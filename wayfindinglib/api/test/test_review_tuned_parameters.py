@@ -35,7 +35,7 @@ def _review(active: bool = True) -> ObservationReview:
     )
     review = object.__new__(ObservationReview)
     review._context = SimpleNamespace(config=SimpleNamespace(get_observatory_setups=lambda: setups))
-    owner = SimpleNamespace(astrometrics="astrometrics")
+    owner = SimpleNamespace(astrometrics=SimpleNamespace(config=review._context.config))
     review._owner_provider = lambda: owner
     return review
 
@@ -51,7 +51,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """
     seen: list[dict[str, Any]] = []
 
-    def fake_tune(packages: tuple[str, ...], configuration: Any, **keywords: Any) -> str:
+    def fake_tune(astrometrics: Any, wayfinder: Any = None, **keywords: Any) -> str:
         """Record what the entry point was given.
 
         Returns
@@ -59,7 +59,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         report : `str`
             A stand-in report.
         """
-        seen.append({"packages": packages, "configuration": configuration, **keywords})
+        seen.append({"astrometrics": astrometrics, "wayfinder": wayfinder, **keywords})
         return "report"
 
     monkeypatch.setattr(parameters, "tune", fake_tune)
@@ -75,8 +75,8 @@ def test_runs_the_wayfinding_tuners_without_saving_and_passes_both_services(
     assert calls[0]["setup"] is None
     assert calls[0]["only"] is None
     assert calls[0]["save"] is False
-    assert calls[0]["services"]["astrometrics"] == "astrometrics"
-    assert set(calls[0]["services"]) == {"wayfinder", "astrometrics"}
+    assert calls[0]["astrometrics"].config is not None
+    assert calls[0]["wayfinder"] is not None
 
 
 def test_setup_only_and_save_are_passed_on(calls: list[dict[str, Any]]) -> None:
@@ -95,3 +95,14 @@ def test_unknown_tuners_and_setups_are_refused_by_the_core() -> None:
         _review().measure_tuned_parameters("Other setup")
     with pytest.raises(NotFoundError):
         _review(active=False).measure_tuned_parameters()
+
+
+def test_importing_wayfindinglib_registers_its_tuners() -> None:
+    """`wayfindinglib` adds itself to the core's tuner registry on import.
+
+    An unregistered package is refused before any tuner is looked for, so a
+    refusal that names the tuner shows the package is registered.
+    """
+    astrometrics = SimpleNamespace(config=None)
+    with pytest.raises(InvalidArgumentError, match="No tuner named"):
+        parameters.tune(astrometrics, packages=("wayfindinglib",), only=["no.such.tuner"])

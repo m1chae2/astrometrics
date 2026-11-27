@@ -100,7 +100,7 @@ class FoundStars(BaseModel):
     kernel_fwhm_px : `float`
         The star width, in pixels of the searched plane, that sized the
         finder's star-shaped template. It is a setting of the search, not a
-        measured star width (`QualityBlocks.star_widths` measures one).
+        measured star width (`quality.detections.measure_widths` measures one).
     threshold_sigma : `float`
         How many noise levels above the sky a star had to stand.
     binned_on_color : `bool`
@@ -112,12 +112,12 @@ class FoundStars(BaseModel):
         pixels.
     stars : `list` [`StarDetection`]
         The stars, brightest first. ``x`` and ``y`` are 1-based pixels (as
-        in FITS and DS9), as in `QualityRecords.measure_detections`.
+        in FITS and DS9), as in `quality.detections.measure_detections`.
         ``flux`` is the finder's own brightness: the sum of the
         sky-subtracted pixel values inside the template's footprint (a
         circle about 1.5 template widths across), in image units, on the
         searched plane. It is not the star's total light (use
-        `QualityBlocks.measure_aperture` for that). For a merged star it is
+        `quality.blocks.measure_aperture` for that). For a merged star it is
         the sum of the merged reports, and ``merged`` is `True`.
     star_count : `int`
         The number of stars (the length of ``stars``).
@@ -142,7 +142,7 @@ class ChannelStarWidths(BaseModel):
     moment), given as the full width at half maximum (FWHM) of a Gaussian
     star of that spread, and the median over the stars. These widths are for
     comparing the color channels of one image with each other, not one image
-    with another. `QualityRecords.measure_star_profile` gives widths on the
+    with another. `quality.detections.measure_profile` gives widths on the
     library's one star-width scale.
 
     Parameters

@@ -14,6 +14,9 @@ finds the answer in three ways, in order:
    sky position when the two images belong to different stacks.
 3. The same pixel, as a guess, when nothing else applies.
 
+`astrometricslib.pipelines.stacking.position_following.map_positions`
+follows many positions at once, with this module first.
+
 All positions are 1-based FITS pixels (the center of the first pixel is 1, 1).
 Siril counts pixels from 0, and its y axis runs up from the last row of the
 array (``y = height - 1 - row``), as `astrometricslib` uses it (checked on the

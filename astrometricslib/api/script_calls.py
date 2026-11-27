@@ -180,8 +180,8 @@ def detect_point_sources(
 ) -> FoundStars:
     """Find stars (point sources) in an image's pixel data.
 
-    This is `QualityBlocks.find_stars` with the astrometry run's finder, the
-    library's one star search; this function only keeps the script call.
+    This is `quality.blocks.measure_stars` with the astrometry run's finder,
+    the library's one star search; this function only keeps the script call.
 
     Parameters
     ----------
@@ -203,9 +203,9 @@ def detect_point_sources(
         The stars found, brightest first, with ``x`` and ``y`` in 1-based
         pixels (as in FITS and DS9) and the finder's ``flux``.
     """
-    from astrometricslib.api._quality_building_blocks import QualityBlocks
+    from astrometricslib.pipelines.stacking.building_blocks import find_image_stars
 
-    found = QualityBlocks(pipelines._config).find_stars(
+    found = find_image_stars(
         np.asarray(image_data), finder="astrometry", fwhm_px=fwhm, threshold_sigma=threshold_sigma
     )
     # Only the "daofind" finder can come back empty-handed (no measurable

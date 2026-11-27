@@ -1,190 +1,188 @@
-"""Tests for the raw-frame quality tool.
+"""Tests for the raw-frame check, ``astrometrics.quality.frames.measure``.
 
-`QualityRecords.measure_frames` gives an AI client statistics on a
-target's frames, a check of a folder, or a quarantine preview. These tests
-use small fake frames and a fake measuring function, and check the choice of
-kind, the newest-frames limit, the summary, and above all that the saved
-target is never changed.
+`QualityFrames.measure` takes the frames a caller chose (a frame query's
+page, frame records or file paths) and works out from their filters whether
+they are imaging or spectrum frames. These tests use small fake frames with
+the measuring functions replaced, and check the choice of check, the
+``metrics`` part, the refusals and that nothing is saved on the target.
 """
 
-from collections.abc import Callable, Iterator
-from typing import Any
+from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
+from astropy.io import fits
 
-from astrometricslib.api.quality import QualityRecords
-from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.api._quality_frames import QualityFrames
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.models.page import Page
+from astrometricslib.models.quality.folder_measurement import FolderMeasurementReport
 from astrometricslib.models.target import FrameRecord, Target
 
+RAW_CHECK = "astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames"
+SPECTRAL_CHECK = (
+    "astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check.check_spectral_frames"
+)
+FRAME_METRICS = "astrometricslib.pipelines.stacking.folder_frame_measurement.measure_frame_metrics"
 
-def _target(frame_count: int = 6) -> Target:
-    """Build a target with light frames, a dark, and a spectral-free layout.
+
+def _frames(count: int = 4, filter_name: str = "Luminance", exposure: str = "60") -> list[FrameRecord]:
+    """Build light frames numbered by time.
+
+    Parameters
+    ----------
+    count : `int`, optional
+        How many frames.
+    filter_name : `str`, optional
+        Their filter; ``"Star Analyzer 200"`` makes spectrum frames.
+    exposure : `str`, optional
+        Their exposure length, in seconds.
 
     Returns
     -------
-    target : `Target`
-        The target. Frames are numbered by time.
+    frames : `list` [`FrameRecord`]
+        The frames, newest last.
     """
-    frames = [
+    return [
         FrameRecord(
-            path=f"/lights/f{number}.fits", role="LIGHT", camera="ZWO ASI533", timestamp=float(number)
+            path=f"/lights/f{number}.fits",
+            role="LIGHT",
+            camera="ZWO ASI533",
+            filter=filter_name,
+            exposure=exposure,
+            timestamp=float(number),
         )
-        for number in range(frame_count)
+        for number in range(count)
     ]
-    frames.append(FrameRecord(path="/darks/d.fits", role="DARK", camera="ZWO ASI533", timestamp=99.0))
-    return Target(id="T 1", frames=frames)
 
 
-def _fake_measure(
-    working: Target,
-    measure_fwhm: Callable[[Any], float | None] | None,
-    remeasure: bool,
-    camera_id: str | None,
-) -> dict[str, int]:
-    """Fill in measurements on the frames it is given, like the real function.
+def _checked(paths: list[str]) -> dict:
+    """Stand in for the batch check: one row per frame, nothing flagged.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        The frames checked.
 
     Returns
     -------
-    counts : `dict` [`str`, `int`]
-        The measured count.
+    report : `dict`
+        Rows with a star count, width and sky level, and a batch summary.
     """
-    for number, frame in enumerate(working.frames):
-        frame.measurements.background_level = 300.0 + number
-        frame.measurements.saturated_pixel_fraction = 0.001 * (number + 1)
-    return {"measured": len(working.frames), "skipped": 0, "failed": 0}
-
-
-@pytest.fixture(autouse=True)
-def no_stored_sky_rates() -> Iterator[None]:
-    """Stop the tests from opening the quality database.
-
-    Yields
-    ------
-    None
-        Control, while the stored-rate lookup returns no rates.
-    """
-    with patch.object(QualityRecords, "_stored_sky_rates", return_value={}):
-        yield
+    rows = [
+        {"path": path, "star_count": 100, "fwhm_px": 3.0, "sky_median_adu": 500.0, "flags": []}
+        for path in paths
+    ]
+    return {"frames": rows, "batch": {"frame_count": len(rows), "flagged_count": 0}}
 
 
 @pytest.fixture
-def diagnostics() -> QualityRecords:
-    """Make the diagnostics object under test.
+def frames_api() -> QualityFrames:
+    """Make the object under test.
 
     Returns
     -------
-    diagnostics : `QualityRecords`
-        An instance with no configuration, since these kinds need none.
+    frames : `QualityFrames`
+        ``astrometrics.quality.frames`` with no configuration, which frame
+        records do not need.
     """
-    return QualityRecords(None, None)
+    return QualityFrames(None)  # type: ignore[arg-type]
 
 
-def test_input_quality_summarizes_the_newest_frames(diagnostics: QualityRecords) -> None:
-    """Only the newest light frames are measured, with a summary per number."""
-    with patch(
-        "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
+def test_imaging_frames_get_the_batch_check_in_time_order(frames_api: QualityFrames) -> None:
+    """Every frame is checked, oldest first, and no metric set is made."""
+    frames = list(reversed(_frames()))
+    with patch(RAW_CHECK, side_effect=lambda paths: _checked(paths)) as check:
+        report = frames_api.measure(frames)
+    assert check.call_args.kwargs["paths"] == [f"/lights/f{number}.fits" for number in range(4)]
+    assert report.kind == "imaging"
+    assert report.frames_measured == 4
+    assert report.checks is not None and report.checks.frames_checked == 4
+    assert report.metrics is None and report.spectral is None
+    assert report.checks.fwhm_estimator == "raw check second moment"
+
+
+def test_the_sky_level_is_trended_only_for_one_exposure_length(frames_api: QualityFrames) -> None:
+    """Frames of mixed exposure leave the sky level out of the drifts."""
+    mixed = [*_frames(2), *_frames(2, exposure="30")]
+    with patch(RAW_CHECK, side_effect=lambda paths: _checked(paths)):
+        same = frames_api.measure(_frames())
+        different = frames_api.measure(mixed)
+    assert "sky_median_adu" in same.checks.trends["metrics"]
+    assert "sky_median_adu" not in different.checks.trends["metrics"]
+    assert "different exposure lengths" in different.checks.trends["notes"][0]
+
+
+def test_the_metrics_part_measures_the_stored_metric_set(frames_api: QualityFrames) -> None:
+    """``include=["metrics"]`` adds the metric set at the bias level given."""
+    with (
+        patch(RAW_CHECK, side_effect=lambda paths: _checked(paths)),
+        patch(FRAME_METRICS, return_value=FolderMeasurementReport(frames_measured=4)) as metrics,
     ):
-        report = diagnostics.measure_frames(_target(), kind="input_quality", limit=3)
-    assert report.frames_measured == 3
-    assert report.light_frames_in_target == 6
-    assert [row["file"] for row in report.frames] == ["f3.fits", "f4.fits", "f5.fits"]
-    background = report.summary["background_level"]
-    assert (background["frames"], background["minimum"], background["maximum"]) == (3, 300.0, 302.0)
-    assert report.summary["measured_fwhm_px"] == {"frames": 0}
+        report = frames_api.measure(_frames(), include=["metrics"], bias_level_adu=300.0)
+    assert report.metrics is not None and report.metrics.frames_measured == 4
+    assert metrics.call_args.kwargs["bias_level_adu"] == pytest.approx(300.0)
+    assert len(metrics.call_args.args[0]) == 4
 
 
-def test_the_saved_target_is_never_changed(diagnostics: QualityRecords) -> None:
-    """Measuring works on a copy, so the original frames keep no new values."""
-    target = _target()
-    with patch(
-        "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
-    ):
-        diagnostics.measure_frames(target, kind="input_quality")
-    assert all(frame.measurements.background_level is None for frame in target.frames)
+def test_spectrum_frames_get_the_spectrum_check(frames_api: QualityFrames) -> None:
+    """Spectrum frames are found by their filter and given the prediction."""
+    from astrometricslib.models.quality.quality_reports import SpectralFrameCheckReport
+
+    with patch(SPECTRAL_CHECK, return_value=SpectralFrameCheckReport(frames_measured=2)) as check:
+        report = frames_api.measure(_frames(2, filter_name="Star Analyzer 200"), predict_exposure_s=60.0)
+    assert report.kind == "spectral"
+    assert report.frames_measured == 2
+    assert check.call_args.args[1] == pytest.approx(60.0)
 
 
-def test_camera_filter_and_dark_frames(diagnostics: QualityRecords) -> None:
-    """Dark frames are never measured, and a camera filter can leave none."""
-    with patch(
-        "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
-    ):
-        assert diagnostics.measure_frames(_target(), camera_id="asi533").frames_measured == 6
-        assert diagnostics.measure_frames(_target(), camera_id="nikon").frames_measured == 0
+def test_bad_requests_are_refused(frames_api: QualityFrames) -> None:
+    """A mix of kinds, an option of the other kind, or no frames is refused."""
+    with pytest.raises(InvalidArgumentError, match="mix imaging and spectrum"):
+        frames_api.measure([*_frames(2), *_frames(1, filter_name="Star Analyzer 200")])
+    with pytest.raises(InvalidArgumentError, match="spectrum frames only"):
+        frames_api.measure(_frames(), predict_exposure_s=60.0)
+    with pytest.raises(InvalidArgumentError, match="imaging frames only"):
+        frames_api.measure(_frames(2, filter_name="Star Analyzer 200"), include=["metrics"])
+    with pytest.raises(InvalidArgumentError, match="Unknown include section"):
+        frames_api.measure(_frames(), include=["fwhm"])
+    with pytest.raises(InvalidArgumentError, match="empty"):
+        frames_api.measure([])
+    with pytest.raises(InvalidArgumentError):
+        frames_api.measure("/lights")  # type: ignore[arg-type]
 
 
-def test_a_limit_outside_its_range_is_refused(diagnostics: QualityRecords) -> None:
-    """The one limit rule: a limit outside 1 to 300 (100 spectral) raises."""
-    for kind, limit in (("input_quality", 0), ("input_quality", 301), ("spectral", 101)):
-        with pytest.raises(InvalidArgumentError, match="limit must be"):
-            diagnostics.measure_frames(_target(), kind=kind, limit=limit)
-    with patch(
-        "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
-    ):
-        assert diagnostics.measure_frames(_target(), limit=1).frames_measured == 1
+def test_a_page_cut_short_is_refused_and_a_whole_page_is_measured(frames_api: QualityFrames) -> None:
+    """A page that does not hold every match would measure part of a choice."""
+    frames = _frames()
+    with pytest.raises(InvalidArgumentError, match="cut short"):
+        frames_api.measure(Page.of(frames, limit=2))
+    with patch(RAW_CHECK, side_effect=lambda paths: _checked(paths)):
+        assert frames_api.measure(Page.of(frames)).frames_measured == 4
 
 
-def test_raw_check_measures_a_targets_newest_frames(diagnostics: QualityRecords) -> None:
-    """The batch check measures only the newest of a target's light frames."""
-    with patch(
-        "astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames",
-        return_value={"frames": [], "batch": {}},
-    ) as check:
-        report = diagnostics.measure_frames(_target(), kind="raw_check", limit=2)
-    assert len(check.call_args.kwargs["paths"]) == 2
-    assert report.frames_checked == 2
-    assert report.kind == "raw_check"
+def test_paths_are_read_from_their_headers_and_need_not_be_library_frames(tmp_path: Path) -> None:
+    """A path outside the library is measured; a missing one is not found."""
+    from astrometricslib import AppConfiguration
+
+    path = tmp_path / "staging" / "frame.fits"
+    path.parent.mkdir()
+    header = fits.Header({"IMAGETYP": "Light Frame", "FILTER": "L", "EXPTIME": 60.0, "INSTRUME": "Cam"})
+    fits.writeto(path, np.zeros((8, 8), dtype=np.float32), header)
+    frames_api = QualityFrames(AppConfiguration())
+    with patch(RAW_CHECK, side_effect=lambda paths: _checked(paths)) as check:
+        report = frames_api.measure([str(path)])
+    assert check.call_args.kwargs["paths"] == [str(path)]
+    assert report.frames_measured == 1
+    with pytest.raises(NotFoundError):
+        frames_api.measure([str(tmp_path / "missing.fits")])
 
 
-def test_bad_requests_are_errors(diagnostics: QualityRecords) -> None:
-    """An unknown kind, a missing target, or an unused argument is refused."""
-    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        diagnostics.measure_frames(_target(), kind="everything")
-    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        diagnostics.measure_frames(_target(), kind="quarantine_preview")
-    with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
-        diagnostics.measure_frames(_target(), kind="raw_check", camera_id="asi533")
-    with pytest.raises(InvalidArgumentError, match="does not use: fwhm"):
-        diagnostics.measure_frames(_target(), kind="raw_check", include=["fwhm"])
-
-
-def test_a_file_range_takes_the_first_frames_inside_it(diagnostics: QualityRecords) -> None:
-    """With a range, the limit keeps the first frames in it, not the newest."""
-    with patch(
-        "astrometricslib.pipelines.shared.quality.frame_statistics.measure_frame_input_quality", _fake_measure
-    ):
-        report = diagnostics.measure_frames(
-            _target(), kind="input_quality", first_file="1", last_file="4", limit=2
-        )
-    assert [row["file"] for row in report.frames] == ["f1.fits", "f2.fits"]
-    assert report.frames_matching == 4
-
-
-def test_a_bad_time_is_refused(diagnostics: QualityRecords) -> None:
-    """An unreadable time raises InvalidArgumentError."""
-    with pytest.raises(InvalidArgumentError, match="ISO 8601"):
-        diagnostics.measure_frames(_target(), since="last night")
-
-
-def test_the_spectral_kind_passes_its_inputs_to_the_spectrum_check(diagnostics: QualityRecords) -> None:
-    """``kind="spectral"`` hands the exposure inputs and the limit on."""
-    with patch(
-        "astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check.check_spectral_frames",
-        return_value="report",
-    ) as check:
-        report = diagnostics.measure_frames(
-            _target(), kind="spectral", exposure_seconds=30.0, predict_exposure_seconds=60.0, limit=100
-        )
-    assert report == "report"
-    arguments = check.call_args.args
-    assert arguments[2:] == (30.0, 60.0, 100)
-
-
-def test_the_spectral_inputs_are_refused_for_other_kinds(diagnostics: QualityRecords) -> None:
-    """The exposure inputs belong to the spectral kind; others refuse them."""
-    with pytest.raises(InvalidArgumentError, match="does not use: exposure_seconds"):
-        diagnostics.measure_frames(_target(), exposure_seconds=30.0)
-    with pytest.raises(InvalidArgumentError, match="does not use: predict_exposure_seconds"):
-        diagnostics.measure_frames(_target(), kind="raw_check", predict_exposure_seconds=60.0)
-    with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
-        diagnostics.measure_frames(_target(), kind="spectral", camera_id="asi533")
+def test_the_frames_given_are_never_changed(frames_api: QualityFrames) -> None:
+    """Measuring stores nothing on the frame records or a target."""
+    target = Target(id="T 1", frames=_frames())
+    before = [frame.model_dump() for frame in target.frames]
+    with patch(RAW_CHECK, side_effect=lambda paths: _checked(paths)):
+        frames_api.measure(target.frames)
+    assert [frame.model_dump() for frame in target.frames] == before

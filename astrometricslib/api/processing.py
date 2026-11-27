@@ -62,7 +62,7 @@ __all__ = ["ProcessingPipelines"]
 
 
 class ProcessingPipelines(MovedNames):
-    """Stack targets, run the analysis stages and measure noise.
+    """Stack targets and run the analysis stages.
 
     It also remakes the preview pictures of stacks.
 
@@ -172,7 +172,6 @@ class ProcessingPipelines(MovedNames):
     stack = _stacking.stack
     _choose_frames = _stacking._choose_frames
     predict_stack = _stacking.predict_stack
-    measure_noise = _stacking.measure_noise
     _library_stack_path = _stacking._library_stack_path
     _subset_context = _stacking._subset_context
     find_stack_configuration = _stacking.find_stack_configuration

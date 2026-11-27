@@ -16,8 +16,10 @@ A `Tuner` derives the values of one family of parameters from one method
 `run_tuning` runs tuners for one setup, checks each value against its
 parameter's allowed range and minimum sample, reports every value that
 moves, and with ``write=True`` saves the values after backing up the config.
-`tune` is the one entry point: it picks a library's tuners and the setup,
-then calls `run_tuning`. Both libraries' ``measure_tuned_parameters`` call it.
+`tune` is the one entry point: it runs the tuners of every registered
+library (`TUNER_PACKAGES`; `wayfindinglib` registers itself with
+`register_tuner_package` when it is imported) on one setup, through
+`run_tuning`.
 
 `ConfigTunedValues` gives `resolve` the stored values. A value outside the
 allowed range, or derived from fewer samples than the parameter's minimum,
@@ -592,35 +594,62 @@ def run_tuning(
     )
 
 
-def tune(
-    packages: Iterable[str],
-    configuration: Any,
-    *,
-    setup: str | None = None,
-    only: Sequence[str] | None = None,
-    save: bool = False,
-    services: Mapping[str, Any] | None = None,
-) -> TuningReport:
-    """Run the tuners of some packages on one setup (the one entry point).
+TUNER_PACKAGES: list[str] = ["astrometricslib"]
+"""The packages whose tuners `tune` runs, in the order they registered.
+`astrometricslib` is always first; `wayfindinglib` adds itself when it is
+imported (`register_tuner_package`)."""
 
-    The tuners are found with `collect_tuners`, narrowed to ``only`` when it
-    is given, and run with `run_tuning` on the named setup (or the active
-    one), stamped with today's date.
+
+def register_tuner_package(package: str) -> None:
+    """Add a package's tuners to the ones `tune` runs.
+
+    A library that extends `astrometricslib` calls this once, when it is
+    imported, so one `tune` call runs every library's tuners. Registering a
+    package twice changes nothing.
 
     Parameters
     ----------
-    packages : `Iterable` [`str`]
-        The packages whose tuners to run, such as ``("astrometricslib",)``.
-    configuration : `Any`
-        The loaded config (an `AppConfiguration`).
+    package : `str`
+        The package name, such as ``"wayfindinglib"``. Its modules are
+        searched for module-level `Tuner` objects (`collect_tuners`).
+    """
+    if package not in TUNER_PACKAGES:
+        TUNER_PACKAGES.append(package)
+
+
+def tune(
+    astrometrics: Any,
+    wayfinder: Any = None,
+    *,
+    packages: Iterable[str] | None = None,
+    setup: str | None = None,
+    only: Sequence[str] | None = None,
+    save: bool = False,
+) -> TuningReport:
+    """Run the tuners of every registered library on one setup.
+
+    The one entry point for tuning. The tuners of every registered package
+    (`TUNER_PACKAGES`) are found with `collect_tuners`, narrowed to
+    ``only`` when it is given, and run with `run_tuning` on the named setup
+    (or the active one), stamped with today's date. A tuner that needs the
+    `Wayfinder` and is not given one is reported as skipped.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The library whose settings are tuned and whose stored data the
+        tuners read.
+    wayfinder : `Wayfinder`, optional
+        The observatory library, whose records the wayfinding tuners read.
+    packages : `Iterable` [`str`], optional
+        Run only the tuners of these registered packages, such as
+        ``("wayfindinglib",)``. Every registered package when left out.
     setup : `str`, optional
         The setup to tune. The active setup when left out.
     only : `Sequence` [`str`], optional
         Run only the tuners with these names.
     save : `bool`, optional
         Write the accepted values to the config, after one backup.
-    services : `Mapping` [`str`, `Any`], optional
-        The data access the tuners need (see `TuningInputs.services`).
 
     Returns
     -------
@@ -633,24 +662,34 @@ def tune(
     NotFoundError
         If the setup is not in the config, or there is no active setup.
     InvalidArgumentError
-        If ``only`` names a tuner that does not exist.
+        If ``only`` names a tuner that does not exist, or ``packages`` names
+        a package that is not registered.
     """
-    tuners = collect_tuners(packages)
+    chosen_packages = list(TUNER_PACKAGES) if packages is None else list(packages)
+    unregistered = sorted(set(chosen_packages) - set(TUNER_PACKAGES))
+    if unregistered:
+        raise InvalidArgumentError(f"No tuners are registered for {', '.join(unregistered)}.")
+    tuners = collect_tuners(chosen_packages)
     if only:
         unknown = sorted(set(only) - {tuner.name for tuner in tuners})
         if unknown:
             raise InvalidArgumentError(f"No tuner named {', '.join(unknown)}.")
         tuners = [tuner for tuner in tuners if tuner.name in set(only)]
+    configuration = astrometrics.config
     setups = configuration.get_observatory_setups()
     chosen = setups.setup_named(setup) if setup else setups.active_setup()
     if chosen is None:
         raise NotFoundError(f"No setup named {setup!r} in the config." if setup else "No active setup.")
+    services: dict[str, Any] = {"astrometrics": astrometrics}
+    if wayfinder is not None:
+        services["wayfinder"] = wayfinder
     return run_tuning(
         tuners, chosen, configuration, services=services, today=datetime.date.today(), write=save
     )
 
 
 __all__ = [
+    "TUNER_PACKAGES",
     "ChangeNotice",
     "ConfigTunedValues",
     "TunedRecord",
@@ -661,6 +700,7 @@ __all__ = [
     "TuningSkippedError",
     "collect_tuners",
     "read_tuned_record",
+    "register_tuner_package",
     "run_tuning",
     "tune",
 ]

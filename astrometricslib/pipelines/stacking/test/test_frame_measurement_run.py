@@ -590,13 +590,13 @@ def mountain_time() -> Iterator[None]:
 
 
 @pytest.mark.usefixtures("mountain_time")
-def test_the_processing_api_runs_the_job_and_checks_the_limit(
+def test_the_quality_api_runs_the_job_and_measures_each_frame_once(
     target: Target, tmp_path: Path, biases: list[str]
 ) -> None:
-    """The public method stores rows, saves only stamps, checks the limit."""
+    """The public method stores rows, saves only stamps, measures once."""
     pipelines, catalog_access = _pipelines(tmp_path, biases)
 
-    summary = pipelines.record_frame_measurements(target)
+    summary = pipelines.frames.record(target)
 
     assert summary.target_id == "M 99"
     assert summary.frames_measured == 3
@@ -604,10 +604,10 @@ def test_the_processing_api_runs_the_job_and_checks_the_limit(
     assert catalog_access.merge_and_record.call_count == 1
     assert catalog_access.merge_and_record.call_args.args[0] == "target_catalog"
     assert QualityStore(str(tmp_path / "astrometrics.db")).query(target_id="M 99")
-    again = pipelines.record_frame_measurements(target)
+    again = pipelines.frames.record(target)
     assert again.frames_measured == 0
-    with pytest.raises(InvalidArgumentError, match="limit"):
-        pipelines.record_frame_measurements(target, limit=0)
+    with pytest.raises(InvalidArgumentError, match=r"targets\.get"):
+        pipelines.frames.record("M 99")  # type: ignore[arg-type]
 
 
 def test_the_stamps_are_saved_every_few_frames_and_at_the_end(

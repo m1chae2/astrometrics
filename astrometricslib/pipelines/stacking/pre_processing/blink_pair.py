@@ -31,10 +31,11 @@ import numpy as np
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d, open_primary_hdu
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.quality.blink_pair import BlinkPair, FramePositionMatch, MatchedPoint
-from astrometricslib.models.target import FrameRecord
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_ELONGATION
 from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
@@ -61,6 +62,7 @@ __all__ = [
     "choose_blink_pair",
     "choose_reference_stars",
     "choose_typical_path",
+    "find_blink_partner",
     "match_frame_positions",
 ]
 
@@ -500,3 +502,49 @@ def frame_record_for_set_aside(
     if template is None:
         return None
     return template.model_copy(update={"path": path, "timestamp": timestamp, "date": date})
+
+
+def find_blink_partner(target: Target, path: str, configuration: AppConfiguration) -> BlinkPair:
+    """Pick a typical frame and a reference star to blink a frame against.
+
+    The owner of ``astrometrics.quality.frames.get_blink_partner``. The frame
+    may be one of the target's light frames or one the stacker set aside;
+    a set-aside frame gets a record built from its set-aside entry.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    path : `str`
+        The frame to examine.
+    configuration : `AppConfiguration`
+        The settings, which give the folders of the set-aside frames.
+
+    Returns
+    -------
+    pair : `BlinkPair`
+        The typical frame and the reference star in both frames, or
+        ``found=False`` with the reason.
+
+    Raises
+    ------
+    NotFoundError
+        If the frame file does not exist.
+    """
+    import os
+
+    from astrometricslib.foundation.errors import NotFoundError
+    from astrometricslib.pipelines.stacking.frame_status import list_set_aside_frames_with_reasons
+
+    if not os.path.isfile(path):
+        raise NotFoundError(f"No frame at {path}.")
+    lights = [frame for frame in target.frames if frame.role == "LIGHT"]
+    clicked = None
+    if not any(frame.path == path for frame in lights):
+        set_aside = list_set_aside_frames_with_reasons(target, configuration)
+        record = next((item for item in set_aside if item.path == path), None)
+        if record is not None:
+            clicked = frame_record_for_set_aside(
+                lights, path, record.camera, record.filter, record.exposure_seconds, record.date
+            )
+    return choose_blink_pair(target.id, path, lights, clicked)

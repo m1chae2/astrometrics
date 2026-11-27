@@ -17,6 +17,9 @@ ones the app and the stored rows have always used (``gainSetting``,
 ``exposureSeconds``), and the old field names ``gain_setting`` and
 ``exposure_seconds`` are still read, so a record saved before the rename
 loads unchanged.
+
+`StoredCaptureSetting` pairs a stored setting with the id the quality store
+gave it.
 """
 
 import math
@@ -190,3 +193,24 @@ class CaptureSetting(BaseModel):
             The value from `round_pixel_scale`.
         """
         return round_pixel_scale(value)
+
+
+class StoredCaptureSetting(BaseModel):
+    """A capture setting as the quality store keeps it, with its id.
+
+    A stored measurement carries only a ``capture_setting_id``.
+    ``astrometrics.quality.records.get_capture_settings`` gives these, so a
+    reader can turn the id into the setting.
+
+    Parameters
+    ----------
+    id : `int`
+        The store's id of the setting.
+    setting : `CaptureSetting`
+        The camera, telescope, filter, exposure, gain, offset and binning.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    setting: CaptureSetting

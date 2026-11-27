@@ -16,9 +16,9 @@ trailed-stars rule warns where the frame status flags, and the dark
 temperature tolerance so that a reader of calibration counts quotes the
 tolerance the library matched darks with. A `Tuner`
 derives one family of tuned values, and `run_tuning` stores them with their
-provenance in the config. `tune` is the one entry point that picks a
-library's tuners and a setup and runs them; both libraries'
-``measure_tuned_parameters`` call it. A script and
+provenance in the config. `tune` is the one entry point: it runs the tuners
+of every registered library on one setup. `wayfindinglib` adds its tuners
+with `register_tuner_package` when it is imported. A script and
 `wayfindinglib` import these names from here. Each is imported from the module
 where its code lives today.
 """
@@ -60,6 +60,7 @@ from astrometricslib.foundation.tuning import (
     TuningSkippedError,
     collect_tuners,
     read_tuned_record,
+    register_tuner_package,
     run_tuning,
     tune,
 )
@@ -117,6 +118,7 @@ __all__ = [
     "parameter_context",
     "read_tuned_record",
     "record_basis",
+    "register_tuner_package",
     "resolve_parameter",
     "run_basis_value",
     "run_tuning",

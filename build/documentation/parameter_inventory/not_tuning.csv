@@ -70,6 +70,10 @@ astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID forma
 astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
 astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
+astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_values.clip_sigma,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_values.maximum_passes,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_values.minimum_count,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/api/_quality_building_blocks.py,QualityDetections.measure_profile.cut_angle_deg,A direction chosen by the caller; 0 means along a column
 astrometricslib/api/_target_frames.py,TargetFrames.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/calibration.py,CalibrationCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
@@ -83,10 +87,7 @@ astrometricslib/api/jobs.py,MAXIMUM_TEXT_LENGTH,Reply size cap; plumbing
 astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
 astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
 astrometricslib/api/observatories.py,ObservatoryConfigurations.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
-astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
+astrometricslib/api/quality.py,QualityMeasurements.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/targets.py,TargetCatalog.measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 means from the first row
@@ -239,6 +240,7 @@ astrometricslib/pipelines/photometry/processing/variability_indices.py,false_ala
 astrometricslib/pipelines/photometry/run_warnings.py,_MAXIMUM_KEPT_WARNINGS,Row or item cap on distinct warnings kept; later ones are counted; plumbing
 astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety limit on the clipping loop; it settles in two or three rounds
 astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/photometry/star_inspection.py,measure_star_profile.cut_angle_deg,A direction chosen by the caller; 0 means along a column
 astrometricslib/pipelines/shared/binned_sky_plane.py,block_medians.minimum_valid_fraction,Default that keeps every block: callers pass their own share
 astrometricslib/pipelines/shared/catalog_star_identity.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
 astrometricslib/pipelines/shared/catalog_star_identity.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
@@ -281,6 +283,7 @@ astrometricslib/pipelines/shared/quality/star_profile_fitting.py,_MINOR_AXIS_STA
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_ITERATIONS,"Rounds of sigma clipping for the ring sky plane; the same 5 rounds as the profile sky, and the fit settles in fewer"
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,Clipping limit of the ring sky plane; the same 3 sigma as the profile sky
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_MINIMUM_PIXELS,"Fewest pixels the sky annulus needs, as for the profile's sky; below it the profile sky is used"
+astrometricslib/pipelines/shared/quality/stored_measurements.py,query_measurements.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/quality/time_budget.py,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,Plumbing: time budget
 astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries
 astrometricslib/pipelines/shared/registration_record.py,REGISTRATION_RECORD_VERSION,software plumbing
@@ -374,6 +377,9 @@ astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database re
 astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,_LOAD_CHUNK_SIZE,Batch size for reading stored stars in a tuning run; affects only memory use
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
 astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUNDED_SIGMA,Unbounded sigma sentinel
+astrometricslib/pipelines/stacking/building_blocks.py,clipped_values.clip_sigma,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/pipelines/stacking/building_blocks.py,clipped_values.maximum_passes,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/pipelines/stacking/building_blocks.py,clipped_values.minimum_count,A script's own clipping choice; the pipelines pass their tuned values
 astrometricslib/pipelines/stacking/calibration_catalog.py,query_calibration_sets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,CALIBRATION_MEASUREMENT_WORKERS,software plumbing
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."

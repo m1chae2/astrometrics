@@ -16,7 +16,7 @@ converted only at the edges. The cut angle is measured from the +y axis
 (increasing row number) toward the +x axis (increasing column number), so
 0 degrees runs along a column and 90 degrees runs along a row.
 
-`QualityRecords.measure_star_profile` is the public entry point. The module
+`quality.detections.measure_profile` is the public entry point. The module
 reads a file but changes nothing.
 """
 

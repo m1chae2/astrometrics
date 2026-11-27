@@ -2,7 +2,7 @@
 
 Description: `TargetCatalog.add_frames` and `calibration.frames.add`
 sort new FITS files into the library and return where they went. `sessions`
-groups a target's frames by night, and `QualityRecords.get_aperture_record`
+groups a target's frames by night, and `quality.stacks.get_aperture_record`
 reads the per-aperture noise file beside a stack.
 """
 
@@ -144,7 +144,7 @@ def test_get_aperture_record_reads_the_file_or_gives_none(tmp_path: Path) -> Non
     good.write_text(json.dumps({"version": APERTURE_RECORD_VERSION, "apertures": []}), encoding="utf-8")
     other = tmp_path / "other.json"
     other.write_text(json.dumps({"version": -1}), encoding="utf-8")
-    records = QualityRecords(AppConfiguration(), MagicMock())
+    records = QualityRecords(AppConfiguration(), MagicMock()).stacks
 
     record = records.get_aperture_record(str(good))
     assert record is not None

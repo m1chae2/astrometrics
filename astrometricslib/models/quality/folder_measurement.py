@@ -1,11 +1,11 @@
-"""The result of measuring a folder of frames without storing anything.
+"""The result of measuring frames with the frame metrics, storing nothing.
 
-`QualityRecords.measure_folder` reads each FITS file of a folder and measures
-it with the same `frame.*` metrics that `record_frame_measurements` stores for
-a library target. Nothing is written to the quality store, and the folder need
-not be in the library. These models carry the numbers back to the caller: one
-value per metric for each frame, and the median of each metric over the
-frames.
+`quality.frames.measure` with ``include=["metrics"]`` reads each frame and
+measures it with the same `frame.*` metrics that `quality.frames.record`
+stores for a library target. Nothing is written to the quality store, and the
+frames need not be in the library. These models carry the numbers back to
+the caller: one value per metric for each frame, and the median of each
+metric over the frames.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,12 +59,12 @@ class FolderMeasurementReport(BaseModel):
 
     Parameters
     ----------
-    folder_path : `str`
-        The folder.
+    folder_path : `str` or `None`
+        The folder the frames are in, or `None` when they are in several.
     frames_matching : `int`
-        How many FITS files the selection kept.
+        How many frames were given.
     frames_measured : `int`
-        How many of them were measured (at most the limit).
+        How many of them were measured.
     bias_level_adu : `float` or `None`
         The bias level used for the sky metrics, in ADU, when one common
         level was given. `None` when it came from the calibration library
@@ -96,7 +96,7 @@ class FolderMeasurementReport(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    folder_path: str = Field(alias="folderPath")
+    folder_path: str | None = Field(default=None, alias="folderPath")
     frames_matching: int = Field(default=0, alias="framesMatching")
     frames_measured: int = Field(default=0, alias="framesMeasured")
     bias_level_adu: float | None = Field(default=None, alias="biasLevelAdu")

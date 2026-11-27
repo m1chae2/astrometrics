@@ -1,17 +1,17 @@
 """Data structures for the quality checks on frames and stacks.
 
-`QualityRecords` measures raw frames and finished stacks, and
+`astrometrics.quality` measures raw frames and finished stacks, and
 `ProcessingPipelines.stack_summary` reads back what the stacking stage saved.
 Each check returns one of these structures. A check never saves anything, so
 these only describe; they never change a target.
 
-- `RawFrameCheckReport` is the batch check of a target's
+- `RawFrameCheckReport` is the batch check of raw light
   frames: star count, width and roundness, trailing, sky level and jumps,
   with the frames that stand out flagged.
-- `InputQualityReport` holds the sky level, saturation and (if asked) star
-  width of a target's newest frames, with a summary of each number.
-- `SpectralFrameCheckReport` describes a target's raw spectrum frames and
-  where they clip.
+- `SpectralFrameCheckReport` describes raw spectrum frames and where they
+  clip.
+- `FrameQualityReport` is what `quality.frames.measure` returns: the
+  check of imaging or spectrum frames, and the frame metric set if asked.
 - `StackQualityReport` holds the measurements of one stack, and optionally
   its comparison with another stack.
 - `StackSummary` is the short description of a target's current stack that
@@ -26,10 +26,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.models.quality.folder_measurement import FolderMeasurementReport
 from astrometricslib.models.quality.stack_comparison import StackComparison
 
 __all__ = [
-    "InputQualityReport",
+    "FrameQualityReport",
     "RawFrameCheckReport",
     "RegistrationRow",
     "SpectralFrameCheckReport",
@@ -39,7 +40,7 @@ __all__ = [
 
 
 class RawFrameCheckReport(BaseModel):
-    """The batch check of a target's raw light frames.
+    """The batch check of raw light frames.
 
     The star width of each row (``fwhm_px``) and of the batch
     (``median_fwhm_px``) is the check's own quick estimate,
@@ -50,11 +51,9 @@ class RawFrameCheckReport(BaseModel):
     why; compare it only with other raw checks.
     """
 
-    kind: Literal["raw_check"] = "raw_check"
     fwhm_estimator: str | None = None
     fwhm_not_on_scale_reason: str | None = None
-    target_id: str | None = None
-    # How many frames matched the selection, and how many of them were read.
+    # How many frames were given, and how many of them were read.
     frames_matching: int = 0
     frames_checked: int = 0
     # One row per frame: its measurements and the ``flags`` it raised.
@@ -66,40 +65,9 @@ class RawFrameCheckReport(BaseModel):
     trends: dict[str, Any] = Field(default_factory=dict)
 
 
-class InputQualityReport(BaseModel):
-    """Sky level, saturation and star width of a target's newest frames.
-
-    The frames are measured on a copy of the target, so the saved catalog
-    never changes. Frames that were already measured keep their stored values.
-    A row's star width, ``measured_fwhm_px``, comes from the estimator
-    ``fwhm_estimator`` (``"frame Gaussian"``, `None` when no row has a
-    width); the row's
-    ``measured_fwhm_on_scale_px`` is the same width on the library's one
-    star-width scale (the per-frame Gaussian of the brightest stars). Both
-    widths are `None` for a frame with no measured width.
-    """
-
-    kind: Literal["input_quality"] = "input_quality"
-    target_id: str
-    light_frames_in_target: int
-    spectral_light_frames_in_target: int
-    frames_matching: int
-    frames_measured: int
-    fwhm_estimator: str | None = None
-    # How many frames were measured, skipped (already measured) or failed.
-    counts: dict[str, int] = Field(default_factory=dict)
-    # For each number: how many frames had it, and its minimum, median and
-    # maximum.
-    summary: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    trends: dict[str, Any] = Field(default_factory=dict)
-    frames: list[dict[str, Any]] = Field(default_factory=list)
-    note: str = ""
-
-
 class SpectralFrameCheckReport(BaseModel):
-    """Measurements of a target's raw spectrum frames and where they clip."""
+    """Measurements of raw spectrum frames and where they clip."""
 
-    target_id: str
     frames_matching: int = 0
     frames_measured: int = 0
     # The frames grouped by exposure length (how many clip the zero order or
@@ -107,6 +75,39 @@ class SpectralFrameCheckReport(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     frames: list[dict[str, Any]] = Field(default_factory=list)
     note: str = ""
+
+
+class FrameQualityReport(BaseModel):
+    """What the frame check found in some raw frames.
+
+    Imaging frames always get the batch check (``checks``); with
+    ``include=["metrics"]`` they also get the stored frame metric set
+    (``metrics``). Spectrum frames get the spectrum check (``spectral``).
+    Nothing is saved.
+
+    Parameters
+    ----------
+    kind : {"imaging", "spectral"}
+        The kind of frames given, worked out from their filters.
+    frames_measured : `int`
+        How many frames were measured.
+    checks : `RawFrameCheckReport` or `None`
+        Imaging frames: star count, width and roundness, trailing, sky level
+        and jumps, with the frames that stand out flagged.
+    metrics : `FolderMeasurementReport` or `None`
+        Imaging frames, with ``include=["metrics"]``: the value of each
+        ``frame.*`` metric for each frame, and the medians.
+    spectral : `SpectralFrameCheckReport` or `None`
+        Spectrum frames: where each frame clips, by exposure and pier side.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["imaging", "spectral"]
+    frames_measured: int = 0
+    checks: RawFrameCheckReport | None = None
+    metrics: FolderMeasurementReport | None = None
+    spectral: SpectralFrameCheckReport | None = None
 
 
 class RegistrationRow(BaseModel):

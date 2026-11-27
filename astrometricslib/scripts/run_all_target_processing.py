@@ -48,7 +48,7 @@ from astrometricslib.foundation.parameters import resolve
 # target should never pop open a GUI window mid-run.
 os.environ["HEADLESS"] = "1"
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import Astrometrics, Target, configure_logging
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.processing_scripts import stack_subset
@@ -562,9 +562,9 @@ def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datet
         when the stack holds fewer than two nights (including a stack that
         stored no weights).
     """
-    weight_rows = astrometrics.quality.query(
-        metric=STACKING_FRAME_WEIGHT, target_id=target.id, since=since, library_only=True
-    ).rows
+    weight_rows = astrometrics.quality.records.query(
+        metric=STACKING_FRAME_WEIGHT, target=target, since=since, library_only=True
+    )
     night_of_subject = {
         row.subject.subject_id: row.subject.observing_night_id
         for row in weight_rows
@@ -655,7 +655,7 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The library interface, for ``quality.query``.
+        The library interface, for ``quality.records.query``.
     target_id : `str`
         The target.
     since : `datetime` or `str` or `None`
@@ -669,20 +669,20 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
         above zero.
     """
     stored = _measured_value(
-        astrometrics.quality.query(
+        astrometrics.quality.records.query(
             metric=STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
-            target_id=target_id,
+            target=Target(id=target_id),
             since=since,
             library_only=True,
-        ).rows
+        )
     )
     if stored is not None:
         return stored
     measured, predicted = (
         _measured_value(
-            astrometrics.quality.query(
-                metric=metric, target_id=target_id, since=since, library_only=True
-            ).rows
+            astrometrics.quality.records.query(
+                metric=metric, target=Target(id=target_id), since=since, library_only=True
+            )
         )
         for metric in (
             STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -722,7 +722,7 @@ def _odd_even_difference_note(astrometrics: Astrometrics, target: Any, since: da
         ratio = _noise_ratio(astrometrics, target.id, since)
         ratio_text = "no ratio" if ratio is None else f"ratio {ratio:.2f}"
         print(f"  [{target.id}] odd–even difference run ({ratio_text})")
-        astrometrics.processing.measure_noise(target, kind="odd_even_difference")
+        astrometrics.quality.stacks.record_odd_even_noise(target)
     except Exception as odd_even_difference_error:
         # The library stack is already made and recorded; the measurement is
         # an extra. Whatever its cause, it is noted and the run goes on.
@@ -744,7 +744,7 @@ def _stack_one_target(
 
     The frames are chosen as the full pipeline chooses them: one camera, one
     optic, imaging (not spectral) frames. Every one of them is measured first
-    (`QualityRecords.record_frame_measurements`), so the stack's
+    (`quality.frames.record`), so the stack's
     predicted noise has the sky of each frame. They then go to the public
     `ProcessingPipelines.stack`, which sets aside bad frames, stacks, and
     records the stack's quality rows. No astrometry, photometry or
@@ -799,7 +799,7 @@ def _stack_one_target(
     # The stack's predicted noise needs the sky of every frame, so every
     # imaging frame is measured first. Frames measured before and unchanged
     # since are skipped, so a resumed run does not repeat the work.
-    measurement = astrometrics.quality.record_frame_measurements(target, frames=standard_frames)
+    measurement = astrometrics.quality.frames.record(target, frames=standard_frames)
     if measurement.already_running:
         raise RuntimeError(f"another run is measuring the frames of '{target.id}'; try again later")
     print(
@@ -890,7 +890,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The library interface, for ``quality.query``.
+        The library interface, for ``quality.records.query``.
     record : `dict`
         The target's newest progress record.
 
@@ -930,9 +930,12 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         rows : `list`
             The newest library rows of that metric for this target.
         """
-        return astrometrics.quality.query(
-            metric=metric, target_id=row["target"], since=record.get("run_started_at"), library_only=True
-        ).rows
+        return astrometrics.quality.records.query(
+            metric=metric,
+            target=Target(id=row["target"]),
+            since=record.get("run_started_at"),
+            library_only=True,
+        )
 
     weight_rows = query(STACKING_FRAME_WEIGHT)
     row["weights_known"] = _presence_label(weight_rows)
@@ -955,12 +958,12 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         )
     elif len(nights) >= 2:
         earlier_rows = [
-            astrometrics.quality.query(
+            astrometrics.quality.records.query(
                 metric=metric,
-                target_id=row["target"],
+                target=Target(id=row["target"]),
                 since=record.get("run_started_at"),
                 variant=EARLIER_NIGHTS_VARIANT,
-            ).rows
+            )
             for metric in (STACKING_FRAME_WEIGHT, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
         ]
         row["earlier_nights_present"] = (
@@ -991,7 +994,7 @@ def write_review_list(astrometrics: Any, progress_path: str, review_path: str) -
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The library interface, for ``quality.query``.
+        The library interface, for ``quality.records.query``.
     progress_path : `str`
         The progress file to read.
     review_path : `str`

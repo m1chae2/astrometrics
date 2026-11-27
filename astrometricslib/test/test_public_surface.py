@@ -127,7 +127,7 @@ EXPECTED_MODULE_NAMES = {
         "AstrometryPipelineQualityMetrics",
         "AstrometryQualitySummary",
         "ExposureGroupSummary",
-        "InputQualityReport",
+        "FrameQualityReport",
         "LimitTier",
         "MeasurementReference",
         "MeasurementStatus",
@@ -199,6 +199,7 @@ EXPECTED_MODULE_NAMES = {
         "collect_tuners",
         "read_tuned_record",
         "run_tuning",
+        "register_tuner_package",
         "tune",
         "collect_parameters",
         "current_parameter_context",
@@ -360,7 +361,6 @@ SUB_API_MEMBERS = {
         "list_preview_bright_objects",
         "process_target",
         "remake_preview",
-        "measure_noise",
         "open_in_siril",
         "plate_solve",
         "predict_stack",
@@ -380,35 +380,33 @@ SUB_API_MEMBERS = {
         "record_sensor_noise",
     },
     "calibration.frames": {"add", "record", "scan"},
-    "quality": {
-        "blocks",
-        "calibration_identities",
-        "choose_blink_pair",
-        "get_aperture_record",
-        "capture_settings",
-        "map_position",
-        "match_frame_positions",
-        "measure_detections",
-        "measure_folder",
-        "measure_frames",
-        "measure_stack",
-        "measure_star_profile",
-        "measure_tuned_parameters",
-        "metrics",
+    "quality": {"blocks", "detections", "frames", "records", "stacks"},
+    "quality.records": {
+        "get",
+        "get_calibration_identities",
+        "get_capture_settings",
+        "get_metric",
+        "get_metrics",
+        "get_paths",
         "query",
-        "record_frame_measurements",
-        "resolve_rows",
     },
+    "quality.frames": {"get_blink_partner", "map_positions", "measure", "record"},
+    "quality.stacks": {
+        "get_aperture_record",
+        "measure",
+        "record_night_contributions",
+        "record_noise_growth",
+        "record_odd_even_noise",
+    },
+    "quality.detections": {"measure_detections", "measure_profile", "measure_widths"},
     "quality.blocks": {
-        "find_stars",
         "measure_aperture",
+        "measure_clipped_values",
+        "measure_robust_sigma",
         "measure_sky",
+        "measure_sky_corners",
         "measure_sky_gradient",
-        "robust_sigma",
-        "sigma_clip",
-        "sky_corners",
-        "solved_stars",
-        "star_widths",
+        "measure_stars",
     },
     "visualization": {
         "get_last_captured_image",
@@ -482,7 +480,8 @@ def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
 
     astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert astrometrics.processing._targets is astrometrics.targets
-    assert astrometrics.quality._targets is astrometrics.targets
+    assert astrometrics.quality.records._targets is astrometrics.targets
+    assert astrometrics.quality.frames._targets is astrometrics.targets
     assert astrometrics.processing._calibration is astrometrics.calibration
     assert astrometrics.visualization._stars is astrometrics.stars
 

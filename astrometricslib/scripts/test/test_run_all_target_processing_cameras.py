@@ -150,13 +150,14 @@ class FakeAstrometrics:
         self.odd_even_difference_calls: list[str] = []
         self.odd_even_difference_failures: set[str] = set()
         self.processing = SimpleNamespace(
-            measure_noise=self.measure_noise,
             process_target=self.process_target,
             stack=self.stack,
             stack_subset=self.stack_subset,
         )
         self.quality = SimpleNamespace(
-            query=self.query_quality, record_frame_measurements=self.record_frame_measurements
+            records=SimpleNamespace(query=self.query_quality),
+            frames=SimpleNamespace(record=self.record_frame_measurements),
+            stacks=SimpleNamespace(record_odd_even_noise=self.measure_noise),
         )
 
     def record_frame_measurements(self, target: Any, **keywords: Any) -> SimpleNamespace:
@@ -233,8 +234,8 @@ class FakeAstrometrics:
         return SimpleNamespace()
 
     def query_quality(
-        self, metric: str, target_id: str, variant: str | None = None, **keywords: Any
-    ) -> SimpleNamespace:
+        self, metric: str, target: Any, variant: str | None = None, **keywords: Any
+    ) -> list[Any]:
         """Return the fake quality rows of one metric for one target.
 
         Rows asked for by a subset variant are kept under the key with the
@@ -242,11 +243,11 @@ class FakeAstrometrics:
 
         Returns
         -------
-        answer : `types.SimpleNamespace`
-            With ``rows``, the rows the test set up, or none.
+        rows : `list`
+            The rows the test set up, or none.
         """
-        key = f"{target_id}|{metric}" + (f"|{variant}" if variant else "")
-        return SimpleNamespace(rows=self.quality_rows.get(key, []))
+        key = f"{target.id}|{metric}" + (f"|{variant}" if variant else "")
+        return list(self.quality_rows.get(key, []))
 
     def process_target(self, target: list[str] | None, **keywords: Any) -> SimpleNamespace:
         """Record one pass and pretend it succeeded.

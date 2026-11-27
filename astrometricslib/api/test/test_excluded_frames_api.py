@@ -269,12 +269,12 @@ def test_restore_with_apply_does_not_rescan_when_nothing_moved(
 
 
 def test_frame_quality_has_no_set_aside_preview(quality: QualityRecords, tmp_path: Path) -> None:
-    """The preview kind is gone: `predict_stack` is the one preview."""
+    """The frame check has no preview part; the stack prediction is the one."""
     folder = camera_folder(tmp_path)
     target = make_target(folder, 12)
 
-    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        quality.measure_frames(target, kind="quarantine_preview")
+    with pytest.raises(InvalidArgumentError, match="Unknown include section"):
+        quality.frames.measure(target.frames, include=["quarantine_preview"])
 
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:

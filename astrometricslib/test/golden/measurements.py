@@ -254,7 +254,7 @@ def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
     The star count, FWHM, longest streak, sky level, saturated
     pixels, shift from the previous frame and flags come from
     `check_raw_frames`, the batch check behind
-    ``QualityRecords.measure_frames(kind="raw_check")``, run here on the
+    ``quality.frames.measure`` (its batch check), run here on the
     sample folder (the public method measures a target's frames). The
     background
     level and saturated fraction come from `measure_frame_input_quality`. The

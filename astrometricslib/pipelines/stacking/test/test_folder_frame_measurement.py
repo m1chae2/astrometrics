@@ -1,12 +1,13 @@
 """Purpose: Tests for measuring a folder of frames without storing anything.
 
-Description: Checks `QualityRecords.measure_folder` and
-`measure_folder_frames` on small synthetic star fields whose star width and
-sky level are known. The frames are drawn here, so no real image is read. The
-tests check that the width and the sky rate are recovered, that the bias level
-comes from the right place, that selection and limit work, that a frame drawn
-by a simulator raises a notice, that one bad file does not stop the others,
-and that nothing reaches the quality store.
+Description: Checks ``quality.frames.measure(paths, include=["metrics"])``
+and its `measure_frame_metrics` on small synthetic star fields whose star
+width and sky level are known. The frames are drawn here, so no real image is
+read, and the batch check is replaced. The tests check that the width and the
+sky rate are recovered, that the bias level comes from the right place, that
+the frames given are the frames measured, that a frame drawn by a simulator
+raises a notice, that one bad file does not stop the others, and that nothing
+reaches the quality store.
 """
 
 from pathlib import Path
@@ -18,9 +19,12 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.run_bases import StarWidthEstimator, star_width_on_scale
+from astrometricslib.models.quality.folder_measurement import FolderMeasurementReport
 from astrometricslib.models.target import FrameRecord
+from astrometricslib.pipelines.shared import frame_scanning
+from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.stacking import folder_frame_measurement
 from astrometricslib.pipelines.stacking.test.test_frame_measurement_run import _Library, _profile, biases
 
@@ -94,8 +98,34 @@ def stand_in_header_reading(monkeypatch: pytest.MonkeyPatch) -> None:
             timestamp=1.78e9,
         )
 
-    monkeypatch.setattr(folder_frame_measurement, "create_frame_record_from_fits", fake_record)
+    monkeypatch.setattr(frame_scanning, "create_frame_record_from_fits", fake_record)
     monkeypatch.setattr(folder_frame_measurement, "resolve_camera_profile", lambda name: _profile())
+    monkeypatch.setattr(
+        raw_frame_check, "check_raw_frames", lambda paths: {"frames": [], "batch": {"frame_count": 0}}
+    )
+
+
+def _measure(quality: QualityRecords, folder: Path, **options: object) -> FolderMeasurementReport:
+    """Measure the FITS files of a folder with the frame metric set.
+
+    Parameters
+    ----------
+    quality : `QualityRecords`
+        The quality API.
+    folder : `pathlib.Path`
+        The folder; its ``*.fits`` files are measured in name order.
+    **options : `object`
+        Passed on to ``quality.frames.measure``.
+
+    Returns
+    -------
+    report : `FolderMeasurementReport`
+        The ``metrics`` part of the report.
+    """
+    paths = sorted(str(path) for path in folder.glob("*.fits"))
+    report = quality.frames.measure(paths, include=["metrics"], **options)
+    assert report.metrics is not None
+    return report.metrics
 
 
 def _quality(tmp_path: Path, bias_paths: list[str] | None = None) -> tuple[QualityRecords, MagicMock]:
@@ -122,7 +152,7 @@ def test_star_width_and_sky_rate_are_recovered_and_nothing_is_stored(tmp_path: P
     _write_star_field(tmp_path / "frame_001.fits")
     quality, storage = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
+    report = _measure(quality, tmp_path, bias_level_adu=BIAS_ADU)
 
     assert report.frames_matching == 1
     assert report.frames_measured == 1
@@ -139,7 +169,7 @@ def test_each_star_width_names_its_estimator_and_its_value_on_the_scale(tmp_path
     _write_star_field(tmp_path / "frame_001.fits")
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
+    report = _measure(quality, tmp_path, bias_level_adu=BIAS_ADU)
 
     moffat = "frame.star_width_moffat_px"
     assert report.star_width_estimators[moffat] == "frame Moffat"
@@ -166,7 +196,7 @@ def test_the_bias_level_comes_from_the_calibration_library_when_none_is_given(
     _write_star_field(folder / "frame_001.fits")
     quality, _ = _quality(tmp_path, biases)
 
-    report = quality.measure_folder(str(folder))
+    report = _measure(quality, folder)
 
     # The library's bias frames give a level, so the sky rate is measured.
     assert report.medians["frame.sky_rate_e_per_s_per_px"] > 0.0
@@ -178,7 +208,7 @@ def test_without_a_bias_level_the_sky_metrics_say_why_they_are_missing(tmp_path:
     _write_star_field(tmp_path / "frame_001.fits")
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path))
+    report = _measure(quality, tmp_path)
 
     assert "frame.sky_rate_e_per_s_per_px" not in report.frames[0].values
     assert "frame.sky_rate_e_per_s_per_px" in report.frames[0].not_measured
@@ -191,24 +221,24 @@ def test_a_frame_drawn_by_a_simulator_raises_a_notice(tmp_path: Path) -> None:
     _write_star_field(tmp_path / "frame_001.fits", synthetic=True)
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
+    report = _measure(quality, tmp_path, bias_level_adu=BIAS_ADU)
 
     assert report.notices
     assert "frame.notice_synthetic" not in report.frames[0].values
 
 
-def test_the_limit_and_the_file_range_choose_the_frames(tmp_path: Path) -> None:
-    """Only the first frames in the range are measured, in name order."""
+def test_the_frames_given_are_the_frames_measured(tmp_path: Path) -> None:
+    """Only the frames given are measured; the report names their folder."""
     for index in range(4):
         _write_star_field(tmp_path / f"frame_{index:03d}.fits", seed=index + 1)
     quality, _ = _quality(tmp_path)
+    paths = [str(tmp_path / "frame_002.fits"), str(tmp_path / "frame_003.fits")]
 
-    limited = quality.measure_folder(str(tmp_path), limit=2, bias_level_adu=BIAS_ADU)
-    ranged = quality.measure_folder(str(tmp_path), first_file="002", limit=5, bias_level_adu=BIAS_ADU)
+    report = quality.frames.measure(paths, include=["metrics"], bias_level_adu=BIAS_ADU).metrics
 
-    assert [frame.file_name for frame in limited.frames] == ["frame_000.fits", "frame_001.fits"]
-    assert limited.frames_matching == 4
-    assert [frame.file_name for frame in ranged.frames] == ["frame_002.fits", "frame_003.fits"]
+    assert [frame.file_name for frame in report.frames] == ["frame_002.fits", "frame_003.fits"]
+    assert report.frames_matching == 2
+    assert report.folder_path == str(tmp_path)
 
 
 def test_one_unreadable_file_does_not_stop_the_others(tmp_path: Path) -> None:
@@ -217,23 +247,16 @@ def test_one_unreadable_file_does_not_stop_the_others(tmp_path: Path) -> None:
     _write_star_field(tmp_path / "frame_001.fits")
     quality, _ = _quality(tmp_path)
 
-    report = quality.measure_folder(str(tmp_path), bias_level_adu=BIAS_ADU)
+    report = _measure(quality, tmp_path, bias_level_adu=BIAS_ADU)
 
     assert [frame.file_name for frame in report.frames][-1] == "frame_001.fits"
     assert report.frames[-1].values["frame.star_width_moffat_px"] > 0.0
 
 
-def test_a_missing_folder_is_refused(tmp_path: Path) -> None:
-    """A path that is not a folder raises `InvalidArgumentError`."""
+def test_a_missing_file_or_no_frames_is_refused(tmp_path: Path) -> None:
+    """A path with no file is not found; an empty list is refused."""
     quality, _ = _quality(tmp_path)
-    with pytest.raises(InvalidArgumentError, match="not a folder"):
-        quality.measure_folder(str(tmp_path / "nowhere"))
-
-
-def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
-    """With no FITS files nothing is measured and no median exists."""
-    quality, _ = _quality(tmp_path)
-    report = quality.measure_folder(str(tmp_path))
-    assert report.frames_matching == 0
-    assert report.frames == []
-    assert report.medians == {}
+    with pytest.raises(NotFoundError):
+        quality.frames.measure([str(tmp_path / "nowhere.fits")], include=["metrics"])
+    with pytest.raises(InvalidArgumentError, match="empty"):
+        quality.frames.measure([], include=["metrics"])

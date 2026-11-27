@@ -19,7 +19,7 @@ record.
 
 The record goes in the quality store's calibration table
 (`QualityStore.write_calibration_identities`); the public reader is
-`QualityRecords.calibration_identities`.
+`quality.records.get_calibration_identities`.
 """
 
 import logging

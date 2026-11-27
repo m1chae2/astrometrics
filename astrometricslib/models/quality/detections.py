@@ -1,4 +1,4 @@
-"""What `QualityRecords.measure_detections` returns: the detected stars.
+"""What `quality.detections.measure_detections` returns: the detected stars.
 
 The result lists every star that the astrometry run's star finder detects in
 one image, with its position and brightness, and the radius of the circle

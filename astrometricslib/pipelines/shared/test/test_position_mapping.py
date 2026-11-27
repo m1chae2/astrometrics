@@ -2,8 +2,8 @@
 
 A frame pixel goes onto its stack (with the crop offset) and back. A frame
 Siril left out of the stack, and a spectral stack, cannot be followed and say
-why. `QualityRecords.map_position` checks that both files exist and gives
-1-based answers.
+why. ``quality.frames.map_positions`` checks that both files exist, gives
+1-based answers and says which method it used.
 """
 
 import json
@@ -115,12 +115,44 @@ def test_the_quality_method_checks_the_files_and_searches_the_stacks_folders(tmp
     _write_record(stack, [frame], (5.0, 3.0), (2, 1))
 
     with pytest.raises(NotFoundError):
-        quality.map_position(str(tmp_path / "none.fits"), 1.0, 1.0, str(stack))
-    mapping = quality.map_position(str(frame), 10.0, 20.0, str(stack))
+        quality.frames.map_positions(str(tmp_path / "none.fits"), str(stack), points=[(1.0, 1.0)])
+    mapping = quality.frames.map_positions(str(frame), str(stack), points=[(10.0, 20.0)])
 
     assert mapping.method == "stack alignment"
-    assert (mapping.x, mapping.y) == pytest.approx((13.0, 16.0))
-    assert type(mapping.x) is float
+    (point,) = mapping.points
+    assert (point.x, point.y) == pytest.approx((10.0, 20.0))
+    assert (point.mapped_x, point.mapped_y) == pytest.approx((13.0, 16.0))
+    assert type(point.mapped_x) is float
+    assert point.inside
+
+
+def test_two_unlinked_frames_of_one_size_are_matched_by_their_stars(tmp_path: Path) -> None:
+    """With no record or plate solution, the frames' stars are matched."""
+    from unittest.mock import patch
+
+    from astrometricslib.models.quality.blink_pair import FramePositionMatch, MatchedPoint
+
+    config = MagicMock()
+    config.get_library_path.return_value = tmp_path
+    config.get_stacks_path.return_value = tmp_path / "stacks"
+    quality = QualityRecords(config, MagicMock())
+    first, second = tmp_path / "a.fits", tmp_path / "b.fits"
+    _write_image(first)
+    _write_image(second)
+    match = FramePositionMatch(
+        matched=True, votes=9, points=[MatchedPoint(x=5.0, y=6.0, mapped_x=7.0, mapped_y=8.0, inside=True)]
+    )
+    with patch(
+        "astrometricslib.pipelines.stacking.position_following.match_frame_positions", return_value=match
+    ) as matcher:
+        mapping = quality.frames.map_positions(str(first), str(second), points=[(5.0, 6.0)])
+        same = quality.frames.map_positions(str(first), str(first))
+
+    assert mapping.method == "star matching"
+    assert (mapping.points[0].mapped_x, mapping.points[0].mapped_y) == (7.0, 8.0)
+    assert "9 votes" in mapping.note
+    assert same.method == "same pixel"
+    assert matcher.call_count == 1
 
 
 @pytest.mark.parametrize(

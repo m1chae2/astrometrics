@@ -1,4 +1,4 @@
-"""What `QualityRecords.measure_star_profile` returns: one star's profile.
+"""What `quality.detections.measure_profile` returns: one star's profile.
 
 The result holds the radial profile of a star (brightness above the sky
 against distance from the star's center), the Moffat and Gaussian curves
@@ -258,7 +258,7 @@ class StarProfileMeasurement(BaseModel):
         The brightest pixel above the sky divided by the sky noise (one
         standard deviation of a sky pixel). It is the peak's height in noise
         levels, not the signal-to-noise ratio of the star's total light,
-        which `QualityBlocks.measure_aperture` gives.
+        which `quality.blocks.measure_aperture` gives.
     edge_distance_px : `float`
         How far the star's center is from the nearest image edge, in pixels.
     coverage_fraction : `float`

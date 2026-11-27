@@ -1,15 +1,16 @@
-"""Purpose: Tests for the subset-stack methods of `ProcessingPipelines`.
+"""Purpose: Tests for the noise records and `stack_subset`.
 
-Description: `stack_subset` and `measure_noise` (with its three kinds) are
-thin: they resolve the target, find its
-library stack, record a job and hand the work to
+Description: The three noise methods of ``astrometrics.quality.stacks``
+(`record_noise_growth`, `record_night_contributions` and
+`record_odd_even_noise`, owned by `pipelines/stacking/noise_records.py`) and
+the script call `stack_subset` are thin: they find the target's library
+stack, record a job and hand the work to
 `pipelines/stacking/subset_noise_run.py` with a measurement time from the
 clock. The science is tested there. These tests check the wiring with the
 pipeline functions replaced: the job is recorded, the time has a time zone and
-the job id, the night contributions run only when asked, the odd–even
-difference noise runs inside the growth job unless turned off and also as
-its own job (with or without a job record), and a target with no stack is
-refused.
+the job id, the night contributions and the odd–even difference noise run
+inside the growth job only when asked and also as jobs of their own, and a
+target with no stack is refused.
 """
 
 from collections.abc import Iterator
@@ -21,6 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.processing_scripts import stack_subset
+from astrometricslib.api._quality_frames import QualityStacks
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
@@ -108,6 +110,17 @@ def _pipelines() -> ProcessingPipelines:
     return ProcessingPipelines(AppConfiguration(), MagicMock(), targets=MagicMock())
 
 
+def _stacks() -> QualityStacks:
+    """Build ``astrometrics.quality.stacks`` on the default settings.
+
+    Returns
+    -------
+    stacks : `QualityStacks`
+        The stack checks and noise records.
+    """
+    return QualityStacks(AppConfiguration())
+
+
 def test_the_growth_job_records_a_job_and_runs_the_nights_only_when_asked(
     isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -145,9 +158,9 @@ def test_the_growth_job_records_a_job_and_runs_the_nights_only_when_asked(
             targetId=target.id, libraryStackPath=stack_path
         ),
     )
-    pipelines = _pipelines()
+    stacks = _stacks()
 
-    result = pipelines.measure_noise(_target(), maximum_steps=3)
+    result = stacks.record_noise_growth(_target(), maximum_steps=3)
     assert result.night_contributions is None
     assert seen["nights"] == 0
     assert seen["stack_path"] == LIBRARY_STACK
@@ -159,15 +172,15 @@ def test_the_growth_job_records_a_job_and_runs_the_nights_only_when_asked(
     assert context.job_id == jobs[0].id
     assert context.measured_at.utcoffset() == timedelta(0)
 
-    result = pipelines.measure_noise(_target(), include=["night_contributions"])
+    result = stacks.record_noise_growth(_target(), include=["night_contributions"])
     assert result.night_contributions is not None
     assert seen["nights"] == 1
 
 
-def test_the_growth_job_runs_the_odd_even_difference_unless_turned_off(
+def test_the_growth_job_runs_the_odd_even_difference_only_when_asked(
     isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The odd–even difference is on by default and can be off."""
+    """The odd–even difference is off by default and can be included."""
     calls: list[dict[str, Any]] = []
 
     def half(target: Target, stack_path: str, **keywords: Any) -> OddEvenDifferenceNoiseResult:
@@ -189,11 +202,11 @@ def test_the_growth_job_runs_the_odd_even_difference_unless_turned_off(
         ),
     )
     monkeypatch.setattr(odd_even_difference_run, "run_odd_even_difference_noise", half)
-    pipelines = _pipelines()
+    stacks = _stacks()
 
-    assert pipelines.measure_noise(_target()).odd_even_difference is not None
+    assert stacks.record_noise_growth(_target(), include=["odd_even_difference"]).odd_even_difference
     assert len(calls) == 1
-    assert pipelines.measure_noise(_target(), include=[]).odd_even_difference is None
+    assert stacks.record_noise_growth(_target()).odd_even_difference is None
     assert len(calls) == 1
 
     def fail(target: Target, stack_path: str, **keywords: Any) -> OddEvenDifferenceNoiseResult:
@@ -207,7 +220,7 @@ def test_the_growth_job_runs_the_odd_even_difference_unless_turned_off(
         raise RuntimeError("Siril stopped")
 
     monkeypatch.setattr(odd_even_difference_run, "run_odd_even_difference_noise", fail)
-    result = pipelines.measure_noise(_target())
+    result = stacks.record_noise_growth(_target(), include=["odd_even_difference"])
     assert result.odd_even_difference is None
     assert any("odd–even difference noise was not measured" in note for note in result.notes)
 
@@ -230,21 +243,21 @@ def test_each_odd_even_difference_run_records_its_job(
         return OddEvenDifferenceNoiseResult(targetId=target.id, libraryStackPath=stack_path)
 
     monkeypatch.setattr(odd_even_difference_run, "run_odd_even_difference_noise", half)
-    pipelines = _pipelines()
+    stacks = _stacks()
 
-    result = pipelines.measure_noise(_target(), kind="odd_even_difference", keep_halves=True)
+    result = stacks.record_odd_even_noise(_target(), keep_halves=True)
     assert result.library_stack_path == LIBRARY_STACK
     assert seen[0]["keep_halves"] is True
     jobs = _read_jobs(isolated_job_logging, "SubsetTarget")
     assert [job.status for job in jobs] == ["completed"]
     assert seen[0]["context"].job_id == jobs[0].id
 
-    pipelines.measure_noise(_target(), kind="odd_even_difference")
+    stacks.record_odd_even_noise(_target())
     assert seen[1]["keep_halves"] is False
     # Every run records a job, whoever starts it.
     assert len(_read_jobs(isolated_job_logging, "SubsetTarget")) == 2
     with pytest.raises(NotFoundError):
-        pipelines.measure_noise(Target(id="BareTarget", frames=[]), kind="odd_even_difference")
+        stacks.record_odd_even_noise(Target(id="BareTarget", frames=[]))
 
 
 def test_the_night_job_runs_the_night_function(
@@ -265,7 +278,7 @@ def test_the_night_job_runs_the_night_function(
         return NightContributionResult(targetId=target.id, libraryStackPath=stack_path)
 
     monkeypatch.setattr(subset_noise_run, "run_night_contributions", nights)
-    _pipelines().measure_noise(_target(), kind="night_contributions")
+    _stacks().record_night_contributions(_target())
     assert calls == [LIBRARY_STACK]
 
 
@@ -275,11 +288,11 @@ def test_a_target_without_a_stack_is_refused_and_steps_are_checked(
     """No stack is NotFoundError; no steps is InvalidArgumentError."""
     bare = Target(id="BareTarget", frames=[])
     with pytest.raises(NotFoundError):
-        _pipelines().measure_noise(bare)
+        _stacks().record_noise_growth(bare)
     with pytest.raises(NotFoundError):
-        _pipelines().measure_noise(bare, kind="night_contributions")
+        _stacks().record_night_contributions(bare)
     with pytest.raises(InvalidArgumentError, match="maximum_steps"):
-        _pipelines().measure_noise(_target(), maximum_steps=0)
+        _stacks().record_noise_growth(_target(), maximum_steps=0)
 
 
 def test_stack_subset_passes_the_frames_and_the_library_stack(
@@ -314,15 +327,9 @@ def test_stack_subset_passes_the_frames_and_the_library_stack(
     assert Path(seen["stack_path"]).as_posix().endswith("Bare Target/Bare_Target_Stacked.fits")
 
 
-def test_arguments_of_another_kind_are_refused() -> None:
-    """Each kind refuses the options that belong to the others."""
-    with pytest.raises(InvalidArgumentError, match="does not use: keep_halves"):
-        _pipelines().measure_noise(_target(), keep_halves=True)
-    with pytest.raises(InvalidArgumentError, match="does not use: maximum_steps"):
-        _pipelines().measure_noise(_target(), kind="odd_even_difference", maximum_steps=2)
-    with pytest.raises(InvalidArgumentError, match="does not use: include"):
-        _pipelines().measure_noise(_target(), kind="night_contributions", include=["odd_even_difference"])
+def test_an_unknown_part_or_a_target_id_is_refused() -> None:
+    """An unknown part is refused; every method wants a `Target`."""
     with pytest.raises(InvalidArgumentError, match="Unknown include section"):
-        _pipelines().measure_noise(_target(), include=["everything"])
-    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        _pipelines().measure_noise(_target(), kind="all")
+        _stacks().record_noise_growth(_target(), include=["everything"])
+    with pytest.raises(InvalidArgumentError, match=r"targets\.get"):
+        _stacks().record_odd_even_noise("SubsetTarget")  # type: ignore[arg-type]

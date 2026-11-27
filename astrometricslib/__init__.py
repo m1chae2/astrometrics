@@ -24,12 +24,13 @@ settings by itself::
 - `stars` (`StellarCatalog`): the library's star records, catalog queries
   and light-curve (brightness over time) analysis.
 - `processing` (`ProcessingPipelines`): stack a target, remake its preview
-  and run the analysis stages and noise measurements.
+  and run the analysis stages.
 - `calibration` (`CalibrationCatalog`): the darks, biases and flats, which
   sets fit some light frames, how good each set is, and each camera's noise
   profile. Its `frames` child adds, rescans and measures the files.
-- `quality` (`QualityRecords`): stored quality measurements, the metric list
-  and live checks of raw frames and stacks.
+- `quality` (`QualityRecords`): its `records` read the stored quality
+  measurements and the metric list; `frames`, `stacks`, `detections` and
+  `blocks` measure raw frames, stacks and single images.
 - `visualization` (`Visualization`): draw frames and stacks as pictures and
   plot results.
 - `jobs` (`Jobs`): read the history of running and finished jobs.
@@ -285,7 +286,6 @@ class Astrometrics(MovedNames):
             targets=self.targets,
             calibration_library=lambda: self.calibration._calibration_library,
             drivers=drivers,
-            owner=lambda: self,
         )
         self.jobs = Jobs(self.config, self._catalog_access)
         self.observatories = Observatories(self.config, targets=self.targets)

@@ -1,8 +1,9 @@
-"""Tests for the stored-measurement reads on the quality root.
+"""Tests for the stored-measurement reads, ``astrometrics.quality.records``.
 
-`QualityRecords.query` reads what earlier runs stored, and `metrics`
-lists the declared metrics. The tests use a temporary library folder, so no
-real database is touched.
+`QualityMeasurements.query` and `get` read what earlier runs stored,
+`get_paths` finds the picture behind a row, and `get_metrics` and
+`get_metric` read the declared metrics. The tests use a temporary library
+folder, so no real database is touched.
 """
 
 import sqlite3
@@ -14,8 +15,8 @@ import pytest
 
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib._internal.testing import astrometrics_with_drivers
-from astrometricslib.api.quality import QualityRecords
-from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.api.quality import QualityMeasurements, QualityRecords
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.quality.calibration_identities import CalibrationIdentities
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
@@ -25,7 +26,8 @@ from astrometricslib.models.quality.measurement import (
     QualitySubject,
     SubjectLevel,
 )
-from astrometricslib.models.quality.metric_spec import MetricSpec, MetricSummary
+from astrometricslib.models.quality.metric_spec import MetricSpec
+from astrometricslib.models.target import Target
 
 BASE_TIME = datetime(2026, 10, 1, 3, 0, 0, tzinfo=UTC)
 
@@ -53,34 +55,36 @@ def _measurement(run_id: str, measured_at: datetime, **overrides: object) -> Qua
 
 
 @pytest.fixture
-def quality(tmp_path: Path) -> QualityRecords:
-    """Make the quality API on a temporary library folder.
+def quality(tmp_path: Path) -> QualityMeasurements:
+    """Make the stored-measurement reads on a temporary library folder.
 
     Returns
     -------
-    quality : `QualityRecords`
+    quality : `QualityMeasurements`
         An instance whose library path is empty.
     """
     configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
-    return QualityRecords(configuration, None)
+    return QualityMeasurements(configuration)
 
 
 def test_a_library_with_no_database_gives_an_empty_list_and_creates_nothing(
-    quality: QualityRecords, tmp_path: Path
+    quality: QualityMeasurements, tmp_path: Path
 ) -> None:
     """Asking before anything is stored creates no file."""
-    assert quality.query().rows == []
+    assert list(quality.query()) == []
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_database_without_the_quality_table_is_left_alone(quality: QualityRecords, tmp_path: Path) -> None:
+def test_a_database_without_the_quality_table_is_left_alone(
+    quality: QualityMeasurements, tmp_path: Path
+) -> None:
     """A database that lacks the quality table gets none from a read."""
     database = tmp_path / "astrometrics.db"
     with sqlite3.connect(database) as connection:
         connection.execute("CREATE TABLE other (x INTEGER)")
     connection.close()
 
-    assert quality.query().rows == []
+    assert list(quality.query()) == []
 
     with sqlite3.connect(database) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
@@ -88,24 +92,24 @@ def test_a_database_without_the_quality_table_is_left_alone(quality: QualityReco
     assert tables == {"other"}
 
 
-def test_capture_settings_read_by_id(quality: QualityRecords, tmp_path: Path) -> None:
+def test_capture_settings_read_by_id(quality: QualityMeasurements, tmp_path: Path) -> None:
     """The capture settings come back by id; asking first creates no file."""
-    assert quality.capture_settings() == {}
+    assert quality.get_capture_settings() == []
     assert list(tmp_path.iterdir()) == []
 
     store = QualityStore(str(tmp_path / "astrometrics.db"))
     first = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM", binning=1))
     second = store.get_or_create_capture_setting(CaptureSetting(camera="D5300"))
 
-    assert set(quality.capture_settings()) == {first, second}
-    only_first = quality.capture_settings([first, 9999])
-    assert list(only_first) == [first]
-    assert only_first[first].camera == "ASI533MM"
+    assert [stored.id for stored in quality.get_capture_settings()] == sorted([first, second])
+    only_first = quality.get_capture_settings([first, 9999])
+    assert [stored.id for stored in only_first] == [first]
+    assert only_first[0].setting.camera == "ASI533MM"
 
 
-def test_calibration_identities_read_by_run_and_target(quality: QualityRecords, tmp_path: Path) -> None:
+def test_calibration_identities_read_by_run_and_target(quality: QualityMeasurements, tmp_path: Path) -> None:
     """The reader returns records by run id and target; no file is created."""
-    assert quality.calibration_identities() == []
+    assert quality.get_calibration_identities() == []
     assert list(tmp_path.iterdir()) == []
 
     store = QualityStore(str(tmp_path / "astrometrics.db"))
@@ -114,11 +118,11 @@ def test_calibration_identities_read_by_run_and_target(quality: QualityRecords, 
             CalibrationIdentities(run_id=run_id, subject_id=f"{target_id}/stack.fits", target_id=target_id)
         )
 
-    assert [record.run_id for record in quality.calibration_identities(run_ids=["run-2"])] == ["run-2"]
-    assert [record.target_id for record in quality.calibration_identities(target_id="M31")] == ["M31"]
+    assert [record.run_id for record in quality.get_calibration_identities(run_ids=["run-2"])] == ["run-2"]
+    assert [record.target_id for record in quality.get_calibration_identities(Target(id="M31"))] == ["M31"]
 
 
-def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_path: Path) -> None:
+def test_stored_measurements_come_back_filtered(quality: QualityMeasurements, tmp_path: Path) -> None:
     """The filters narrow the rows, and the newest row wins by default."""
     store = QualityStore(str(tmp_path / "astrometrics.db"))
     setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM"))
@@ -134,19 +138,23 @@ def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_pat
         ),
     ])
 
-    latest = quality.query(level="frame").rows
+    latest = quality.query(level="frame")
     assert [measurement.value for measurement in latest] == [3.0]
-    assert len(quality.query(level="frame", latest_only=False).rows) == 2
-    assert [m.subject.target_id for m in quality.query(camera_id="ASI533MM").rows] == ["M13"]
-    assert quality.query(target_id="nobody").rows == []
-    assert len(quality.query(since="2026-10-01T03:30:00").rows) == 1
-    assert len(quality.query(since=BASE_TIME + timedelta(hours=2)).rows) == 0
-    cited = quality.query(row_ids=[1]).rows
-    assert [measurement.row_id for measurement in cited] == [1]
+    assert len(quality.query(level="frame", latest_only=False)) == 2
+    assert [m.subject.target_id for m in quality.query(camera="ASI533MM")] == ["M13"]
+    assert list(quality.query(target=Target(id="nobody"))) == []
+    assert len(quality.query(since="2026-10-01T03:30:00")) == 1
+    assert len(quality.query(since=BASE_TIME + timedelta(hours=2))) == 0
+    assert len(quality.query(level="frame", latest_only=False, until=BASE_TIME + timedelta(minutes=30))) == 1
+    cited = quality.get(1)
+    assert cited is not None and cited.row_id == 1
+    assert quality.get(9999) is None
+    with pytest.raises(NotFoundError):
+        quality.get(9999, required=True)
 
 
 def test_a_limit_and_offset_page_the_answer_and_say_whether_more_remain(
-    quality: QualityRecords, tmp_path: Path
+    quality: QualityMeasurements, tmp_path: Path
 ) -> None:
     """With no limit every match comes back; a limit pages the answer."""
     QualityStore(str(tmp_path / "astrometrics.db")).write_measurements([
@@ -156,20 +164,20 @@ def test_a_limit_and_offset_page_the_answer_and_say_whether_more_remain(
     ])
 
     everything = quality.query(latest_only=False)
-    assert (len(everything.rows), everything.total_matching, everything.truncated) == (3, 3, False)
+    assert (len(everything), everything.total, everything.next_offset) == (3, 3, None)
     first_page = quality.query(latest_only=False, limit=2)
-    assert [row.value for row in first_page.rows] == [2.5, 3.0]
-    assert (first_page.total_matching, first_page.truncated, first_page.offset) == (3, True, 0)
+    assert [row.value for row in first_page] == [2.5, 3.0]
+    assert (first_page.total, first_page.next_offset) == (3, 2)
     last_page = quality.query(latest_only=False, limit=2, offset=2)
-    assert [row.value for row in last_page.rows] == [4.0]
-    assert (last_page.truncated, last_page.offset) == (False, 2)
+    assert [row.value for row in last_page] == [4.0]
+    assert last_page.next_offset is None
     with pytest.raises(InvalidArgumentError):
         quality.query(limit=0)
     with pytest.raises(InvalidArgumentError):
         quality.query(offset=-1)
 
 
-def test_variant_and_library_only_filters(quality: QualityRecords) -> None:
+def test_variant_and_library_only_filters(quality: QualityMeasurements) -> None:
     """``variant`` picks one subset; ``library_only`` leaves subsets out."""
     quality.query()  # The store file may not exist yet; asking must be harmless.
     QualityStore(quality_database_path(quality._config)).write_measurements([
@@ -186,17 +194,17 @@ def test_variant_and_library_only_filters(quality: QualityRecords) -> None:
         ),
     ])
 
-    assert [m.subject.variant for m in quality.query(variant="half").rows] == ["half"]
-    assert [m.subject.variant for m in quality.query(library_only=True).rows] == [None]
+    assert [m.subject.variant for m in quality.query(variant="half")] == ["half"]
+    assert [m.subject.variant for m in quality.query(library_only=True)] == [None]
 
 
-def test_variant_with_library_only_is_refused(quality: QualityRecords) -> None:
+def test_variant_with_library_only_is_refused(quality: QualityMeasurements) -> None:
     """Asking for one subset and for none at once raises an error."""
     with pytest.raises(InvalidArgumentError):
         quality.query(variant="half", library_only=True)
 
 
-def test_bad_arguments_are_refused(quality: QualityRecords) -> None:
+def test_bad_arguments_are_refused(quality: QualityMeasurements) -> None:
     """An unknown level or an unreadable time raises `InvalidArgumentError`."""
     with pytest.raises(InvalidArgumentError):
         quality.query(level="galaxy")
@@ -204,43 +212,36 @@ def test_bad_arguments_are_refused(quality: QualityRecords) -> None:
         quality.query(since="last night")
 
 
-def test_an_unregistered_metric_name_is_refused(quality: QualityRecords) -> None:
+def test_an_unregistered_metric_name_is_refused(quality: QualityMeasurements) -> None:
     """`query(metric=...)` lists the registered names when it is wrong."""
     with pytest.raises(InvalidArgumentError, match=r"frame\.background_level_adu"):
         quality.query(metric="frame.no_such_metric")
-    assert quality.query(metric="frame.background_level_adu").rows == []
+    assert list(quality.query(metric="frame.background_level_adu")) == []
 
 
-def test_metrics_with_a_name_gives_that_one_spec(quality: QualityRecords) -> None:
-    """`metrics(name=...)` gives one declaration or refuses an unknown name."""
-    one = quality.metrics(name="frame.background_level_adu")
-    assert [spec.name for spec in one] == ["frame.background_level_adu"]
-    with pytest.raises(InvalidArgumentError):
-        quality.metrics(name="frame.no_such_metric")
+def test_get_metric_gives_that_one_spec(quality: QualityMeasurements) -> None:
+    """`get_metric(name)` gives one declaration or refuses an unknown name."""
+    assert quality.get_metric("frame.background_level_adu").name == "frame.background_level_adu"
+    with pytest.raises(NotFoundError):
+        quality.get_metric("frame.no_such_metric")
 
 
-def test_metrics_lists_the_declarations(quality: QualityRecords) -> None:
-    """`metrics` gives summaries by default and full specs on request."""
-    summaries = quality.metrics()
-    assert summaries
-    assert all(isinstance(summary, MetricSummary) for summary in summaries)
-    assert len({summary.name for summary in summaries}) == len(summaries)
-    specs = quality.metrics(detail="full")
+def test_get_metrics_lists_the_declarations(quality: QualityMeasurements) -> None:
+    """`get_metrics` gives every full declaration, each once."""
+    specs = quality.get_metrics()
+    assert specs
     assert all(isinstance(spec, MetricSpec) for spec in specs)
-    assert [spec.name for spec in specs] == [summary.name for summary in summaries]
+    assert len({spec.name for spec in specs}) == len(specs)
 
 
-def test_metrics_filters_by_checkpoint_and_name(quality: QualityRecords) -> None:
-    """A checkpoint keeps only its metrics; bad choices raise."""
-    frame_metrics = quality.metrics(checkpoint="frame", detail="full")
+def test_get_metrics_filters_by_checkpoint(quality: QualityMeasurements) -> None:
+    """A checkpoint keeps only its metrics; an unknown one raises."""
+    frame_metrics = quality.get_metrics(checkpoint="frame")
     assert frame_metrics
     assert all(spec.checkpoint.value == "frame" for spec in frame_metrics)
-    assert len(frame_metrics) < len(quality.metrics())
-    one = quality.metrics(name=frame_metrics[0].name)
-    assert [summary.name for summary in one] == [frame_metrics[0].name]
-    for bad in ({"checkpoint": "nowhere"}, {"detail": "everything"}, {"name": "not.a.metric"}):
-        with pytest.raises(InvalidArgumentError):
-            quality.metrics(**bad)
+    assert len(frame_metrics) < len(quality.get_metrics())
+    with pytest.raises(InvalidArgumentError):
+        quality.get_metrics(checkpoint="nowhere")
 
 
 def test_the_root_object_holds_the_quality_child() -> None:
@@ -248,23 +249,27 @@ def test_the_root_object_holds_the_quality_child() -> None:
     from unittest.mock import MagicMock
 
     from astrometricslib import AppConfiguration
+    from astrometricslib.exceptions import MovedError
 
     astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     assert isinstance(astrometrics.quality, QualityRecords)
-    assert astrometrics.quality._targets is astrometrics.targets
+    assert astrometrics.quality.records._targets is astrometrics.targets
+    for old in ("query", "measure_frames", "metrics", "resolve_rows", "measure_tuned_parameters"):
+        with pytest.raises(MovedError, match="moved to astrometrics"):
+            getattr(astrometrics.quality, old)
     assert not hasattr(astrometrics.processing, "diagnostics")
 
 
-def test_query_fills_each_row_with_its_metric_unit(quality: QualityRecords, tmp_path: Path) -> None:
+def test_query_fills_each_row_with_its_metric_unit(quality: QualityMeasurements, tmp_path: Path) -> None:
     """A row read back carries the unit of its metric."""
     QualityStore(quality_database_path(quality._config)).write_measurements([_measurement("run", BASE_TIME)])
 
-    [row] = quality.query().rows
+    [row] = quality.query()
 
     assert row.unit == "arcsec"
 
 
-def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) -> None:
+def test_get_paths_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) -> None:
     """Each found row gets a path or a reason; missing ids are listed apart."""
     frames_folder = tmp_path / "lights" / "M31" / "scope" / "cam"
     frames_folder.mkdir(parents=True)
@@ -280,7 +285,7 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
         ],
     )
     configuration = SimpleNamespace(get_library_path=lambda: tmp_path, get_stacks_path=lambda: tmp_path)
-    records = QualityRecords(configuration, None, targets=SimpleNamespace(get=lambda target_id: target))
+    records = QualityMeasurements(configuration, targets=SimpleNamespace(get=lambda target_id: target))
     subjects = {
         "frame": QualitySubject(level=SubjectLevel.FRAME, subject_id="M31/scope/cam/a.fits", target_id="M31"),
         "gone": QualitySubject(
@@ -296,9 +301,9 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
     store.write_measurements([
         _measurement(f"run-{name}", BASE_TIME, subject=subject) for name, subject in subjects.items()
     ])
-    ids = {row.subject.subject_id: row.row_id for row in records.query(latest_only=False).rows}
+    ids = {row.subject.subject_id: row.row_id for row in records.query(latest_only=False)}
 
-    result = records.resolve_rows([
+    result = records.get_paths([
         ids["run-1"],
         9999,
         ids["M31/scope/cam/a.fits"],
@@ -318,7 +323,7 @@ def test_resolve_rows_gives_frame_and_stack_paths_and_reasons(tmp_path: Path) ->
 
 
 def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
-    quality: QualityRecords, tmp_path: Path
+    quality: QualityMeasurements, tmp_path: Path
 ) -> None:
     """A stored identity row is read back and turned into its text."""
     from astrometricslib._internal.stacking import aperture_identity_from_number, aperture_identity_to_number
@@ -334,7 +339,7 @@ def test_the_aperture_set_identity_row_is_read_back_through_the_public_query(
             value=aperture_identity_to_number("v3-156104df543d"),
         )
     ])
-    rows = quality.query(metric="stacking.aperture_set_number", target_id="M13", library_only=True).rows
+    rows = quality.query(metric="stacking.aperture_set_number", target=Target(id="M13"), library_only=True)
     assert [aperture_identity_from_number(row.value) for row in rows] == ["v3-156104df543d"]
 
 
@@ -357,7 +362,7 @@ def _frame_measurement(
 
 
 def test_deleting_frame_measurements_removes_only_the_given_frames(
-    quality: QualityRecords, tmp_path: Path
+    quality: QualityMeasurements, tmp_path: Path
 ) -> None:
     """A deleted frame loses its rows and subset weights; the rest stay."""
     store = QualityStore(str(tmp_path / "astrometrics.db"))
@@ -377,7 +382,7 @@ def test_deleting_frame_measurements_removes_only_the_given_frames(
     assert store.delete_frame_measurements(["M31/a.fits", "M31/missing.fits", ""]) == 3
 
     remaining = {
-        (row.subject.level.value, row.subject.subject_id) for row in quality.query(latest_only=False).rows
+        (row.subject.level.value, row.subject.subject_id) for row in quality.query(latest_only=False)
     }
     assert remaining == {("frame", "M31/ab.fits"), ("frame", "M31/b.fits"), ("stack", "M31/a.fits")}
 
@@ -418,5 +423,5 @@ def test_deleting_a_targets_frames_forgets_their_measurements(tmp_path: Path) ->
 
     assert result.deleted == [str(gone)]
     assert not gone.exists()
-    rows = QualityRecords(configuration, None).query(latest_only=False).rows
+    rows = QualityMeasurements(configuration).query(latest_only=False)
     assert [row.subject.subject_id for row in rows] == ["M31/scope/cam/kept.fits"]

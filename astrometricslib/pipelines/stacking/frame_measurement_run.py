@@ -168,6 +168,7 @@ __all__ = [
     "quarantine_measurements_for_frame",
     "record_frame_measurements_for_target",
     "record_stage_frame_quality",
+    "record_target_frame_measurements",
     "run_measurement_task",
 ]
 
@@ -1430,3 +1431,56 @@ def record_stage_frame_quality(
         full_summary.rows_written += summary.rows_written
         return full_summary
     return summary
+
+
+def record_target_frame_measurements(
+    target: Target,
+    configuration: AppConfiguration,
+    calibration_library: Any,
+    measured_at: datetime,
+    *,
+    frames: Sequence[FrameRecord] | None = None,
+    save_target: Callable[[], None] | None = None,
+) -> FrameMeasurementSummary:
+    """Measure a target's light frames once and store the numbers, as a job.
+
+    The owner of ``astrometrics.quality.frames.record``. It records a
+    ``quality`` job (or joins the job already running), builds the run's
+    session and calls `record_frame_measurements_for_target`.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target. Its frames are stamped in memory as they are measured.
+    configuration : `AppConfiguration`
+        The settings, which give the quality store.
+    calibration_library : `CalibrationLibrary`
+        The calibration library, for the bias level of each setting.
+    measured_at : `datetime`
+        When the measurement is made, with a time zone. The caller reads
+        the clock; a pipeline never does.
+    frames : `Sequence` [`FrameRecord`], optional
+        Only these frames. Every light frame of the target when omitted.
+    save_target : `Callable`, optional
+        Saves the target's stamps (see `record_frame_measurements_for_target`).
+
+    Returns
+    -------
+    summary : `FrameMeasurementSummary`
+        How many frames were measured, skipped or failed, and how many rows
+        were written.
+    """
+    from astrometricslib.foundation.jobs.runner import registered_job
+
+    with registered_job(job_type="quality", target_id=target.id) as job:
+        # The run gets its own run id and reports progress only when it
+        # registered (or joined) a job of its own. Called from inside
+        # another job (stacking, ingestion), it leaves that job's progress
+        # and id alone.
+        session = FrameMeasurementSession(
+            QualityStore.from_configuration(configuration),
+            calibration_library,
+            progress_job=job if job.job_id is not None and job.job_type == "quality" else None,
+            measured_at=measured_at,
+        )
+        return record_frame_measurements_for_target(target, session, frames=frames, save_target=save_target)

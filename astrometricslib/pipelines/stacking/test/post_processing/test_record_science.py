@@ -628,7 +628,7 @@ def test_missing_members_and_missing_sky_rows_give_a_reason(fake_profiles: list[
     store = _FakeStore(_sky_rows(["/frames/a.fits"]))
     outcome = compute_expected_noise(_membership(), "", "M 99", store=store)
     assert outcome.result is None
-    assert "record_frame_measurements" in outcome.reason
+    assert "quality.frames.record" in outcome.reason
 
 
 def test_a_store_that_fails_gives_a_reason_and_does_not_raise(fake_profiles: list[object]) -> None:

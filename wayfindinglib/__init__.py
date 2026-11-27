@@ -62,6 +62,7 @@ from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING
 
 from astrometricslib import configure_offline_iers
+from astrometricslib.parameters import register_tuner_package
 from wayfindinglib._internal.renames import MovedNames
 
 # A library only writes log messages. A program decides where they go, by
@@ -72,6 +73,9 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 # Every program that uses the library works offline: astropy uses its bundled
 # Earth-rotation table instead of downloading a new one.
 configure_offline_iers()
+
+# One `astrometricslib.parameters.tune` call runs this library's tuners too.
+register_tuner_package("wayfindinglib")
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics

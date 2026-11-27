@@ -435,6 +435,7 @@ ignore_imports = [
     "wayfindinglib.** -> astrometricslib.jobs",
     "wayfindinglib.** -> astrometricslib.drivers",
     "wayfindinglib.** -> astrometricslib.parameters",
+    "wayfindinglib -> astrometricslib.parameters",
     "wayfindinglib.test.** -> astrometricslib._internal.**",
     "wayfindinglib.**.test.** -> astrometricslib._internal.**",
     "wayfindinglib.test.** -> astrometricslib._internal",

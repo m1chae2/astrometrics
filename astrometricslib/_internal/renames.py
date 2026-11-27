@@ -70,6 +70,64 @@ RENAMES: dict[str, str] = {
         "astrometrics.targets.frames.restore(target, frames)"
     ),
     "astrometricslib.QualityRecords.forget": "astrometrics.targets.frames.delete(target, frames)",
+    # Step 4e: quality has the objects records, frames, stacks, detections
+    # and blocks.
+    "astrometricslib.QualityRecords.query": "astrometrics.quality.records.query(target=..., night=...)",
+    "astrometricslib.QualityRecords.resolve_rows": "astrometrics.quality.records.get_paths(row_ids)",
+    "astrometricslib.QualityRecords.metrics": (
+        "astrometrics.quality.records.get_metrics(checkpoint) or get_metric(name)"
+    ),
+    "astrometricslib.QualityRecords.capture_settings": (
+        "astrometrics.quality.records.get_capture_settings(ids)"
+    ),
+    "astrometricslib.QualityRecords.calibration_identities": (
+        "astrometrics.quality.records.get_calibration_identities(target, run_ids=...)"
+    ),
+    "astrometricslib.QualityRecords.measure_frames": (
+        "astrometrics.quality.frames.measure(astrometrics.targets.frames.query(target, ...))"
+    ),
+    "astrometricslib.QualityRecords.measure_folder": (
+        "astrometrics.quality.frames.measure(paths, include=['metrics'])"
+    ),
+    "astrometricslib.QualityRecords.record_frame_measurements": (
+        "astrometrics.quality.frames.record(target, frames)"
+    ),
+    "astrometricslib.QualityRecords.choose_blink_pair": (
+        "astrometrics.quality.frames.get_blink_partner(target, path)"
+    ),
+    "astrometricslib.QualityRecords.map_position": (
+        "astrometrics.quality.frames.map_positions(from_path, to_path, points=[(x, y)])"
+    ),
+    "astrometricslib.QualityRecords.match_frame_positions": (
+        "astrometrics.quality.frames.map_positions(path_a, path_b, points=points)"
+    ),
+    "astrometricslib.QualityRecords.measure_stack": (
+        "astrometrics.quality.stacks.measure(target_or_path, include=..., compare_to=...)"
+    ),
+    "astrometricslib.QualityRecords.get_aperture_record": (
+        "astrometrics.quality.stacks.get_aperture_record(path)"
+    ),
+    "astrometricslib.QualityRecords.measure_star_profile": (
+        "astrometrics.quality.detections.measure_profile(path, (x, y), cut_angle_deg=...)"
+    ),
+    "astrometricslib.QualityRecords.measure_detections": (
+        "astrometrics.quality.detections.measure_detections(path)"
+    ),
+    "astrometricslib.QualityRecords.measure_tuned_parameters": (
+        "astrometricslib.parameters.tune(astrometrics, wayfinder, setup=..., only=..., save=...)"
+    ),
+    "astrometricslib.QualityBlocks.find_stars": "astrometrics.quality.blocks.measure_stars(image)",
+    "astrometricslib.QualityBlocks.star_widths": (
+        "astrometrics.quality.detections.measure_widths(image, positions)"
+    ),
+    "astrometricslib.QualityBlocks.sky_corners": "astrometrics.quality.blocks.measure_sky_corners(path)",
+    "astrometricslib.QualityBlocks.solved_stars": "astrometrics.processing.astrometry.get_named_stars(path)",
+    "astrometricslib.QualityBlocks.robust_sigma": "astrometrics.quality.blocks.measure_robust_sigma(values)",
+    "astrometricslib.QualityBlocks.sigma_clip": "astrometrics.quality.blocks.measure_clipped_values(values)",
+    "astrometricslib.ProcessingPipelines.measure_noise": (
+        "astrometrics.quality.stacks.record_noise_growth(target), record_night_contributions(target) "
+        "or record_odd_even_noise(target)"
+    ),
 }
 
 

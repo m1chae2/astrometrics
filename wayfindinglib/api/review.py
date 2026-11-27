@@ -191,7 +191,7 @@ class ObservationReview(ControlChild):
         sample. Nothing is saved unless ``save`` is set; then the config is
         backed up and each value is written with where it came from. The
         image-processing values are tuned by
-        `Astrometrics.quality.measure_tuned_parameters`.
+        `astrometricslib.parameters.tune`, which runs both libraries' tuners.
 
         Parameters
         ----------
@@ -216,13 +216,9 @@ class ObservationReview(ControlChild):
         """
         from astrometricslib.parameters import tune
 
-        services: dict[str, Any] = {}
-        if self._owner_provider is not None:
-            wayfinder = self._owner_provider()
-            services = {"wayfinder": wayfinder, "astrometrics": wayfinder.astrometrics}
-        return tune(
-            ("wayfindinglib",), self._context.config, setup=setup, only=only, save=save, services=services
-        )
+        wayfinder = self._owner_provider() if self._owner_provider is not None else None
+        astrometrics = wayfinder.astrometrics if wayfinder is not None else self._context._astrometrics
+        return tune(astrometrics, wayfinder, packages=("wayfindinglib",), setup=setup, only=only, save=save)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def query(

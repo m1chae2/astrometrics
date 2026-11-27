@@ -271,6 +271,6 @@ def run_stack(
         update={
             "stacked_path": stacked_path,
             "quality_summary": quality,
-            "note": "To compare this stack with the previous one, use QualityRecords.measure_stack.",
+            "note": "To compare this stack with the previous one, use quality.stacks.measure.",
         }
     )

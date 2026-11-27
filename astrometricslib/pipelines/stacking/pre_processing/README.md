@@ -74,7 +74,7 @@ The limits are in `frame_quarantine.py`.
 
 - `frame_homogeneity.py`: the gain check.
 - `frame_quarantine.py`: the frame-quality check and its limits.
-- `blink_pair.py`: picks what the viewer's Blink button needs for a flagged or set-aside frame: a typical frame of the same session (stored star elongation and sky unevenness closest to the session medians) and one bright, isolated, unsaturated star near the center, with its position in both frames. The star comes from the star-shape measurement's candidate rules, and the position is mapped with the star matching of the pointing check, which allows for a meridian flip. It stores nothing. `QualityRecords.choose_blink_pair` and `QualityRecords.match_frame_positions` call it.
+- `blink_pair.py`: picks what the viewer's Blink button needs for a flagged or set-aside frame: a typical frame of the same session (stored star elongation and sky unevenness closest to the session medians) and one bright, isolated, unsaturated star near the center, with its position in both frames. The star comes from the star-shape measurement's candidate rules, and the position is mapped with the star matching of the pointing check, which allows for a meridian flip. It stores nothing. `quality.frames.get_blink_partner` and `QualityRecords.match_frame_positions` call it.
 - `background_homogeneity.py`: the background check.
 - `flat_calibration.py`: the flat check.
 - `calibration_assessment.py`: judges a set of dark or bias frames from the numbers stored for each frame (cut off at zero, light on the sensor, level, noise, frame count and copies), and puts a flat set's check in the same form. It returns `GateResult` records and stores nothing.

@@ -20,7 +20,7 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.quality.quality_reports import (
-    InputQualityReport,
+    FrameQualityReport,
     RawFrameCheckReport,
     SpectralFrameCheckReport,
     StackQualityReport,
@@ -38,7 +38,7 @@ __all__ = [
     "AstrometryPipelineQualityMetrics",
     "AstrometryQualitySummary",
     "ExposureGroupSummary",
-    "InputQualityReport",
+    "FrameQualityReport",
     "LimitTier",
     "MeasurementReference",
     "MeasurementStatus",

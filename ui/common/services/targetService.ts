@@ -40,11 +40,22 @@ const frameStatsInFlight = new Map<string, Promise<GroupedFrameStat[]>>();
  * Fetches frame statistics grouped by filter and exposure.
  * @param targetId The identifier of the target.
  * @param camera Optional camera filter.
- * @return List of grouped frame statistics.
+ * @return List of grouped frame statistics (empty after a failure, which is reported).
  */
 export function fetchFrameStatsGrouped(targetId: string, camera?: string): Promise<GroupedFrameStat[]> {
-    // Two panels ask for the same summary when a target opens. While one request is
-    // running, the second gets its answer instead of sending the same call again.
+    return requestFrameStatsGrouped(targetId, camera).catch(() => []);
+}
+
+/**
+ * Asks for frame statistics grouped by filter and exposure, and rejects when the call fails.
+ * A cache uses this so it never keeps an empty answer that only came from a failure.
+ * Two panels ask for the same summary when a target opens. While one request is
+ * running, the second gets its answer instead of sending the same call again.
+ * @param targetId The identifier of the target.
+ * @param camera Optional camera filter.
+ * @return List of grouped frame statistics. A failure is reported once and then rejects.
+ */
+export function requestFrameStatsGrouped(targetId: string, camera?: string): Promise<GroupedFrameStat[]> {
     const requestKey = `${targetId}\u0000${camera ?? ''}`;
     const running = frameStatsInFlight.get(requestKey);
     if (running) return running;
@@ -56,10 +67,10 @@ export function fetchFrameStatsGrouped(targetId: string, camera?: string): Promi
 }
 
 /**
- * Sends the grouped-frame request itself. Use `fetchFrameStatsGrouped`.
+ * Sends the grouped-frame request itself. Use `requestFrameStatsGrouped` or `fetchFrameStatsGrouped`.
  * @param targetId The target identifier name.
  * @param camera Optional camera filter.
- * @return List of grouped frame statistics (empty after a failure, which is reported).
+ * @return List of grouped frame statistics. A failure is reported and then thrown again.
  */
 async function loadFrameStatsGrouped(targetId: string, camera?: string): Promise<GroupedFrameStat[]> {
     try {
@@ -69,8 +80,9 @@ async function loadFrameStatsGrouped(targetId: string, camera?: string): Promise
         }
         return [];
     } catch (err: unknown) {
-        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
-        return [];
+        const error = err instanceof Error ? err : new Error(String(err));
+        reportError(error, 'backend');
+        throw error;
     }
 }
 

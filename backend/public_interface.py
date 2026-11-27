@@ -363,7 +363,8 @@ UI_EVENTS: tuple[UiEvent, ...] = (
         "library:frames_updated",
         "A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames "
         "into the library, before they are measured. The payload is "
-        "{targetId, framesAdded}.",
+        "{targetId, framesAdded, isCalibration}, where isCalibration is true when the sync was of a "
+        "calibration folder (bias, dark or flat) and not a target.",
     ),
     UiEvent(
         "calibration:measured",

@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 
 from astrometricslib import AppConfiguration
@@ -27,6 +28,7 @@ from wayfindinglib.analytics.capture_history import (
     collect_capture_frames,
     frames_by_night,
     night_captures,
+    roundness_baseline_signature,
     usable_star_frames,
 )
 from wayfindinglib.analytics.test.frame_measurement_helpers import FakeAstrometrics
@@ -452,3 +454,165 @@ def test_baseline_counts_only_nights_with_frames_from_this_equipment(make_frame:
     baseline = collect_capture_baseline_values(frames, contexts, 9.6)
 
     assert baseline["capture_abort_fraction"] == [pytest.approx(2 / 42)]
+
+
+def _pick(generator: np.random.Generator, choices: list[Any]) -> Any:
+    """Pick one of a list, which may hold `None`.
+
+    Returns
+    -------
+    choice : `Any`
+        One of `choices`.
+    """
+    return choices[int(generator.integers(len(choices)))]
+
+
+def _random_frames(generator: np.random.Generator) -> list[dict[str, Any]]:
+    """Make three nights of frames with every mix of measured or not.
+
+    Returns
+    -------
+    frames : `list` [`dict`]
+        Each frame's subject, timestamp, exposure, spectral flag, width and
+        elongation (either may be missing or unusable).
+    """
+    frames = []
+    for day in range(3):
+        for index in range(int(generator.integers(11, 16))):
+            frames.append({
+                "subject": f"Target/{day}_{index}.fits",
+                "timestamp": _NIGHT_ONE + day * 86400.0 + 60.0 * index,
+                "exposure_s": _pick(generator, [5.0, 30.0, 60.0, 60.0]),
+                "is_spectral": bool(generator.random() < 0.05),
+                "width": _pick(generator, [None, -1.0, 2.0, 3.0, 2.5, 2.2, 2.8, 3.1, 2.4, 2.6, 2.9, 3.3]),
+                "elongation": _pick(
+                    generator, [None, 0.9, 1.1, 1.3, 1.2, 1.15, 1.25, 1.05, 1.08, 1.18, 1.22, 1.4]
+                ),
+            })
+    return frames
+
+
+def _baseline_inputs(frames: list[dict[str, Any]]) -> tuple[list[CaptureFrame], list[Any], dict[str, Any]]:
+    """Turn frame descriptions into the inputs of both functions.
+
+    Returns
+    -------
+    capture_frames, night_frames, stored : `tuple`
+        The `CaptureFrame` list `collect_capture_baseline_values` reads, the
+        indexed frames `roundness_baseline_signature` reads, and the stored
+        values they share.
+    """
+    stored: dict[str, dict[str, tuple[float, int]]] = {}
+    capture_frames, night_frames = [], []
+    for frame in frames:
+        values = {}
+        if frame["width"] is not None:
+            values[STAR_WIDTH_METRIC] = (frame["width"], 1)
+        if frame["elongation"] is not None:
+            values[STAR_ELONGATION_METRIC] = (frame["elongation"], 2)
+        if values:
+            stored[frame["subject"]] = values
+        width, elongation = frame["width"], frame["elongation"]
+        capture_frames.append(
+            CaptureFrame(
+                path=frame["subject"],
+                target_id="Target",
+                timestamp=frame["timestamp"],
+                exposure_s=frame["exposure_s"],
+                filter_name="Luminance",
+                is_spectral=frame["is_spectral"],
+                star_width_arcsec=width if width is not None and width > 0 else None,
+                roundness=1.0 / elongation if elongation is not None and elongation >= 1.0 else None,
+            )
+        )
+        night_frames.append(
+            SimpleNamespace(
+                night=observing_night_id(frame["timestamp"]),
+                subject_id=frame["subject"],
+                exposure_s=frame["exposure_s"],
+                is_spectral=frame["is_spectral"],
+            )
+        )
+    return capture_frames, night_frames, stored
+
+
+def test_an_unchanged_roundness_signature_means_an_unchanged_roundness_series() -> None:
+    """Whenever the signature stays the same, so does every night's roundness.
+
+    Random frame sets are changed one field at a time. Each change that
+    leaves the signature as it is must leave the roundness series as it is,
+    for every shortest exposure time and judged night; most changes that
+    move the series must move the signature.
+    """
+    generator = np.random.default_rng(20261127)
+    same_signature = 0
+    for _ in range(300):
+        frames = _random_frames(generator)
+        changed = [dict(frame) for frame in frames]
+        frame = generator.choice(changed)
+        field_name = generator.choice([
+            "exposure_s",
+            "is_spectral",
+            "width",
+            "elongation",
+            "removed",
+            "added",
+        ])
+        if field_name == "removed":
+            changed.remove(frame)
+        elif field_name == "added":
+            changed.append({**frame, "subject": "Target/new.fits", "width": None, "elongation": None})
+        elif field_name == "is_spectral":
+            frame["is_spectral"] = not frame["is_spectral"]
+        else:
+            frame[field_name] = generator.choice(
+                {
+                    "exposure_s": [5.0, 30.0, 60.0],
+                    "width": [None, -1.0, 2.0, 3.0],
+                    "elongation": [None, 0.9, 1.1, 1.3, 1.5],
+                }[field_name]
+            )
+        before_frames, before_nights, before_stored = _baseline_inputs(frames)
+        after_frames, after_nights, after_stored = _baseline_inputs(changed)
+        for before_night in (None, observing_night_id(_NIGHT_ONE + 2 * 86400.0)):
+            signature_kept = roundness_baseline_signature(
+                before_nights, before_stored, before_night
+            ) == roundness_baseline_signature(after_nights, after_stored, before_night)
+            for minimum_exposure_s in (1.0, 20.0, 45.0):
+                series_kept = (
+                    collect_capture_baseline_values(before_frames, [], minimum_exposure_s, before_night)[
+                        "night_star_roundness"
+                    ]
+                    == collect_capture_baseline_values(after_frames, [], minimum_exposure_s, before_night)[
+                        "night_star_roundness"
+                    ]
+                )
+                assert series_kept or not signature_kept
+            same_signature += signature_kept
+    # Both kinds of change happened, so the check above was not empty.
+    assert 0 < same_signature < 600
+
+
+def test_a_frame_that_is_indexed_but_not_measured_leaves_the_signature() -> None:
+    """A new frame with no rows, or a width row alone, leaves the signature."""
+    frames = [
+        {
+            "subject": f"Target/{index}.fits",
+            "timestamp": _NIGHT_ONE + 60.0 * index,
+            "exposure_s": 60.0,
+            "is_spectral": False,
+            "width": 2.0,
+            "elongation": 1.1,
+        }
+        for index in range(10)
+    ]
+    _, nights, stored = _baseline_inputs(frames)
+    before = roundness_baseline_signature(nights, stored)
+    new = {**frames[0], "subject": "Target/new.fits", "width": None, "elongation": None}
+
+    _, nights, stored = _baseline_inputs([*frames, new])
+    assert roundness_baseline_signature(nights, stored) == before
+    _, nights, stored = _baseline_inputs([*frames, {**new, "width": 2.0}])
+    assert roundness_baseline_signature(nights, stored) == before
+    _, nights, stored = _baseline_inputs([*frames, {**new, "width": 2.0, "elongation": 1.2}])
+    assert roundness_baseline_signature(nights, stored) != before

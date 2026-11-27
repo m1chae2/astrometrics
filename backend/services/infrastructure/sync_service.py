@@ -202,7 +202,11 @@ class SyncService:
         """Tell the app that frames were added, so its frame lists reload.
 
         This runs when the sync ends, after the new frames were measured.
-        A failure is logged and never changes the sync's result.
+        A failure is logged and never changes the sync's result. The payload
+        says whether the sync was of a calibration folder. The app then reads
+        every target's frame summaries again, because new calibration frames
+        can change the calibration match of any target. A target sync only
+        makes that one target's views read again.
 
         Parameters
         ----------
@@ -215,7 +219,12 @@ class SyncService:
             return
         try:
             self._socket_manager.broadcast_ui_event_sync(
-                "library:frames_updated", {"targetId": object_id, "framesAdded": int(frames_added)}
+                "library:frames_updated",
+                {
+                    "targetId": object_id,
+                    "framesAdded": int(frames_added),
+                    "isCalibration": object_id.strip().lower() in CALIBRATION_FOLDER_NAMES,
+                },
             )
         except Exception:  # an announcement must never fail the sync: log it
             logger.exception("Could not announce the new frames of the %s sync", object_id)

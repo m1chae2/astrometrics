@@ -283,6 +283,63 @@ def test_a_light_read_counts_only_the_lengths_it_keeps(tmp_path: Path) -> None:
         storage._generic.get_by_ids_leaving_out("stellar_catalog", ["Vega"], (), ("photometry'); --",))
 
 
+def test_a_light_read_keeps_nan_and_infinity_in_a_star_record(tmp_path: Path) -> None:
+    """A star whose record holds NaN still reads without its light curve.
+
+    SQLite reads a stored ``NaN`` but writes it back as ``null``, which a
+    float list rejects. Such a record comes back whole and Python takes
+    the light-curve lists out, so the star validates, ``NaN`` and infinity
+    survive, and the stored list lengths are still counted. A star
+    without ``NaN`` goes the usual way beside it, through both the driver
+    and `StellarCatalog.query`.
+    """
+    import math
+
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+    from astrometricslib.api.stars import StellarCatalog
+    from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
+
+    config = _make_isolated_config(tmp_path)
+    storage = CatalogAccess(config)
+    with_nan = StellarObject(
+        id="Albireo",
+        photometry=PhotometryResult(
+            timestamps=["2026-01-01T00:00:00Z"] * 5, fluxes=[1.0, 2.0, 3.0, 4.0, 5.0]
+        ),
+        spectroscopy=SpectroscopyResult(
+            response_corrected_intensities=[1.0, float("nan"), float("inf"), float("-inf")],
+            response_corrected_intensity_errors=[0.1, float("nan"), 0.1, 0.1],
+        ),
+    )
+    plain = StellarObject(
+        id="Vega", photometry=PhotometryResult(timestamps=["2026-01-01T00:00:00Z"] * 3, fluxes=[1.0] * 3)
+    )
+    storage.put([with_nan, plain], "stellar_catalog", {})
+
+    stars = {star.id: star for star in storage.get_stars_without_light_curves(["Albireo", "Vega"])}
+    records = {
+        record.id: lengths
+        for record, lengths in storage._generic.get_by_ids_leaving_out(
+            "stellar_catalog", ["Albireo", "Vega"], ("photometry.timestamps", "photometry.fluxes")
+        )
+    }
+    (queried,) = [star for star in StellarCatalog(config, storage).query().items if star.id == "Albireo"]
+
+    for light in (stars["Albireo"], queried):
+        intensities = light.spectroscopy.response_corrected_intensities
+        assert math.isnan(intensities[1])
+        assert intensities[2:] == [math.inf, -math.inf]
+        assert math.isnan(light.spectroscopy.response_corrected_intensity_errors[1])
+        assert light.photometry.timestamps == []
+        assert light.photometry.fluxes == []
+        assert light.has_photometry
+        assert not light.light_curves_included
+    assert records["Albireo"] == {"photometry.timestamps": 5, "photometry.fluxes": 5}
+    assert records["Vega"] == {"photometry.timestamps": 3, "photometry.fluxes": 3}
+    assert stars["Vega"].photometry.timestamps == []
+    assert stars["Vega"].has_photometry
+
+
 def test_query_lists_real_star_records_without_their_points(tmp_path: Path) -> None:
     """`StellarCatalog.query` returns star records with real nested models.
 

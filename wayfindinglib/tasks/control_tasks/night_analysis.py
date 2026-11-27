@@ -11,21 +11,42 @@ Each night is judged against limits built only from the equipment's
 earlier nights. When many nights are analysed in one call, the science
 library's frame records are read once and shared through a
 `library_cache` dictionary.
+
+Three slow reads are kept in the context's `review_cache` between calls,
+each until its own data change, and each answer equals a fresh read:
+
+* the stored measurements of every frame (`kept_frame_measurements`). When
+  rows were only added (a new frame was measured), only the added rows are
+  read and merged in;
+* the Ekos session records and guiding runs (`recorded_sessions`), until a
+  write to either table;
+* each night's guiding baseline (`_night_baseline_provider`), which reads
+  only wayfinding records. A new live sample works out again only the nights
+  its samples belong to (tonight), and a changed session record or guiding
+  run only the nights whose windows or runs changed. A guide log sync or a
+  change of configuration works out every night again.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.drivers import get_frame_metric_data_versions
 from wayfindinglib.analytics import capture_history
-from wayfindinglib.analytics.data_versions import review_data_version
+from wayfindinglib.analytics.data_versions import (
+    guiding_baseline_data_version,
+    recorded_sessions_data_version,
+)
 from wayfindinglib.analytics.envelope_assembly import (
+    NightBaselineTable,
     NightGuidingBaseline,
     assemble_performance_envelope,
-    collect_night_baselines,
     read_capture_frames,
+    read_night_baseline_table,
+    update_night_baseline_table,
 )
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
+from wayfindinglib.drivers.control_record_store import BULK_GUIDING_SAMPLES_KIND
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Sequence
@@ -76,17 +97,89 @@ def capture_library(
     """
     key = ("library", telescope_name, camera_name)
     if key not in library_cache:
-        library_cache[key] = read_capture_frames(context.astrometrics, telescope_name, camera_name, targets)
+        library_cache[key] = read_capture_frames(
+            context.astrometrics,
+            telescope_name,
+            camera_name,
+            targets,
+            read_measurements=lambda: kept_frame_measurements(context).values,
+        )
     return library_cache[key]
 
 
-def recorded_sessions(context: ControlContext) -> tuple[list[EkosSessionContext], list[GuidingRunSummary]]:
-    """Read every recorded Ekos session and guiding run.
+def kept_frame_measurements(context: ControlContext) -> capture_history.FrameMeasurements:
+    """Give the stored measurements of every frame, read again only on change.
+
+    The capture history reads four metrics of every frame in the library
+    (`capture_history.PINNED_FRAME_METRICS`), about half a second of reading.
+    They are kept in the context's review cache with the data version of
+    those metrics (``get_frame_metric_data_versions``). When the version
+    changed only because rows were added, the kept numbers are brought up to
+    date by reading the added rows alone
+    (`capture_history.update_frame_measurements`). Anything else, such as a
+    deleted frame, reads every row again. The answer is the same as a full
+    read (`capture_history.read_frame_measurements`).
 
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the butler.
+        Supplies the science library, the configuration and the cache.
+
+    Returns
+    -------
+    measurements : `capture_history.FrameMeasurements`
+        The numbers. Every caller gets the same object while the rows stay
+        the same; it is not changed by anyone.
+
+    Notes
+    -----
+    A library that cannot be read raises the library's error, as a full
+    read does.
+    """
+
+    def read_version() -> Any:
+        """Read the data version of the pinned frame metrics.
+
+        Returns
+        -------
+        version : `Any`
+            See ``get_frame_metric_data_versions``.
+        """
+        return get_frame_metric_data_versions(context.config, tuple(capture_history.PINNED_FRAME_METRICS))
+
+    def update(
+        _kept_version: Any, kept: capture_history.FrameMeasurements, version: Any
+    ) -> capture_history.FrameMeasurements | None:
+        """Read only the rows added since the kept numbers were read.
+
+        Returns
+        -------
+        measurements : `capture_history.FrameMeasurements` or `None`
+            The numbers for `version`, or `None` to read them all again.
+        """
+        return capture_history.update_frame_measurements(context.astrometrics, kept, version)
+
+    return context.review_cache.get_or_build(
+        ("frame_measurements",),
+        read_version,
+        lambda: capture_history.read_frame_measurement_table(context.astrometrics, read_version),
+        copy_result=False,
+        update=update,
+    )
+
+
+def recorded_sessions(context: ControlContext) -> tuple[list[EkosSessionContext], list[GuidingRunSummary]]:
+    """Read every recorded Ekos session and guiding run, kept until changed.
+
+    Decoding every record takes about a fifth of a second, and they change
+    rarely (an Ekos log sync, a saved guiding run). So they are kept in the
+    context's review cache until the counter of either table changes
+    (`recorded_sessions_data_version`).
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the butler, the record store and the cache.
 
     Returns
     -------
@@ -94,8 +187,22 @@ def recorded_sessions(context: ControlContext) -> tuple[list[EkosSessionContext]
         Every Ekos session record.
     runs : `list` [`GuidingRunSummary`]
         Every guiding run.
+
+    Notes
+    -----
+    Each call gets its own lists, but the records in them are shared by
+    every caller: treat them as read-only.
     """
-    return context.butler.get_all("ekos_session_context"), context.butler.get_all("guiding_run")
+    contexts, runs = context.review_cache.get_or_build(
+        ("recorded_sessions",),
+        lambda: recorded_sessions_data_version(context),
+        lambda: (
+            tuple(context.butler.get_all("ekos_session_context")),
+            tuple(context.butler.get_all("guiding_run")),
+        ),
+        copy_result=False,
+    )
+    return list(contexts), list(runs)
 
 
 def performance_envelope(
@@ -170,6 +277,16 @@ def _night_baseline_provider(
 ) -> Callable[[str], Sequence[NightGuidingBaseline]]:
     """Make the function that gives the guiding baselines, kept in the cache.
 
+    The baselines read only wayfinding records, so they are kept with
+    `guiding_baseline_data_version`, which a new frame does not change. When
+    the version changed, only the nights whose inputs changed are worked out
+    again (`update_night_baseline_table`): the nights of the guide samples
+    added since (`ControlRecordStore.guiding_sample_nights_after`), and the
+    nights whose session windows or guiding runs differ. A guide log sync
+    (which replaces samples) or a change of configuration works out every
+    night again. The answer equals a full `collect_night_baselines`, so the
+    median guide cadence over all nights is the same too.
+
     Returns
     -------
     provide : `Callable`
@@ -186,12 +303,37 @@ def _night_baseline_provider(
         baselines : `Sequence` [`NightGuidingBaseline`]
             The kept baselines, or new ones when the records changed.
         """
-        return context.review_cache.get_or_build(
+
+        def update(kept_version: Any, kept: NightBaselineTable, version: Any) -> NightBaselineTable | None:
+            """Work out again only the nights whose inputs changed.
+
+            Returns
+            -------
+            table : `NightBaselineTable` or `None`
+                The table for `version`, or `None` to work out every night.
+            """
+            kept_bulk = dict(kept_version.records).get(BULK_GUIDING_SAMPLES_KIND)
+            if (
+                kept_version.configuration != version.configuration
+                or dict(version.records).get(BULK_GUIDING_SAMPLES_KIND) != kept_bulk
+                or version.newest_sample_id < kept_version.newest_sample_id
+            ):
+                return None
+            sample_nights = context.records.guiding_sample_nights_after(kept_version.newest_sample_id)
+            if sample_nights is None:
+                return None
+            return update_night_baseline_table(
+                context.records, contexts, fingerprint, runs, kept, sample_nights
+            )
+
+        table = context.review_cache.get_or_build(
             ("night_baselines", fingerprint),
-            lambda: review_data_version(context),
-            lambda: collect_night_baselines(context.records, contexts, fingerprint, runs),
+            lambda: guiding_baseline_data_version(context),
+            lambda: read_night_baseline_table(context.records, contexts, fingerprint, runs),
             copy_result=False,
+            update=update,
         )
+        return table.nights
 
     return provide
 

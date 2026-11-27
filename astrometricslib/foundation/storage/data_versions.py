@@ -33,7 +33,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Collection, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import quote
 
 if TYPE_CHECKING:
@@ -150,7 +150,51 @@ def get_library_data_version(
     return tuple((kind, versions.get(kind, 0)) for kind in wanted)
 
 
-def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[str | int, ...] | None:
+class TargetDataVersion(NamedTuple):
+    """The parts of one target's data version (`get_target_data_version`).
+
+    It is a plain tuple, so it can be compared and kept as a cache version.
+    The named parts let a cache that keeps a result built from the target's
+    quality rows bring it up to date when rows were only added: the count,
+    the newest row number and the sum of the row numbers together show
+    whether any row was removed (see the module description of the
+    measurement store: rows are only ever added, except when a frame is
+    deleted).
+
+    Attributes
+    ----------
+    document_size : `int`
+        The length of the stored target document, in characters.
+    document_hash : `str`
+        A short hash of the stored document. Empty when there is none.
+    measurement_count : `int`
+        How many quality rows the target has.
+    newest_row_id : `int`
+        The largest row number among them, 0 when there are none.
+    newest_measured_at : `str`
+        The latest measurement time among them, as stored (ISO 8601 in UTC).
+        Empty when there are none.
+    identity_count : `int`
+        How many calibration identity records the target has.
+    newest_identity_at : `str`
+        The latest time among those records, empty when there are none.
+    measurement_row_id_sum : `int`
+        The sum of the row numbers of the target's quality rows. A row that
+        is removed while another is added leaves the count the same but
+        changes the sum.
+    """
+
+    document_size: int
+    document_hash: str
+    measurement_count: int
+    newest_row_id: int
+    newest_measured_at: str
+    identity_count: int
+    newest_identity_at: str
+    measurement_row_id_sum: int
+
+
+def get_target_data_version(config: AppConfiguration, target_id: str) -> TargetDataVersion | None:
     """Give a value that changes whenever one target's own data change.
 
     The library counters (`get_library_data_version`) change when any target
@@ -171,11 +215,13 @@ def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[s
 
     Returns
     -------
-    version : `tuple` [`str` or `int`, ...] or `None`
+    version : `TargetDataVersion` or `None`
         The stored document's size and hash, then the count, newest row
         number and newest time of the target's measurements, then the count
-        and newest time of its calibration identities. `None` when the
-        database could not be read; the caller must not keep an answer then.
+        and newest time of its calibration identities, then the sum of the
+        measurements' row numbers. It is a tuple with named parts. `None`
+        when the database could not be read; the caller must not keep an
+        answer then.
     """
     try:
         database_path = os.path.join(str(config.get_library_path()), "astrometrics.db")
@@ -184,7 +230,7 @@ def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[s
         logger.warning("Could not find the library folder for the target data version.", exc_info=True)
         return None
     if not os.path.isfile(database_path):
-        return (0, "", 0, 0, "", 0, "")
+        return TargetDataVersion(0, "", 0, 0, "", 0, "", 0)
     connection = None
     try:
         connection = sqlite3.connect(f"file:{quote(database_path)}?mode=ro", uri=True, timeout=5.0)
@@ -195,10 +241,10 @@ def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[s
         digest = hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest() if text else ""
         measurements = _read_or_default(
             connection,
-            "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(MAX(measured_at), '') "
-            "FROM quality_measurements WHERE target_id = ?",
+            "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(MAX(measured_at), ''), "
+            "COALESCE(SUM(row_id), 0) FROM quality_measurements WHERE target_id = ?",
             (target_id,),
-            (0, 0, ""),
+            (0, 0, "", 0),
         )
         identities = _read_or_default(
             connection,
@@ -207,7 +253,10 @@ def get_target_data_version(config: AppConfiguration, target_id: str) -> tuple[s
             (target_id,),
             (0, ""),
         )
-        return (len(text), digest, *measurements, *identities)
+        count, newest_row_id, newest_measured_at, row_id_sum = measurements
+        return TargetDataVersion(
+            len(text), digest, count, newest_row_id, newest_measured_at, *identities, row_id_sum
+        )
     except sqlite3.Error, OSError:
         logger.warning("Could not read the target data version from %s.", database_path, exc_info=True)
         return None
@@ -426,6 +475,99 @@ def get_frame_metric_signs(
         return tuple((len(ids), max(ids, default=0), sum(ids)) for ids in row_ids)
     except sqlite3.Error, OSError:
         logger.warning("Could not read the frame metric signs from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+class FrameMetricDataVersion(NamedTuple):
+    """The parts of one frame metric's data version.
+
+    `get_frame_metric_data_versions` gives one of these for each metric.
+
+    It is a plain tuple, so it can be compared and kept as a cache version.
+    A cache that keeps a result built from the frame rows of a metric can
+    bring it up to date when rows were only added: the count and the sum of
+    the row numbers grow by exactly the added rows, and every added row has a
+    row number above the kept newest one.
+
+    Attributes
+    ----------
+    measurement_count : `int`
+        How many frame-level rows the metric has.
+    newest_row_id : `int`
+        The largest row number among them, 0 when there are none.
+    measurement_row_id_sum : `int`
+        The sum of their row numbers. A row removed while another is added
+        leaves the count the same but changes the sum.
+    newest_measured_at : `str`
+        The latest measurement time among them, as stored (ISO 8601 in UTC).
+        Empty when there are none.
+    """
+
+    measurement_count: int
+    newest_row_id: int
+    measurement_row_id_sum: int
+    newest_measured_at: str
+
+
+def get_frame_metric_data_versions(
+    config: AppConfiguration, metrics: Collection[str]
+) -> dict[str, FrameMetricDataVersion] | None:
+    """Give a value for each frame metric that changes whenever its rows do.
+
+    A result that reads a few metrics of every frame in the library (the
+    capture history of the equipment) changes when a frame-level row of one
+    of those metrics is added or removed, whatever its target. The library
+    counters (`get_library_data_version`) also change for every other write,
+    such as a stack row, so this looks at the frame rows of the given
+    metrics only. One query reads all of them.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+    metrics : `~collections.abc.Collection` [`str`]
+        The metric names, for example ``"frame.star_elongation"``.
+
+    Returns
+    -------
+    versions : `dict` [`str`, `FrameMetricDataVersion`] or `None`
+        For each metric: the count, newest row number and row-number sum of
+        its frame-level rows, and their newest measurement time. A metric
+        with no rows gets zeros. `None` when the database could not be read;
+        the caller must not keep an answer then.
+    """
+    wanted = sorted(set(metrics))
+    empty = FrameMetricDataVersion(0, 0, 0, "")
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    if not os.path.isfile(path) or not wanted:
+        return dict.fromkeys(wanted, empty)
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        # One short query per metric, so each uses the index that starts
+        # with the metric name, all in one read transaction.
+        connection.execute("BEGIN")
+        versions = {}
+        for metric in wanted:
+            count, newest_row_id, row_id_sum, newest_measured_at = _read_or_default(
+                connection,
+                "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(SUM(row_id), 0), "
+                "COALESCE(MAX(measured_at), '') FROM quality_measurements "
+                "WHERE metric = ? AND subject_level = 'frame'",
+                (metric,),
+                tuple(empty),
+            )
+            versions[metric] = FrameMetricDataVersion(
+                int(count), int(newest_row_id), int(row_id_sum), str(newest_measured_at)
+            )
+        return versions
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the frame metric versions from %s.", path, exc_info=True)
         return None
     finally:
         if connection is not None:

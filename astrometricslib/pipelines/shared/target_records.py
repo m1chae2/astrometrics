@@ -305,7 +305,7 @@ def _refresh_frames_in_place(held_frames: list[Any], stored_frames: list[Any]) -
     return refreshed
 
 
-def _merge_stored_into_held(api: Any, held: Any, stored: Any) -> None:
+def _merge_stored_into_held(api: Any, held: Any, stored: Any) -> bool:
     """Move what is stored into the held target, unless it has unsaved edits.
 
     The held object stays the same object, so code that fetched it earlier
@@ -321,9 +321,15 @@ def _merge_stored_into_held(api: Any, held: Any, stored: Any) -> None:
         The target this process holds.
     stored : `Target`
         The same target as just read from storage.
+
+    Returns
+    -------
+    merged : `bool`
+        `True` when the held target now holds what is stored. `False` when it
+        has unsaved edits and was left as it is.
     """
     if _has_unsaved_changes(api, held):
-        return
+        return False
     # Same object, new contents: assigning fields one by one would check each
     # value again, so the stored values are moved over.
     frames = _refresh_frames_in_place(list(held.frames), list(stored.frames))
@@ -331,6 +337,158 @@ def _merge_stored_into_held(api: Any, held: Any, stored: Any) -> None:
     held.frames = frames
     held.__pydantic_fields_set__ = set(stored.__pydantic_fields_set__)
     _saved_fingerprints(api)[held.id] = _fingerprint(held)
+    return True
+
+
+def _stored_document_signs(api: Any) -> dict[str, tuple[int, str]] | None:
+    """Read the sign of every stored target document, if the storage gives one.
+
+    A sign is the size and a short hash of a target's stored text, so it
+    changes whenever the document does. It is read without decoding any
+    document, which is much cheaper than reading the targets themselves.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that keeps track of loaded targets.
+
+    Returns
+    -------
+    signs : `dict` [`str`, `tuple` [`int`, `str`]] or `None`
+        The sign of each stored target, by id, in the order a full read
+        gives the targets. `None` when the storage gives no signs or could
+        not be read; the caller then reads every target.
+    """
+    reader = getattr(api._catalog_access, "get_document_signs", None)
+    if not callable(reader):
+        return None
+    try:
+        signs = reader("target_catalog")
+    except OSError, ValueError, TypeError:
+        return None
+    return signs if isinstance(signs, dict) else None
+
+
+_MOST_DOCUMENTS_CHANGED_FRACTION = 0.5
+"""Above this share of changed target documents, `list_targets` reads all.
+
+When most documents changed (for example, a script rewrote the whole
+catalog), reading the changed ones by id costs about as much as one full
+read, and the full read is the simpler path. The result is the same either
+way, so the value only affects speed. Design estimate, not measured.
+"""
+
+
+def _list_changed_documents(
+    api: Any, signs: dict[str, tuple[int, str]], listed: dict[str, tuple[tuple[int, str], Any]]
+) -> list[Any] | None:
+    """Build the target list again, reading only the documents that changed.
+
+    A held target whose stored sign is the one it had when it last took on
+    the stored contents is kept as it is: a full read would give the same
+    contents, or would keep the held object because of its unsaved edits.
+    Every other stored target (changed, new, or held by a different object)
+    is read by id and handled exactly as `list_targets` handles it. A held
+    target whose document is no longer stored is dropped. The list is in the
+    order of ``signs``, which is the order a full read gives.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that keeps track of loaded targets.
+    signs : `dict` [`str`, `tuple` [`int`, `str`]]
+        The stored sign of each target, read just now, before any document.
+    listed : `dict` [`str`, `tuple` [`tuple` [`int`, `str`], `Target`]]
+        For each target id: the sign of the stored document the held object
+        last took on, and that object. It is replaced by the new record when
+        the list is built.
+
+    Returns
+    -------
+    targets : `list` or `None`
+        The targets, the same as a full read gives. `None` when this path
+        cannot give that answer (too many documents changed, or a document
+        could not be read); the caller then reads every target.
+    """
+    held = {target.id: target for target in api._targets}
+    unchanged_ids = set()
+    for target_id, sign in signs.items():
+        record = listed.get(target_id)
+        if record is not None and record[0] == sign and held.get(target_id) is record[1]:
+            unchanged_ids.add(target_id)
+    read_ids = [target_id for target_id in signs if target_id not in unchanged_ids]
+    if len(read_ids) > _MOST_DOCUMENTS_CHANGED_FRACTION * len(signs):
+        return None
+    try:
+        stored_targets = api._catalog_access.get_by_ids("target_catalog", read_ids) if read_ids else []
+    except (sqlite3.Error, OSError, ValueError) as problem:
+        logger.debug("Reading the changed targets failed (%s); reading them all.", problem)
+        return None
+    stored_by_id = {stored.id: stored for stored in stored_targets}
+    if set(stored_by_id) != set(read_ids):
+        # A document was deleted or could not be decoded after its sign was
+        # read. The full read handles both the way it always has.
+        return None
+    fingerprints = _saved_fingerprints(api)
+    merged = []
+    new_listed: dict[str, tuple[tuple[int, str], Any]] = {}
+    for target_id, sign in signs.items():
+        current = held.get(target_id)
+        if target_id in unchanged_ids:
+            merged.append(current)
+            new_listed[target_id] = (sign, current)
+            continue
+        stored = stored_by_id[target_id]
+        if current is None:
+            merged.append(stored)
+            fingerprints[stored.id] = _fingerprint(stored)
+            new_listed[target_id] = (sign, stored)
+            continue
+        if _merge_stored_into_held(api, current, stored):
+            new_listed[target_id] = (sign, current)
+        merged.append(current)
+    api._listed_documents = new_listed
+    return merged
+
+
+def _list_all_documents(api: Any, signs: dict[str, tuple[int, str]] | None) -> list[Any]:
+    """Build the target list again from a full read of the stored targets.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that keeps track of loaded targets.
+    signs : `dict` [`str`, `tuple` [`int`, `str`]] or `None`
+        The stored sign of each target, read before the targets, or `None`.
+        A target that takes on the stored contents is recorded with its sign,
+        so the next call can skip it. A write made after the signs were read
+        leaves a sign that no longer matches, so that target is read again
+        next time; a sign is never newer than the contents it is kept with.
+
+    Returns
+    -------
+    targets : `list`
+        The stored targets, with held objects kept as `list_targets` says.
+    """
+    stored_targets = api._catalog_access.get("target_catalog", {}) or []
+    held = {target.id: target for target in api._targets}
+    fingerprints = _saved_fingerprints(api)
+    merged = []
+    new_listed: dict[str, tuple[tuple[int, str], Any]] = {}
+    for stored in stored_targets:
+        current = held.get(stored.id)
+        sign = signs.get(stored.id) if signs is not None else None
+        if current is None:
+            merged.append(stored)
+            fingerprints[stored.id] = _fingerprint(stored)
+            if sign is not None:
+                new_listed[stored.id] = (sign, stored)
+            continue
+        if _merge_stored_into_held(api, current, stored) and sign is not None:
+            new_listed[stored.id] = (sign, current)
+        merged.append(current)
+    api._listed_documents = new_listed
+    return merged
 
 
 def list_targets(api: Any) -> list[Any]:
@@ -350,6 +508,16 @@ def list_targets(api: Any) -> list[Any]:
     skipped: the held targets already match storage, apart from unsaved
     edits, which are kept either way.
 
+    When something was written, only the documents that changed are read.
+    Each stored document has a sign (its size and a short hash) that is
+    cheap to read. A held target whose sign is the same as when it last took
+    on the stored contents is kept without reading or checking it; new and
+    changed targets are read by id. Every target is read when there is no
+    record of the last signs (the first refresh after the catalog read all
+    the targets itself), when the storage gives no signs, when most
+    documents changed, or when a document vanished while it was read. Both
+    paths give the same targets in the same order.
+
     Every listed target counts as touched, so scripts that edit the targets
     they list can save them. A save writes only those that changed.
 
@@ -364,30 +532,26 @@ def list_targets(api: Any) -> list[Any]:
         A list of all targets in the database.
     """
     with _catalog_lock(api):
-        # The counter is read before the rows, so a write made while the rows
-        # are read leaves the counter behind and the next call reads again.
+        # The counter is read before the signs, and the signs before the
+        # documents, so a write made while they are read leaves the counter
+        # or the sign behind and the next call reads that document again.
         version = _stored_targets_version(api)
         held_ids = tuple(target.id for target in api._targets)
         if version is not None and getattr(api, "_listed_state", None) == (version, held_ids):
             for target in api._targets:
                 mark_touched(api, target.id)
             return api._targets
-        stored_targets = api._catalog_access.get("target_catalog", {}) or []
-        held = {target.id: target for target in api._targets}
-        fingerprints = _saved_fingerprints(api)
-        merged = []
-        for stored in stored_targets:
-            current = held.get(stored.id)
-            if current is None:
-                merged.append(stored)
-                fingerprints[stored.id] = _fingerprint(stored)
-                continue
-            _merge_stored_into_held(api, current, stored)
-            merged.append(current)
+        signs = _stored_document_signs(api) if version is not None else None
+        listed = api.__dict__.get("_listed_documents")
+        merged = None
+        if signs is not None and listed:
+            merged = _list_changed_documents(api, signs, listed)
+        if merged is None:
+            merged = _list_all_documents(api, signs)
         api._targets = merged
         for target in merged:
             mark_touched(api, target.id)
-        record_listed_state(api, version)
+        _record_listed_ids(api, version)
         return merged
 
 
@@ -417,7 +581,9 @@ def record_listed_state(api: Any, version: int | None) -> None:
     """Remember that the held targets were read when storage was at `version`.
 
     The catalog calls this after its first read, so the first refresh can
-    be skipped when nothing has been written since.
+    be skipped when nothing has been written since. The held targets were
+    read without their document signs, so the record of the signs is
+    cleared, and the first refresh after a write reads every target.
 
     Parameters
     ----------
@@ -428,8 +594,23 @@ def record_listed_state(api: Any, version: int | None) -> None:
         `None` if there is none.
     """
     with _catalog_lock(api):
-        api._listed_state = None if version is None else (version, tuple(t.id for t in api._targets))
-        api._refreshed_versions = {} if version is None else {t.id: version for t in api._targets}
+        _record_listed_ids(api, version)
+        api._listed_documents = {}
+
+
+def _record_listed_ids(api: Any, version: int | None) -> None:
+    """Remember the write counter and the ids of the held targets.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the loaded targets.
+    version : `int` or `None`
+        The storage's write counter read before the targets were read, or
+        `None` if there is none.
+    """
+    api._listed_state = None if version is None else (version, tuple(t.id for t in api._targets))
+    api._refreshed_versions = {} if version is None else {t.id: version for t in api._targets}
 
 
 def refresh_target(api: Any, target_id: str) -> None:

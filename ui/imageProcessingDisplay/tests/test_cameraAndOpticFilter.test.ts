@@ -27,10 +27,11 @@ vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
 import { getMultiOpticStatus } from '../utils/opticSelection';
+import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 
 /** Render the hook for M 27 and wait for its files to load. */
 const renderLoaded = async () => {
-    const rendered = renderHook(() => useTargetFilesLogic('M 27', 0));
+    const rendered = renderHook(() => useTargetFilesLogic('M 27', 0), { wrapper: createQueryClientTestWrapper().wrapper });
     await waitFor(() => expect(rendered.result.current.allFiles).toHaveLength(10));
     return rendered;
 };

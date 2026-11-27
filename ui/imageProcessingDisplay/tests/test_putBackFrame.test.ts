@@ -7,6 +7,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
+import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 
 const callBackendMock = vi.fn();
 vi.mock('../../common/services/backendApi', () => ({
@@ -43,7 +44,7 @@ beforeEach(() => {
 
 describe('useTargetFilesLogic set-aside frames', () => {
     it('lists set-aside frames apart from the target files', async () => {
-        const { result } = renderHook(() => useTargetFilesLogic('NGC 7331', 0));
+        const { result } = renderHook(() => useTargetFilesLogic('NGC 7331', 0), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.setAsideFiles).toHaveLength(1));
         expect(result.current.setAsideFiles[0]).toMatchObject({ path: '/lib/_excluded/c.fits', name: 'c.fits', date: '2026-11-01 21:10:00' });
         expect(result.current.allFiles.map((file) => file.path)).toEqual(['/lib/a.fits', '/lib/b.fits']);
@@ -51,7 +52,7 @@ describe('useTargetFilesLogic set-aside frames', () => {
     });
 
     it('keeps only the frames that match a status filter', async () => {
-        const { result } = renderHook(() => useTargetFilesLogic('NGC 7331', 0));
+        const { result } = renderHook(() => useTargetFilesLogic('NGC 7331', 0), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.frameStatuses.size).toBe(3));
         await waitFor(() => expect(result.current.allFiles).toHaveLength(2));
         act(() => result.current.setFileFilterText('status:not-stacked'));
@@ -59,7 +60,7 @@ describe('useTargetFilesLogic set-aside frames', () => {
     });
 
     it('puts a frame back through the backend and reads the statuses again', async () => {
-        const { result } = renderHook(() => useTargetFilesLogic('NGC 7331', 0));
+        const { result } = renderHook(() => useTargetFilesLogic('NGC 7331', 0), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.setAsideFiles).toHaveLength(1));
         const readsBefore = callBackendMock.mock.calls.filter(([method]) => method === 'target:get_frame_statuses').length;
         await act(async () => { await result.current.putBackFrame('/lib/_excluded/c.fits'); });

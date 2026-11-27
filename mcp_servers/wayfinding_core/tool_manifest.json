@@ -210,7 +210,7 @@
       "category": "observatory-status",
       "disposition": "drop",
       "interim_block": "",
-      "note": "The backend shows it. An AI reads the stored runs through review_query(kind=\"alignment\")."
+      "note": "The backend shows it. An AI reads the stored runs through review_alignment_query."
     },
     "observatory_mount_manual_move": {
       "tool_class": "actuate",
@@ -534,96 +534,187 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
-    "review_frame_guiding": {
+    "review_alignment_get_pointing_model": {
       "tool_class": "compute",
       "category": "observatory-status",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. Reads only."
+      "note": "Since #206 (was review_query kind pointing_model): fits one night's pointing model. Saves nothing."
     },
-    "review_get_advisory": {
-      "tool_class": "observe",
+    "review_alignment_get_polar_alignment": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Since #206 the home of observatory_mount_get_polar_alignment. The backend shows it; an AI reads the stored runs through review_alignment_query."
+    },
+    "review_alignment_query": {
+      "tool_class": "compute",
       "category": "observatory-status",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star result, worked out on demand. Saves nothing."
+      "note": "Since #206 review_alignment_query: the stored plate-solve attempts of a night or a time range, grouped by target, with the latest polar alignment run. Reads only."
     },
-    "review_get_live_session_status": {
+    "review_alignment_query_nights": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206: one alignment summary per recorded night, newest first. Reads only."
+    },
+    "review_alignment_record_external": {
       "tool_class": "ingest",
       "category": "observatory-status",
-      "disposition": "keep",
+      "disposition": "drop",
       "interim_block": "",
-      "note": "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, which is reading from the telescope computer and adds files only. A folder argument is now checked against the allowed roots. Reports pier side, camera temperature, exposure counts and dither settings; the guide algorithm is not in the logs and the reply says so."
+      "note": "Since #206 the home of observatory_mount_poll_external_alignment. The backend calls it to store the syncs other programs queued. It writes records, and the AI is read-only."
     },
-    "review_get_performance_envelope": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Slow: reads every session and target twice."
-    },
-    "review_get_sky_rate_prediction": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's own frames. Reads only; nothing is stored. The first call fits the model and is slow."
-    },
-    "review_get_star_shape_review": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-20 (#199). Says in plain words how round a target's stars are, whether the stretch points one way, and which frames stand out, from the stored star-shape measurements. Reads only; nothing is measured or stored. Corner widths are reported as not validated (AST-18)."
-    },
-    "review_measure_focus_temperature_coefficient": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-07. Fits the focus-versus-temperature slope on recorded autofocus runs and frame headers. Reads only; nothing is stored. Slow when it reads every frame record."
-    },
-    "review_measure_guiding_spectrum": {
-      "tool_class": "observe",
-      "category": "observatory-status",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing."
-    },
-    "review_measure_tuned_parameters": {
+    "review_guiding_get_night": {
       "tool_class": "compute",
       "category": "observatory-status",
-      "disposition": "withhold",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-11-16 (#175). Works out the wayfinding tuned values; with save=True it backs up and writes the configuration file. The AI does not change settings."
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
     },
-    "review_measure_unguided_mount_error": {
+    "review_guiding_measure_spectrum": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights optionally left out. Unlike review_guiding_record_spectrum it stores nothing."
+    },
+    "review_guiding_measure_unguided_error": {
       "tool_class": "observe",
       "category": "observatory-status",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-11-07. Reads the recorded guide samples and guiding runs and fits the mount's own error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history."
     },
-    "review_query": {
+    "review_guiding_query_runs": {
       "tool_class": "compute",
       "category": "observatory-status",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 characters. The recorded-data tables are read through the butler, which creates a missing table. Kind night_quality needs session_id (the night) and returns a typed review."
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
     },
-    "review_query_alignment_records": {
-      "tool_class": "unclassified",
+    "review_guiding_record_spectrum": {
+      "tool_class": "change-data",
       "category": "observatory-status",
       "disposition": "drop",
       "interim_block": "",
-      "note": "The backend reads the stored attempts for its alignment views and passes in library targets. The AI reads nights through review_query(kind=\"alignment\")."
+      "note": "Since #206 the home of observatory_guiding_refit_spectrum: recomputes and stores the mount's model. The user does not want an AI to trigger it."
     },
-    "review_query_alignment_sessions": {
+    "review_nights_get": {
       "tool_class": "compute",
       "category": "observatory-status",
-      "disposition": "drop",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "The backend calls it with plate-solve attempts it has already read. The AI reads nights through review_query(kind=\"alignment\"), which groups them already."
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_nights_get_capture": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_nights_get_ekos_session": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_nights_get_live_status": {
+      "tool_class": "ingest",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Served 2026-10-03. force=true copies the newest Ekos and KStars logs into the wayfinding library's log folder, which is reading from the telescope computer and adds files only. Since #206 it is review_nights_get_live_status and takes no folder. Reports pier side, camera temperature, exposure counts and dither settings; the guide algorithm is not in the logs and the reply says so."
+    },
+    "review_nights_get_recurring_issues": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_nights_get_sky_coverage": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_nights_get_target_changes": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_nights_query": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-03. Since #206 review_nights_query: the recorded nights and what data each has. The other kinds became the review_nights, review_guiding and review_alignment reads. Reads only."
+    },
+    "review_nights_query_ekos_sessions": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. Saves nothing; the server keeps the reply under its size limit."
+    },
+    "review_performance_get_envelope": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Slow: reads every session and target twice."
+    },
+    "review_performance_measure_focus_temperature": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Fits the focus-versus-temperature slope on recorded autofocus runs and frame headers. Reads only; nothing is stored. Slow when it reads every frame record."
+    },
+    "review_performance_predict_sky_rate": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-07. Predicts the sky background rate from the sky model fitted to the library's own frames. Reads only; nothing is stored. The first call fits the model and is slow."
+    },
+    "review_targets_get_frame_guiding": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. Since #206 it is review_targets_get_frame_guiding and takes a frame filter. Reads only."
+    },
+    "review_targets_get_report": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-06; split 2026-10-31. Since #206 review_targets_get_report: the target dataset report, worked out on demand. Saves nothing."
+    },
+    "review_targets_get_result": {
+      "tool_class": "compute",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 (was review_get_advisory kind result): how far one star's results can be trusted. Saves nothing."
+    },
+    "review_targets_get_star_shapes": {
+      "tool_class": "observe",
+      "category": "observatory-status",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-11-20 (#199). Says in plain words how round a target's stars are, whether the stretch points one way, and which frames stand out, from the stored star-shape measurements. Reads only; nothing is measured or stored. Corner widths are reported as not validated (AST-18)."
     }
   }
 }

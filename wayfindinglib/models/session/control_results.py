@@ -2,8 +2,9 @@
 
 Description: `control.remote.query_files`, `get_frame_locations`,
 `sync_frames` and `sync_logs`, and `review.targets.get_frame_guiding` each
-return a model that names its fields. The remote results fill different fields in
-different cases (see the call's description), and leave the others out
+return a model that names its fields. The remote results fill different
+fields in different cases (see the call's description), and leave the
+others out
 when turned into plain data, so the data keeps the keys the dictionary
 replies had before.
 """

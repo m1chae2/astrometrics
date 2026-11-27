@@ -1,8 +1,8 @@
 """Purpose: Integration tests for the raw INDI inspection actions.
 
 Description: `IndiDiagnosticsService` serves the three raw INDI actions
-through `control.equipment` (`status(include=["indi_devices"])`,
-`status(include=["indi_properties"], device_name=...)` and
+through `control.equipment` (`get_status(include=["indi_devices"])`,
+`get_status(include=["indi_properties"], device_name=...)` and
 `set_device_property`), which use `IndiDiagnostics`
 (`wayfindinglib/drivers/indi/diagnostics.py`). These tests confirm the
 full chain -- `rpc_router.py`'s three actions -> `IndiDiagnosticsService`

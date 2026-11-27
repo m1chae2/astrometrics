@@ -7,7 +7,6 @@ reply into the shape the app shows.
 """
 
 import threading
-from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -29,19 +28,19 @@ class _Remote:
         self.log_error: Exception | None = None
         self.samples = 42
 
-    def sync_frames(self, target: str, on_copied: Callable[[int], None] | None = None) -> SimpleNamespace:
-        """Record the target, report 2 copied frames and wait to be released.
+    def sync_frames(
+        self, target: object = None, kind: str | None = None, dry_run: bool = False
+    ) -> SimpleNamespace:
+        """Record the target, wait to be released, then report 2 copied frames.
 
         Returns
         -------
         result : `types.SimpleNamespace`
-            A successful sync with no measurements.
+            A successful sync that copied two frames, with no measurements.
         """
-        self.synced.append(target)
-        if on_copied is not None:
-            on_copied(2)
+        self.synced.append(target.id if target is not None else kind)
         self.release.wait(timeout=5.0)
-        return SimpleNamespace(success=True, measurements=None)
+        return SimpleNamespace(success=True, transferred=2, measurements=None)
 
     def sync_logs(self) -> SimpleNamespace:
         """Return a log sync reply.
@@ -88,8 +87,8 @@ def test_the_log_sync_reply_keeps_the_apps_shape() -> None:
     assert reply["fitsSolvesRecorded"] == 0
 
 
-def test_new_frames_are_announced_when_copied_not_when_the_sync_ends() -> None:
-    """The UI event goes out from the copy callback, before the sync ends."""
+def test_new_frames_are_announced_when_the_sync_ends() -> None:
+    """The UI event goes out once, when the sync that copied frames ends."""
     events: list[tuple[str, dict]] = []
     socket_manager = SimpleNamespace(
         broadcast_ui_event_sync=lambda action, payload: events.append((action, payload))
@@ -100,11 +99,11 @@ def test_new_frames_are_announced_when_copied_not_when_the_sync_ends() -> None:
     service.start_sync("M 31")
     thread_management._syncing["M 31"].join(timeout=0.5)
     assert service.is_syncing("M 31") is True
-    assert events == [("library:frames_updated", {"targetId": "M 31", "framesAdded": 2})]
+    assert events == []
 
     remote.release.set()
     thread_management._syncing["M 31"].join(timeout=5.0)
-    assert len(events) == 1
+    assert events == [("library:frames_updated", {"targetId": "M 31", "framesAdded": 2})]
 
 
 def test_two_starts_for_one_target_run_one_sync() -> None:

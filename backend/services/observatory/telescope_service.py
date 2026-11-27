@@ -3,14 +3,24 @@
 TelescopeService manages high-level astronomical telescope control
 operations, delegating all core hardware interaction and observation
 state logic directly to the wayfindinglib domain high-level interface.
+It adapts the library to the RPC replies the screens read: the library's
+device actions return nothing and raise when they fail, so each command
+here answers `True` once it was accepted; the mount position comes in
+degrees and is written here as the text the status shows.
 """
 
 import logging
 import sqlite3
 from typing import Any
 
-from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError
-from backend.services.coordinate_text import parse_coordinate_text
+from astrometricslib import SkyPosition
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
+from backend.services.coordinate_text import (
+    format_angle,
+    format_declination,
+    format_right_ascension,
+    parse_coordinate_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +170,19 @@ class TelescopeService:
 
         logger = logging.getLogger(__name__)
         try:
-            data = self.wayfinder.control.mount.status().model_dump(by_alias=True)
-            imaging = self.wayfinder.control.imaging.status(include=["current_filter", "focuser", "camera"])
+            mount = self.wayfinder.control.mount.get_status()
+            data = mount.model_dump(
+                by_alias=True, exclude={"ra_deg", "dec_deg", "altitude_deg", "azimuth_deg"}
+            )
+            data.update({
+                "ra": format_right_ascension(mount.ra_deg),
+                "dec": format_declination(mount.dec_deg),
+                "altitude": format_angle(mount.altitude_deg),
+                "azimuth": format_angle(mount.azimuth_deg),
+            })
+            imaging = self.wayfinder.control.imaging.get_status(
+                include=["current_filter", "focuser", "camera"]
+            )
             data.update({
                 "cameraStatus": imaging.camera_status,
                 "filter": imaging.current_filter,
@@ -269,9 +290,10 @@ class TelescopeService:
         Returns
         -------
         result : `bool`
-            `True` if the connection succeeded.
+            `True` once every device was asked to connect.
         """
-        return self.wayfinder.control.equipment.connect()
+        self.wayfinder.control.equipment.connect()
+        return True
 
     def slew_coordinates(self, ra: float, dec: float) -> bool:
         """Command the telescope to slew to the specified coordinates.
@@ -294,10 +316,11 @@ class TelescopeService:
             If the hardware driver rejects an argument of the slew command.
         """
         try:
-            position = {"ra_deg": (float(ra) * 15.0) % 360.0, "dec_deg": float(dec)}
-            return self.wayfinder.control.mount.slew(position)
+            position = SkyPosition(ra_deg=(float(ra) * 15.0) % 360.0, dec_deg=float(dec))
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
+        self.wayfinder.control.mount.slew(position)
+        return True
 
     def slew_target(self, target_name: str) -> bool:
         """Resolve a target name from the library and slew to it.
@@ -310,13 +333,19 @@ class TelescopeService:
         Raises
         ------
         InvalidArgumentError
-            If ``target_name`` is empty. A name that is not in the library
-            is refused by `control.mount.slew` with `NotFoundError`.
+            If ``target_name`` is empty.
+        NotFoundError
+            If no library target has that name.
         """
         if not target_name or not target_name.strip():
             raise InvalidArgumentError("target_name must not be empty")
-
-        return self.wayfinder.control.mount.slew(target_name)
+        target = self.wayfinder.astrometrics.targets.get(target_name)
+        if target is None:
+            raise NotFoundError(
+                f"Target '{target_name}' not found in library", details={"target": target_name}
+            )
+        self.wayfinder.control.mount.slew(target)
+        return True
 
     def park_telescope(self) -> bool:
         """Command the telescope to park via the high-level interface.
@@ -332,7 +361,8 @@ class TelescopeService:
             If the hardware driver rejects an argument of the park command.
         """
         try:
-            return self.wayfinder.control.mount.park()
+            self.wayfinder.control.mount.park()
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -350,7 +380,8 @@ class TelescopeService:
             If the hardware driver rejects an argument of the unpark command.
         """
         try:
-            return self.wayfinder.control.mount.unpark()
+            self.wayfinder.control.mount.unpark()
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -368,7 +399,8 @@ class TelescopeService:
             If the hardware driver rejects an argument of the tracking command.
         """
         try:
-            return self.wayfinder.control.mount.set_tracking(enabled)
+            self.wayfinder.control.mount.set_tracking(enabled)
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -386,7 +418,8 @@ class TelescopeService:
             If the hardware driver rejects an argument of the movement command.
         """
         try:
-            return self.wayfinder.control.mount.manual_move(direction, start)
+            self.wayfinder.control.mount.move(direction, start)
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -396,7 +429,7 @@ class TelescopeService:
         Returns
         -------
         result : `bool`
-            `True` if the abort command succeeded.
+            `True` once the stop was accepted. It also ends a centering run.
 
         Raises
         ------
@@ -404,7 +437,8 @@ class TelescopeService:
             If the hardware driver rejects an argument of the abort command.
         """
         try:
-            return self.wayfinder.control.mount.abort_motion()
+            self.wayfinder.control.mount.stop()
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -422,7 +456,8 @@ class TelescopeService:
             If the hardware driver rejects the slew rate.
         """
         try:
-            return self.wayfinder.control.mount.set_slew_rate(rate_index)
+            self.wayfinder.control.mount.set_slew_rate(rate_index)
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -440,7 +475,8 @@ class TelescopeService:
             If the hardware driver rejects the number of steps.
         """
         try:
-            return self.wayfinder.control.imaging.focus_move(steps)
+            self.wayfinder.control.imaging.move_focuser(steps)
+            return True
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -458,7 +494,7 @@ class TelescopeService:
             If the hardware driver rejects the query.
         """
         try:
-            return self.wayfinder.control.imaging.status(include=["focuser"]).focuser_position
+            return self.wayfinder.control.imaging.get_status(include=["focuser"]).focuser_position
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
@@ -483,7 +519,8 @@ class TelescopeService:
         if not filter_name or not filter_name.strip():
             raise InvalidArgumentError("filter_name must not be empty")
 
-        return self.wayfinder.control.imaging.set_filter(filter_name)
+        self.wayfinder.control.imaging.set_filter(filter_name)
+        return True
 
     def get_observer_location(self) -> dict:
         """Return observer location from INDI GPSD or a fallback default.
@@ -495,10 +532,44 @@ class TelescopeService:
             ``"longitude"``, and ``"elevation"``.
         """
         try:
-            geo = self.wayfinder.control.equipment.status(include=["observer_location"]).observer_location
+            geo = self.wayfinder.control.equipment.get_status(include=["observer_location"]).observer_location
             if geo:
                 return geo
         except (AstrometricsError, OSError, RuntimeError) as exc:
             logger.debug("Failed to get observer location from wayfinder: %s", exc)
         # Default fallback: Denver, CO
         return {"latitude": 39.7392, "longitude": -104.9903, "elevation": 1600.0}
+
+    def apply_promotion_decision(
+        self, capability: str, new_state: str, evidence_note: str = ""
+    ) -> dict[str, Any]:
+        """Change one capability's delegation state, as the screens ask.
+
+        Parameters
+        ----------
+        capability : `str`
+            The capability, such as ``"AUTOFOCUS"``.
+        new_state : `str`
+            Its new state, such as ``"SHADOWED"``.
+        evidence_note : `str`, optional
+            Why, in the operator's words.
+
+        Returns
+        -------
+        policy : `dict` [`str`, `Any`]
+            The saved delegation policy as plain data.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the capability or the state is not one the library knows.
+        """
+        from wayfindinglib.reports import DelegationState, ObservatoryCapability
+
+        try:
+            change = {ObservatoryCapability(capability): DelegationState(new_state)}
+        except ValueError as error:
+            raise InvalidArgumentError(str(error)) from error
+        safety = self.wayfinder.control.safety
+        policy = safety.get_status(include=["delegation_policy"]).delegation_policy
+        return safety.update(policy, change, note=evidence_note).model_dump(mode="json")

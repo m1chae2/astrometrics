@@ -5,7 +5,9 @@ profiles and the active observatory configuration (the stored record of the
 telescope, camera and other equipment used together). Its `control.safety`
 moves every observatory capability between "monitoring" (the app only
 watches) and "controller" (the app drives the hardware). This service passes
-the RPC calls on to those two and turns their replies into plain data.
+the RPC calls on to those two and turns their replies into plain data. It
+also turns the fields the screens send for a guider calibration or a focus
+model into the record the library stores.
 
 The screens still choose a camera or a telescope on its own
 (``observatory:set_active_camera``, ``observatory:set_active_telescope``).
@@ -14,11 +16,13 @@ configuration that pairs the chosen camera or telescope with the other half
 of the active one, and makes it active.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
+from pydantic import ValidationError
+
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
-from wayfindinglib import ObservatoryControl
+from wayfindinglib import FocusModel, GuiderCalibration, ObservatoryControl
 
 
 def _name_key(name: str) -> str:
@@ -123,7 +127,7 @@ class EquipmentService:
         profiles : `list`
             One profile per camera, with its pixel size and sensor size.
         """
-        return self._observatory.equipment.status(include=["camera_profiles"]).camera_profiles
+        return self._observatory.equipment.get_status(include=["camera_profiles"]).camera_profiles
 
     def get_equipment_configuration(self) -> Any:
         """Report the active telescope and camera and what they can see.
@@ -134,7 +138,7 @@ class EquipmentService:
             The telescope, the camera, the plate scale and the field of
             view, or `None` when no equipment is set up.
         """
-        return self._observatory.equipment.status(include=["configuration"]).configuration
+        return self._observatory.equipment.get_status(include=["configuration"]).configuration
 
     def set_active_camera(self, camera_name: str) -> bool:
         """Make a camera the active one.
@@ -168,7 +172,7 @@ class EquipmentService:
             The active telescope (its altitude and hour angle limits and
             flip threshold are fields of it), or `None` when none is set up.
         """
-        return self._observatory.equipment.status(include=["telescope"]).telescope
+        return self._observatory.equipment.get_status(include=["telescope"]).telescope
 
     def set_active_telescope(self, telescope_id: str, limits: dict[str, float | bool] | None = None) -> bool:
         """Choose the active telescope, and optionally save its safety limits.
@@ -225,7 +229,7 @@ class EquipmentService:
             ``{"applied": {capability: state}, "rejected": {capability:
             reason}}``.
         """
-        return _outcome_as_dict(self._observatory.safety.enter_monitoring_mode(evidence_note=evidence_note))
+        return _outcome_as_dict(self._observatory.safety.set_mode("monitor", note=evidence_note))
 
     def enter_controller_mode(
         self, evidence_note: str = "", shadow_first: bool = False
@@ -248,10 +252,138 @@ class EquipmentService:
             reason}}``.
         """
         return _outcome_as_dict(
-            self._observatory.safety.enter_controller_mode(
-                evidence_note=evidence_note, shadow_first=shadow_first
-            )
+            self._observatory.safety.set_mode("controller", note=evidence_note, shadow_first=shadow_first)
         )
+
+    def record_guider_calibration(
+        self,
+        *,
+        calibration_id: str,
+        camera_id: str,
+        telescope_id: str,
+        arcsec_per_pixel: float,
+        camera_angle_deg: float,
+        ra_rate_arcsec_per_sec: float,
+        dec_rate_arcsec_per_sec: float,
+        source_note: str,
+        calibrated_at: datetime | None = None,
+        replace: bool = False,
+    ) -> Any:
+        """Save a guider calibration measured elsewhere, from the RPC's fields.
+
+        Parameters
+        ----------
+        calibration_id : `str`
+            Id of the record.
+        camera_id, telescope_id : `str`
+            The equipment pairing the calibration belongs to.
+        arcsec_per_pixel : `float`
+            Guide camera plate scale.
+        camera_angle_deg : `float`
+            Angle of the camera against the mount axes.
+        ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec : `float`
+            Speed of the mount along each axis for a guide pulse.
+        source_note : `str`
+            Where the numbers came from.
+        calibrated_at : `datetime`, optional
+            When the calibration was made. Now when omitted.
+        replace : `bool`, optional
+            Replace a saved record with the same id.
+
+        Returns
+        -------
+        calibration : `GuiderCalibration`
+            The saved record.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the fields do not make a valid record.
+        """
+        fields: dict[str, Any] = {
+            "id": calibration_id,
+            "camera_id": camera_id,
+            "telescope_id": telescope_id,
+            "arcsec_per_pixel": arcsec_per_pixel,
+            "camera_angle_deg": camera_angle_deg,
+            "ra_rate_arcsec_per_sec": ra_rate_arcsec_per_sec,
+            "dec_rate_arcsec_per_sec": dec_rate_arcsec_per_sec,
+            "source_note": source_note,
+        }
+        if calibrated_at is not None:
+            fields["calibrated_at"] = calibrated_at
+        try:
+            calibration = GuiderCalibration(**fields)
+        except ValidationError as error:
+            raise InvalidArgumentError(f"The guider calibration is not valid: {error}") from error
+        return self._observatory.guiding.create_guider_calibration(calibration, force=replace)
+
+    def record_focus_model(
+        self,
+        *,
+        focus_model_id: str,
+        camera_id: str,
+        telescope_id: str,
+        backlash_steps: int,
+        approach_direction: str,
+        source_note: str,
+        thermal_coefficient_steps_per_c: float = 0.0,
+        filter_offsets: dict[str, int] | None = None,
+        calibrated_at: datetime | None = None,
+        replace: bool = False,
+    ) -> Any:
+        """Save a focus model measured elsewhere, from the RPC's fields.
+
+        Parameters
+        ----------
+        focus_model_id : `str`
+            Id of the record.
+        camera_id, telescope_id : `str`
+            The equipment pairing the model belongs to.
+        backlash_steps : `int`
+            Focuser backlash in steps.
+        approach_direction : `str`
+            ``"inward"`` or ``"outward"``.
+        source_note : `str`
+            Where the numbers came from.
+        thermal_coefficient_steps_per_c : `float`, optional
+            Focus shift in steps for each degree Celsius.
+        filter_offsets : `dict` [`str`, `int`], optional
+            Focus offset in steps for each filter name.
+        calibrated_at : `datetime`, optional
+            When the model was made. Now when omitted.
+        replace : `bool`, optional
+            Replace a saved record with the same id.
+
+        Returns
+        -------
+        focus_model : `FocusModel`
+            The saved record.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the fields do not make a valid record.
+        """
+        fields: dict[str, Any] = {
+            "id": focus_model_id,
+            "camera_id": camera_id,
+            "telescope_id": telescope_id,
+            "backlash_steps": backlash_steps,
+            "approach_direction": approach_direction,
+            "thermal_coefficient_steps_per_c": thermal_coefficient_steps_per_c,
+            "filter_offsets": [
+                {"filter": name, "offset_steps": offset} for name, offset in (filter_offsets or {}).items()
+            ],
+            "source_note": source_note,
+        }
+        if calibrated_at is not None:
+            fields["calibrated_at"] = calibrated_at
+        try:
+            focus_model = FocusModel(**fields)
+        except ValidationError as error:
+            raise InvalidArgumentError(f"The focus model is not valid: {error}") from error
+        return self._observatory.imaging.create_focus_model(focus_model, force=replace)
 
 
 def _outcome_as_dict(outcome: Any) -> dict[str, dict[str, str]]:

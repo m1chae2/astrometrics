@@ -3,33 +3,24 @@
 Description: Guiding lives in the wayfinding library. The guiding driver
 the active telescope's ``guiding_protocol`` names (PHD2, the pulses
 KStars/Ekos sends the mount, or a simulator) reads the guide samples;
-`control.guiding.status(include=["live"])` reports them with the
-root-mean-square (RMS) error; and `control.guiding.run_loop` runs this
-app's own guide loop. This service only runs that loop on a background
-thread and stops it, and passes the RPC calls on.
+`control.guiding.get_status(include=["live"])` reports them with the
+root-mean-square (RMS) error; and `control.guiding.start` and `stop` run
+this app's own guide loop on a thread the library keeps. This service
+passes the RPC calls on and keeps their replies.
 """
 
 import logging
-import threading
-import time
 from typing import Any
 
-from astrometricslib.exceptions import AstrometricsError
+from astrometricslib.exceptions import ConflictError
 from backend.services.error_logging import log_failure
-from backend.services.infrastructure.background_logging import background_log_context
 from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)
 
-START_WAIT_SECONDS = 5.0
-"""How long `start_guiding` waits for the loop to start or give up."""
-
-START_POLL_SECONDS = 0.1
-"""How often it checks."""
-
 
 class GuidingService:
-    """Run the library's guide loop on a thread and report guiding."""
+    """Start and stop the library's guide loop and report guiding."""
 
     def __init__(self, observatory_api: ObservatoryControl) -> None:
         """Keep the observatory control.
@@ -40,11 +31,9 @@ class GuidingService:
             The Wayfinder's `control`, which guides.
         """
         self._observatory = observatory_api
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
 
     def start_guiding(self, exposure: float | None = None, gain: float | None = None) -> bool:
-        """Start the guide loop on a background thread.
+        """Start the guide loop.
 
         Parameters
         ----------
@@ -58,34 +47,22 @@ class GuidingService:
         started : `bool`
             `True` once the loop runs; `False` if it was already running
             or could not start (for example, the mount is not tracking).
+
+        Notes
+        -----
+        In monitor mode the library raises `PermissionDeniedError`; this
+        service lets the error through.
         """
-        if self._thread is not None and self._thread.is_alive():
-            logger.warning("Guiding already active")
+        try:
+            self._observatory.guiding.start(exposure_s=exposure, gain=gain)
+        except ConflictError as error:
+            log_failure(logger, error, "Guiding did not start")
             return False
-        self._stop.clear()
-
-        def run() -> None:
-            """Run the guide loop; the top of a background thread."""
-            try:
-                with background_log_context("guiding"):
-                    self._observatory.guiding.run_loop(self._stop, exposure_seconds=exposure, gain=gain)
-            except AstrometricsError as error:
-                log_failure(logger, error, "Guiding did not run")
-            except Exception:  # the top of a background thread: log it, never lose it
-                logger.exception("Guide loop failed")
-
-        self._thread = threading.Thread(target=run, name="guiding", daemon=True)
-        self._thread.start()
-        deadline = time.monotonic() + START_WAIT_SECONDS
-        while time.monotonic() < deadline and self._thread.is_alive():
-            if self._observatory.guiding.status(include=["live"]).live.is_guiding:
-                logger.info("Started guiding loop: Exp=%ss, Gain=%s", exposure, gain)
-                return True
-            time.sleep(START_POLL_SECONDS)
-        return self._thread.is_alive()
+        logger.info("Started guiding loop: Exp=%ss, Gain=%s", exposure, gain)
+        return True
 
     def stop_guiding(self) -> bool:
-        """Stop the guide loop and wait for its thread to end.
+        """Stop the guide loop and wait for it to end.
 
         Returns
         -------
@@ -98,9 +75,7 @@ class GuidingService:
         In monitor mode the library raises `PermissionDeniedError` (issue
         #95, decision U4); this service lets the error through.
         """
-        self._observatory.guiding.stop_loop(self._stop)
-        if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=5.0)
+        self._observatory.guiding.stop()
         logger.info("Stopped guiding loop")
         return True
 
@@ -121,9 +96,11 @@ class GuidingService:
         Returns
         -------
         captured : `bool`
-            `True` if the camera accepted the exposure command.
+            `True` once the camera accepted the exposure command. A refusal
+            raises instead.
         """
-        return self._observatory.guiding.expose(exposure, gain=gain).started
+        self._observatory.guiding.capture(exposure, gain=gain)
+        return True
 
     def get_status(self) -> dict[str, Any]:
         """Report the guiding going on now.
@@ -137,5 +114,5 @@ class GuidingService:
             ``is_guiding``, ``stats`` (RMS in arcseconds), ``history`` (the
             newest samples), ``exposure`` and ``gain``.
         """
-        live = self._observatory.guiding.status(include=["live"]).live
+        live = self._observatory.guiding.get_status(include=["live"]).live
         return live.model_dump(mode="json", by_alias=True)

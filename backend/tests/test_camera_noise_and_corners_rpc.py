@@ -25,10 +25,10 @@ def test_list_cameras_reads_the_camera_profiles_section_and_keeps_the_noise() ->
     noise_entry = {"gainSetting": "0", "gain": {"value": 0.78, "status": "measured"}}
     profiles = [{"name": "ASI533", "pixelSizeUm": 3.76, "sensorNoise": [noise_entry]}]
     equipment = create_autospec(EquipmentControl, instance=True)
-    equipment.status.return_value = EquipmentStatus(camera_profiles=profiles)
+    equipment.get_status.return_value = EquipmentStatus(camera_profiles=profiles)
     service = EquipmentService(SimpleNamespace(equipment=equipment), configurations=None)
     assert service.list_camera_profiles() == profiles
-    equipment.status.assert_called_once_with(include=["camera_profiles"])
+    equipment.get_status.assert_called_once_with(include=["camera_profiles"])
 
 
 def test_mosaic_preview_returns_the_panels_with_their_corners() -> None:

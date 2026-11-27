@@ -163,7 +163,7 @@ def test_safety_status_asks_only_for_the_policy() -> None:
     """The safety read includes only the delegation policy."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_safety_status()
-    wayfinder.control.safety.status.assert_called_once_with(include=["delegation_policy"])
+    wayfinder.control.safety.get_status.assert_called_once_with(include=["delegation_policy"])
 
 
 def test_mosaic_preview_passes_the_rotation() -> None:

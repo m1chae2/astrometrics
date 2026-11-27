@@ -191,7 +191,7 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
     """
     records = [
         record
-        for record in wayfinder.control.guiding.query_calibrations()
+        for record in wayfinder.control.guiding.query_guider_calibrations()
         if not record.source_note.startswith(SIMULATOR_NOTE_PREFIX)
     ]
     if records:
@@ -201,7 +201,7 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
             Candidate(
                 "newest real record",
                 {"dec_rate_arcsec_per_s": newest.dec_rate_arcsec_per_sec},
-                "wayfinder.control.guiding.query_calibrations",
+                "wayfinder.control.guiding.query_guider_calibrations",
                 {},
                 [],
                 f"Guider calibration {newest.id!r}: the mount's Dec guide speed.",

@@ -150,9 +150,9 @@ def _offline_service() -> IngestionService:
     from astrometricslib.exceptions import ExternalServiceError
 
     wayfinder = MagicMock()
-    wayfinder.control.remote.list.side_effect = ExternalServiceError(
-        "The observatory computer is not reachable."
-    )
+    offline = ExternalServiceError("The observatory computer is not reachable.")
+    wayfinder.control.remote.query_folders.side_effect = offline
+    wayfinder.control.remote.query_files.side_effect = offline
     return IngestionService(wayfinder=wayfinder)
 
 
@@ -183,7 +183,7 @@ def test_offline_telescope_polls_log_no_error_and_note_the_change_once(
     from backend.services.observatory.telescope_service import TelescopeService
 
     wayfinder = MagicMock()
-    wayfinder.control.mount.status.side_effect = ExternalServiceError("offline")
+    wayfinder.control.mount.get_status.side_effect = ExternalServiceError("offline")
     service = TelescopeService(wayfinder=wayfinder)
     with caplog.at_level(logging.DEBUG):
         for _ in range(3):
@@ -200,11 +200,13 @@ def test_scan_reports_offline_computer_as_status() -> None:
     from backend.services.processing.ingestion_service import IngestionService
 
     wayfinder = MagicMock()
-    wayfinder.control.remote.list.return_value = []
-    wayfinder.control.remote.check_connection.return_value = False
+    from astrometricslib.exceptions import ExternalServiceError
+
+    wayfinder.control.remote.query_folders.return_value = []
+    wayfinder.control.remote.check_connection.side_effect = ExternalServiceError("offline", report="status")
     service = IngestionService.__new__(IngestionService)
     service._wayfinder = wayfinder
     assert service.scan_remote_targets_rpc() == {"folders": [], "reachable": False}
 
-    wayfinder.control.remote.list.return_value = ["M_31"]
+    wayfinder.control.remote.query_folders.return_value = ["M_31"]
     assert service.scan_remote_targets_rpc() == {"folders": ["M_31"], "reachable": True}

@@ -240,10 +240,14 @@ def test_telescope_service_prioritizes_driver_target_name() -> None:
     from backend.services.observatory.telescope_service import TelescopeService
 
     wayfinder_mock = MagicMock()
-    wayfinder_mock.control.mount.status.return_value = SimpleNamespace(
-        model_dump=lambda by_alias=False: {"ra": "00 42 44", "dec": "+41 16 09", "targetName": "IC 1396"}
+    wayfinder_mock.control.mount.get_status.return_value = SimpleNamespace(
+        ra_deg=None,
+        dec_deg=None,
+        altitude_deg=None,
+        azimuth_deg=None,
+        model_dump=lambda **_: {"ra": "00 42 44", "dec": "+41 16 09", "targetName": "IC 1396"},
     )
-    wayfinder_mock.control.imaging.status.return_value = SimpleNamespace(
+    wayfinder_mock.control.imaging.get_status.return_value = SimpleNamespace(
         camera_status="Idle", current_filter="L", focuser_position=0, camera_temperature="-"
     )
 

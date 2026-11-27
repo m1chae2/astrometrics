@@ -696,7 +696,7 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
         return answer
 
     guiding = SimpleNamespace(
-        query_calibrations=lambda: record("query_calibrations", answers["calibrations"])
+        query_guider_calibrations=lambda: record("query_guider_calibrations", answers["calibrations"])
     )
     review = SimpleNamespace(
         guiding=SimpleNamespace(

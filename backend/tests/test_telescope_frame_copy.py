@@ -26,8 +26,14 @@ def _service(syncing: bool, jobs: list[object]) -> tuple[TelescopeService, Magic
         The fake job service.
     """
     wayfinder = MagicMock()
-    wayfinder.control.mount.status.return_value.model_dump.return_value = {"targetName": "M 31"}
-    wayfinder.control.imaging.status.return_value.camera_status = "Idle"
+    wayfinder.control.mount.get_status.return_value = SimpleNamespace(
+        ra_deg=None,
+        dec_deg=None,
+        altitude_deg=None,
+        azimuth_deg=None,
+        model_dump=lambda **_: {"targetName": "M 31"},
+    )
+    wayfinder.control.imaging.get_status.return_value.camera_status = "Idle"
     sync_service = MagicMock()
     sync_service.is_syncing.return_value = syncing
     job_service = MagicMock()
@@ -88,7 +94,13 @@ def test_finished_quality_job_is_ignored() -> None:
 def test_status_without_sources_is_inactive() -> None:
     """A service with no copy sources reports no copy."""
     wayfinder = MagicMock()
-    wayfinder.control.mount.status.return_value.model_dump.return_value = {"targetName": "M 31"}
+    wayfinder.control.mount.get_status.return_value = SimpleNamespace(
+        ra_deg=None,
+        dec_deg=None,
+        altitude_deg=None,
+        azimuth_deg=None,
+        model_dump=lambda **_: {"targetName": "M 31"},
+    )
     assert TelescopeService(wayfinder=wayfinder).get_status()["frameCopy"]["active"] is False
 
 

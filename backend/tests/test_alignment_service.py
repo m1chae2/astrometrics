@@ -116,9 +116,7 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     observatory = _autospec_control()
     released = threading.Event()
     observatory.mount.slew.side_effect = lambda *args, **kwargs: released.wait(timeout=5.0)
-    observatory.mount.cancel_centering.side_effect = lambda run_is_active: (
-        (released.set() if run_is_active else None) or run_is_active
-    )
+    observatory.mount.stop.side_effect = lambda: released.set()
     service = AlignmentService(observatory_api=observatory, review=_real_review(_Logs()))
 
     assert service.start_alignment(target_ra="0h 40m 00s", target_dec="+20d 00m 00s") is True
@@ -129,19 +127,18 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     assert service.cancel_alignment() is True
     assert service.is_active() is False
     (position,), options = observatory.mount.slew.call_args
-    assert position["ra_deg"] == pytest.approx(10.0)
-    assert position["dec_deg"] == pytest.approx(20.0)
+    assert position.ra_deg == pytest.approx(10.0)
+    assert position.dec_deg == pytest.approx(20.0)
     assert options == {"center": True, "max_iterations": CENTERING_MAX_ITERATIONS}
 
 
 def test_cancel_without_a_run_reports_false() -> None:
-    """Cancelling when nothing runs changes nothing."""
+    """Cancelling when nothing runs gives `False`; the stop still goes out."""
     observatory = _autospec_control()
-    observatory.mount.cancel_centering.return_value = False
     service = AlignmentService(observatory_api=observatory)
 
     assert service.cancel_alignment() is False
-    observatory.mount.cancel_centering.assert_called_once_with(False)
+    observatory.mount.stop.assert_called_once_with()
 
 
 def test_start_alignment_raises_on_unparseable_coordinates() -> None:
@@ -159,7 +156,7 @@ def test_start_alignment_raises_on_unparseable_coordinates() -> None:
 def test_cancel_passes_on_the_librarys_refusal_in_monitor_mode() -> None:
     """Decision U4 lives in the library; the service lets its error through."""
     observatory = _autospec_control()
-    observatory.mount.cancel_centering.side_effect = PermissionDeniedError("monitor mode")
+    observatory.mount.stop.side_effect = PermissionDeniedError("monitor mode")
     service = AlignmentService(observatory_api=observatory)
 
     with pytest.raises(PermissionDeniedError):

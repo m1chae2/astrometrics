@@ -1,9 +1,9 @@
-"""Purpose: Save the app's settings and pass them on to the hardware driver.
+"""Purpose: Save the app's settings.
 
 Description: The settings page sends the whole configuration back when the
 user saves it. This service writes it through the shared configuration
-object, then tells the observatory control to read the telescope hostname
-again, so a changed hostname is used on the next connection.
+object. The observatory control reads the telescope hostname again on its
+next connection, so a changed hostname needs no step here.
 
 A save is refused if it changes a setting the launch locked (the
 ``locked_keys`` of the ``[Launch]`` section, see
@@ -43,19 +43,15 @@ class SettingsService:
     def __init__(
         self,
         config: Any,
-        equipment: Any = None,
         launch_reader: Callable[[], LaunchIdentity | None] | None = None,
         configurations: Any = None,
     ) -> None:
-        """Keep the configuration and the equipment control.
+        """Keep the configuration and the stored configurations.
 
         Parameters
         ----------
         config : `AstrometricsConfiguration`
             The shared configuration object.
-        equipment : `EquipmentControl`, optional
-            The Wayfinder's ``control.equipment``. `None` when there is no
-            hardware control.
         launch_reader : `~collections.abc.Callable`, optional
             Gives the launch identity. Default: the configuration's own
             ``get_launch_identity``, or no identity if it has none.
@@ -66,11 +62,10 @@ class SettingsService:
         reader = launch_reader or getattr(config, "get_launch_identity", None)
         self._launch_reader: Callable[[], LaunchIdentity | None] = reader or (lambda: None)
         self._config = config
-        self._equipment = equipment
         self._configurations = configurations
 
     def save_config(self, config: dict[str, Any]) -> bool:
-        """Save new settings and pass the hostname on to the hardware.
+        """Save new settings.
 
         Parameters
         ----------
@@ -84,8 +79,6 @@ class SettingsService:
         """
         self._refuse_locked_changes(config)
         self._config.update_config(config)
-        if self._equipment is not None:
-            self._equipment.apply_configuration()
         if self._configurations is not None:
             # New equipment in the settings gets its stored configuration
             # now, so the screens can choose it at once.

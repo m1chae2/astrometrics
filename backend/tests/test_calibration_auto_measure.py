@@ -160,7 +160,7 @@ def _sync(folder: str, added_by_folder: dict[str, int]) -> _Recorder:
     """
     recorder = _Recorder()
     remote = SimpleNamespace(
-        sync_frames=lambda target, on_copied=None: SimpleNamespace(
+        sync_frames=lambda target=None, kind=None, dry_run=False: SimpleNamespace(
             success=True, measurements=None, added_by_folder=added_by_folder
         )
     )

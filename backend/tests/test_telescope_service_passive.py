@@ -85,15 +85,19 @@ def test_get_status_polls_external_guiding() -> None:
     guiding_service_mock.get_status.return_value = {"history": [{"time": 100, "dra": 0.1, "ddec": -0.1}]}
 
     wayfinder_mock = MagicMock()
-    wayfinder_mock.control.mount.status.return_value = SimpleNamespace(
-        model_dump=lambda by_alias=False: {
+    wayfinder_mock.control.mount.get_status.return_value = SimpleNamespace(
+        ra_deg=None,
+        dec_deg=None,
+        altitude_deg=None,
+        azimuth_deg=None,
+        model_dump=lambda **_: {
             "ra": "20h 00m 00s",
             "dec": "+22° 00m 00s",
             "trackingStatus": "Tracking",
             "connectionStatus": "Connected",
-        }
+        },
     )
-    wayfinder_mock.control.imaging.status.return_value = _imaging_status()
+    wayfinder_mock.control.imaging.get_status.return_value = _imaging_status()
 
     service = TelescopeService(guiding_service=guiding_service_mock, wayfinder=wayfinder_mock)
     status = service.get_status()

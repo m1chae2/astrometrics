@@ -272,7 +272,7 @@ astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,Numb
 astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
-astrometricslib/pipelines/shared/quality/star_profile_fitting.py,_MINOR_AXIS_START_RATIO,"Starting guess for fit (minor axis 5 percent wider so the exact angle derivative is not zero); no effect on result beyond optimizer noise"
+astrometricslib/pipelines/shared/quality/star_profile_fitting.py,_MINOR_AXIS_START_RATIO,Starting guess for fit (minor axis 5 percent wider so the exact angle derivative is not zero); no effect on result beyond optimizer noise
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_ITERATIONS,"Rounds of sigma clipping for the ring sky plane; the same 5 rounds as the profile sky, and the fit settles in fewer"
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,Clipping limit of the ring sky plane; the same 3 sigma as the profile sky
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_MINIMUM_PIXELS,"Fewest pixels the sky annulus needs, as for the profile's sky; below it the profile sky is used"
@@ -514,8 +514,8 @@ astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPT
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_SEED,software plumbing
 astrometricslib/pipelines/stacking/processing/image_registration.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/processing/image_registration.py,_INVERSE_ROUNDS,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/processing/image_registration.py,_TERM_COUNT,"Number of terms of a quadratic in two variables; math constant."
-astrometricslib/pipelines/stacking/processing/image_registration.py,_WARP_ROWS_PER_BLOCK,"Memory block size of the resampling; plumbing."
+astrometricslib/pipelines/stacking/processing/image_registration.py,_TERM_COUNT,Number of terms of a quadratic in two variables; math constant.
+astrometricslib/pipelines/stacking/processing/image_registration.py,_WARP_ROWS_PER_BLOCK,Memory block size of the resampling; plumbing.
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_FRAMES,software plumbing
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_SECONDS,software plumbing
 astrometricslib/pipelines/tasks.py,STACKING_TIMEOUT_BASE_SECONDS,Plumbing: timeout
@@ -592,19 +592,13 @@ wayfindinglib/analytics/unguided_mount_error.py,_GRID_OVERSAMPLING,numerical gri
 wayfindinglib/analytics/unguided_mount_error.py,_MAD_TO_SIGMA,unit or physical constant
 wayfindinglib/analytics/unguided_mount_error.py,_NOISE_FLOOR_ARCSEC,Division guard for noise-free test data
 wayfindinglib/analytics/unguided_mount_error.py,reconstruct_unguided_error.sign,Sign convention (+1 or -1); not tuned
-wayfindinglib/api/control/guiding.py,GuidingControl.refit_spectrum.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/control/guiding.py,MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC,Input sanity limit
-wayfindinglib/api/control/guiding.py,MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL,Input sanity limit
-wayfindinglib/api/control/guiding.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
-wayfindinglib/api/control/guiding.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
-wayfindinglib/api/control/imaging.py,ImagingControl.capture_image.count,Frame count; 1 means one frame
-wayfindinglib/api/control/imaging.py,ImagingControl.capture_image.delay_seconds,Delay between frames; 0 means none
-wayfindinglib/api/control/imaging.py,ImagingControl.record_focus_model.thermal_coefficient_steps_per_c,0 means no model; the caller passes the fit
-wayfindinglib/api/control/imaging.py,MAXIMUM_BACKLASH_STEPS,Input sanity limit
-wayfindinglib/api/control/imaging.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
-wayfindinglib/api/control/imaging.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
-wayfindinglib/api/control/imaging.py,MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C,Input sanity limit
-wayfindinglib/api/execution.py,ObservationExecution.create_recorder.snapshot_interval_seconds,Recording cadence; plumbing
+wayfindinglib/api/control/guiding.py,GuidingControl.query_guider_calibrations.offset,Query paging offset; 0 means from the first item
+wayfindinglib/api/control/imaging.py,ImagingControl.capture.count,Frame count; 1 means one frame
+wayfindinglib/api/control/imaging.py,ImagingControl.capture.delay_s,Delay between frames; 0 means none
+wayfindinglib/api/control/imaging.py,ImagingControl.check_capture.count,Frame count; 1 means one frame
+wayfindinglib/api/control/imaging.py,ImagingControl.check_capture.delay_s,Delay between frames; 0 means none
+wayfindinglib/api/control/imaging.py,ImagingControl.query_focus_models.offset,Query paging offset; 0 means from the first item
+wayfindinglib/api/execution.py,ObservationExecution.create_recorder.snapshot_interval_s,Recording cadence; plumbing
 wayfindinglib/api/planning/catalogs.py,PlanningCatalogs.query.offset,Paging start that callers pass; 0 is the first match
 wayfindinglib/api/planning/catalogs.py,PlanningCatalogs.query_sources.radius_deg,Search radius a caller passes; 1 degree is only a starting view
 wayfindinglib/api/planning/packages.py,PlanningPackages.create.priority,0 is the neutral priority; the caller sets the order
@@ -729,6 +723,14 @@ wayfindinglib/tasks/control_tasks/alignment_history.py,query_alignment_nights.of
 wayfindinglib/tasks/control_tasks/centering.py,IMAGE_WAIT_SECONDS,Wait timeout; plumbing
 wayfindinglib/tasks/control_tasks/centering.py,SETTLE_SECONDS,Decided not tuning in the #175 review (WAY-D139): operational wait after a slew
 wayfindinglib/tasks/control_tasks/centering_exposure.py,ARCSEC_PER_RADIAN,unit or physical constant
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_BACKLASH_STEPS,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,query_focus_models.offset,Query paging offset; 0 means from the first item
+wayfindinglib/tasks/control_tasks/control_records.py,query_guider_calibrations.offset,Query paging offset; 0 means from the first item
 wayfindinglib/tasks/control_tasks/frame_end_detection.py,COUNTDOWN_JUMP_SECONDS,Plumbing: detection of a clock jump
 wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_FRAMES,Reply size cap
 wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_QUALITY_FRAMES,Cost cap on measuring frames
@@ -739,9 +741,12 @@ wayfindinglib/tasks/control_tasks/guiding_log_ingestion.py,_REFIT_SAMPLE_LIMIT,R
 wayfindinglib/tasks/control_tasks/guiding_log_ingestion.py,refit_and_persist_guiding_spectrum.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/control_tasks/imaging_capture.py,READOUT_SECONDS,Decided not tuning in the #175 review (WAY-D139): operational wait for the readout
 wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.count,Frame count; 1 means one frame
-wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.delay_seconds,Delay between frames; 0 means none
+wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.delay_s,Delay between frames; 0 means none
+wayfindinglib/tasks/control_tasks/imaging_capture.py,check_capture.count,Frame count; 1 means one frame
+wayfindinglib/tasks/control_tasks/imaging_capture.py,check_capture.delay_s,Delay between frames; 0 means none
 wayfindinglib/tasks/control_tasks/live_guiding.py,HISTORY_LIMIT,History buffer size
 wayfindinglib/tasks/control_tasks/live_guiding.py,RETRY_SECONDS,Retry pause between cycles
+wayfindinglib/tasks/control_tasks/live_guiding.py,stop_loop.timeout_s,Wait for a thread to end; plumbing
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,LIVE_SECTION_ITEMS,Reply count cap per section; size only
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,MAXIMUM_STATUS_CHARACTERS,Reply size cap; plumbing
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,get_live_session_status.limit,Row or item cap that callers pass; plumbing
@@ -760,6 +765,7 @@ wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_SAMPLE_READ_LIMIT,R
 wayfindinglib/tasks/control_tasks/target_changes.py,POSITION_WINDOW_SECONDS,Poll window; plumbing
 wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentinel for unsolved position
 wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
+wayfindinglib/tasks/execution_tasks/session_execution.py,build_recorder.snapshot_interval_s,Recording cadence; plumbing
 wayfindinglib/tasks/execution_tasks/session_recorder.py,ObservationSessionRecorder.__init__.snapshot_interval_seconds,Recording cadence; plumbing
 wayfindinglib/tasks/planning_tasks/catalog_answers.py,query_catalogs.offset,Paging start that callers pass; 0 is the first match
 wayfindinglib/tasks/planning_tasks/catalog_answers.py,query_sources.radius_deg,Search radius a caller passes; 1 degree is only a starting view

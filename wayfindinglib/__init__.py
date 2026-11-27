@@ -152,20 +152,18 @@ def __getattr__(name: str) -> object:
 
     Raises
     ------
-    ImportError
-        If the rename table says where `name` moved.
     AttributeError
         If `name` is not an export of this package.
+
+    Notes
+    -----
+    A name the rename table lists raises `ImportError` that says where it
+    moved.
     """
     if name not in _LAZY_EXPORTS:
-        from wayfindinglib._internal.renames import RENAMES
+        from wayfindinglib._internal.renames import refuse_moved_root_name
 
-        key = f"{__name__}.{name}"
-        if key in RENAMES:
-            from astrometricslib.exceptions import MovedError
-
-            moved = MovedError(key, RENAMES[key])
-            raise ImportError(str(moved), name=__name__) from moved
+        refuse_moved_root_name(__name__, name)
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)
 

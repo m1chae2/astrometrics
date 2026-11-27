@@ -288,9 +288,7 @@ def force_safe_assessment(wayfinder: Any, monkeypatch: Any) -> None:
     monkeypatch : `pytest.MonkeyPatch`
         Wraps the queue's safety read and undoes the change after the test.
     """
-    from wayfindinglib.tasks.execution_tasks import imaging_queue
-
-    real_status = imaging_queue.read_safety_status
+    from wayfindinglib.tasks.control_tasks.control_status import read_safety_status as real_status
 
     def status(context: Any, include: list[str] | None = None, capability: Any = None) -> Any:
         """Read the real status, with its assessment replaced by "safe".
@@ -305,7 +303,8 @@ def force_safe_assessment(wayfinder: Any, monkeypatch: Any) -> None:
             result.assessment = SafetyAssessment(verdict=SafetyVerdict.SAFE)
         return result
 
-    monkeypatch.setattr(imaging_queue, "read_safety_status", status)
+    # Named by text: the imaging queue reads the name it imported.
+    monkeypatch.setattr("wayfindinglib.tasks.execution_tasks.imaging_queue.read_safety_status", status)
 
 
 class RecordingDrivers:

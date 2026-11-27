@@ -12,7 +12,7 @@ Terms are in the [glossary](../Glossary.md).
 
 This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The package root is the one supported entry point. It loads names on first use, so importing it loads no hardware code. Its 8 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession`, `ObservationPackage` and `FrameEndDetector`. `exceptions.py` and `reports.py` are public. The rest is private.
+The package root is the one supported entry point. It loads names on first use, so importing it loads no hardware code. Its names are `Wayfinder`, the four sub-API classes, `ObservationSession`, `ObservationPackage` and the input models. `exceptions.py`, `reports.py` and `logs.py` (with `FrameEndDetector`) are public. The rest is private.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
@@ -54,17 +54,17 @@ Shared definitions in the foundation: protocol names (`models/equipment_and_site
 
 `validate_delegation_policy` raises `DelegationPolicyValidationError` for a shadowed safety capability, early capture orchestration or missing calibration. `promote_capability` forces shadowing first.
 
-Each command in `tasks/control_tasks/hardware_operations.py` starts with `_require_authoritative`, which raises `PermissionDeniedError` unless its capability is `AUTHORITATIVE`. Table 2 lists them.
+Each command in `tasks/control_tasks/hardware_operations.py` starts with `require_authoritative`, which raises `PermissionDeniedError` unless its capability is `AUTHORITATIVE`. Table 2 lists them.
 
 **Table 2.** Capability required by each hardware command.
 
 | Capability | Commands |
 | --- | --- |
-| `MOUNT_CONTROL` | `slew`, `park`, `unpark`, `set_tracking`, `manual_move`, `abort_motion`, `set_slew_rate` |
+| `MOUNT_CONTROL` | `slew`, `park`, `unpark`, `set_tracking`, `manual_move`, `stop_mount`, `set_slew_rate` |
 | `PLATE_SOLVE_ALIGNMENT` | `sync_mount` |
-| `AUTOGUIDING` | `pulse`, `guide_expose` |
-| `AUTOFOCUS` | `focus_move` |
-| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image`, `stop_capture` |
+| `AUTOGUIDING` | `pulse`, `guide_expose`, `start_loop`, `stop_loop` |
+| `AUTOFOCUS` | `move_focuser` |
+| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image`, `stop_capture`, `check_capture` |
 | `OBSERVATORY_SAFETY` | `open_enclosure`, `close_enclosure` |
 
 `tasks/control_tasks/capability_promotion.py` holds `apply_promotion_decision`, `summarize_divergence_evidence` (Architecture Equation (2)) and `set_all_capabilities`.
@@ -195,17 +195,17 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 
 ### 6.1 Facade and children
 
-`ObservatoryControl` (`api/control/control.py`) holds the drivers and six children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`.
+`ObservatoryControl` (`api/control/control.py`) holds the drivers and six children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py`; `get_status` reads are in `tasks/control_tasks/control_status.py`.
 
 **Table 6.** The six children of `ObservatoryControl`.
 
 | Child | Main calls |
 | --- | --- |
-| `control.mount` | `slew`, `park`, `unpark`, `set_tracking` |
-| `control.imaging` | `capture_image`, `set_filter`, `focus_move` |
-| `control.guiding` | `run_loop`, `stop_loop`, `refit_spectrum` |
-| `control.remote` | `list`, `sync_frames`, `sync_logs` |
-| `control.safety` | `apply_promotion_decision`, `enter_monitoring_mode` |
+| `control.mount` | `slew`, `stop`, `park`, `set_tracking` |
+| `control.imaging` | `check_capture`, `capture`, `stop`, `move_focuser` |
+| `control.guiding` | `start`, `stop`, `capture`, `create_guider_calibration` |
+| `control.remote` | `query_folders`, `sync_frames`, `sync_logs` |
+| `control.safety` | `set_mode`, `update` |
 | `control.equipment` | `connect`, `get_active`, `set_active` |
 
 `Wayfinder.review` (`api/review/`) holds the night reads in five objects: `nights`, `targets`, `guiding`, `performance` and `alignment`. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
@@ -551,11 +551,11 @@ No module applies the gates of the architecture's Table 8; `DivergenceEvidenceSu
 | Mount | `control.mount.slew`, `park`, `set_tracking` |
 | Align | `control.mount._compute_pointing_correction`, `slew(center=True)` |
 | Focus | `focus_correction.compute_focus_correction` (no autofocus sweep call) |
-| Guide | `control.guiding._compute_correction`, `status(include=["live"])` |
+| Guide | `control.guiding._compute_correction`, `get_status(include=["live"])` |
 | Scheduler | `planning.sessions.create(night, packages=...)` |
 | Capture | `planning.packages.create` |
 | Dome and weather interlock | `control.safety._execute_safe_state`, `_assess` |
-| Session recording | `execution.advance_session`, `create_recorder`, `review.nights` |
+| Session recording | `execution.run`, `create_recorder`, `review.nights` |
 
 ## References
 

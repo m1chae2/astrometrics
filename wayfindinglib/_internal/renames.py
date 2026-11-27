@@ -18,7 +18,7 @@ from typing import NoReturn
 
 from astrometricslib.exceptions import MovedError
 
-__all__ = ["RENAMES", "MovedNames"]
+__all__ = ["RENAMES", "MovedNames", "refuse_moved_root_name"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
@@ -256,3 +256,25 @@ class MovedNames:
         if moved is not None:
             raise moved
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}", name=name, obj=self)
+
+
+def refuse_moved_root_name(module_name: str, name: str) -> None:
+    """Refuse a name the package root no longer exports, saying where it went.
+
+    Parameters
+    ----------
+    module_name : `str`
+        The package's dotted name, ``"wayfindinglib"``.
+    name : `str`
+        The name that was read.
+
+    Raises
+    ------
+    ImportError
+        When the rename table lists ``"<module>.<name>"``. An `ImportError`
+        keeps its message through ``from wayfindinglib import <old name>``.
+    """
+    key = f"{module_name}.{name}"
+    if not name.startswith("__") and key in RENAMES:
+        moved = MovedError(key, RENAMES[key])
+        raise ImportError(str(moved), name=module_name) from moved

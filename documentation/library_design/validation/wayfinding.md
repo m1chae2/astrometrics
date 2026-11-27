@@ -63,8 +63,8 @@ Every Python example assumes the library is installed and configured with your o
   from wayfindinglib.analytics.result_quality.judge_results import judge_results, needs_attention
 
   astro = Astrometrics()
-  rows = astro.quality.query(target_id="M 57").rows
-  settings = astro.quality.capture_settings()
+  rows = astro.quality.records.query(target=astro.targets.get("M 57"))
+  settings = {stored.id: stored.setting for stored in astro.quality.records.get_capture_settings()}
   statements = judge_results(rows, capture_settings=settings)
   for statement in statements:
       print(statement.kind.value, statement.rule, statement.message)
@@ -110,8 +110,8 @@ Every Python example assumes the library is installed and configured with your o
   from wayfindinglib.models.quality.efficiency import ScienceGoal
 
   astro = Astrometrics()
-  rows = astro.quality.query(target_id="M 27", level="frame").rows  # frame measurement rows
-  settings = astro.quality.capture_settings()
+  rows = astro.quality.records.query(target=astro.targets.get("M 27"), level="frame")  # frame measurement rows
+  settings = {stored.id: stored.setting for stored in astro.quality.records.get_capture_settings()}
   observations = frame_observations_from_measurements(rows, settings)
   key = baseline_key(observations[0].capture_setting)
   reference = baseline_reference(build_baseline_nights(observations), key).reference
@@ -655,10 +655,10 @@ Every Python example assumes the library is installed and configured with your o
 - **Claim:** For one target, the report summarizes each capture setting, lists the warnings and recommendations in priority order, says explicitly what could not be checked, gives a starting point when there are no frames, checks earlier "take N more" forecasts, and brings back the checklist items the user ticked when the measurements taken since still trip the rule. It reads only stored measurements, the calibration library, the stacker's set-aside records, the stored night plans and the Ekos session records. It lists the newest value of each context metric for each capture setting. It stores nothing. A report that would be longer than 40,000 characters loses its context section first, then the long evidence lists of its statements, and says so.
 - **Settings it supports:** None. The entry backs a method, not a tuned value. The constants are the design estimates WAY-D60 and WAY-D61. The size of the reply is WAY-D77.
 - **Status:** Partly measured. The joins (a stack tied to its setting through its frame weights, a set-aside frame tied to its quarantine rows, a dark tied to the light frames) and every statement are checked on made-up libraries, and the report is shown to store nothing. No real target has been reported on yet (batch 7 does that on a copy).
-- **Data you need:** A target with measured frames (`QualityRecords.measure_frames`), at least one stack, and a calibration library. For the sky model and the equipment baseline, at least three nights of frames from the same camera and settings.
+- **Data you need:** A target with measured frames (`QualityFrames.measure`), at least one stack, and a calibration library. For the sky model and the equipment baseline, at least three nights of frames from the same camera and settings.
 - **Procedure:**
   1. Build the report for a target.
-  2. Read the statements in order, and open the rows each cites with `QualityRecords.query(row_ids=...)`.
+  2. Read the statements in order, and open the rows each cites with `QualityMeasurements.get(row_id)`.
   3. Compare a statement with what you know of the target.
 
      ```python
@@ -675,7 +675,7 @@ Every Python example assumes the library is installed and configured with your o
 - **What to look at:** Whether every statement names its setting and cites rows that exist; whether a rule that could not be checked says what is missing; whether the Moon share, where shown, is labeled model-derived; whether the stack's rows were tied to the right setting (the notes say when a stack holds more than one).
 - **Our result:** Measured value not recorded.
 - **Verdict:** Not judged.
-- **Limits:** The item `best_window` of the decision catalog is not made; it is a deferred rule with its reason (the nights-by-visibility model is not built). The item `guiding_limits_exposure` is made (WAY-75). "Take N more" for a target is shown only after one forecast check of that target came out as forecast (user decision U1, 2026-10-24); until then the report has an `insufficient_data` statement for the rule `more_frames` that says to take more frames, stack them, and let the check run, and says what the checks so far found. The library returns the full report; the MCP reply (not the library's) is cut to the reply budget (WAY-D77), and each statement lists its most extreme evidence first, so the cut keeps it. The rows stay readable with `QualityRecords.query`. A stack of several capture settings is tied to the setting with most of its frames, so its rows are judged against that setting only. The reference for the efficiency of a setting is the equipment baseline when three nights exist, else the physical reference, else none (and the report says so). The sky model needs five nights and 20 frames of the equipment.
+- **Limits:** The item `best_window` of the decision catalog is not made; it is a deferred rule with its reason (the nights-by-visibility model is not built). The item `guiding_limits_exposure` is made (WAY-75). "Take N more" for a target is shown only after one forecast check of that target came out as forecast (user decision U1, 2026-10-24); until then the report has an `insufficient_data` statement for the rule `more_frames` that says to take more frames, stack them, and let the check run, and says what the checks so far found. The library returns the full report; the MCP reply (not the library's) is cut to the reply budget (WAY-D77), and each statement lists its most extreme evidence first, so the cut keeps it. The rows stay readable with `QualityMeasurements.query`. A stack of several capture settings is tied to the setting with most of its frames, so its rows are judged against that setting only. The reference for the efficiency of a setting is the equipment baseline when three nights exist, else the physical reference, else none (and the report says so). The sky model needs five nights and 20 frames of the equipment.
 - **To tune for your setup:** Change the design-estimate rows WAY-D60 to WAY-D69, WAY-D77 and WAY-D78 to WAY-D81 first, then the constants they name.
 - **Regenerate with:** No script; run the example above.
 - **Guarded by tests:** `wayfindinglib/tasks/planning_tasks/test/test_target_report_tasks.py` checks the whole report on a made-up library, `wayfindinglib/analytics/result_quality/test/test_report_rules.py` checks each rule at its limit, `wayfindinglib/tasks/planning_tasks/test/test_target_report_context.py` checks that every context metric can be shown, and `test_target_report_tasks.py` checks that a busy target (3 capture settings, 500 frames, every metric) gives a report that fits the 40,000-character reply budget.
@@ -700,19 +700,23 @@ Every Python example assumes the library is installed and configured with your o
      from wayfindinglib.analytics.result_quality.forecast import forecast_check, stack_runs_from_measurements
 
      astro = Astrometrics()
-     stack_rows = astro.quality.query(target_id="M 57", level="stack", library_only=True, latest_only=False).rows
-     weight_rows = astro.quality.query(
-         target_id="M 57", metric="stacking.frame_weight", library_only=True, latest_only=False
-     ).rows
-     frame_rows = astro.quality.query(target_id="M 57", level="frame", library_only=True).rows
+     stack_rows = astro.quality.records.query(
+         target=astro.targets.get("M 57"), level="stack", library_only=True, latest_only=False
+     )
+     weight_rows = astro.quality.records.query(
+         target=astro.targets.get("M 57"), metric="stacking.frame_weight", library_only=True, latest_only=False
+     )
+     frame_rows = astro.quality.records.query(target=astro.targets.get("M 57"), level="frame", library_only=True)
      runs = stack_runs_from_measurements(stack_rows + weight_rows)
-     observations = frame_observations_from_measurements(frame_rows, astro.quality.capture_settings())
+     observations = frame_observations_from_measurements(
+         frame_rows, {stored.id: stored.setting for stored in astro.quality.records.get_capture_settings()}
+     )
      for check in forecast_check(runs, observations):
          print(check.outcome.value, check.forecast_when_planned, check.forecast_given_frames_taken, check.measured)
      ```
 
   `forecast_check` <!-- impl: wayfindinglib.analytics.result_quality.forecast.forecast_check --> makes the checks, and `stack_runs_from_measurements` <!-- impl: wayfindinglib.analytics.result_quality.forecast.stack_runs_from_measurements --> builds the run records. `ForecastCheck` <!-- impl: wayfindinglib.models.planning.target_report.ForecastCheck --> is the reply shape.
-  For stacks of several exposure groups, add the calibration records before the check. `QualityRecords.calibration_identities` reads them, `attach_calibration_identities` <!-- impl: wayfindinglib.analytics.result_quality.forecast.attach_calibration_identities --> puts each on its run, and `forecast_check` then applies the group model. The calls to repeat the group steps on one run are `stack_groups_of_run` <!-- impl: wayfindinglib.analytics.result_quality.forecast.stack_groups_of_run --> (the groups rebuilt from the stored rows), `fixed_pattern_noise_for_runs` <!-- impl: wayfindinglib.analytics.result_quality.forecast.fixed_pattern_noise_for_runs --> (the fixed-pattern noise of the newest stack) and `forecast_group_noise` <!-- impl: wayfindinglib.analytics.result_quality.noise_growth.forecast_group_noise --> (the predicted noise). The unit numbers and the rules are in [WAY-D70](#design-estimates).
+  For stacks of several exposure groups, add the calibration records before the check. `QualityMeasurements.get_calibration_identities` reads them, `attach_calibration_identities` <!-- impl: wayfindinglib.analytics.result_quality.forecast.attach_calibration_identities --> puts each on its run, and `forecast_check` then applies the group model. The calls to repeat the group steps on one run are `stack_groups_of_run` <!-- impl: wayfindinglib.analytics.result_quality.forecast.stack_groups_of_run --> (the groups rebuilt from the stored rows), `fixed_pattern_noise_for_runs` <!-- impl: wayfindinglib.analytics.result_quality.forecast.fixed_pattern_noise_for_runs --> (the fixed-pattern noise of the newest stack) and `forecast_group_noise` <!-- impl: wayfindinglib.analytics.result_quality.noise_growth.forecast_group_noise --> (the predicted noise). The unit numbers and the rules are in [WAY-D70](#design-estimates).
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** Whether the measured change agrees with the forecast given the frames taken on nights whose cause you know (a moonlit night should be short for a known reason), and how often a check is not checkable because a run stored no weights.
@@ -908,7 +912,7 @@ Every Python example assumes the library is installed and configured with your o
      from wayfindinglib import Wayfinder
 
      astro = Astrometrics()
-     astro.processing.measure_noise("M 13", kind="odd_even_difference")
+     astro.quality.stacks.record_odd_even_noise(astro.targets.get("M 13"))
      for name in (
          "stacking.empty_aperture_noise_normalized",
          "stacking.odd_even_difference_noise_normalized",
@@ -916,7 +920,7 @@ Every Python example assumes the library is installed and configured with your o
          "stacking.odd_even_difference_aperture_set_number",
          "stacking.effective_frame_count",
      ):
-         for row in astro.quality.query(metric=name, target_id="M 13", library_only=True).rows:
+         for row in astro.quality.records.query(metric=name, target=astro.targets.get("M 13"), library_only=True):
              print(name, row.value, row.status, row.reason)
      report = Wayfinder().planning.get_advisory("quality", target="M 13")
      for statement in report.statements:
@@ -943,7 +947,7 @@ These values have not been measured. Each is a reasoned choice; the last column 
 | --- | --- | --- | --- | --- | --- |
 | WAY-D01 | Seeing used by the physical efficiency reference when the site's typical seeing is not set | None: the reference uses the telescope's diffraction limit alone | `SiteProfile.typical_seeing_fwhm_arcsec` <!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile --> | Every frame looks worse than the reference, so the efficiency reads low and losses are overstated. | Enter your typical good-night star width in arcseconds, or take the lower decile of your own star widths over many nights, and compare the efficiency with and without it.  |
 | WAY-D05 | Clipping limit and aimed peak of the overexposure rule | A peak of 1.0 of the room clips; a proposed exposure aims for 0.8 | `CLIPPING_PEAK_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.rules.CLIPPING_PEAK_FRACTION --> and `TARGET_PEAK_FRACTION` <!-- impl: wayfindinglib.analytics.result_quality.rules.TARGET_PEAK_FRACTION --> | A proposed exposure leaves too little signal (aim too low) or still clips on a better night (aim too high). | Take one bright star at several exposures and find the exposure where its peak sits at 0.8 of the room; compare with the proposal.  |
-| WAY-D06 | Least ratio of sky noise to read noise in the underexposure rule | 3 | `MINIMUM_SKY_TO_READ_NOISE_RATIO` <!-- impl: wayfindinglib.analytics.result_quality.rules.MINIMUM_SKY_TO_READ_NOISE_RATIO --> | Frames are called short when read noise costs less than 5% of the noise, or are called long enough when it costs more. | Stack the same field at two exposures with equal total time and compare the stack noise with `QualityRecords.measure_stack`.  |
+| WAY-D06 | Least ratio of sky noise to read noise in the underexposure rule | 3 | `MINIMUM_SKY_TO_READ_NOISE_RATIO` <!-- impl: wayfindinglib.analytics.result_quality.rules.MINIMUM_SKY_TO_READ_NOISE_RATIO --> | Frames are called short when read noise costs less than 5% of the noise, or are called long enough when it costs more. | Stack the same field at two exposures with equal total time and compare the stack noise with `QualityStacks.measure`.  |
 | WAY-D07 | Star elongation at which the trailed-stars rule warns and the frame status flags a stacked frame | 1.2 (long axis over short axis) | `STRETCHED_STAR_WARNING_ELONGATION` <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.STRETCHED_STAR_WARNING_ELONGATION --> | Round enough stars are flagged, or visibly oval stars are not. | Read `frame.star_elongation` over your good nights, take the upper decile, and compare it with 1.2.  |
 | WAY-D08 | Share of stack noise variance a master flat may add, and the share to aim for | Limit 0.03, aim 0.01; a master flat's own noise limit 0.005 (a copy of the stacker's limit, [STK-05](stacking.md#stk-05)) | `FLAT_VARIANCE_SHARE_LIMIT` <!-- impl: wayfindinglib.analytics.result_quality.rules.FLAT_VARIANCE_SHARE_LIMIT --> and `FLAT_VARIANCE_SHARE_TARGET` <!-- impl: wayfindinglib.analytics.result_quality.rules.FLAT_VARIANCE_SHARE_TARGET -->, `MASTER_FLAT_NOISE_FRACTION_LIMIT` <!-- impl: wayfindinglib.analytics.result_quality.rules.MASTER_FLAT_NOISE_FRACTION_LIMIT --> in `rules.py` | More flats are asked for when they would not show, or a fixed pattern is left in the stack. | Stack the target with a flat of 10 frames and one of 40, and compare `stacking.empty_aperture_noise_stack_unit` and `stacking.flat_noise_in_aperture_stack_unit`.  |
 | WAY-D09 | Fewest frames and least temperature change for the focus drift fit | 5 frames per segment, 20 in all, 1.0 degree C. The error of the slope comes from a block bootstrap (whole segments when there are 3 or more, runs of 5 frames inside a segment otherwise); the drift test is on the squared slope (one-sided, 2.3%). The fitted slope is the quadrature slope; it matches a straight-line px per degree C slope only far from best focus, and is larger than the straight-line slope over the allowed 5% range | `MINIMUM_FRAMES_PER_SEGMENT` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_FRAMES_PER_SEGMENT --> , `MINIMUM_FRAMES_TOTAL` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_FRAMES_TOTAL --> and `MINIMUM_TEMPERATURE_CHANGE_DEGC` <!-- impl: wayfindinglib.analytics.result_quality.focus_drift.MINIMUM_TEMPERATURE_CHANGE_DEGC --> | A slope is fitted from noise, or a real drift is reported as "not enough data". | Fit nights of different length and see where the slope stops changing.  |

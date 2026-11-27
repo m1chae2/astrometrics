@@ -66,6 +66,7 @@ The checks treat the first two positional arguments as subject and operands. The
 | `measure`, `measure_<noun>` | Compute a result. Writes nothing. |
 | `predict`, `predict_<noun>` | Compute what a run or an observation would give, without running it. |
 | `record`, `record_<noun>` | Compute a result and store it. |
+| `map_<noun>` | Carry positions from one image onto another. Writes nothing. |
 | `run` | Run a pipeline. |
 | `render` | Make a picture of an image as data (a `RenderedImage`). |
 | `plot_<noun>` | Draw a Matplotlib figure. |

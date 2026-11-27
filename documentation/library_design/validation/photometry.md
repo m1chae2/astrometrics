@@ -795,9 +795,9 @@ frames = [
 ]
 astrometrics.processing.process_target("M 57", stages=["photometry"], photometry={"frames": frames})
 for part in ("photon", "sky", "read"):
-    for row in astrometrics.quality.query(
-        metric=f"photometry.model_noise_{part}_at_mag12_mag", target_id="M 57"
-    ).rows:
+    for row in astrometrics.quality.records.query(
+        metric=f"photometry.model_noise_{part}_at_mag12_mag", target=astrometrics.targets.get("M 57")
+    ):
         print(part, row.status, row.value)
 ```
 
@@ -830,9 +830,9 @@ from astrometricslib import Astrometrics
 astrometrics = Astrometrics()
 for rank in (1, 2, 3):
     for quantity in ("frequency_per_day", "power_fraction"):
-        for row in astrometrics.quality.query(
-            metric=f"photometry.window_alias_{rank}_{quantity}", target_id="Vega"
-        ).rows:
+        for row in astrometrics.quality.records.query(
+            metric=f"photometry.window_alias_{rank}_{quantity}", target=astrometrics.targets.get("Vega")
+        ):
             print(rank, quantity, row.value, row.reason)
 ```
 
@@ -869,7 +869,7 @@ for metric in (
     "photometry.target_phase_coverage_fraction",
     "photometry.target_catalog_amplitude_mag",
 ):
-    for row in astrometrics.quality.query(metric=metric, target_id="Mirach").rows:
+    for row in astrometrics.quality.records.query(metric=metric, target=astrometrics.targets.get("Mirach")):
         print(metric, row.status, row.value, row.reason)
 ```
 

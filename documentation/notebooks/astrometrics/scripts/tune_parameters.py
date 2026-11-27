@@ -9,27 +9,27 @@ backed up first and each value is written with where it came from.
 Edit the settings below, then run it:
 
 - ``SETUP``: the setup to tune, or ``None`` for the active one.
-- ``IMAGE_TUNERS`` and ``OBSERVATORY_TUNERS``: tuner names to run, or an
-  empty list for all of that library's tuners. The report names each tuner.
+- ``TUNERS``: tuner names to run, or an empty list for every tuner of both
+  libraries. The report names each tuner.
 - ``SAVE``: leave ``False`` to preview.
 """
 
 from astrometricslib import Astrometrics, get_configuration
+from astrometricslib.parameters import tune
 from wayfindinglib import Wayfinder
 
 SETUP: str | None = None
-IMAGE_TUNERS: list[str] = []
-OBSERVATORY_TUNERS: list[str] = []
+TUNERS: list[str] = []
 SAVE = False
 
 
 def print_report(title: str, report: object) -> None:
-    """Print one library's tuning report.
+    """Print a tuning report.
 
     Parameters
     ----------
     title : `str`
-        The library the report is for.
+        What the report is for.
     report : `TuningReport`
         What the tuners found.
     """
@@ -50,10 +50,8 @@ def run_tuning_recipe() -> None:
     configuration = get_configuration()
     astrometrics = Astrometrics(configuration)
     wayfinder = Wayfinder(configuration, astrometrics)
-    report = astrometrics.quality.measure_tuned_parameters(SETUP, IMAGE_TUNERS or None, save=SAVE)
-    print_report("Image processing", report)
-    report = wayfinder.review.measure_tuned_parameters(SETUP, OBSERVATORY_TUNERS or None, save=SAVE)
-    print_report("Observatory", report)
+    report = tune(astrometrics, wayfinder, setup=SETUP, only=TUNERS or None, save=SAVE)
+    print_report("Both libraries", report)
     if not SAVE:
         print("Nothing written; set SAVE = True to save the values.")
 

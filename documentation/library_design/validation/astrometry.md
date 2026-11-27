@@ -807,18 +807,20 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  summary = astro.quality.record_frame_measurements("M 13", limit=20)
+  target = astro.targets.get("M 13", required=True)
+  frames = list(astro.targets.frames.query(target, order_by="newest"))[:20]
+  summary = astro.quality.frames.record(target, frames=frames)
   print(summary.frames_measured, summary.rows_written, summary.frames_failed)
   for metric in (
       "frame.star_width_moffat_px",
       "frame.star_width_gaussian_brightest_px",
       "frame.star_elongation",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 13").rows:
+      for row in astro.quality.records.query(metric=metric, target=astro.targets.get("M 13")):
           print(metric, row.subject.subject_id, row.value, row.status.value, row.reason)
   ```
 
-  `QualityRecords.record_frame_measurements` <!-- impl: astrometricslib.api.quality.QualityRecords.record_frame_measurements --> calls `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> for each light frame.
+  `QualityFrames.record` <!-- impl: astrometricslib.api._quality_frames.QualityFrames.record --> calls `measure_frame` <!-- impl: astrometricslib.pipelines.shared.quality.frame_measurement.measure_frame --> for each light frame.
 - **Acceptance criterion:** Not recorded (set after the real-data check).
 - **What to look at:** The Moffat width and the Gaussian width of the brightest stars on round frames (the Moffat width is expected to be 0.83 to 0.91 of the Gaussian width: see the synthetic ratios below), and on trailed frames the Gaussian width reading sharp (it keeps the narrow axis of a star stretched by more than 1.5) while the Moffat width and the elongation rise.
 - **Our result:** Synthetic runs on 2026-10-22: Moffat stars of known width, stretch and angle, drawn with 5 by 5 sub-sampling on a 1500 by 1500 px frame (300 stars, sky 500 ADU, gain 0.5 e-/ADU, read noise 2 e-, fixed seeds), through `measure_star_profiles`. About 150 stars survived the isolation and fit cuts in each case.
@@ -845,9 +847,9 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
   Run time: the full `measure_frame` took 11.6 s (`M_13_Light_Luminance_019`) and 13.5 s (`M_13_Light_Luminance_020`) on 3008 by 3008 px ASI533MM frames, serial, on a 12-core machine, with 179 and 175 stars. The Moffat width read 1.92 and 2.14 px, the Gaussian width of the brightest stars 2.33 and 2.48 px, and the elongation 1.05 and 1.19 (angle 149 and 0.1 degrees, coherence 0.59 and 0.97). These are run-through numbers, not a validation: the gain and read noise used were test values.
   Ratio of the two widths on the same synthetic frames (`measure_star_profiles` against `measure_fwhm_from_data`, 700 by 700 px, 90 stars, run 2026-10-22): the Moffat width over the Gaussian width is 0.874 for 3 px stars of beta 3, 0.838 for 2 px, 0.907 for 5 px, 0.825 for beta 2 and 0.914 for beta 5. The Gaussian fit reads wider because it has no wings to absorb, so a ratio near 0.85 to 0.9 is expected, not 1. On a frame stretched to 2 the Gaussian function returns no width.
 
-  Real data (ZWO ASI 533MM Pro, gain 0, offset 10, 60 s, M 57, night of 2026-10-03, 61 frames, run 2026-10-22 on copies of the databases): 61 of 61 frames were measured (793 rows) and a second run measured nothing. The median Moffat width over the 47 round frames (elongation below 1.15) was 1.90 px against a Gaussian 2.26 px (ratio 0.834, inside the synthetic range). For the 8 frames at elongation 1.15 to 1.30 it was 2.37 against 2.62 px (0.902), and for the one frame at 1.30 or more 2.54 against 2.79 (0.911). The median was 196 stars per frame and the elongation ranged from 1.03 to 1.30. The ratio rises with the elongation because the Gaussian estimator falls back to the narrow axis of a stretched star. The quarantine step had already set the worst frames aside, so badly trailed frames are not in this sample. A width of 1.92 px is just under Nyquist sampling (2 px per FWHM), so the fits there rest on pixel-integrated models and are less certain than on wider stars. To repeat: `astro.quality.record_frame_measurements("M 57")`, then query `frame.star_width_moffat_px` and `frame.star_width_gaussian_brightest_px` and the ratio per frame.
+  Real data (ZWO ASI 533MM Pro, gain 0, offset 10, 60 s, M 57, night of 2026-10-03, 61 frames, run 2026-10-22 on copies of the databases): 61 of 61 frames were measured (793 rows) and a second run measured nothing. The median Moffat width over the 47 round frames (elongation below 1.15) was 1.90 px against a Gaussian 2.26 px (ratio 0.834, inside the synthetic range). For the 8 frames at elongation 1.15 to 1.30 it was 2.37 against 2.62 px (0.902), and for the one frame at 1.30 or more 2.54 against 2.79 (0.911). The median was 196 stars per frame and the elongation ranged from 1.03 to 1.30. The ratio rises with the elongation because the Gaussian estimator falls back to the narrow axis of a stretched star. The quarantine step had already set the worst frames aside, so badly trailed frames are not in this sample. A width of 1.92 px is just under Nyquist sampling (2 px per FWHM), so the fits there rest on pixel-integrated models and are less certain than on wider stars. To repeat: `astro.quality.frames.record(astro.targets.get("M 57"))`, then query `frame.star_width_moffat_px` and `frame.star_width_gaussian_brightest_px` and the ratio per frame.
 
-  Ring analysis (the "Around the star" view), real data, run 2026-11-15 read-only on the ASI 533MM Pro M 31 stack (`M_31_L_Stacked_ZWO_ASI_533MM_Pro_405mm.fits`, peak 1 and sky noise about 5e-5 in stack units), through `QualityRecords.measure_star_profile`. Each measurement took 0.07 to 0.09 s (the star finder runs on a box of about 130 by 130 px only). Positions are 1-based; "sig" is amplitude over its 1σ uncertainty; direction is from +y toward +x, with 180 degrees toward lower y.
+  Ring analysis (the "Around the star" view), real data, run 2026-11-15 read-only on the ASI 533MM Pro M 31 stack (`M_31_L_Stacked_ZWO_ASI_533MM_Pro_405mm.fits`, peak 1 and sky noise about 5e-5 in stack units), through `QualityDetections.measure_profile`. Each measurement took 0.07 to 0.09 s (the star finder runs on a box of about 130 by 130 px only). Positions are 1-based; "sig" is amplitude over its 1σ uncertainty; direction is from +y toward +x, with 180 degrees toward lower y.
 
   | Star (x, y) | Clipped | Ring (px) | Neighbors left out (masked share) | Significant terms (amplitude, sig, direction) |
   | --- | --- | --- | --- | --- |
@@ -890,7 +892,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "frame.star_width_center_px",
       "frame.star_width_corner_xhigh_ylow_px",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 57").rows:
+      for row in astro.quality.records.query(metric=metric, target=astro.targets.get("M 57")):
           print(metric, row.subject.subject_id, row.value, row.uncertainty, row.sample_count)
   ```
 
@@ -959,7 +961,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
       "astrometry.frame_target_clipped_fraction",
       "astrometry.frame_target_nonlinear_fraction",
   ):
-      for row in astro.quality.query(metric=metric, target_id="M 57").rows:
+      for row in astro.quality.records.query(metric=metric, target=astro.targets.get("M 57")):
           print(metric, row.subject.subject_id, row.value, row.sample_count, row.status.value, row.reason[:80])
   ```
 
@@ -1040,7 +1042,7 @@ for metric in (
     "astrometry.expected_pixel_phase_rms_arcsec",
     "astrometry.expected_gaia_epoch_error_rms_arcsec",
 ):
-    for row in astrometrics.quality.query(metric=metric, target_id="M 57").rows:
+    for row in astrometrics.quality.records.query(metric=metric, target=astrometrics.targets.get("M 57")):
         print(metric, row.status, row.value, row.reason)
 ```
 

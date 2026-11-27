@@ -22,7 +22,7 @@ from typing import Any, Protocol
 from astrometricslib.exceptions import AstrometricsError
 from backend.services.error_logging import log_failure
 from backend.services.infrastructure.background_logging import background_log_context
-from wayfindinglib import FrameEndDetector
+from wayfindinglib.logs import FrameEndDetector
 
 logger = logging.getLogger(__name__)
 

@@ -17,11 +17,10 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import CaptureSetting
+from astrometricslib import CaptureSetting, SkyPosition
 from astrometricslib._internal.quality import StoredCaptureSetting
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import centering_exposure
 from wayfindinglib.tasks.control_tasks.centering_exposure import (
     EXPOSURE_LADDER_SECONDS,

@@ -70,7 +70,8 @@ class ObservatoryControl(MovedNames):
         omitted, the simulator is used if ``ASTROMETRICS_TESTING`` is set.
     separate_process : `bool`, optional
         Run the INDI session in a process of its own, so a slow INDI
-        call cannot freeze the caller. `close` stops that process.
+        call cannot freeze the caller. `close` stops that process. An
+        option for programs such as the backend, not for a script.
     open_port_forwards : `bool`, optional
         Allow live SSH port forwards, such as the one to PHD2 on the
         observatory computer. `False` by default: each process would
@@ -140,6 +141,9 @@ class ObservatoryControl(MovedNames):
         event reader, if guiding was used, and the INDI worker process, if
         `separate_process` started one. It starts nothing that was not
         already running, and it is safe to call more than once.
+
+        Owner:
+            wayfindinglib.api.control.context.ControlContext.close
         """
         self._context.close()
 

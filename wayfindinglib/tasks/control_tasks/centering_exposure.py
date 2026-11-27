@@ -38,7 +38,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import CaptureSetting
+from astrometricslib import CaptureSetting, SkyPosition
 from astrometricslib.exceptions import AstrometricsError, ConfigurationError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -53,10 +53,10 @@ from wayfindinglib.analytics.capture_history import equipment_spellings, normali
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, baseline_key
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.session.centering_exposure import CenteringExposure, CenteringExposureTrial
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import sky_rate_tasks
 
 if TYPE_CHECKING:
+    from astrometricslib.arguments import TimeInput
     from wayfindinglib.api.control.context import ControlContext
 
 __all__ = [
@@ -840,3 +840,39 @@ def choose_centering_exposure(
         setting_key=facts["setting_key"],
         trials=trials,
     )
+
+
+def get_centering_exposure(
+    context: ControlContext,
+    destination: Any,
+    time: TimeInput | None = None,
+    filter_name: str | None = None,
+) -> CenteringExposure:
+    """Choose the centering exposure for a slew destination.
+
+    The work behind ``control.mount.get_centering_exposure``: it turns the
+    destination into a sky position and the time into seconds, then calls
+    `choose_centering_exposure`.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the equipment, the science library and the catalog.
+    destination : `Target`, `StellarObject` or `SkyPosition`
+        Where the telescope will point.
+    time : `TimeInput`, optional
+        When the frame will be taken. Now when omitted.
+    filter_name : `str`, optional
+        Use this filter's measurements.
+
+    Returns
+    -------
+    result : `CenteringExposure`
+        See `choose_centering_exposure`.
+    """
+    from astrometricslib.arguments import to_epoch_seconds
+    from wayfindinglib.tasks.control_tasks import hardware_operations
+
+    position = hardware_operations.resolve_destination(context, destination)
+    epoch_seconds = None if time is None else to_epoch_seconds(time)
+    return choose_centering_exposure(context, position, epoch_seconds=epoch_seconds, filter_name=filter_name)

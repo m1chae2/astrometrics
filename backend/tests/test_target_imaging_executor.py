@@ -5,7 +5,7 @@ the wayfinding library. These tests use a real `ObservationPlanning` over
 a temporary store and a stand-in execution, and check the RPC methods
 keep the shape the app shows: added sequences appear as queued items,
 removing, reordering and changing work on the session's queue, and
-starting runs `advance_session` on a thread.
+starting runs `execution.run` on a thread.
 """
 
 import threading
@@ -83,22 +83,22 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     planning = ObservationPlanning(config, astrometrics=astrometrics)
     runs: list[Any] = []
 
-    def advance_session(session_id: str, stop: threading.Event) -> None:
+    def run(session: Any, stop: threading.Event) -> None:
         """Record the run.
 
         Parameters
         ----------
-        session_id : `str`
+        session : `ObservationSession`
             The session.
         stop : `threading.Event`
             The stop signal.
         """
-        runs.append(session_id)
+        runs.append(session.id)
 
     service = TargetImagingExecutor(
         wayfinder=SimpleNamespace(
             planning=planning,
-            execution=SimpleNamespace(advance_session=advance_session),
+            execution=SimpleNamespace(run=run),
             astrometrics=astrometrics,
         )
     )
@@ -154,7 +154,7 @@ def test_remove_reorder_and_modify_edit_the_queue(executor: TargetImagingExecuto
 
 
 def test_begin_runs_the_session_queue_on_a_thread(executor: TargetImagingExecutor) -> None:
-    """Starting the sequencer runs advance_session for its session."""
+    """Starting the sequencer runs execution.run for its session."""
     executor.begin_imaging()
     assert executor.runs == []
 
@@ -181,8 +181,8 @@ def test_pause_stops_the_loop_and_abort_also_closes_it(executor: TargetImagingEx
     """Pause raises the stop signal; abort also aborts the running session."""
     aborted: list[tuple[str, str]] = []
     execution = executor._wayfinder.execution
-    execution.abort_session = lambda session_id, reason: aborted.append((session_id, reason))
-    executor._running_session_id = "night-1"
+    execution.abort = lambda session, reason: aborted.append((session.id, reason))
+    executor._running_session = SimpleNamespace(id="night-1")
 
     executor.pause_imaging()
     assert executor._stop.is_set()

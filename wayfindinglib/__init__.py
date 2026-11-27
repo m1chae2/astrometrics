@@ -31,20 +31,24 @@ What to import from where
 The package root holds `Wayfinder`, the four sub-API classes
 (`ObservatoryControl`, `ObservationPlanning`, `ObservationExecution` and
 `ObservationReview`), the two records a script builds or reads most
-(`ObservationSession` and `ObservationPackage`), `FrameEndDetector`, which
-says when a camera frame has ended from the camera status text, and the
-models the planning methods take as input (`ExposureRequest`,
-`DitherConfig`, `Framing`, `ChecklistItem`, `QueueRequest`, `MosaicPanel`
-and `HorizonZone`).
-Three public modules hold the rest:
+(`ObservationSession` and `ObservationPackage`), and the models the public
+methods take as input: for planning `ExposureRequest`, `DitherConfig`,
+`Framing`, `ChecklistItem`, `QueueRequest`, `MosaicPanel` and `HorizonZone`,
+and for control `FocusModel` and `GuiderCalibration`.
+Four public modules hold the rest:
 
 - `wayfindinglib.exceptions`: the errors that belong to this library. The
   shared categories (`NotFoundError`, `InvalidArgumentError` and the rest)
   come from `astrometricslib.exceptions`.
 - `wayfindinglib.reports`: the states and levels that results report
-  (`RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`).
+  (`RunState`, `PackageStatus`, `DepthGoalState` and `DepthLevel`), and the
+  observatory's capabilities with their delegation states
+  (`ObservatoryCapability` and `DelegationState`).
 - `wayfindinglib.logs`: readers for the Ekos analyze log (`read_ekos_captures`,
-  `ekos_utc_offset_hours` and the `SavedCapture` record they return).
+  `ekos_utc_offset_hours` and the `SavedCapture` record they return), and
+  `FrameEndDetector`, which says when a camera frame has ended from the
+  camera status text.
+- `wayfindinglib.drivers`: the PHD2 client.
 
 Everything else is private. The result models that the calls return are
 private too: use their fields, as listed on the API reference page, and do
@@ -87,6 +91,8 @@ if TYPE_CHECKING:
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
     from wayfindinglib.api.review import ObservationReview
+    from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
+    from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
     from wayfindinglib.models.planning.framing import Framing
     from wayfindinglib.models.planning.mosaic import MosaicPanel
     from wayfindinglib.models.planning.observation_package import (
@@ -100,7 +106,6 @@ if TYPE_CHECKING:
         ObservationSession,
         QueueRequest,
     )
-    from wayfindinglib.tasks.control_tasks.frame_end_detection import FrameEndDetector
 
 try:
     # Single source of truth is pyproject.toml; both libraries ship from the
@@ -116,12 +121,13 @@ _LAZY_EXPORTS = {
     "ObservationReview": "wayfindinglib.api.review",
     "ObservationPackage": "wayfindinglib.models.planning.observation_package",
     "ObservationSession": "wayfindinglib.models.session.observation_session",
-    "FrameEndDetector": "wayfindinglib.tasks.control_tasks.frame_end_detection",
-    # The input models of the planning methods.
+    # The input models of the planning and control methods.
     "ChecklistItem": "wayfindinglib.models.session.observation_session",
     "DitherConfig": "wayfindinglib.models.planning.observation_package",
     "ExposureRequest": "wayfindinglib.models.planning.observation_package",
+    "FocusModel": "wayfindinglib.models.equipment_and_site.focus_model",
     "Framing": "wayfindinglib.models.planning.framing",
+    "GuiderCalibration": "wayfindinglib.models.equipment_and_site.guider_calibration",
     "HorizonZone": "wayfindinglib.models.planning.visibility",
     "MosaicPanel": "wayfindinglib.models.planning.mosaic",
     "QueueRequest": "wayfindinglib.models.session.observation_session",
@@ -148,8 +154,16 @@ def __getattr__(name: str) -> object:
     ------
     AttributeError
         If `name` is not an export of this package.
+
+    Notes
+    -----
+    A name the rename table lists raises `ImportError` that says where it
+    moved.
     """
     if name not in _LAZY_EXPORTS:
+        from wayfindinglib._internal.renames import refuse_moved_root_name
+
+        refuse_moved_root_name(__name__, name)
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)
 
@@ -190,14 +204,16 @@ class Wayfinder(MovedNames):
             When omitted, the simulator is used if ``ASTROMETRICS_TESTING``
             is set in the environment.
         separate_process : `bool`, optional
-            Run the INDI session in a process of its own. The library
+            An option for programs, such as the backend, rather than for a
+            script. Run the INDI session in a process of its own. The library
             starts it on the first call that needs INDI, and
             ``control.close()`` stops it. A program with a busy event loop,
             such as the backend, should ask for it: the INDI client
             library holds Python's global lock during its blocking calls
             and would freeze everything else. `False` by default.
         open_port_forwards : `bool`, optional
-            Allow live SSH port forwards, such as the one to PHD2 on the
+            An option for programs, like `separate_process`. Allow live SSH
+            port forwards, such as the one to PHD2 on the
             observatory computer. `False` by default: each process would
             otherwise open its own SSH connection, and the backend is the
             one process that should hold live links.

@@ -2,11 +2,11 @@
 
 Description: The guiding itself is in the wayfinding library (see
 `wayfindinglib/tasks/control_tasks/test/test_live_guiding.py`). The
-backend only runs `control.guiding.run_loop` on a thread, stops it, and
-hands on the live status. The tests use a stand-in `control.guiding`.
+backend only starts and stops the library's loop (`control.guiding.start`
+and `stop`) and hands on the live status. The tests use a stand-in
+`control.guiding`.
 """
 
-import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,7 +18,7 @@ from wayfindinglib._internal.control import LiveGuidingStatus
 
 
 class _Guiding:
-    """A stand-in `control.guiding` whose loop runs until stopped."""
+    """A stand-in `control.guiding` with a loop the library would own."""
 
     def __init__(self, refuse: bool = False, monitor_mode: bool = False) -> None:
         """Start idle; `refuse` blocks a start, `monitor_mode` a stop."""
@@ -27,22 +27,22 @@ class _Guiding:
         self.monitor_mode = monitor_mode
         self.arguments: dict[str, Any] = {}
 
-    def run_loop(self, stop: threading.Event, exposure_seconds: float | None, gain: float | None) -> None:
-        """Run until `stop` is set, or refuse.
+    def start(self, exposure_s: float | None = None, gain: float | None = None) -> None:
+        """Start the loop, or refuse as the library does.
 
         Raises
         ------
         ConflictError
-            If this stand-in refuses to start.
+            If this stand-in refuses to start, or the loop already runs.
         """
         if self.refuse:
             raise ConflictError("The mount is not tracking.")
-        self.arguments = {"exposure_seconds": exposure_seconds, "gain": gain}
+        if self.running:
+            raise ConflictError("This app's guide loop is already running.")
+        self.arguments = {"exposure_s": exposure_s, "gain": gain}
         self.running = True
-        stop.wait(timeout=5.0)
-        self.running = False
 
-    def stop_loop(self, stop: threading.Event) -> None:
+    def stop(self) -> None:
         """End the loop, as the library does, unless in monitor mode.
 
         Raises
@@ -52,9 +52,9 @@ class _Guiding:
         """
         if self.monitor_mode:
             raise PermissionDeniedError("monitor mode")
-        stop.set()
+        self.running = False
 
-    def status(self, include: list[str]) -> SimpleNamespace:
+    def get_status(self, include: list[str]) -> SimpleNamespace:
         """Report whether the loop runs.
 
         Returns
@@ -75,12 +75,12 @@ def test_stop_passes_on_the_librarys_refusal_in_monitor_mode() -> None:
 
 
 def test_start_runs_the_library_loop_and_stop_ends_it() -> None:
-    """Start waits for the loop, refuses a second run; stop ends it."""
+    """Start runs the loop, a second start is refused; stop ends it."""
     guiding = _Guiding()
     service = GuidingService(observatory_api=SimpleNamespace(guiding=guiding))
 
     assert service.start_guiding(exposure=2.0, gain=5) is True
-    assert guiding.arguments == {"exposure_seconds": 2.0, "gain": 5}
+    assert guiding.arguments == {"exposure_s": 2.0, "gain": 5}
     assert service.start_guiding() is False
     assert service.get_status()["is_guiding"] is True
 

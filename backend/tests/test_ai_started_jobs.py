@@ -170,7 +170,7 @@ class _Remote:
         self.frame_calls: list[dict[str, Any]] = []
         self.log_calls: list[dict[str, Any]] = []
 
-    def sync_frames(self, target: str, **kwargs: Any) -> SimpleNamespace:
+    def sync_frames(self, target: Any = None, **kwargs: Any) -> SimpleNamespace:
         """Record the call.
 
         Returns
@@ -178,7 +178,7 @@ class _Remote:
         result : `types.SimpleNamespace`
             A plan or a successful sync with no measurements.
         """
-        self.frame_calls.append({"target": target, **kwargs})
+        self.frame_calls.append({"target": getattr(target, "id", target), **kwargs})
         return SimpleNamespace(model_dump=lambda mode="python": {"to_transfer": 3}, measurements=None)
 
     def sync_logs(self, **kwargs: Any) -> SimpleNamespace:
@@ -205,7 +205,7 @@ def test_a_frame_sync_records_a_remote_sync_job() -> None:
     assert service.start_sync("M 13") == {"started": True, "target_id": "M 13"}
     thread_management._syncing["M 13"].join(timeout=5.0)
 
-    assert remote.frame_calls[0] == {"target": "M 13", "on_copied": remote.frame_calls[0]["on_copied"]}
+    assert remote.frame_calls[0] == {"target": "M 13", "dry_run": False}
 
 
 def test_a_frame_sync_dry_run_gives_the_plan_and_starts_nothing() -> None:

@@ -100,7 +100,7 @@ def run_observation_session_recorder() -> None:
         recorder = wayfinder.execution.create_recorder(
             phd2_host=args.phd2_host,
             phd2_port=args.phd2_port,
-            snapshot_interval_seconds=args.snapshot_interval_seconds,
+            snapshot_interval_s=args.snapshot_interval_seconds,
         )
 
         if args.dry_run:

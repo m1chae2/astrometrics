@@ -10,7 +10,7 @@ Nothing is stored. Each method is a thin wrapper of one owner function in
 `wayfindinglib.tasks.planning_tasks.sky_answers`.
 """
 
-from astrometricslib import ObservatoryConfiguration, StellarObject, Target
+from astrometricslib import ObservatoryConfiguration, SkyPosition, StellarObject, Target
 from astrometricslib.arguments import TimeInput
 from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.models.planning.mosaic import MosaicPanel
@@ -36,7 +36,7 @@ class PlanningSky(MovedNames):
 
     def get_visibility(
         self,
-        objects: list[Target | StellarObject] | None = None,
+        objects: list[Target | StellarObject | SkyPosition] | None = None,
         *,
         time: TimeInput | None = None,
         until: TimeInput | None = None,
@@ -62,11 +62,10 @@ class PlanningSky(MovedNames):
 
         Parameters
         ----------
-        objects : `list` [`Target` or `StellarObject`], optional
+        objects : `list` [`Target`, `StellarObject` or `SkyPosition`], optional
             The objects. ``astrometrics.targets.resolve(name)`` turns a name
-            into one; a `StellarObject` built with an id, ``ra`` and ``dec``
-            stands for any point. Every library target, highest first, when
-            omitted.
+            into one; a `SkyPosition` stands for any point. Every library
+            target, highest first, when omitted.
         time : `str`, `datetime` or `Time`, optional
             The moment, or the start of the span. Now when omitted. A time
             without a zone is UTC.
@@ -92,7 +91,8 @@ class PlanningSky(MovedNames):
 
         Notes
         -----
-        Raises `InvalidArgumentError` if an object is not a target or star, a
+        Raises `InvalidArgumentError` if an object is not a target, star or
+        position, a
         time cannot be read, a span-only argument comes without ``until``, or
         the span is too long or too crowded.
         """
@@ -149,7 +149,7 @@ class PlanningSky(MovedNames):
 
     def get_panels(
         self,
-        center: Target | StellarObject,
+        center: Target | StellarObject | SkyPosition,
         rows: int = 1,
         cols: int = 1,
         *,
@@ -167,8 +167,8 @@ class PlanningSky(MovedNames):
 
         Parameters
         ----------
-        center : `Target` or `StellarObject`
-            The object at the grid center.
+        center : `Target`, `StellarObject` or `SkyPosition`
+            The object or position at the grid center.
         rows : `int`, optional
             Number of panel rows. Defaults to 1.
         cols : `int`, optional

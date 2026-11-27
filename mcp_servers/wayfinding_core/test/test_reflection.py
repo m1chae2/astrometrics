@@ -14,8 +14,8 @@ pytestmark = pytest.mark.anyio
 def test_the_wayfinder_sub_apis_are_reflected(registry: ToolRegistry) -> None:
     """Tools of the control children and planning are registered."""
     names = set(registry.tools)
-    assert "observatory_mount_status" in names
-    assert "observatory_remote_list" in names
+    assert "observatory_mount_get_status" in names
+    assert "observatory_remote_query_folders" in names
     assert not any(name.startswith("observatory_get_") for name in names)
     assert "planning_sky_get_visibility" in names
     assert "planning_sky_get_panels" in names

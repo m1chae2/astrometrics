@@ -16,7 +16,7 @@ points is off by some arcminutes. Centering closes that gap in a loop:
 
 Each iteration is recorded as an alignment attempt in the log database,
 so `review.alignment.query` can show it. A call to
-`control.mount.abort_motion` stops the loop before its next step.
+`control.mount.stop` stops the loop before its next step.
 """
 
 from __future__ import annotations
@@ -26,18 +26,24 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.exceptions import AstrometricsError, PlateSolveFailedError
+from astrometricslib import SkyPosition
+from astrometricslib.exceptions import (
+    AstrometricsError,
+    HardwareError,
+    InvalidArgumentError,
+    PlateSolveFailedError,
+)
 from wayfindinglib.models.session.correction_result import PointingCorrection
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations
 from wayfindinglib.tasks.control_tasks.centering_exposure import choose_centering_exposure
 from wayfindinglib.tasks.control_tasks.imaging_capture import READOUT_SECONDS
 from wayfindinglib.tasks.control_tasks.pointing_correction import compute_pointing_correction
 
 if TYPE_CHECKING:
+    from astrometricslib import StellarObject, Target
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["SETTLE_SECONDS", "center_on"]
+__all__ = ["SETTLE_SECONDS", "center_on", "slew_to"]
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +203,7 @@ def center_on(
     -------
     centered : `bool`
         `True` once a solve is within the tolerance; `False` if the
-        iterations ran out or `control.mount.abort_motion` stopped the
-        loop.
+        iterations ran out or `control.mount.stop` stopped the loop.
     """
     config = context.correction_config
     if tolerance_arcsec is not None:
@@ -251,3 +256,60 @@ def center_on(
         hardware_operations.slew(context, position)
     logger.warning("Centering did not converge in %s iterations", iterations)
     return False
+
+
+def slew_to(
+    context: ControlContext,
+    destination: Target | StellarObject | SkyPosition,
+    center: bool = False,
+    tolerance_arcsec: float | None = None,
+    max_iterations: int | None = None,
+) -> None:
+    """Slew the mount to a destination, and center it by plate solving.
+
+    The work behind ``control.mount.slew``.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the drivers, the policy and the target catalog.
+    destination : `Target`, `StellarObject` or `SkyPosition`
+        Where to point, in ICRS (J2000).
+    center : `bool`, optional
+        Refine the pointing by plate solving after the slew (`center_on`).
+    tolerance_arcsec : `float`, optional
+        Largest pointing error that counts as centered. Only with
+        ``center=True``.
+    max_iterations : `int`, optional
+        Most solve-and-correct rounds. Only with ``center=True``.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `tolerance_arcsec` or `max_iterations` is given without
+        ``center=True``.
+    HardwareError
+        If centering did not reach the tolerance in its rounds. A centering
+        run stopped by ``control.mount.stop`` ends without an error.
+
+    Notes
+    -----
+    The slew itself raises `PermissionDeniedError` in monitor mode and
+    `HardwareError` if the mount refuses it.
+    """
+    position = hardware_operations.resolve_destination(context, destination)
+    if not center:
+        if tolerance_arcsec is not None or max_iterations is not None:
+            raise InvalidArgumentError("tolerance_arcsec and max_iterations are used only with center=True.")
+        hardware_operations.slew(context, position)
+        return
+    target_name = destination if isinstance(destination, str) else getattr(destination, "id", None)
+    centered = center_on(
+        context,
+        position,
+        tolerance_arcsec=tolerance_arcsec,
+        max_iterations=max_iterations,
+        target_name=target_name,
+    )
+    if not centered and not context.motion_stop.is_set():
+        raise HardwareError("Centering did not reach the pointing tolerance.")

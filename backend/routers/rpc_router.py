@@ -90,28 +90,29 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "guiding:start": ("guiding_service", "start_guiding"),
     "guiding:stop": ("guiding_service", "stop_guiding"),
     "guiding:capture_frame": ("guiding_service", "capture_frame"),
-    # Telescope mount, focuser, filter wheel and raw INDI properties
-    "telescope:connect": ("wayfinder.control.equipment", "connect"),
-    "telescope:abort_motion": ("wayfinder.control.mount", "abort_motion"),
-    "telescope:apply_promotion_decision": ("wayfinder.control.safety", "apply_promotion_decision"),
-    "telescope:focus_move": ("wayfinder.control.imaging", "focus_move"),
+    # Telescope mount, focuser, filter wheel and raw INDI properties. The
+    # service answers True for a command the library accepted.
+    "telescope:connect": ("telescope_service", "connect"),
+    "telescope:abort_motion": ("telescope_service", "abort_motion"),
+    "telescope:apply_promotion_decision": ("telescope_service", "apply_promotion_decision"),
+    "telescope:focus_move": ("telescope_service", "focus_move"),
     "telescope:get_focuser_position": ("telescope_service", "get_focuser_position"),
-    "telescope:manual_move": ("wayfinder.control.mount", "manual_move"),
-    "telescope:park": ("wayfinder.control.mount", "park"),
-    "telescope:set_filter": ("wayfinder.control.imaging", "set_filter"),
-    "telescope:set_slew_rate": ("wayfinder.control.mount", "set_slew_rate"),
-    "telescope:set_tracking": ("wayfinder.control.mount", "set_tracking"),
+    "telescope:manual_move": ("telescope_service", "manual_move"),
+    "telescope:park": ("telescope_service", "park_telescope"),
+    "telescope:set_filter": ("telescope_service", "set_filter"),
+    "telescope:set_slew_rate": ("telescope_service", "set_slew_rate"),
+    "telescope:set_tracking": ("telescope_service", "set_tracking"),
     # The UI sends RA in hours; the service sends degrees.
     "telescope:slew_coordinates": ("telescope_service", "slew_coordinates"),
     "telescope:slew_target": ("telescope_service", "slew_target"),
-    # The service adds the guiding history and alignment state to
-    # `control.mount.status`.
+    # The service writes the mount position as text and adds the guiding
+    # history and alignment state to `control.mount.get_status`.
     "telescope:status": ("telescope_service", "get_status"),
     # Frame syncs and their running state belong to the backend's
     # SyncService, which takes the UI's `object_id`.
     "telescope:sync": ("sync_service", "start_sync"),
     "telescope:is_syncing": ("sync_service", "is_syncing"),
-    "telescope:unpark": ("wayfinder.control.mount", "unpark"),
+    "telescope:unpark": ("telescope_service", "unpark_telescope"),
     "telescope:indi_devices": ("indi_diagnostics_service", "get_devices"),
     "telescope:indi_properties": ("indi_diagnostics_service", "get_properties"),
     "telescope:set_indi_property": ("indi_diagnostics_service", "set_property"),
@@ -135,8 +136,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:set_source": ("observatory_source_service", "set_source"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
-    "observatory:record_guider_calibration": ("wayfinder.control.guiding", "record_calibration"),
-    "observatory:record_focus_model": ("wayfinder.control.imaging", "record_focus_model"),
+    "observatory:record_guider_calibration": ("equipment_service", "record_guider_calibration"),
+    "observatory:record_focus_model": ("equipment_service", "record_focus_model"),
     # Ingestion of new frames
     "ingestion:start": ("ingestion_service", "start_ingestion_by_args"),
     "ingestion:status": ("ingestion_service", "get_ingestion_status"),

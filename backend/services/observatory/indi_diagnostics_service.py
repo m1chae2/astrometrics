@@ -1,14 +1,15 @@
 """Backend service for raw INDI device and property inspection.
 
 Serves the three raw INDI actions that `IndiStatusPanel` calls, through
-`control.equipment`: `status(include=["indi_devices"])`,
-`status(include=["indi_properties"], device_name=...)` and
-`set_device_property`. Each returns an empty answer when the active mount
-does not use INDI.
+`control.equipment`: `get_status(include=["indi_devices"])`,
+`get_status(include=["indi_properties"], device_name=...)` and
+`set_device_property`. Each returns an empty answer (or `False`) when the
+active mount does not use INDI.
 """
 
 from typing import Any
 
+from astrometricslib.exceptions import ConfigurationError, NotFoundError
 from wayfindinglib import ObservatoryControl
 
 
@@ -28,7 +29,7 @@ class IndiDiagnosticsService:
             Names of the currently connected INDI devices, or an empty
             list if the active mount protocol isn't ``"indi"``.
         """
-        return self._observatory.equipment.status(include=["indi_devices"]).indi_devices or []
+        return self._observatory.equipment.get_status(include=["indi_devices"]).indi_devices or []
 
     def get_properties(self, device_name: str) -> dict[str, Any]:
         """List all registered properties for an INDI device.
@@ -39,7 +40,7 @@ class IndiDiagnosticsService:
             Mapping of property name to its details for the device, or
             an empty dict if the active mount protocol isn't ``"indi"``.
         """
-        status = self._observatory.equipment.status(include=["indi_properties"], device_name=device_name)
+        status = self._observatory.equipment.get_status(include=["indi_properties"], device_name=device_name)
         return status.indi_properties or {}
 
     def set_property(
@@ -51,6 +52,11 @@ class IndiDiagnosticsService:
         -------
         success : `bool`
             `True` if the property element was updated, `False` if the
-            active mount protocol isn't ``"indi"``.
+            active mount protocol isn't ``"indi"`` or the device, property
+            or element is not there.
         """
-        return self._observatory.equipment.set_device_property(device_name, property_name, value, element)
+        try:
+            self._observatory.equipment.set_device_property(device_name, property_name, value, element)
+        except ConfigurationError, NotFoundError:
+            return False
+        return True

@@ -1,29 +1,25 @@
 """Purpose: `ObservationExecution`, the entry point for running a session.
 
 Description: `Wayfinder.execution` is an `ObservationExecution`. It
-advances a session's queue (one cycle, or until it is done), runs the
-meridian flip, recovers from device faults and lost guide stars, records
-telemetry, and reconciles a session after the night.
+runs a session's queue (one cycle, or until it is done), aborts a
+session, reconciles it after the night, and builds the recorder that
+saves a night's telemetry. The meridian flip, the recovery from device
+faults and lost guide stars are private steps of a run.
 Callers never import `wayfindinglib.tasks.execution_tasks` directly.
 
 Execution is the one part of the library that uses both of the others:
-it runs what planning wrote, through the hardware `control` drives. A
-caller may hand in the bundles of steps that touch hardware
-(`SessionRunnerDependencies`, `MeridianFlipSteps`), the same way
-`control.safety._execute_safe_state` takes its steps. For an imaging
-queue, `advance_session` builds its steps from `control` itself.
+it runs what planning wrote, through the hardware `control` drives. The
+steps of an imaging queue are built on the work behind `control`
+(`tasks.execution_tasks.imaging_queue`).
 """
 
 import threading
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AppConfiguration, Astrometrics
-from astrometricslib.exceptions import ConfigurationError, NotFoundError
+from astrometricslib.exceptions import ConfigurationError
 from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.drivers.butler import DiskButler
-from wayfindinglib.drivers.phd2.phd2_client import DEFAULT_PHD2_PORT, PHD2Client
-from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 from wayfindinglib.models.policy.recovery import FaultRecord, RecoveryPolicy
 from wayfindinglib.models.session.guide_star_loss import GuideStarLossEvent
@@ -32,16 +28,11 @@ from wayfindinglib.models.session.observation_session import ObservationSession
 from wayfindinglib.tasks.execution_tasks.fault_recovery import recover_fault
 from wayfindinglib.tasks.execution_tasks.guide_star_loss_recovery import attempt_guide_star_recovery
 from wayfindinglib.tasks.execution_tasks.meridian_flip import MeridianFlipSteps, execute_meridian_flip
-from wayfindinglib.tasks.execution_tasks.post_session_reconciliation import reconcile_session
 from wayfindinglib.tasks.execution_tasks.session_recorder import ObservationSessionRecorder
-from wayfindinglib.tasks.execution_tasks.session_runner import (
-    SessionRunnerDependencies,
-    abort_session,
-    advance_session,
-)
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control import ObservatoryControl
+    from wayfindinglib.api.control.context import ControlContext
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -66,8 +57,8 @@ class ObservationExecution(MovedNames):
         The science library handle shared with the rest of the
         `Wayfinder`. Built over `config` on first use when omitted.
     control : `ObservatoryControl`, optional
-        The `Wayfinder`'s hardware sub-API. `advance_session` uses it to
-        build the imaging steps when none are handed in.
+        The `Wayfinder`'s hardware sub-API. `run` and `create_recorder`
+        use its context.
     """
 
     def __init__(
@@ -104,38 +95,27 @@ class ObservationExecution(MovedNames):
             self._shared_astrometrics = Astrometrics(self._config)
         return self._shared_astrometrics
 
-    def _session(self, session: str | ObservationSession) -> ObservationSession:
-        """Turn a session id into the recorded session it names.
-
-        Parameters
-        ----------
-        session : `str` or `ObservationSession`
-            A session id, or a session, which is returned as it is.
+    def _control_context(self) -> ControlContext:
+        """Return the shared control context, or refuse without `control`.
 
         Returns
         -------
-        session : `ObservationSession`
-            The session.
+        context : `ControlContext`
+            The context of the `Wayfinder`'s `control`.
 
         Raises
         ------
-        NotFoundError
-            If no recorded session has that id.
+        ConfigurationError
+            If this object was built without `control`.
         """
-        if isinstance(session, ObservationSession):
-            return session
-        found = self._butler.get("observation_session", {"session_id": session})
-        if found is None:
-            raise NotFoundError(f"No observation session {session!r}.", details={"session_id": session})
-        return found
+        if self._control is None:
+            raise ConfigurationError("Execution needs the Wayfinder's control, which drives the hardware.")
+        return self._control._context
 
     # -- Queue advancement -------------------------------------------------
 
-    def advance_session(
-        self,
-        session: str | ObservationSession,
-        deps: SessionRunnerDependencies | None = None,
-        stop: threading.Event | None = None,
+    def run(
+        self, session: ObservationSession, stop: threading.Event | None = None
     ) -> ObservationSession | None:
         """Run a session's queue: one cycle, or cycle after cycle.
 
@@ -143,14 +123,13 @@ class ObservationExecution(MovedNames):
         start time has come, sends (or only records, per the delegation
         policy) its slew, captures its frames, and saves the session.
 
+        Owner:
+            wayfindinglib.tasks.execution_tasks.session_execution.run_session
+
         Parameters
         ----------
-        session : `str` or `ObservationSession`
-            The session, by id or as a session.
-        deps : `SessionRunnerDependencies`, optional
-            The steps that touch hardware. When omitted, the imaging steps
-            are built from `control`: a safety assessment, a slew to the
-            entry's target and a capture of its exposures.
+        session : `ObservationSession`
+            The session.
         stop : `threading.Event`, optional
             Given, keep running cycles until the queue has nothing left to
             run, the session ends or is suspended, or `stop` is set. This
@@ -162,60 +141,37 @@ class ObservationExecution(MovedNames):
             The session after the last cycle (`None` if `stop` was already
             set).
 
-        Raises
-        ------
-        ConfigurationError
-            If `deps` is omitted and this object was built without
-            `control`.
+        Notes
+        -----
+        Raises `ConfigurationError` if this object was built without
+        `control`.
         """
-        from wayfindinglib.tasks.execution_tasks.queue_runner import run_queue
+        from wayfindinglib.tasks.execution_tasks.session_execution import run_session
 
-        if deps is None:
-            from astrometricslib.exceptions import ConfigurationError
-            from wayfindinglib.tasks.execution_tasks.imaging_queue import imaging_dependencies
+        return run_session(self._control_context(), self._butler, session, stop)
 
-            if self._control is None:
-                raise ConfigurationError("advance_session needs control to build the imaging steps.")
-            deps = imaging_dependencies(self._control, self._butler)
-        session_id = session if isinstance(session, str) else session.id
+    def abort(self, session: ObservationSession, reason: str = "") -> ObservationSession:
+        """Abort a session: skip its pending entries, close it and save it.
 
-        def advance_once() -> ObservationSession:
-            """Run one cycle on the latest saved copy of the session.
-
-            Returns
-            -------
-            session : `ObservationSession`
-                The advanced session.
-            """
-            return advance_session(self._session(session_id), deps)
-
-        if stop is None:
-            return advance_session(self._session(session), deps)
-        return run_queue(advance_once, stop)
-
-    def abort_session(
-        self, session: str | ObservationSession, reason: str, now: datetime | None = None
-    ) -> ObservationSession:
-        """Abort a session: skip its pending entries, close it and record it.
+        Owner:
+            wayfindinglib.tasks.execution_tasks.session_execution.abort_and_save
 
         Parameters
         ----------
-        session : `str` or `ObservationSession`
-            The session, by id or as a session.
-        reason : `str`
+        session : `ObservationSession`
+            The session.
+        reason : `str`, optional
             Why it was aborted, recorded on the session and on each
             skipped entry.
-        now : `datetime`, optional
-            When it was closed. Defaults to now.
 
         Returns
         -------
         session : `ObservationSession`
-            The aborted, recorded session.
+            The aborted, saved session.
         """
-        aborted = abort_session(self._session(session), reason, now or datetime.now(UTC))
-        self._butler.put_session_from_execution(aborted)
-        return aborted
+        from wayfindinglib.tasks.execution_tasks.session_execution import abort_and_save
+
+        return abort_and_save(self._butler, session, reason)
 
     # -- Meridian flip -------------------------------------------------------
 
@@ -298,69 +254,68 @@ class ObservationExecution(MovedNames):
 
     def create_recorder(
         self,
-        *,
-        phd2_host: str = "localhost",
+        phd2_host: str | None = None,
         phd2_port: int | None = None,
-        snapshot_interval_seconds: int = 300,
-        guiding_service: Any | None = None,
+        snapshot_interval_s: int = 300,
     ) -> ObservationSessionRecorder:
-        """Build an `ObservationSessionRecorder` bound to this DB.
+        """Build the recorder that saves guiding and weather telemetry.
 
-        The recorder reads the INDI session of the `Wayfinder`'s `control`.
-        Unless the caller passes a guiding service, it opens its own
-        connection to the PHD2 event server (the guiding program's data
-        feed) at `phd2_host` and `phd2_port`.
+        The recorder reads the INDI session of the `Wayfinder`'s `control`
+        and opens its own connection to the PHD2 event server (the guiding
+        program's data feed).
+
+        Owner:
+            wayfindinglib.tasks.execution_tasks.session_execution.build_recorder
 
         Parameters
         ----------
         phd2_host : `str`, optional
-            The computer PHD2 runs on. Ignored when `guiding_service` is
-            given.
+            The computer PHD2 runs on. The configured PHD2 location when
+            omitted.
         phd2_port : `int`, optional
             The PHD2 event-server port. PHD2's standard port, 4400, if not
-            given. Ignored when `guiding_service` is given.
-        snapshot_interval_seconds : `int`, optional
+            given.
+        snapshot_interval_s : `int`, optional
             How often a snapshot is saved, in seconds.
-        guiding_service : `Any`, optional
-            An existing PHD2 guiding service whose telemetry is recorded,
-            such as the one the backend already runs. A new connection is
-            built from `phd2_host` and `phd2_port` if not given.
 
         Returns
         -------
         recorder : `ObservationSessionRecorder`
-            The newly constructed recorder.
+            The recorder, not yet running.
 
-        Raises
-        ------
-        ConfigurationError
-            If this object was built without the `Wayfinder`'s `control`.
+        Notes
+        -----
+        Raises `ConfigurationError` if this object was built without
+        `control`.
         """
-        if self._control is None:
-            raise ConfigurationError(
-                "create_recorder needs the Wayfinder's control, which holds the INDI session."
-            )
-        if guiding_service is None:
-            guiding_service = PHD2GuidingService(
-                PHD2Client(host=phd2_host, port=DEFAULT_PHD2_PORT if phd2_port is None else phd2_port)
-            )
-        return ObservationSessionRecorder(
-            guiding_service, self._control._driver, self._butler, snapshot_interval_seconds
+        from wayfindinglib.tasks.execution_tasks.session_execution import build_recorder
+
+        return build_recorder(
+            self._control_context(),
+            self._butler,
+            phd2_host=phd2_host,
+            phd2_port=phd2_port,
+            snapshot_interval_s=snapshot_interval_s,
         )
 
     # -- Post-session reconciliation -----------------------------------------
 
-    def reconcile_session(self, session: str | ObservationSession) -> ObservationSession:
+    def reconcile(self, session: ObservationSession) -> ObservationSession:
         """Run both post-session reconciliations, recording the results.
+
+        Owner:
+            wayfindinglib.tasks.execution_tasks.post_session_reconciliation.reconcile_session
 
         Parameters
         ----------
-        session : `str` or `ObservationSession`
-            The session, by id or as a session.
+        session : `ObservationSession`
+            The session, which must have ended.
 
         Returns
         -------
         session : `ObservationSession`
             The session after reconciliation, with results recorded.
         """
-        return reconcile_session(self._butler, self._session(session), self._astrometrics)
+        from wayfindinglib.tasks.execution_tasks.post_session_reconciliation import reconcile_session
+
+        return reconcile_session(self._butler, session, self._astrometrics)

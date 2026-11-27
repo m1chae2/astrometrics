@@ -157,7 +157,13 @@ class ControlContext:
         """Each target's frames in their nights, for the list of nights."""
         self._indi_diagnostics: IndiDiagnostics | None = None
         self.motion_stop = threading.Event()
-        """Set by `control.mount.abort_motion` to stop a centering loop."""
+        """Set by `control.mount.stop` to stop a centering loop."""
+        self.guide_loop_lock = threading.Lock()
+        """Lets one caller at a time start or stop this app's guide loop."""
+        self.guide_loop_thread: threading.Thread | None = None
+        """The thread of this app's guide loop, while one runs."""
+        self.guide_loop_stop: threading.Event | None = None
+        """Set to end the guide loop that `guide_loop_thread` runs."""
 
     # -- Shared handles --------------------------------------------------
 
@@ -631,8 +637,10 @@ class ControlContext:
 
         Builds nothing: a driver that was never asked for has nothing
         running. This includes the INDI worker process, if one was
-        started. Safe to call more than once.
+        started, and this app's guide loop. Safe to call more than once.
         """
+        if self.guide_loop_stop is not None:
+            self.guide_loop_stop.set()
         with self._guiding_driver_lock:
             guiding_driver = self._guiding_driver
             port_forward, self._phd2_port_forward = self._phd2_port_forward, None

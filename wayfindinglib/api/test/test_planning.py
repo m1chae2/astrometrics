@@ -454,8 +454,12 @@ def test_a_mosaic_center_is_read_as_degrees_not_hours(isolated_butler: DiskButle
     assert panel.dec_deg == pytest.approx(41.269, abs=1e-6)
     with pytest.raises(InvalidArgumentError, match="overlap_pct"):
         planning.sky.get_panels(_point(), 2, 2, overlap_pct=100.0)
-    with pytest.raises(InvalidArgumentError, match="Target or a StellarObject"):
+    with pytest.raises(InvalidArgumentError, match="a StellarObject or a SkyPosition"):
         planning.sky.get_panels("M 31")
+    from astrometricslib import SkyPosition
+
+    (position_panel,) = planning.sky.get_panels(SkyPosition(ra_deg=10.684, dec_deg=41.269))
+    assert position_panel.ra_deg == pytest.approx(10.684, abs=1e-6)
 
 
 def test_create_mosaic_records_one_package_per_panel(isolated_butler: DiskButler) -> None:

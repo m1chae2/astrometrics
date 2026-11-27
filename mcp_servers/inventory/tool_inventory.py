@@ -161,7 +161,7 @@ def _rule(pattern: str, tool_class: str, confidence: str, reason: str) -> Classi
 CLASSIFICATION_RULES = (
     # Exact names first: these tools are known cases.
     _rule(
-        r"^observatory_(mount_abort_motion|safety_execute_safe_state)$",
+        r"^observatory_(mount_stop|safety_execute_safe_state)$",
         "safe-stop",
         "high",
         "Stops motion or secures the equipment.",
@@ -260,47 +260,53 @@ CLASSIFICATION_RULES = (
         "Records packages and sessions.",
     ),
     _rule(
-        r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
+        r"^planning_create_sequence$",
+        "change-data",
+        "high",
+        "Builds a sequence plan and writes nothing.",
+    ),
+    _rule(
+        r"^observatory_(safety_update|equipment_set_active_.+)$",
         "change-data",
         "high",
         "Writes settings to local storage.",
     ),
     _rule(
-        r"^(observatory_guiding_(drain_external_pulses|refit_spectrum)|review_guiding_record_spectrum)$",
+        r"^(observatory_guiding_drain_external_pulses|review_guiding_record_spectrum)$",
         "change-data",
         "low",
         "Clears or refits stored guiding state. Check.",
     ),
     _rule(
-        r"^execution_(abort_session|reconcile_session|create_recorder)$",
+        r"^execution_(abort|reconcile|create_recorder)$",
         "change-data",
         "low",
         "Closes or records a session in the database. Stopping the mount is a different tool. Check.",
     ),
     # Hardware.
     _rule(
-        r"^observatory_(mount_(slew|sync|park|unpark|set_tracking|manual_move|set_slew_rate|run_.+)"
-        r"|imaging_(capture_image|stop_capture|set_filter|focus_move)|guiding_(pulse|expose|run_.+)"
-        r"|safety_(open|close)_enclosure|equipment_(connect|disconnect|set_device_property))$",
+        r"^observatory_(mount_(slew|sync|park|unpark|set_tracking|move|set_slew_rate|run_.+)"
+        r"|imaging_(capture|stop|set_filter|move_focuser)|guiding_(pulse|capture|start|stop|run_.+)"
+        r"|safety_(open|close)_enclosure|equipment_(connect|set_device_property))$",
         "actuate",
         "high",
         "Moves or commands equipment.",
     ),
     _rule(
-        r"^observatory_safety_enter_(controller|monitoring)_mode$",
+        r"^observatory_safety_set_mode$",
         "actuate",
         "low",
         "Switches who controls the hardware. Check.",
     ),
     _rule(
-        r"^execution_(advance_session|execute_meridian_flip|recover_.+)$",
+        r"^execution_(run|execute_meridian_flip|recover_.+)$",
         "actuate",
         "high",
         "Runs or recovers an observing session.",
     ),
     # Reads.
     _rule(
-        r"^observatory_remote_(list|check_connection)$",
+        r"^observatory_remote_(query_folders|query_files|check_connection)$",
         "observe",
         "medium",
         "Reads, but contacts the remote computer over the network.",
@@ -312,7 +318,7 @@ CLASSIFICATION_RULES = (
         "Name says it reads.",
     ),
     _rule(
-        r"^observatory_(equipment_(cooling_ramp_rate|summarize_device)|[a-z]+_status)$",
+        r"^observatory_(equipment_(cooling_ramp_rate|summarize_device)|[a-z]+_get_status|imaging_check_capture)$",
         "observe",
         "high",
         "Returns a stored, derived or measured value.",
@@ -348,7 +354,7 @@ CLASSIFICATION_RULES = (
         "Queries the Gaia archive for a sample of chunks. Saves nothing.",
     ),
     _rule(
-        r"^observatory_remote_frame_locations$",
+        r"^observatory_remote_get_frame_locations$",
         "observe",
         "high",
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",

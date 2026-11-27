@@ -17,7 +17,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import TargetCatalog
+from astrometricslib import SkyPosition, TargetCatalog
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, StorageError
 from backend.services.coordinate_text import parse_coordinate_text
 from backend.services.error_logging import log_failure
@@ -227,18 +227,14 @@ class AlignmentService:
         if self.is_active():
             logger.warning("Alignment already in progress")
             return False
-        position = {"ra_deg": ra_deg % 360.0, "dec_deg": dec_deg}
+        position = SkyPosition(ra_deg=ra_deg % 360.0, dec_deg=dec_deg)
         self._run_started_at = time.time()
 
         def run() -> None:
             """Center the mount; the top of a background thread."""
             try:
-                centered = self._observatory.mount.slew(
-                    position, center=True, max_iterations=CENTERING_MAX_ITERATIONS
-                )
-                logger.info(
-                    "Centering on RA=%s, DEC=%s finished; centered: %s", target_ra, target_dec, centered
-                )
+                self._observatory.mount.slew(position, center=True, max_iterations=CENTERING_MAX_ITERATIONS)
+                logger.info("Centering on RA=%s, DEC=%s finished", target_ra, target_dec)
             except AstrometricsError as error:
                 log_failure(logger, error, "Centering on RA=%s, DEC=%s failed", target_ra, target_dec)
             except Exception:  # the top of a background thread: log it, never lose it
@@ -252,8 +248,9 @@ class AlignmentService:
     def cancel_alignment(self) -> bool:
         """Stop the current centering run.
 
-        Stops the mount through `control.mount.cancel_centering`, which also
-        ends the centering loop before its next step.
+        Stops the mount through `control.mount.stop`, which also ends the
+        centering loop before its next step. The stop is sent even when no
+        run is active; stopping a still mount does nothing.
 
         Returns
         -------
@@ -267,7 +264,8 @@ class AlignmentService:
         #95, decision U4); this service lets the error through.
         """
         active = self.is_active()
-        if not self._observatory.mount.cancel_centering(active):
+        self._observatory.mount.stop()
+        if not active:
             logger.warning("No alignment in progress")
             return False
         logger.info("Cancelled alignment")

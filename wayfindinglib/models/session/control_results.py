@@ -1,15 +1,15 @@
-"""Purpose: The results of the `control.remote` and `control.guiding` calls.
+"""Purpose: The results of the `control.remote` calls and of frame guiding.
 
-Description: `control.remote.frame_locations`, `sync_frames` and `sync_logs`,
-`control.guiding.expose` and `review.targets.get_frame_guiding` each
-return a model
-that names its fields. The remote results fill different fields in
-different cases (see the call's description), and leave the others out
+Description: `control.remote.query_files`, `get_frame_locations`,
+`sync_frames` and `sync_logs`, and `review.targets.get_frame_guiding` each
+return a model that names its fields. The remote results fill different
+fields in different cases (see the call's description), and leave the
+others out
 when turned into plain data, so the data keeps the keys the dictionary
 replies had before.
 """
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from wayfindinglib.models.session.sparse_result import SparseResult
 
@@ -18,28 +18,27 @@ __all__ = [
     "FrameGuidingReport",
     "FrameLocationReport",
     "FrameSyncResult",
-    "GuideExposureResult",
     "LogPlan",
     "LogSyncResult",
+    "RemoteFile",
 ]
 
 
-class GuideExposureResult(BaseModel):
-    """What `control.guiding.expose` did.
+class RemoteFile(BaseModel):
+    """One FITS file on the observatory computer.
 
     Attributes
     ----------
-    started : `bool`
-        Whether the guide camera accepted the exposure command.
-    exposure_seconds : `float`
-        The exposure length that was asked for.
-    gain : `float`, optional
-        The gain that was set first, or `None` if it was left alone.
+    path : `str`
+        The file's path inside its folder.
+    size_bytes : `int`
+        The file's size in bytes.
     """
 
-    started: bool
-    exposure_seconds: float
-    gain: float | None = None
+    model_config = ConfigDict(frozen=True)
+
+    path: str
+    size_bytes: int
 
 
 class FrameSyncResult(SparseResult):

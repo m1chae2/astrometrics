@@ -22,12 +22,12 @@ from `mcp_servers`.
 """
 
 import json
-import threading
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
+from astrometricslib import SkyPosition
 from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver
 from wayfindinglib.drivers.interfaces.enclosure_driver import EnclosureDriver
 from wayfindinglib.drivers.interfaces.filter_wheel_driver import FilterWheelDriver
@@ -49,12 +49,11 @@ MANIFEST_PATH = Path(__file__).resolve().parents[2] / "mcp_servers" / "wayfindin
 
 COMMAND_TOOL_CLASSES = frozenset({"actuate", "safe-stop"})
 """Manifest classes whose tools command hardware. ``safe-stop`` is
-included because `abort_motion` is a motion command the user wants
-refused in monitor mode (decision of 2026-10-24, issue #95)."""
+included because the stops (`mount.stop`, `guiding.stop`) are commands the
+user wants refused in monitor mode (decision of 2026-10-24, issue #95)."""
 
 ALLOWED_IN_MONITOR_MODE = frozenset({
     "observatory_equipment_connect",
-    "observatory_equipment_disconnect",
     "observatory_equipment_set_device_property",
 })
 """Commands that stay allowed in monitor mode.
@@ -62,13 +61,12 @@ ALLOWED_IN_MONITOR_MODE = frozenset({
 The user decided this on 2026-10-24 (issue #95):
 every motion and capture command stays refused while delegated, but
 device settings (`set_device_property`, the backend's
-``telescope:set_indi_property``) and the app's own INDI connect and
-disconnect stay allowed, because they move nothing and take no picture.
-Decision U4 of the same day: stopping a guiding run or an alignment run is
-NOT allowed. The library refuses it (`control.guiding.stop_loop` and
-`control.mount.cancel_centering`), so the backend's ``guiding:stop`` and
-``telescope:alignment_stop`` are refused too. The two stops are not MCP
-tools; `test_monitor_mode_sends_no_commands` tests them by name.
+``telescope:set_indi_property``) and the app's own INDI connect stay
+allowed, because they move nothing and take no picture. Decision U4 of the
+same day: stopping a guiding run or an alignment run is NOT allowed. The
+library refuses it (`control.guiding.stop` and `control.mount.stop`), so
+the backend's ``guiding:stop`` and ``telescope:alignment_stop`` are refused
+too.
 """
 
 ALLOWED_RPC_IN_MONITOR_MODE = frozenset({"telescope:connect", "telescope:set_indi_property"})
@@ -96,10 +94,10 @@ PRIVATE_REFUSED_COMMANDS = (
 them, but that must still be refused in monitor mode. The name is the
 old tool name; `resolve_tool` finds the private method."""
 
-QUIET_BUT_NOT_REFUSED_TOOLS = frozenset({"execution_advance_session"})
+QUIET_BUT_NOT_REFUSED_TOOLS = frozenset({"execution_run"})
 """Commands that do not raise in monitor mode but still send nothing.
 
-`advance_session` records what it would have done and issues nothing for
+`execution.run` records what it would have done and issues nothing for
 a `DELEGATED` capability (`session_runner`), so it returns normally. The
 test checks that no driver command is sent.
 """
@@ -127,30 +125,29 @@ COMMAND_DRIVER_METHODS = frozenset({
 `get_status` and `get_position` are not on the list."""
 
 SAMPLE_ARGUMENTS: dict[str, dict[str, Any]] = {
-    "observatory_guiding_expose": {"exposure_seconds": 1.0},
+    "observatory_guiding_capture": {"exposure_s": 1.0},
     "observatory_guiding_pulse": {"direction": "north", "duration_ms": 100.0},
     "observatory_guiding_run_exposure_test": {},
-    "observatory_imaging_capture_image": {"exposure_seconds": 1.0},
-    "observatory_imaging_focus_move": {"steps": 10},
-    "observatory_imaging_set_filter": {"filter_name": "L"},
-    "observatory_imaging_stop_capture": {},
-    "observatory_mount_abort_motion": {},
-    "observatory_mount_cancel_centering": {"run_is_active": True},
-    "observatory_mount_manual_move": {"direction": "north"},
+    "observatory_guiding_start": {},
+    "observatory_guiding_stop": {},
+    "observatory_imaging_capture": {"exposure_s": 1.0},
+    "observatory_imaging_move_focuser": {"steps": 10},
+    "observatory_imaging_set_filter": {"name": "L"},
+    "observatory_imaging_stop": {},
+    "observatory_mount_stop": {},
+    "observatory_mount_move": {"direction": "north"},
     "observatory_mount_park": {},
-    "observatory_mount_set_slew_rate": {"rate_index": 1},
-    "observatory_mount_set_tracking": {"enabled": True},
-    "observatory_mount_slew": {"destination": {"ra_deg": 10.0, "dec_deg": 20.0}},
+    "observatory_mount_set_slew_rate": {"rate": 1},
+    "observatory_mount_set_tracking": {"on": True},
+    "observatory_mount_slew": {"destination": SkyPosition(ra_deg=10.0, dec_deg=20.0)},
     "observatory_mount_sync": {"position": {"ra_deg": 10.0, "dec_deg": 20.0}},
     "observatory_mount_unpark": {},
     "observatory_safety_close_enclosure": {},
     "observatory_safety_open_enclosure": {},
-    "execution_advance_session": {"session": "monitor-mode-night"},
+    "execution_run": {},
 }
-"""Sample arguments for each command a test calls.
-
-`observatory_guiding_run_loop` and `observatory_guiding_stop_loop` are
-added by `sample_arguments`, because they need a fresh `threading.Event`."""
+"""Sample arguments for each command a test calls. ``execution_run`` gets
+its session from `make_night_session`."""
 
 CHILD_PREFIXES = ("mount", "imaging", "guiding", "remote", "safety", "equipment")
 """The children of `Wayfinder.control` that hold operations."""
@@ -202,8 +199,6 @@ def sample_arguments(tool_name: str) -> dict[str, Any]:
         Arguments that pass the tool's own checks, so a refusal can only
         come from monitor mode.
     """
-    if tool_name in ("observatory_guiding_run_loop", "observatory_guiding_stop_loop"):
-        return {"stop": threading.Event()}
     return dict(SAMPLE_ARGUMENTS[tool_name])
 
 
@@ -248,7 +243,7 @@ def make_night_session(wayfinder: Any) -> ObservationSession:
     Parameters
     ----------
     wayfinder : `Wayfinder`
-        Its storage keeps the session, so `advance_session` can find it by id.
+        Its storage keeps the session, so `execution.run` reads it back.
 
     Returns
     -------
@@ -289,13 +284,13 @@ def force_safe_assessment(wayfinder: Any, monkeypatch: Any) -> None:
     Parameters
     ----------
     wayfinder : `Wayfinder`
-        Its `control.safety.status` is wrapped.
+        Unused; kept so the callers read the same.
     monkeypatch : `pytest.MonkeyPatch`
-        Undoes the change after the test.
+        Wraps the queue's safety read and undoes the change after the test.
     """
-    real_status = wayfinder.control.safety.status
+    from wayfindinglib.tasks.control_tasks.control_status import read_safety_status as real_status
 
-    def status(include: list[str] | None = None, capability: Any = None) -> Any:
+    def status(context: Any, include: list[str] | None = None, capability: Any = None) -> Any:
         """Read the real status, with its assessment replaced by "safe".
 
         Returns
@@ -303,12 +298,13 @@ def force_safe_assessment(wayfinder: Any, monkeypatch: Any) -> None:
         result : `SafetyStatus`
             The status.
         """
-        result = real_status(include=include, capability=capability)
+        result = real_status(context, include, capability)
         if include and "assessment" in include:
             result.assessment = SafetyAssessment(verdict=SafetyVerdict.SAFE)
         return result
 
-    monkeypatch.setattr(wayfinder.control.safety, "status", status)
+    # Named by text: the imaging queue reads the name it imported.
+    monkeypatch.setattr("wayfindinglib.tasks.execution_tasks.imaging_queue.read_safety_status", status)
 
 
 class RecordingDrivers:

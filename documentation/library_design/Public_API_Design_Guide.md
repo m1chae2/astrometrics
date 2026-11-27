@@ -55,7 +55,7 @@ The checks treat the first two positional arguments as subject and operands. The
 | `query`, `query_<noun>` | Read every stored item that matches the filters (Section 5). `query_<noun>` names the kind when an object holds more than one. |
 | `count_by_<field>` | Count the matching items by the values of one field. |
 | `resolve` | Turn a name into one `Resolution`. |
-| `create`, `create_<noun>` | Make and store a new item; `create_<noun>` makes a related item, such as `packages.create_mosaic`. |
+| `create`, `create_<noun>` | Make and store a new item; `create_<noun>` names the kind when an object holds several, or makes a related item, such as `packages.create_mosaic`. |
 | `update` | Change a stored item and return the new object. |
 | `delete` | Remove a stored item and what was derived from it. |
 | `add`, `remove` | Put an item into a collection, or take it out. |
@@ -71,8 +71,10 @@ The checks treat the first two positional arguments as subject and operands. The
 | `render`, `render_<noun>` | Make a picture of an image as data (a `RenderedImage`), such as `render_newest` for the newest frame. |
 | `plot_<noun>` | Draw a Matplotlib figure. |
 | `set_<setting>` | Change one setting of a device or a library store. |
+| `check_<noun>` | Confirm that something holds, such as a connection or that a capture may run. Returns `None` and raises when it does not. |
+| `sync_<noun>` | Copy what is new from another computer into the library. |
 
-Device actions form a named list of their own: `connect`, `slew`, `park`, `unpark`, `capture`, `expose`, `stop`, `move`, `solve`, `identify`, `abort`, `reconcile` and `close`. Each one commands equipment or a running night, returns `None` and raises when it fails.
+Device actions form a named list of their own: `connect`, `slew`, `start`, `park`, `unpark`, `capture`, `expose`, `stop`, `move` (and `move_<device>`), `solve`, `identify`, `abort`, `reconcile` and `close`. Each one commands equipment or a running night, returns `None` and raises when it fails.
 
 ```python
 mount = wayfinder.control.mount

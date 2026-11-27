@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
-from astrometricslib import ObservatoryConfiguration, StellarObject, Target
+from astrometricslib import ObservatoryConfiguration, SkyPosition, StellarObject, Target
 from astrometricslib.arguments import TimeInput, check_include, to_epoch_seconds
 from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib.models.planning.mosaic import MosaicPanel
@@ -30,8 +30,27 @@ from wayfindinglib.tasks.planning_tasks.planning_context import PlanningContext
 __all__ = ["get_constellation_lines", "get_panels", "get_tonight_advice", "get_visibility"]
 
 
-def _check_objects(objects: Sequence[Target | StellarObject] | None) -> None:
-    """Refuse anything but library targets and stars as sky objects.
+def _as_sky_object(item: Target | StellarObject | SkyPosition) -> Target | StellarObject:
+    """Stand a bare sky position in for a star, so it reads like the others.
+
+    Parameters
+    ----------
+    item : `Target`, `StellarObject` or `SkyPosition`
+        An object asked about.
+
+    Returns
+    -------
+    sky_object : `Target` or `StellarObject`
+        The item itself, or for a position a star named by its coordinates.
+    """
+    if not isinstance(item, SkyPosition):
+        return item
+    name = f"{item.ra_deg:.4f} {item.dec_deg:+.4f}"
+    return StellarObject(id=name, name=name, ra=item.ra_deg, dec=item.dec_deg)
+
+
+def _check_objects(objects: Sequence[Target | StellarObject | SkyPosition] | None) -> None:
+    """Refuse anything but library targets, stars and positions as sky objects.
 
     Parameters
     ----------
@@ -41,17 +60,17 @@ def _check_objects(objects: Sequence[Target | StellarObject] | None) -> None:
     Raises
     ------
     InvalidArgumentError
-        If ``objects`` is text, or an item is not a `Target` or
-        `StellarObject`.
+        If ``objects`` is text, or an item is not a `Target`,
+        `StellarObject` or `SkyPosition`.
     """
     if objects is None:
         return
     if isinstance(objects, str) or not isinstance(objects, Sequence):
-        raise InvalidArgumentError("objects must be a list of Target or StellarObject objects.")
-    wrong = [repr(item) for item in objects if not isinstance(item, Target | StellarObject)]
+        raise InvalidArgumentError("objects must be a list of Target, StellarObject or SkyPosition objects.")
+    wrong = [repr(item) for item in objects if not isinstance(item, Target | StellarObject | SkyPosition)]
     if wrong:
         raise InvalidArgumentError(
-            "Each object must be a Target or a StellarObject; turn a name into one with "
+            "Each object must be a Target, a StellarObject or a SkyPosition; turn a name into one with "
             "astrometrics.targets.resolve(name).",
             details={"objects": wrong[:5]},
         )
@@ -59,7 +78,7 @@ def _check_objects(objects: Sequence[Target | StellarObject] | None) -> None:
 
 def get_visibility(
     context: PlanningContext,
-    objects: Sequence[Target | StellarObject] | None = None,
+    objects: Sequence[Target | StellarObject | SkyPosition] | None = None,
     time: TimeInput | None = None,
     until: TimeInput | None = None,
     step_min: float | None = None,
@@ -74,7 +93,7 @@ def get_visibility(
     ----------
     context : `PlanningContext`
         The shared planning state.
-    objects : `Sequence` [`Target` or `StellarObject`], optional
+    objects : `Sequence` [`Target`, `StellarObject` or `SkyPosition`], optional
         The objects. Every library target, highest first, when omitted.
     time : `TimeInput`, optional
         The moment, or the start of the span. Now when omitted.
@@ -118,7 +137,7 @@ def get_visibility(
     start = visibility_report.to_astropy_time(time, "time")
     end = visibility_report.to_astropy_time(until, "until") if until is not None else None
     resolved = visibility_report.resolve_sky_objects(
-        context.sky_engine, None if objects is None else list(objects)
+        context.sky_engine, None if objects is None else [_as_sky_object(item) for item in objects]
     )
     report = visibility_report.build_visibility_report(
         context.sky_engine, resolved, start, end, step_min, sections, minimum_altitude_deg, zones, 0.0
@@ -176,7 +195,7 @@ def get_constellation_lines(context: PlanningContext) -> list[ConstellationLineS
 
 def get_panels(
     context: PlanningContext,
-    center: Target | StellarObject,
+    center: Target | StellarObject | SkyPosition,
     rows: int = 1,
     cols: int = 1,
     overlap_pct: float = 0.0,
@@ -189,8 +208,8 @@ def get_panels(
     ----------
     context : `PlanningContext`
         The shared planning state.
-    center : `Target` or `StellarObject`
-        The object at the grid center.
+    center : `Target`, `StellarObject` or `SkyPosition`
+        The object or position at the grid center.
     rows, cols : `int`, optional
         The grid size.
     overlap_pct : `float`, optional
@@ -216,6 +235,7 @@ def get_panels(
     from wayfindinglib.tasks.planning_tasks.visibility_report import _object_coordinates
 
     _check_objects([center])
+    center = _as_sky_object(center)
     coordinates = _object_coordinates(center)
     if coordinates is None:
         raise InvalidArgumentError(f"{center.id} has no sky position.", details={"center": center.id})

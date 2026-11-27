@@ -4,6 +4,7 @@ Description: `TelescopeService.get_status` passes the camera status and the
 target name on, and works the same with no service attached.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from backend.services.observatory.telescope_service import TelescopeService
@@ -18,8 +19,14 @@ def _service(auto_download: object | None) -> TelescopeService:
         The service under test.
     """
     wayfinder = MagicMock()
-    wayfinder.control.mount.status.return_value.model_dump.return_value = {"targetName": "M 31"}
-    wayfinder.control.imaging.status.return_value.camera_status = "Idle"
+    wayfinder.control.mount.get_status.return_value = SimpleNamespace(
+        ra_deg=None,
+        dec_deg=None,
+        altitude_deg=None,
+        azimuth_deg=None,
+        model_dump=lambda **_: {"targetName": "M 31"},
+    )
+    wayfinder.control.imaging.get_status.return_value.camera_status = "Idle"
     return TelescopeService(wayfinder=wayfinder, auto_download_service=auto_download)
 
 

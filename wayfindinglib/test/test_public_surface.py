@@ -9,8 +9,9 @@ the UI, so it
 must be a deliberate edit to the lists below rather than a side effect of
 moving code. The tests also check that every export resolves, that
 `control` stays under its size limit, and that the argument guards work:
-`SkyPosition` checks its ranges, and `control.remote.list` refuses
-arguments its `kind` does not use.
+`SkyPosition` checks its ranges, and `control.remote.query_folders` and
+`query_files` refuse a bad kind and tell an offline computer from a missing
+folder.
 
 The last test checks every public method of `Wayfinder` against the public
 API design rules (`documentation/library_design/Public_API_Design_Guide.md`),
@@ -26,11 +27,10 @@ import pytest
 from pydantic import ValidationError
 
 import wayfindinglib
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, SkyPosition
 from astrometricslib._internal.public_api_rules import baseline_problems, find_violations, walk_public_api
 from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
 from wayfindinglib import ObservationExecution, ObservationPlanning, ObservationReview, ObservatoryControl
-from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
 BASELINE = Path(__file__).with_name("public_api_rules_baseline.txt")
@@ -40,8 +40,9 @@ EXPECTED_EXPORTS = frozenset({
     "ChecklistItem",
     "DitherConfig",
     "ExposureRequest",
-    "FrameEndDetector",
+    "FocusModel",
     "Framing",
+    "GuiderCalibration",
     "HorizonZone",
     "MosaicPanel",
     "QueueRequest",
@@ -65,13 +66,16 @@ EXPECTED_MODULE_NAMES = {
         "PlanRevisionConflictError",
     }),
     "wayfindinglib.logs": frozenset({
+        "FrameEndDetector",
         "SavedCapture",
         "ekos_utc_offset_hours",
         "read_ekos_captures",
     }),
     "wayfindinglib.reports": frozenset({
+        "DelegationState",
         "DepthGoalState",
         "DepthLevel",
+        "ObservatoryCapability",
         "PackageStatus",
         "RunState",
     }),
@@ -109,9 +113,9 @@ PLANNING_OBJECTS = {
 """Each object of `ObservationPlanning` and its public members."""
 
 EXECUTION_MEMBERS = frozenset({
-    "advance_session",
-    "abort_session",
-    "reconcile_session",
+    "run",
+    "abort",
+    "reconcile",
     "create_recorder",
 })
 """The public members of `ObservationExecution`."""
@@ -158,49 +162,46 @@ to the observatory.
 
 CHILDREN = {
     "mount": {
-        "status",
-        "poll_external_alignment",
-        "get_polar_alignment",
+        "get_status",
         "get_centering_exposure",
         "slew",
+        "stop",
+        "move",
         "park",
         "unpark",
         "set_tracking",
-        "manual_move",
-        "abort_motion",
-        "cancel_centering",
         "set_slew_rate",
     },
     "imaging": {
-        "status",
-        "capture_image",
-        "stop_capture",
+        "get_status",
+        "check_capture",
+        "capture",
+        "stop",
         "set_filter",
-        "focus_move",
+        "move_focuser",
         "query_focus_models",
-        "record_focus_model",
+        "create_focus_model",
     },
     "guiding": {
-        "status",
-        "query_calibrations",
-        "record_calibration",
-        "expose",
-        "refit_spectrum",
-        "run_loop",
-        "stop_loop",
+        "get_status",
+        "start",
+        "stop",
+        "capture",
+        "query_guider_calibrations",
+        "create_guider_calibration",
     },
-    "remote": {"list", "check_connection", "frame_locations", "sync_frames", "sync_logs"},
-    "safety": {
-        "status",
-        "apply_promotion_decision",
-        "enter_monitoring_mode",
-        "enter_controller_mode",
+    "remote": {
+        "check_connection",
+        "query_folders",
+        "query_files",
+        "get_frame_locations",
+        "sync_frames",
+        "sync_logs",
     },
+    "safety": {"get_status", "set_mode", "update"},
     "equipment": {
-        "status",
+        "get_status",
         "connect",
-        "disconnect",
-        "apply_configuration",
         "get_active",
         "set_active",
         "set_pointing_limits",
@@ -210,9 +211,8 @@ CHILDREN = {
 """Each child of `control` and its public members."""
 
 MAXIMUM_CONTROL_MEMBERS = 72
-"""Most operations `control` and its children may offer together. Raised from
-70 for `guiding.stop_loop` and `mount.cancel_centering` (issue #95, decision
-U4/20): monitor mode refuses a stop, and the guarantee lives in the library."""
+"""Most operations `control` and its children may offer together (38 since
+issue #206 merged the stops and the status reads)."""
 
 
 def _public_names(instance: object) -> set[str]:
@@ -351,22 +351,10 @@ def test_sky_position_checks_its_ranges_and_converts_to_hours() -> None:
         SkyPosition(ra_deg=0.0, dec_deg=91.0)
 
 
-@pytest.mark.parametrize(
-    ("kind", "arguments", "message"),
-    [
-        ("folders", {"sizes": True}, "sizes"),
-        ("target_folders", {"sizes": True}, "sizes"),
-        ("unassociated_folders", {"folder_name": "M 81", "sizes": True}, "sizes"),
-        ("files", {}, "needs a folder_name"),
-        ("everything", {}, "kind must be one of"),
-    ],
-)
-def test_remote_list_refuses_arguments_its_kind_does_not_use(
-    control: ObservatoryControl, kind: str, arguments: dict[str, object], message: str
-) -> None:
-    """`control.remote.list` refuses an argument its kind does not use."""
-    with pytest.raises(InvalidArgumentError, match=message):
-        control.remote.list(kind, **arguments)
+def test_remote_query_folders_refuses_an_unknown_kind(control: ObservatoryControl) -> None:
+    """`control.remote.query_folders` names the kinds it knows."""
+    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
+        control.remote.query_folders(kind="everything")
 
 
 @pytest.mark.parametrize(
@@ -376,7 +364,7 @@ def test_remote_list_refuses_arguments_its_kind_does_not_use(
         (True, NotFoundError, "No folder named"),
     ],
 )
-def test_remote_list_files_tells_unreachable_from_missing_folder(
+def test_remote_query_files_tells_unreachable_from_missing_folder(
     control: ObservatoryControl,
     monkeypatch: pytest.MonkeyPatch,
     is_reachable: bool,
@@ -389,8 +377,10 @@ def test_remote_list_files_tells_unreachable_from_missing_folder(
     monkeypatch.setattr(tasks, "list_remote_targets", lambda context: [])
     monkeypatch.setattr(tasks, "matching_remote_folder", lambda context, name, folders: None)
     monkeypatch.setattr(tasks, "check_remote_connection", lambda context: is_reachable)
-    with pytest.raises(error_type, match=message):
-        control.remote.list("files", folder_name="NGC 7331")
+    with pytest.raises(error_type, match=message) as raised:
+        control.remote.query_files("NGC 7331")
+    if not is_reachable:
+        assert raised.value.report == "status"
 
 
 def test_each_public_module_offers_exactly_its_pinned_names() -> None:

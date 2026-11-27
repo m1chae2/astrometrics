@@ -77,6 +77,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "PreviewBrightObject",
     "ProcessingPipelines",
     "QualityRecords",
+    "SkyPosition",
     "StackingPipeline",
     "StellarCatalog",
     "StellarObject",

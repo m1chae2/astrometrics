@@ -62,16 +62,16 @@ DEVICE_COMMAND_NOTE = (
 """Note for a tool that commands a device."""
 
 INTERIM_BLOCKS = {
-    "observatory_mount_status": (
+    "observatory_mount_get_status": (
         "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. "
         "Blocked until it uses the connect-only path. app_status reports the mount through the backend."
     ),
-    "observatory_safety_status": (
+    "observatory_safety_get_status": (
         "The assessment section connects through connect_to_telescope, which sends CONNECTION=ON to every "
         "INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until "
         "those sections use the connect-only path."
     ),
-    "observatory_imaging_status": (
+    "observatory_imaging_get_status": (
         "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
         "tracking)."
@@ -127,11 +127,6 @@ DECISIONS = {
     "observatory_equipment_connect": ToolDecision(
         "drop",
         "Opens the INDI session. Not a device command, but the status tools already open it on demand.",
-    ),
-    "observatory_equipment_disconnect": ToolDecision(
-        "drop",
-        "Closes the INDI session. Not a device command, but it would cut off monitoring and has "
-        "no monitoring use.",
     ),
     # ---- Withheld: the user decided an AI may not change configuration ----
     "observatory_equipment_set_active": ToolDecision(
@@ -249,16 +244,6 @@ DECISIONS = {
         "with the optional detections and named-stars overlays; the registry sends it as a PNG image. "
         "Saves nothing.",
     ),
-    "observatory_mount_poll_external_alignment": ToolDecision(
-        "drop",
-        "The backend calls it to store the syncs other programs queued. It writes records, and the AI "
-        "is read-only.",
-        "ingest",
-    ),
-    "observatory_mount_get_polar_alignment": ToolDecision(
-        "drop",
-        "The backend shows it. An AI reads the stored runs through review_alignment_query.",
-    ),
     "review_alignment_get_polar_alignment": ToolDecision(
         "drop",
         "Since #206 the home of observatory_mount_get_polar_alignment. The backend shows it; an AI reads "
@@ -269,12 +254,6 @@ DECISIONS = {
         "Since #206 the home of observatory_mount_poll_external_alignment. The backend calls it to store "
         "the syncs other programs queued. It writes records, and the AI is read-only.",
         "ingest",
-    ),
-    "observatory_equipment_apply_configuration": ToolDecision(
-        "drop",
-        "The backend calls it after the settings page saves. It points the INDI session at a host, so "
-        "it is not offered to the AI.",
-        "change-data",
     ),
     "review_query_alignment_records": ToolDecision(
         "keep",
@@ -762,14 +741,9 @@ DECISIONS = {
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
     ),
-    "observatory_mount_cancel_centering": ToolDecision(
+    "observatory_guiding_stop": ToolDecision(
         "drop",
-        "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools.",
-        "safe-stop",
-    ),
-    "observatory_guiding_stop_loop": ToolDecision(
-        "drop",
-        "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools.",
+        "Ends this app's guide loop. Dropped with the other hardware tools.",
         "safe-stop",
     ),
     "review_get_performance_envelope": ToolDecision(
@@ -866,7 +840,17 @@ DECISIONS = {
         "observe",
     ),
     "observatory_remote_list": ToolDecision(
-        "keep", "Lists folders or files on the telescope computer. Reads only.", "observe"
+        "keep", "Lists folders on the telescope computer. Reads only.", "observe"
+    ),
+    "observatory_remote_query_files": ToolDecision(
+        "keep",
+        "Lists the FITS files in one folder on the telescope computer, with sizes. Reads only.",
+        "observe",
+    ),
+    "observatory_imaging_check_capture": ToolDecision(
+        "keep",
+        "Checks the arguments and the delegation policy for a capture. Sends nothing to a device.",
+        "observe",
     ),
     "observatory_equipment_set_device_property": ToolDecision(
         "drop",
@@ -949,12 +933,6 @@ DECISIONS = {
         "the user decided an AI may not change configuration.",
         "change-data",
     ),
-    "observatory_safety_enter_monitoring_mode": ToolDecision(
-        "withhold",
-        "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
-        "the user decided an AI may not change configuration.",
-        "change-data",
-    ),
     "observatory_guiding_record_calibration": ToolDecision(
         "withhold",
         "Saves a guider calibration record to the database. It sends nothing to a device, but the delegation "
@@ -980,12 +958,8 @@ DECISIONS = {
     # ---- Not wanted by the user ----
     "observatory_guiding_run_loop": ToolDecision(
         "drop",
-        "Runs the guide loop until a stop event MCP cannot send is set; the backend runs it on a thread. "
-        "Sends guide pulses, which belongs to the dropped control side.",
+        "Starts this app's guide loop, which sends guide pulses: the dropped control side.",
         "actuate",
-    ),
-    "observatory_guiding_refit_spectrum": ToolDecision(
-        "drop", "Recomputes and stores a result. The user does not want an AI to trigger it."
     ),
     "review_guiding_record_spectrum": ToolDecision(
         "drop",
@@ -1160,6 +1134,29 @@ TOOL_RENAMES: dict[str, str] = {
     "planning_query_sources": "planning_catalogs_query_sources",
     "planning_get_deep_catalog_status": "planning_catalogs_get_deep_status",
     "planning_build_deep_star_catalog": "planning_catalogs_record_deep_catalog",
+    # Step 5c of #206: control and execution.
+    "observatory_equipment_status": "observatory_equipment_get_status",
+    "observatory_mount_status": "observatory_mount_get_status",
+    "observatory_mount_abort_motion": "observatory_mount_stop",
+    "observatory_mount_manual_move": "observatory_mount_move",
+    "observatory_imaging_status": "observatory_imaging_get_status",
+    "observatory_imaging_capture_image": "observatory_imaging_capture",
+    "observatory_imaging_stop_capture": "observatory_imaging_stop",
+    "observatory_imaging_focus_move": "observatory_imaging_move_focuser",
+    "observatory_imaging_record_focus_model": "observatory_imaging_create_focus_model",
+    "observatory_guiding_status": "observatory_guiding_get_status",
+    "observatory_guiding_run_loop": "observatory_guiding_start",
+    "observatory_guiding_expose": "observatory_guiding_capture",
+    "observatory_guiding_query_calibrations": "observatory_guiding_query_guider_calibrations",
+    "observatory_guiding_record_calibration": "observatory_guiding_create_guider_calibration",
+    "observatory_remote_list": "observatory_remote_query_folders",
+    "observatory_remote_frame_locations": "observatory_remote_get_frame_locations",
+    "observatory_safety_status": "observatory_safety_get_status",
+    "observatory_safety_apply_promotion_decision": "observatory_safety_update",
+    "observatory_safety_enter_controller_mode": "observatory_safety_set_mode",
+    "execution_advance_session": "execution_run",
+    "execution_abort_session": "execution_abort",
+    "execution_reconcile_session": "execution_reconcile",
 }
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies
@@ -1210,10 +1207,7 @@ CATEGORY_RULES = (
     (re.compile(r"^review_save_"), "observatory-config"),
     (re.compile(r"^review_"), "observatory-status"),
     (
-        re.compile(
-            r"^observatory_[a-z]+_(save_|set_active_|apply_promotion_decision"
-            r"|enter_(controller|monitoring)_mode)"
-        ),
+        re.compile(r"^observatory_([a-z]+_(save_|set_active_)|safety_(set_mode|update)$)"),
         "observatory-config",
     ),
 )

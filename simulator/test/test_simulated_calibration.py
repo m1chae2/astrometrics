@@ -95,7 +95,7 @@ def _take_command(wayfinder: Wayfinder, root: Path) -> object:
         What `enter_controller_mode` reports.
     """
     record_simulated_calibrations(wayfinder.control, root)
-    return wayfinder.control.safety.enter_controller_mode(evidence_note="simulator", shadow_first=True)
+    return wayfinder.control.safety.set_mode("controller", note="simulator", shadow_first=True)
 
 
 def test_a_simulated_start_makes_every_capability_authoritative(
@@ -108,7 +108,7 @@ def test_a_simulated_start_makes_every_capability_authoritative(
 
     assert outcome.rejected == {}
     assert set(outcome.applied) == set(ObservatoryCapability)
-    policy = wayfinder.control.safety.status(include=["delegation_policy"]).delegation_policy
+    policy = wayfinder.control.safety.get_status(include=["delegation_policy"]).delegation_policy
     assert all(policy.is_authoritative(capability) for capability in ObservatoryCapability)
 
 
@@ -120,14 +120,14 @@ def test_capture_focus_and_filter_commands_pass_the_safety_check(
 
     wayfinder = _make_wayfinder(tmp_path, monkeypatch)
     context = wayfinder.control._context
-    wayfinder.control.safety.enter_controller_mode(evidence_note="before", shadow_first=True)
+    wayfinder.control.safety.set_mode("controller", note="before", shadow_first=True)
     with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
-        wayfinder.control.imaging.focus_move(10)
+        wayfinder.control.imaging.move_focuser(10)
 
     _take_command(wayfinder, tmp_path)
 
-    hardware_operations._require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
-    wayfinder.control.imaging.focus_move(10)
+    hardware_operations.require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
+    wayfinder.control.imaging.move_focuser(10)
     wayfinder.control.imaging.set_filter("L")
     assert wayfinder.recording.commands_sent() != []
 
@@ -154,8 +154,8 @@ def test_the_guider_calibration_holds_the_simulators_own_values(
 
     report = record_simulated_calibrations(wayfinder.control, tmp_path)
 
-    calibration = wayfinder.control.guiding.status(include=["calibration"]).calibration
-    focus_model = wayfinder.control.imaging.status(include=["focus_model"]).focus_model
+    calibration = wayfinder.control.guiding.get_status(include=["calibration"]).calibration
+    focus_model = wayfinder.control.imaging.get_status(include=["focus_model"]).focus_model
     assert calibration.id == report.guider_calibration.id
     assert calibration.camera_angle_deg == pytest.approx(0.0)
     assert calibration.arcsec_per_pixel == pytest.approx(206.265 * 3.76 / 450.0, rel=1e-3)
@@ -258,9 +258,20 @@ def test_building_the_records_saves_nothing_and_the_rpc_calls_take_command(
         "observatory:record_guider_calibration",
         "observatory:record_focus_model",
     ]
-    control.guiding.record_calibration(**calls[0][1])
-    control.imaging.record_focus_model(**calls[1][1])
-    outcome = control.safety.enter_controller_mode(evidence_note="simulator", shadow_first=True)
+    from wayfindinglib import FocusModel, GuiderCalibration
+
+    calibration = dict(calls[0][1])
+    calibration["id"] = calibration.pop("calibration_id")
+    calibration.pop("replace", None)
+    focus = dict(calls[1][1])
+    focus["id"] = focus.pop("focus_model_id")
+    focus.pop("replace", None)
+    focus["filter_offsets"] = [
+        {"filter": name, "offset_steps": offset} for name, offset in focus.get("filter_offsets", {}).items()
+    ]
+    control.guiding.create_guider_calibration(GuiderCalibration(**calibration))
+    control.imaging.create_focus_model(FocusModel(**focus))
+    outcome = control.safety.set_mode("controller", note="simulator", shadow_first=True)
 
     assert outcome.rejected == {}
     assert set(outcome.applied) == set(ObservatoryCapability)

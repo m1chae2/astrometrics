@@ -30,10 +30,10 @@ follow.
 
 Each record carries a ``source_note`` that says it is for the simulator and
 names the source. They are saved through the public
-``record_calibration`` and ``record_focus_model``. The function refuses to
-run unless the wayfinding library it would write to is inside the simulator's
-folder and is not one of the user's real folders. It only reads the library it
-is given.
+``create_guider_calibration`` and ``create_focus_model``. The function
+refuses to run unless the wayfinding library it would write to is inside
+the simulator's folder and is not one of the user's real folders. It only
+reads the library it is given.
 
 The launcher (`simulator.launch`) cannot call the library's methods on the
 running backend's own objects, and it must not write to the databases while
@@ -45,6 +45,7 @@ sends them to the running backend with the public RPC methods
 """
 
 import argparse
+import dataclasses
 import json
 import sys
 from collections.abc import Iterable
@@ -86,8 +87,8 @@ SIMULATED_GUIDE_RATE_UNIT_ARCSEC_PER_SEC = 15.0
 class GuiderCalibrationValues:
     """The numbers of one guider calibration, as plain values.
 
-    These are the arguments of ``control.guiding.record_calibration``, so
-    the simulator needs no library model class.
+    These are the fields of the `GuiderCalibration` record that
+    ``control.guiding.create_guider_calibration`` stores.
     """
 
     id: str
@@ -105,7 +106,8 @@ class GuiderCalibrationValues:
 class FocusModelValues:
     """The numbers of one focus model, as plain values.
 
-    These are the arguments of ``control.imaging.record_focus_model``.
+    These are the fields of the `FocusModel` record that
+    ``control.imaging.create_focus_model`` stores.
     """
 
     id: str
@@ -183,8 +185,8 @@ def _calibration_values(record: object, **changes: object) -> GuiderCalibrationV
     Parameters
     ----------
     record : `object`
-        A calibration from ``control.guiding.query_calibrations`` or
-        ``record_calibration``. Its fields are read, not its class.
+        A calibration from ``control.guiding.query_guider_calibrations`` or
+        ``create_guider_calibration``. Its fields are read, not its class.
     **changes
         Values to use instead of the record's.
 
@@ -214,7 +216,7 @@ def _focus_model_values(record: object, **changes: object) -> FocusModelValues:
     ----------
     record : `object`
         A model from ``control.imaging.query_focus_models`` or
-        ``record_focus_model``. Its fields are read, not its class.
+        ``create_focus_model``. Its fields are read, not its class.
     **changes
         Values to use instead of the record's.
 
@@ -343,7 +345,7 @@ def build_simulated_calibrations(
     from astrometricslib.exceptions import ConfigurationError
 
     check_library_is_simulators(control, simulator_root, protected)
-    equipment = control.equipment.status(include=["telescope", "camera"])
+    equipment = control.equipment.get_status(include=["telescope", "camera"])
     if equipment.telescope is None or equipment.camera is None:
         raise ConfigurationError(
             "No active telescope and camera: there is nothing to calibrate in the simulator."
@@ -352,7 +354,7 @@ def build_simulated_calibrations(
     identifier = f"simulator-{equipment.telescope.id}-{equipment.camera.id}"
 
     plate_scale, angle, ra_rate, dec_rate, guider_source = _simulator_guider(
-        control.guiding.status(include=["plate_scale"]).plate_scale_arcsec_per_px, guide_rate_fraction
+        control.guiding.get_status(include=["plate_scale"]).plate_scale_arcsec_per_px, guide_rate_fraction
     )
     calibration = GuiderCalibrationValues(
         id=identifier,
@@ -454,7 +456,7 @@ def record_simulated_calibrations(
 
     The values come from `build_simulated_calibrations`. The records are
     saved in the simulator's own library only, through the public
-    ``record_calibration`` and ``record_focus_model``. The backend's own
+    ``create_guider_calibration`` and ``create_focus_model``. The backend's own
     start-up path uses this; the launcher uses `rpc_calls` instead.
 
     Parameters
@@ -479,30 +481,16 @@ def record_simulated_calibrations(
     report = build_simulated_calibrations(control, simulator_root, protected)
     calibration = report.guider_calibration
     focus_model = report.focus_model
-    saved_calibration = control.guiding.record_calibration(
-        calibration_id=calibration.id,
-        camera_id=calibration.camera_id,
-        telescope_id=calibration.telescope_id,
-        arcsec_per_pixel=calibration.arcsec_per_pixel,
-        camera_angle_deg=calibration.camera_angle_deg,
-        ra_rate_arcsec_per_sec=calibration.ra_rate_arcsec_per_sec,
-        dec_rate_arcsec_per_sec=calibration.dec_rate_arcsec_per_sec,
-        source_note=calibration.source_note,
-        calibrated_at=calibration.calibrated_at,
-        replace=True,
+    from wayfindinglib import FocusModel, GuiderCalibration
+
+    saved_calibration = control.guiding.create_guider_calibration(
+        GuiderCalibration(**dataclasses.asdict(calibration)), force=True
     )
-    saved_focus_model = control.imaging.record_focus_model(
-        focus_model_id=focus_model.id,
-        camera_id=focus_model.camera_id,
-        telescope_id=focus_model.telescope_id,
-        backlash_steps=focus_model.backlash_steps,
-        approach_direction=focus_model.approach_direction,
-        source_note=focus_model.source_note,
-        thermal_coefficient_steps_per_c=focus_model.thermal_coefficient_steps_per_c,
-        filter_offsets=dict(focus_model.filter_offsets),
-        calibrated_at=focus_model.calibrated_at,
-        replace=True,
-    )
+    focus_fields = dataclasses.asdict(focus_model)
+    focus_fields["filter_offsets"] = [
+        {"filter": name, "offset_steps": offset} for name, offset in focus_model.filter_offsets.items()
+    ]
+    saved_focus_model = control.imaging.create_focus_model(FocusModel(**focus_fields), force=True)
     return SimulatedCalibrationReport(
         guider_calibration=_calibration_values(saved_calibration),
         focus_model=_focus_model_values(saved_focus_model),

@@ -226,7 +226,6 @@ class Container:
 
         self.settings_service = SettingsService(
             self.config_service,
-            equipment=self.wayfinder.control.equipment,
             configurations=self.astrometrics.observatories.configurations,
         )
 
@@ -326,6 +325,7 @@ class Container:
             suggestion_trigger=self.suggestion_refresh_worker.request,
             socket_manager=self.socket_manager,
             calibration_trigger=self.image_processing_service.measure_new_calibration_frames,
+            targets=self.astrometrics.targets,
         )
 
         # The telescope status reports a running copy of new frames.

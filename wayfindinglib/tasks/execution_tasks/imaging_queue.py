@@ -1,18 +1,19 @@
-"""Purpose: The steps an imaging queue entry takes, built from `control`.
+"""Purpose: The steps an imaging queue entry takes, built on the control work.
 
 Description: `advance_session` runs one cycle of an observing session's
 queue, but every step that touches hardware is handed to it as
 `SessionRunnerDependencies`. `imaging_dependencies` builds those steps
-for an imaging queue from the `control` sub-API:
+for an imaging queue from the shared `ControlContext` and the functions
+behind `control` (library code does not call the public objects):
 
 - the safety gate reads a fresh safety assessment
-  (`control.safety.status`); "unknown" counts as unsafe;
+  (`control_status.read_safety_status`); "unknown" counts as unsafe;
 - the delegation policy decides, per capability, whether a step is sent
   to the hardware, only recorded, or left to another program;
 - the one action per entry is a slew to its target (`MOUNT_CONTROL`);
   a target without coordinates yet is captured where the mount points;
 - the outcome is a capture of each exposure request
-  (`control.imaging.capture_image`), with the package's dithering;
+  (`imaging_capture.capture_frames`), with the package's dithering;
 - each cycle is saved through the `DiskButler`.
 
 Device fault states and meridian flips are not tracked for this queue
@@ -29,11 +30,14 @@ from typing import TYPE_CHECKING, Any
 from astrometricslib.exceptions import AstrometricsError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.models.planning.observation_package import FrameType
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
+from wayfindinglib.tasks.control_tasks.centering import slew_to
+from wayfindinglib.tasks.control_tasks.control_status import read_safety_status
+from wayfindinglib.tasks.control_tasks.imaging_capture import capture_frames
 from wayfindinglib.tasks.execution_tasks.session_runner import ActionDisposition, SessionRunnerDependencies
 
 if TYPE_CHECKING:
     from astrometricslib import FilterType
-    from wayfindinglib.api.control import ObservatoryControl
+    from wayfindinglib.api.control.context import ControlContext
     from wayfindinglib.drivers.butler import DiskButler
     from wayfindinglib.models.session.meridian_flip import MeridianFlipOutcome
     from wayfindinglib.models.session.observation_session import ObservationSession, QueuedObservationPackage
@@ -59,13 +63,13 @@ def filter_name(filter_type: FilterType) -> str | None:
     return None if filter_type.name == "NONE" else filter_type.value
 
 
-def capture_entry(control: ObservatoryControl, entry: QueuedObservationPackage) -> tuple[int, str]:
+def capture_entry(context: ControlContext, entry: QueuedObservationPackage) -> tuple[int, str]:
     """Capture every exposure request of one queue entry.
 
     Parameters
     ----------
-    control : `ObservatoryControl`
-        Captures the frames.
+    context : `ControlContext`
+        Supplies the camera, the filter wheel and the policy.
     entry : `QueuedObservationPackage`
         The entry, with its exposure requests and dithering.
 
@@ -80,12 +84,13 @@ def capture_entry(control: ObservatoryControl, entry: QueuedObservationPackage) 
         if request.frame_type != FrameType.LIGHT:
             logger.info("Capturing %s frames: the camera sets the frame type itself.", request.frame_type)
         try:
-            result = control.imaging.capture_image(
+            result = capture_frames(
+                context,
                 request.exposure_sec,
                 count=request.count,
                 filter_name=filter_name(request.filter),
                 dither=entry.dither_config or False,
-                delay_seconds=request.delay_sec,
+                delay_s=request.delay_sec,
             )
         except AstrometricsError as error:
             logger.warning("Capture for %s stopped: %s", entry.target_id, error.message)
@@ -94,18 +99,18 @@ def capture_entry(control: ObservatoryControl, entry: QueuedObservationPackage) 
     return frames, f"Captured {frames} frame(s)."
 
 
-def _slew_to(control: ObservatoryControl, target_id: str) -> None:
+def _slew_to(context: ControlContext, target_id: str) -> None:
     """Slew to a queue entry's target, if it has coordinates yet.
 
     Parameters
     ----------
-    control : `ObservatoryControl`
-        Slews the mount.
+    context : `ControlContext`
+        Supplies the mount and the target catalog.
     target_id : `str`
         The library target.
     """
     try:
-        control.mount.slew(target_id)
+        slew_to(context, target_id)
     except (InvalidArgumentError, NotFoundError) as error:
         logger.warning("Not slewing to %s: %s", target_id, error.message)
 
@@ -126,13 +131,13 @@ def _no_flip(entry: QueuedObservationPackage) -> MeridianFlipOutcome:
     raise ConflictError(f"Meridian flips are not run for the imaging queue (entry {entry.id}).")
 
 
-def imaging_dependencies(control: ObservatoryControl, butler: DiskButler) -> SessionRunnerDependencies:
+def imaging_dependencies(context: ControlContext, butler: DiskButler) -> SessionRunnerDependencies:
     """Build the queue-cycle steps for an imaging queue.
 
     Parameters
     ----------
-    control : `ObservatoryControl`
-        Reads safety and the policy, slews and captures.
+    context : `ControlContext`
+        Supplies safety, the policy, the mount and the camera.
     butler : `DiskButler`
         Saves the session after each cycle.
 
@@ -156,7 +161,7 @@ def imaging_dependencies(control: ObservatoryControl, butler: DiskButler) -> Ses
         """
         return [
             ActionDisposition(
-                ObservatoryCapability.MOUNT_CONTROL, issue=lambda: _slew_to(control, entry.target_id)
+                ObservatoryCapability.MOUNT_CONTROL, issue=lambda: _slew_to(context, entry.target_id)
             )
         ]
 
@@ -168,16 +173,16 @@ def imaging_dependencies(control: ObservatoryControl, butler: DiskButler) -> Ses
         assessment : `SafetyAssessment`
             The verdict.
         """
-        return control.safety.status(include=["assessment"]).assessment
+        return read_safety_status(context, ["assessment"]).assessment
 
     return SessionRunnerDependencies(
-        delegation_policy=control.safety.status(include=["delegation_policy"]).delegation_policy,
+        delegation_policy=read_safety_status(context, ["delegation_policy"]).delegation_policy,
         get_safety_assessment=assessment,
         required_device_states=lambda entry: [],
         check_meridian_crossing=lambda entry, now: False,
         perform_meridian_flip=_no_flip,
         compute_actions=actions,
-        capture_outcome=lambda entry: capture_entry(control, entry),
+        capture_outcome=lambda entry: capture_entry(context, entry),
         checkpoint=checkpoint,
         now=lambda: datetime.now(UTC),
         record_id_factory=lambda: str(uuid.uuid4()),

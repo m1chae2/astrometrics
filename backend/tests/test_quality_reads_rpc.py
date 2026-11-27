@@ -187,7 +187,7 @@ def test_safety_status_asks_only_for_the_policy() -> None:
     """The safety read includes only the delegation policy."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_safety_status()
-    wayfinder.control.safety.status.assert_called_once_with(include=["delegation_policy"])
+    wayfinder.control.safety.get_status.assert_called_once_with(include=["delegation_policy"])
 
 
 def test_mosaic_preview_passes_the_rotation() -> None:
@@ -199,7 +199,7 @@ def test_mosaic_preview_passes_the_rotation() -> None:
     center, rows, cols = call.args
     assert call.kwargs == {"overlap_pct": 10.0, "rotation_deg": pytest.approx(35.0)}
     assert (rows, cols) == (2, 3)
-    assert (center.right_ascension, center.declination) == (10.0, 20.0)
+    assert (center.ra_deg, center.dec_deg) == (10.0, 20.0)
     service.preview_mosaic(10.0, 20.0, {})
     assert wayfinder.planning.sky.get_panels.call_args.kwargs["rotation_deg"] == pytest.approx(0.0)
 

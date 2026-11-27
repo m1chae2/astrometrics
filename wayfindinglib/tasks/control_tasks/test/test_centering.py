@@ -19,10 +19,10 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import SkyPosition
 from astrometricslib.exceptions import PlateSolveFailedError
 from wayfindinglib.models.session.centering_exposure import CenteringExposure
 from wayfindinglib.models.session.correction_config import CorrectionConfig
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import centering, hardware_operations
 
 

@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from astrometricslib import StellarObject
+from astrometricslib import SkyPosition
 from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.subject_resolver import SubjectResolver
 from wayfindinglib import MosaicPanel
@@ -54,9 +54,7 @@ class MosaicService:
         panels : `list` [`MosaicPanel`]
             One panel per grid cell.
         """
-        center = StellarObject(
-            id="mosaic center", name="mosaic center", ra=float(center_ra), dec=float(center_dec)
-        )
+        center = SkyPosition(ra_deg=float(center_ra) % 360.0, dec_deg=float(center_dec))
         return self.wayfinder.planning.sky.get_panels(
             center,
             grid.get("rows", 1),

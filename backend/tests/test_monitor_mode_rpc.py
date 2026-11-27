@@ -2,8 +2,8 @@
 
 Description: The user decided on 2026-10-24 (issue #95, settled decision
 S10) that, in monitor mode, every motion and capture command stays
-refused, while device settings and the app's own INDI connect and
-disconnect stay allowed.
+refused, while device settings and the app's own INDI connect stay
+allowed.
 The library test (`wayfindinglib/test/test_monitor_mode_sends_no_commands.py`)
 proves it through the library. This file proves it through the backend's
 RPC dispatch, the door the desktop app uses.
@@ -13,16 +13,13 @@ Monitor mode is switched on through the RPC method
 container are replaced by recording stand-ins, so a command that got
 past the guard would show up as a call.
 
-Two kinds of RPC method send commands:
-
-* methods that call a library command directly. They are found by
-  reading the RPC table and the wayfindinglib-core manifest
-  (``tool_class`` of ``actuate``), so a new one is covered
-  automatically;
-* methods that go through a backend service first. They are named in
-  `SERVICE_COMMANDS` below. This includes the two stop methods
-  (``guiding:stop``, ``telescope:alignment_stop``): the user decided on
-  2026-10-24 (issue #95, decision U4) that monitor mode refuses a stop too.
+Every RPC method that sends a command goes through a backend service (the
+library's device actions return nothing, and the services keep the RPC
+replies), so none reaches ``wayfinder.control`` directly; a test checks
+that. The command methods are named in `SERVICE_COMMANDS` below. This
+includes the stop methods (``guiding:stop``, ``telescope:alignment_stop``,
+``telescope:abort_motion``): the user decided on 2026-10-24 (issue #95,
+decision U4) that monitor mode refuses a stop too.
 
 The allowed methods (``telescope:connect``, ``telescope:set_indi_property``)
 are checked to still work.
@@ -48,6 +45,15 @@ from wayfindinglib.test import monitor_mode_support as support
 pytestmark = pytest.mark.anyio
 
 SERVICE_COMMANDS: dict[str, dict[str, Any]] = {
+    "telescope:park": {},
+    "telescope:unpark": {},
+    "telescope:abort_motion": {},
+    "telescope:set_tracking": {"enabled": True},
+    "telescope:manual_move": {"direction": "north"},
+    "telescope:set_slew_rate": {"rate_index": 1},
+    "telescope:focus_move": {"steps": 10},
+    "telescope:set_filter": {"filter_name": "L"},
+    "guiding:start": {},
     "telescope:slew_coordinates": {"ra": 1.0, "dec": 20.0},
     "telescope:slew_target": {"target_name": "M 81"},
     "guiding:capture_frame": {"exposure": 1.0},
@@ -60,7 +66,6 @@ SERVICE_COMMANDS: dict[str, dict[str, Any]] = {
 as an error reply. Values are sample parameters."""
 
 BACKGROUND_COMMANDS: dict[str, dict[str, Any]] = {
-    "guiding:start": {},
     "telescope:alignment_start": {"target_ra": "12h 00m 00s", "target_dec": "+45d 00m 00s"},
 }
 """RPC methods that start a thread. The thread logs a refusal instead of
@@ -262,30 +267,6 @@ or copy files from the telescope computer. None sends a command to a device.
 through the library calls that the monitor-mode guard already refuses."""
 
 
-def _direct_command_methods() -> dict[str, str]:
-    """Find the RPC methods that call a library command directly.
-
-    Returns
-    -------
-    methods : `dict` [`str`, `str`]
-        RPC method name -> the manifest tool it calls, for every method
-        in the RPC table that is served by a ``wayfinder.control.<child>``
-        method and whose tool is one of the refused commands.
-    """
-    refused = set(support.refused_tool_names())
-    found = {}
-    for method, handler in rpc_router._HANDLERS.items():
-        if not isinstance(handler, tuple):
-            continue
-        service_name, method_name = handler
-        parts = service_name.split(".")
-        if parts[:2] == ["wayfinder", "control"] and len(parts) == 3:
-            tool = f"observatory_{parts[2]}_{method_name}"
-            if tool in refused:
-                found[method] = tool
-    return found
-
-
 @pytest.fixture
 def monitor_mode() -> Iterator[support.RecordingDrivers]:
     """Switch the shared container to monitor mode with recording drivers.
@@ -333,32 +314,19 @@ async def _enter_monitor_mode() -> None:
 
 def _wait_for_background_threads() -> None:
     """Wait for the threads the background RPC methods start."""
-    for thread in (container.guiding_service._thread, container.alignment_service._alignment_thread):
-        if isinstance(thread, threading.Thread):
-            thread.join(timeout=10.0)
+    thread = container.alignment_service._alignment_thread
+    if isinstance(thread, threading.Thread):
+        thread.join(timeout=10.0)
 
 
-def test_the_direct_command_methods_are_found() -> None:
-    """The scan of the RPC table finds the commands the app sends directly."""
-    found = _direct_command_methods()
-
-    assert {"telescope:park", "telescope:unpark", "telescope:abort_motion", "telescope:set_tracking"} <= set(
-        found
-    )
-    assert {"telescope:focus_move", "telescope:set_filter", "telescope:manual_move"} <= set(found)
-    assert "telescope:connect" not in found
-
-
-async def test_every_direct_command_rpc_is_refused_in_monitor_mode(
-    monitor_mode: support.RecordingDrivers,
-) -> None:
-    """Each RPC method that calls a library command is refused."""
-    await _enter_monitor_mode()
-    for method, tool in _direct_command_methods().items():
-        reply = await _call(method, support.sample_arguments(tool))
-
-        assert reply["error"]["data"]["code"] == "permission_denied", method
-    assert monitor_mode.commands_sent() == []
+def test_no_rpc_method_calls_a_library_command_directly() -> None:
+    """Every command goes through a service; `SERVICE_COMMANDS` covers it."""
+    direct = [
+        method
+        for method, handler in rpc_router._HANDLERS.items()
+        if isinstance(handler, tuple) and handler[0].startswith("wayfinder.control")
+    ]
+    assert direct == []
 
 
 async def test_every_service_command_rpc_is_refused_in_monitor_mode(
@@ -367,13 +335,14 @@ async def test_every_service_command_rpc_is_refused_in_monitor_mode(
     """RPC methods that go through a backend service are refused too."""
     from sys import modules
 
-    # The capture RPC waits a short time for an early refusal before it
-    # answers with a job id. On a slow runner the refusal can come later;
-    # the wait ends as soon as the capture thread ends, so a long one is free.
-    monkeypatch.setattr("backend.services.observatory.imaging_service.EARLY_FAILURE_WAIT_SECONDS", 30.0)
+    from astrometricslib import SkyPosition, Target
 
-    from wayfindinglib._internal.control import SkyPosition
-
+    # The capture RPC checks the capture before its thread starts, so the
+    # refusal is the reply itself. The target lookup and its coordinates
+    # are stand-ins, so the slew reaches the guard.
+    monkeypatch.setattr(
+        container.wayfinder.astrometrics.targets, "get", lambda *args, **kwargs: Target(id="M 81")
+    )
     monkeypatch.setattr(
         modules["wayfindinglib.tasks.control_tasks.hardware_operations"],
         "resolve_destination",
@@ -439,10 +408,7 @@ def test_every_rpc_method_is_classified() -> None:
     that might send a command and leave it out of the monitor-mode proof.
     """
     command_tested = (
-        set(_direct_command_methods())
-        | set(SERVICE_COMMANDS)
-        | set(BACKGROUND_COMMANDS)
-        | set(BACKGROUND_COMMANDS_STARTED_BY_QUEUE)
+        set(SERVICE_COMMANDS) | set(BACKGROUND_COMMANDS) | set(BACKGROUND_COMMANDS_STARTED_BY_QUEUE)
     )
     buckets = {
         "read only": set(READ_ONLY_METHODS),

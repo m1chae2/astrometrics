@@ -1,18 +1,19 @@
 """Purpose: `control.imaging`, the main camera, filter wheel and focuser.
 
 Description: Takes exposures with the main camera (with a filter change
-and dithering between frames), stops the run the app started, turns the
-filter wheel, moves the focuser, and fits a focus curve. `status` reads
-the filter names and the filter in the beam, the focuser position, the
-camera's temperature and activity, and the saved focus model. A capture
-or filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
+and dithering between frames), checks a capture before it runs, stops
+the run the app started, turns the filter wheel and moves the focuser.
+`get_status` reads the filter names and the filter in the beam, the
+focuser position, the camera's temperature and activity, whether a run
+is going and the saved focus model; focus models are records, read with
+`query_focus_models` and stored with `create_focus_model`. A capture or
+filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
 focuser move needs `AUTOFOCUS`.
 """
 
-from datetime import datetime
-
-from astrometricslib.jobs import background_job, registered_job
-from wayfindinglib.api.control.context import ControlChild, require_text
+from astrometricslib.arguments import Page
+from astrometricslib.jobs import background_job
+from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import ImagingStatus
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.planning.observation_package import DitherConfig
@@ -20,29 +21,15 @@ from wayfindinglib.models.session.capture_result import CaptureResult
 
 __all__ = ["ImagingControl"]
 
-STATUS_SECTIONS = ("filters", "current_filter", "focuser", "camera", "focus_model")
-"""Sections `ImagingControl.status` can read."""
-
-
-#: Longest id a recorded focus model may have.
-MAXIMUM_RECORD_ID_LENGTH = 100
-
-#: Longest source note a recorded focus model may have.
-MAXIMUM_SOURCE_NOTE_LENGTH = 500
-
-#: Largest backlash or filter offset accepted, in focuser steps. Real
-#: focusers travel tens of thousands of steps at most.
-MAXIMUM_BACKLASH_STEPS = 100000
-
-#: Largest focus shift per degree Celsius accepted, in steps.
-MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C = 10000.0
-
 
 class ImagingControl(ControlChild):
     """Operate the main camera, the filter wheel and the focuser."""
 
-    def status(self, include: list[str] | None = None) -> ImagingStatus:
+    def get_status(self, include: list[str] | None = None) -> ImagingStatus:
         """Read the filter wheel, the focuser, the camera and the focus model.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_status.read_imaging_status
 
         Parameters
         ----------
@@ -50,52 +37,86 @@ class ImagingControl(ControlChild):
             Sections to read: ``filters`` (slot names, from the device),
             ``current_filter`` (the filter in the beam), ``focuser``
             (position, from the device), ``camera`` (sensor temperature and
-            what the camera is doing) and ``focus_model`` (saved, no device
-            needed). All of them when omitted.
+            what the camera is doing), ``focus_model`` (saved, no device
+            needed) and ``capture`` (whether a capture run this app started
+            is going). All of them when omitted.
 
         Returns
         -------
         status : `ImagingStatus`
             The sections read. The others stay `None`.
         """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
+        from wayfindinglib.tasks.control_tasks.control_status import read_imaging_status
 
-        sections = hardware_operations.check_sections(include, STATUS_SECTIONS)
-        status = ImagingStatus(sections=sections)
-        if "filters" in sections:
-            status.filter_names = hardware_operations.filter_names(self._context)
-        if "current_filter" in sections:
-            status.current_filter = hardware_operations.current_filter(self._context)
-        if "focuser" in sections:
-            status.focuser_position = hardware_operations.focuser_position(self._context)
-        if "camera" in sections:
-            status.camera_temperature, status.camera_status = hardware_operations.camera_reading(
-                self._context
-            )
-        if "focus_model" in sections:
-            status.focus_model = self._context.active_focus_model()
-        return status
+        return read_imaging_status(self._context, include)
 
-    @background_job("capture", grace_period_seconds=5.0)
-    def capture_image(
+    def check_capture(
         self,
-        exposure_seconds: float,
+        exposure_s: float,
         count: int = 1,
         filter_name: str | None = None,
         dither: bool | DitherConfig = False,
-        delay_seconds: float = 0.0,
-    ) -> CaptureResult:
-        """Take one or more exposures with the main camera.
+        delay_s: float = 0.0,
+    ) -> None:
+        """Check that a capture may run, without touching a device.
 
-        Turns the filter wheel first when `filter_name` is given, then
-        takes the exposures one after another. With `dither`, the
-        pointing shifts slightly between frames (one guide pulse on each
-        axis), so a fixed sensor defect lands on different sky in each
-        frame. Each frame waits for its exposure plus a short readout.
+        `capture` makes the same check first. A program that runs the
+        capture on a thread of its own calls this before it starts the
+        thread, so a refusal (a bad argument, or monitor mode) reaches the
+        person at once.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.imaging_capture.check_capture
 
         Parameters
         ----------
-        exposure_seconds : `float`
+        exposure_s : `float`
+            Length of each exposure, in seconds.
+        count : `int`, optional
+            Number of exposures.
+        filter_name : `str`, optional
+            Filter to turn to first.
+        dither : `bool` or `DitherConfig`, optional
+            Dithering between frames, as for `capture`.
+        delay_s : `float`, optional
+            Pause between exposures, in seconds.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if `exposure_s` or `count` is not
+        above zero or `delay_s` is negative, `PermissionDeniedError` unless
+        `CAPTURE_ORCHESTRATION` (and, to dither, `AUTOGUIDING`) is
+        `AUTHORITATIVE`, and `ConfigurationError` when a dither cannot be
+        sized.
+        """
+        from wayfindinglib.tasks.control_tasks.imaging_capture import check_capture
+
+        check_capture(self._context, exposure_s, count, filter_name, dither, delay_s)
+
+    @background_job("capture", grace_period_seconds=5.0)
+    def capture(
+        self,
+        exposure_s: float,
+        count: int = 1,
+        filter_name: str | None = None,
+        dither: bool | DitherConfig = False,
+        delay_s: float = 0.0,
+    ) -> CaptureResult:
+        """Take one or more exposures with the main camera.
+
+        Runs `check_capture` first. Turns the filter wheel when
+        `filter_name` is given, then takes the exposures one after another.
+        With `dither`, the pointing shifts slightly between frames (one
+        guide pulse on each axis), so a fixed sensor defect lands on
+        different sky in each frame. The run is recorded as a ``capture``
+        job, and each frame moves the job's progress.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.imaging_capture.capture_frames
+
+        Parameters
+        ----------
+        exposure_s : `float`
             Length of each exposure, in seconds.
         count : `int`, optional
             Number of exposures. Defaults to 1.
@@ -106,52 +127,39 @@ class ImagingControl(ControlChild):
             `True` dithers by 3 pixels every 3 frames. A `DitherConfig`
             sets the size and how often. Needs an active telescope and
             camera, and `AUTOGUIDING` to be `AUTHORITATIVE`.
-        delay_seconds : `float`, optional
+        delay_s : `float`, optional
             Pause between exposures, for example to let the mount settle.
 
         Returns
         -------
         result : `CaptureResult`
             How many frames were taken, with which filter, and how many
-            dithers. ``stopped`` is `True` if `stop_capture` (or a slew or
-            park) ended the run early.
+            dithers. ``stopped`` is `True` if `stop` (or a slew or park)
+            ended the run early.
 
         Notes
         -----
-        The capture raises `InvalidArgumentError` if `exposure_seconds` or
-        `count` is not above zero or `delay_seconds` is negative, and
-        `HardwareError` if the camera does not start an exposure or the
-        filter wheel does not turn.
+        Raises what `check_capture` raises, and `HardwareError` if the
+        camera does not start an exposure or the filter wheel does not turn.
         """
         from wayfindinglib.tasks.control_tasks.imaging_capture import capture_frames
 
-        with registered_job(
-            job_type="capture",
-            target_id=filter_name or "capture",
-        ):
-            return capture_frames(
-                self._context,
-                exposure_seconds,
-                count=count,
-                filter_name=filter_name,
-                dither=dither,
-                delay_seconds=delay_seconds,
-            )
+        return capture_frames(
+            self._context, exposure_s, count=count, filter_name=filter_name, dither=dither, delay_s=delay_s
+        )
 
-    def stop_capture(self) -> bool:
+    def stop(self) -> None:
         """Stop the capture run this app started, and abort its exposure.
 
         The run ends cleanly after the frame it is on is dropped; the frames
         already taken are kept, and the run's result has ``stopped`` set.
-        Only a run started by this app is stopped, and only its exposure is
-        aborted. When this app has no run going, nothing is sent to the
-        camera, so a run started by another program (Ekos, for example) is
-        never touched. A slew or park does the same before it moves.
+        Only a run started by this app is stopped. When this app has no run
+        going, nothing is sent to the camera, so a run started by another
+        program (Ekos, for example) is never touched. A slew or park does
+        the same before it moves.
 
-        Returns
-        -------
-        stopped : `bool`
-            `True` if a run was stopped, `False` if none was going.
+        Owner:
+            wayfindinglib.tasks.control_tasks.hardware_operations.stop_capture
 
         Notes
         -----
@@ -160,167 +168,102 @@ class ImagingControl(ControlChild):
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.stop_capture(self._context)
+        hardware_operations.stop_capture(self._context)
 
-    def set_filter(self, filter_name: str) -> bool:
+    def set_filter(self, name: str) -> None:
         """Turn the filter wheel to a filter.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.hardware_operations.set_filter
 
         Parameters
         ----------
-        filter_name : `str`
+        name : `str`
             The filter's name, or a name the wheel can match to one.
 
-        Returns
-        -------
-        success : `bool`
-            `True` once the wheel reports the new filter.
+        Notes
+        -----
+        Raises `NotFoundError` if the wheel has no such filter and
+        `HardwareError` if it does not turn.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.set_filter(self._context, filter_name)
+        hardware_operations.set_filter(self._context, name)
 
-    def focus_move(self, steps: int) -> bool:
+    def move_focuser(self, steps: int) -> None:
         """Move the focuser by a number of steps.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.hardware_operations.move_focuser
 
         Parameters
         ----------
         steps : `int`
             Steps to move; the sign gives the direction.
 
-        Returns
-        -------
-        success : `bool`
-            Whether the move command was accepted.
+        Notes
+        -----
+        Raises `HardwareError` if the focuser refuses the move.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        return hardware_operations.focus_move(self._context, steps)
+        hardware_operations.move_focuser(self._context, steps)
 
-    def query_focus_models(self) -> list[FocusModel]:
+    def query_focus_models(self, limit: int | None = None, offset: int = 0) -> Page[FocusModel]:
         """List every saved focus model, oldest first.
 
-        `status` reads only the focus model of the active equipment. This
-        reads them all, for every telescope and camera pairing, so a script
-        can compare models or pick the latest one. It only reads.
+        `get_status` reads only the focus model of the active equipment.
+        This reads them all, for every telescope and camera pairing.
 
-        Returns
-        -------
-        focus_models : `list` [`FocusModel`]
-            The saved records in order of ``calibrated_at``. Empty when none
-            is saved.
-        """
-        records = self._context.butler.get_all("focus_model")
-        return sorted(records, key=lambda record: record.calibrated_at)
-
-    def record_focus_model(
-        self,
-        *,
-        focus_model_id: str,
-        camera_id: str,
-        telescope_id: str,
-        backlash_steps: int,
-        approach_direction: str,
-        source_note: str,
-        thermal_coefficient_steps_per_c: float = 0.0,
-        filter_offsets: dict[str, int] | None = None,
-        calibrated_at: datetime | None = None,
-        replace: bool = False,
-    ) -> FocusModel:
-        """Save a focus model that was measured elsewhere.
-
-        Use this when the numbers come from a focus run in another tool or
-        from a copy of an earlier record. A record with an id that is already
-        saved is refused unless `replace` is true. The delegation rules treat
-        the record like one fitted here. Nothing is sent to a device.
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_records.query_focus_models
 
         Parameters
         ----------
-        focus_model_id : `str`
-            Id of the record, at most 100 characters.
-        camera_id, telescope_id : `str`
-            The equipment pairing the model belongs to.
-        backlash_steps : `int`
-            Focuser backlash in steps. Zero or more, at most 100000.
-        approach_direction : `str`
-            ``"inward"`` or ``"outward"``: the one direction every focus
-            move ends in.
-        source_note : `str`
-            Where the numbers came from. Required, so a record never has an
-            unknown origin. At most 500 characters.
-        thermal_coefficient_steps_per_c : `float`, optional
-            Focus shift in steps for each degree Celsius, from -10000 to
-            10000. Default 0.
-        filter_offsets : `dict` [`str`, `int`], optional
-            Focus offset in steps for each filter name.
-        calibrated_at : `~datetime.datetime`, optional
-            When the model was made. Now when omitted.
-        replace : `bool`, optional
-            Replace a saved record that has the same id. Defaults to
-            `False`, which refuses instead.
+        limit : `int`, optional
+            The most records to return. Every one when omitted.
+        offset : `int`, optional
+            How many records to skip.
+
+        Returns
+        -------
+        focus_models : `Page` [`FocusModel`]
+            The saved records in order of ``calibrated_at``.
+        """
+        from wayfindinglib.tasks.control_tasks.control_records import query_focus_models
+
+        return query_focus_models(self._context, limit=limit, offset=offset)
+
+    def create_focus_model(self, focus_model: FocusModel, force: bool = False) -> FocusModel:
+        """Save a focus model that was measured elsewhere.
+
+        Use this when the numbers come from a focus run in another tool or
+        from a copy of an earlier record. The delegation rules treat the
+        record like one fitted here. Nothing is sent to a device.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_records.create_focus_model
+
+        Parameters
+        ----------
+        focus_model : `FocusModel`
+            The record. Its ``source_note`` says where the numbers came
+            from; its id has at most 100 characters.
+        force : `bool`, optional
+            Replace a saved record that has the same id. `False` refuses
+            instead.
 
         Returns
         -------
         focus_model : `FocusModel`
             The saved record.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If a value is out of range or not recognized, an id or
-            `source_note` is empty or too long, or the id is already saved
-            and `replace` is false.
+        Notes
+        -----
+        Raises `InvalidArgumentError` if a value is out of range, the id
+        or source note is empty or too long, or the id is already saved
+        and `force` is false.
         """
-        from pydantic import ValidationError
+        from wayfindinglib.tasks.control_tasks.control_records import create_focus_model
 
-        from astrometricslib.exceptions import InvalidArgumentError
-        from wayfindinglib.models.equipment_and_site.focus_model import FilterFocusOffset
-
-        require_text(source_note=source_note, focus_model_id=focus_model_id)
-        if len(focus_model_id) > MAXIMUM_RECORD_ID_LENGTH or len(source_note) > MAXIMUM_SOURCE_NOTE_LENGTH:
-            raise InvalidArgumentError(
-                f"focus_model_id may have at most {MAXIMUM_RECORD_ID_LENGTH} characters and source_note "
-                f"at most {MAXIMUM_SOURCE_NOTE_LENGTH}."
-            )
-        if backlash_steps > MAXIMUM_BACKLASH_STEPS:
-            raise InvalidArgumentError(f"backlash_steps must be at most {MAXIMUM_BACKLASH_STEPS}.")
-        if abs(thermal_coefficient_steps_per_c) > MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C:
-            raise InvalidArgumentError(
-                f"thermal_coefficient_steps_per_c must be within {MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C}."
-            )
-        if any(abs(offset) > MAXIMUM_BACKLASH_STEPS for offset in (filter_offsets or {}).values()):
-            raise InvalidArgumentError(f"Each filter offset must be within {MAXIMUM_BACKLASH_STEPS} steps.")
-        if not replace and self._context.butler.get("focus_model", {"id": focus_model_id}) is not None:
-            raise InvalidArgumentError(
-                f"A focus model with id {focus_model_id!r} is already saved. Pass replace=True to replace it."
-            )
-        fields = {
-            "id": focus_model_id,
-            "camera_id": camera_id,
-            "telescope_id": telescope_id,
-            "backlash_steps": backlash_steps,
-            "approach_direction": approach_direction,
-            "thermal_coefficient_steps_per_c": thermal_coefficient_steps_per_c,
-            "filter_offsets": [
-                FilterFocusOffset(filter=name, offset_steps=offset)
-                for name, offset in (filter_offsets or {}).items()
-            ],
-            "source_note": source_note,
-        }
-        if calibrated_at is not None:
-            fields["calibrated_at"] = calibrated_at
-        try:
-            focus_model = FocusModel(**fields)
-        except ValidationError as error:
-            raise InvalidArgumentError(f"The focus model is not valid: {error}") from error
-        self._save_focus_model(focus_model)
-        return focus_model
-
-    def _save_focus_model(self, focus_model: FocusModel) -> None:
-        """Save a measured focus model.
-
-        Parameters
-        ----------
-        focus_model : `FocusModel`
-            The model, keyed by its own id.
-        """
-        self._context.butler.put(focus_model, "focus_model", {"id": focus_model.id})
+        return create_focus_model(self._context, focus_model, force=force)

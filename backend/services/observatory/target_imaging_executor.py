@@ -4,7 +4,7 @@ Description: The app's sequencer queue is the queue of one observing
 session in the wayfinding library. Adding a sequence records an
 observation package and queues it (``planning.sessions.add``);
 removing, reordering and changing entries edit the same queue; and
-starting the sequencer runs `ObservationExecution.advance_session` on a
+starting the sequencer runs `ObservationExecution.run` on a
 background thread until the queue is done. Each cycle checks safety,
 slews to the entry's target and captures its exposures.
 
@@ -61,7 +61,7 @@ class TargetImagingExecutor:
         """
         self._wayfinder = wayfinder
         self._plan_service = plan_service or PlanService(wayfinder=wayfinder)
-        self._running_session_id: str | None = None
+        self._running_session: ObservationSession | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -316,13 +316,13 @@ class TargetImagingExecutor:
             logger.warning("Imaging already in progress.")
             return
         self._stop.clear()
-        session_id = self._existing_session().id
-        self._running_session_id = session_id
+        running_session = self._existing_session()
+        self._running_session = running_session
 
         def run() -> None:
             """Run the queue; the top of a background thread."""
             try:
-                session = self._wayfinder.execution.advance_session(session_id, stop=self._stop)
+                session = self._wayfinder.execution.run(running_session, stop=self._stop)
                 if session is not None:
                     logger.info("Sequencer stopped: %s %s", session.status, session.status_detail)
             except AstrometricsError as error:
@@ -355,8 +355,8 @@ class TargetImagingExecutor:
     def abort_imaging(self) -> None:
         """Stop running the queue and skip every waiting entry."""
         self._stop.set()
-        session_id = self._running_session_id
-        if session_id is not None:
-            self._wayfinder.execution.abort_session(session_id, "Aborted from the sequencer.")
-            self._running_session_id = None
+        running_session = self._running_session
+        if running_session is not None:
+            self._wayfinder.execution.abort(running_session, "Aborted from the sequencer.")
+            self._running_session = None
         logger.info("Imaging aborted.")

@@ -262,4 +262,4 @@ class AdvisoryService:
         status : `SafetyStatus`
             The safety status with only the delegation policy filled in.
         """
-        return self.wayfinder.control.safety.status(include=["delegation_policy"])
+        return self.wayfinder.control.safety.get_status(include=["delegation_policy"])

@@ -408,7 +408,12 @@ def subject_kind_of(hint: Any) -> SubjectParameter | None:
     if len(members) == 1 and typing.get_origin(members[0]) is list:
         inner = subject_kind_of(typing.get_args(members[0])[0]) if typing.get_args(members[0]) else None
         return SubjectParameter(inner.kind, many=True) if inner is not None and not inner.many else None
-    kinds = [_kind_of_type(member) for member in members if member is not str]
+    # A `SkyPosition` beside a target and a star is what a sent point becomes.
+    kinds = [
+        _kind_of_type(member)
+        for member in members
+        if member is not str and getattr(member, "__name__", "") != "SkyPosition"
+    ]
     if {kind.class_name for kind in kinds if kind is not None} == {"Target", "StellarObject"} and len(
         kinds
     ) == 2:

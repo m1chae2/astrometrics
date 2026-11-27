@@ -51,12 +51,15 @@ VERBS = frozenset({
 })
 """The verbs a method name may be, on their own (guide, Table 1)."""
 
-VERB_FORMS = re.compile(r"(get|query|count_by|create|plot|record|measure|predict|map|render|set)_[a-z0-9_]+")
+VERB_FORMS = re.compile(
+    r"(get|count_by|plot|record|measure|predict|map|render|set|query|create|check|sync|move)_[a-z0-9_]+"
+)
 """The verb forms that take a noun, a field or a setting after the verb."""
 
 DEVICE_ACTIONS = frozenset({
     "connect",
     "slew",
+    "start",
     "park",
     "unpark",
     "capture",

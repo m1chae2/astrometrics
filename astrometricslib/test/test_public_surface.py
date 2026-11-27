@@ -98,6 +98,19 @@ EXPECTED_MODULE_NAMES = {
         "StorageNotMountedError",
         "error_from_info",
         "to_error_info",
+        "MovedError",
+        "wrap_outside_error",
+    }),
+    "astrometricslib.arguments": frozenset({
+        "FrameChoice",
+        "Page",
+        "TimeInput",
+        "check_choice",
+        "check_include",
+        "check_limit",
+        "observing_night_id",
+        "reject_unused_arguments",
+        "to_epoch_seconds",
     }),
     "astrometricslib.reports": frozenset({
         "EARLIER_NIGHTS_VARIANT",
@@ -119,7 +132,6 @@ EXPECTED_MODULE_NAMES = {
         "StackSummary",
         "StarResultReference",
         "SubjectLevel",
-        "observing_night_id",
     }),
     "astrometricslib.jobs": frozenset({
         "DbLogHandler",

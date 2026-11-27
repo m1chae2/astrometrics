@@ -427,21 +427,13 @@ def test_a_bad_night_is_refused(isolated_butler: DiskButler) -> None:
 def test_a_quality_advisory_answers_and_refuses_the_wrong_arguments(isolated_butler: DiskButler) -> None:
     """The quality report takes a target; a wrong kind or object is refused."""
     review = _review(isolated_butler, _target("M 81"))
-    report = review.get_advisory("quality", target="M 81")
+    report = review.targets.get_report(_target("M 81"))
     assert isinstance(report, TargetDatasetReport)
     assert report.target_id == "M 81"
     assert report.needs_attention.warning_count == 0
     assert report.starting_point is not None
-    with pytest.raises(InvalidArgumentError, match="object_id"):
-        review.get_advisory("quality", target="M 81", object_id="star-1")
     with pytest.raises(NotFoundError):
-        review.get_advisory("quality", target="NOT-A-TARGET")
-    with pytest.raises(InvalidArgumentError, match="kind"):
-        review.get_advisory("tonight", target="M 81")
-    with pytest.raises(InvalidArgumentError, match="object_id"):
-        review.get_advisory("result", target="M 81")
-    with pytest.raises(NotFoundError):
-        review.get_advisory("result", target="M 81", object_id="no-such-star")
+        review.targets.get_result(StellarObject(id="no-such-star"), target=_target("M 81"))
 
 
 def test_tonight_advice_reads_a_time_and_refuses_bad_text(isolated_butler: DiskButler) -> None:

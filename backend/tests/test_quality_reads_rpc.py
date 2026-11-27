@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
-from astrometricslib import Target
+from astrometricslib import StellarObject, Target
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
@@ -28,7 +28,7 @@ from backend.services.observatory.mosaic_service import MosaicService
 from wayfindinglib.api.control.safety import SafetyControl
 from wayfindinglib.api.planning.packages import PlanningPackages
 from wayfindinglib.api.planning.sky import PlanningSky
-from wayfindinglib.api.review import ObservationReview
+from wayfindinglib.api.review import ReviewNights, ReviewTargets
 
 
 def _wayfinder() -> SimpleNamespace:
@@ -37,20 +37,34 @@ def _wayfinder() -> SimpleNamespace:
     Returns
     -------
     wayfinder : `types.SimpleNamespace`
-        With ``planning``, ``review``, and ``control`` holding ``safety``.
+        With ``planning``, ``review`` (its ``nights`` and ``targets``),
+        ``control`` holding ``safety``, and ``astrometrics``, whose target
+        and star lookups give the `TARGET` and `STAR` stand-ins.
     """
     control = SimpleNamespace(safety=create_autospec(SafetyControl, instance=True))
+    review = SimpleNamespace(
+        nights=create_autospec(ReviewNights, instance=True),
+        targets=create_autospec(ReviewTargets, instance=True),
+    )
     planning = SimpleNamespace(
         packages=create_autospec(PlanningPackages, instance=True),
         sky=create_autospec(PlanningSky, instance=True),
     )
-    targets = SimpleNamespace(get=lambda target_id, required=False: Target(id=target_id), resolve=_resolve)
-    return SimpleNamespace(
-        planning=planning,
-        review=create_autospec(ObservationReview, instance=True),
-        control=control,
-        astrometrics=SimpleNamespace(targets=targets),
+    astrometrics = SimpleNamespace(
+        targets=SimpleNamespace(get=lambda target_id: TARGETS.get(target_id), resolve=_resolve),
+        stars=SimpleNamespace(get=lambda star_id: STAR if star_id == "star-1" else None),
     )
+    return SimpleNamespace(planning=planning, review=review, control=control, astrometrics=astrometrics)
+
+
+TARGET = Target(id="M 81", name="M 81")
+"""The target the stand-in library holds whose reports are read."""
+
+TARGETS = {"M 81": TARGET, "NGC 7331": Target(id="NGC 7331")}
+"""Every target the stand-in library holds."""
+
+STAR = StellarObject(id="star-1")
+"""The one star the stand-in library holds."""
 
 
 def _resolve(name: str) -> SimpleNamespace | None:
@@ -67,7 +81,7 @@ def _resolve(name: str) -> SimpleNamespace | None:
         Where the name is, or `None` for any other name.
     """
     if name == "M 81":
-        return SimpleNamespace(name="M 81", ra_deg=148.9, dec_deg=69.1, target=Target(id="M 81"), star=None)
+        return SimpleNamespace(name="M 81", ra_deg=148.9, dec_deg=69.1, target=TARGET, star=None)
     if name == "Vega":
         return SimpleNamespace(name="* alf Lyr", ra_deg=279.2, dec_deg=38.8, target=None, star=None)
     return None
@@ -98,20 +112,20 @@ def test_new_methods_are_declared_and_served() -> None:
     assert "calibration:query" in RPC_METHODS
 
 
-def test_target_report_asks_for_the_quality_kind() -> None:
-    """The target report passes only the target."""
+def test_target_report_passes_the_target_object() -> None:
+    """The target report looks the id up and passes the target."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_target_report("M 81")
-    wayfinder.review.get_advisory.assert_called_once_with(kind="quality", target="M 81")
+    wayfinder.review.targets.get_report.assert_called_once_with(TARGET)
+    with pytest.raises(NotFoundError):
+        AdvisoryService(wayfinder).get_target_report("M 82")
 
 
 def test_star_shapes_pass_the_target_the_night_and_the_frames() -> None:
     """The star-shape read passes its three arguments to the review."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_star_shape_review("M 81", night="2026-10-24", frame_paths=["a.fits"])
-    wayfinder.review.get_star_shape_review.assert_called_once_with(
-        "M 81", night="2026-10-24", frame_paths=["a.fits"]
-    )
+    wayfinder.review.targets.get_star_shapes.assert_called_once_with(TARGET, ["a.fits"], night="2026-10-24")
 
 
 def test_tonight_ranking_passes_the_planning_time() -> None:
@@ -125,7 +139,7 @@ def test_result_statements_pass_target_and_object() -> None:
     """The result read passes the target and the star."""
     wayfinder = _wayfinder()
     AdvisoryService(wayfinder).get_result_statements("M 81", "star-1")
-    wayfinder.review.get_advisory.assert_called_once_with(kind="result", target="M 81", object_id="star-1")
+    wayfinder.review.targets.get_result.assert_called_once_with(STAR, target=TARGET)
 
 
 def test_depth_goal_methods_pass_the_target_and_the_level() -> None:
@@ -143,22 +157,30 @@ def test_history_reads_pass_their_arguments() -> None:
     """Each history read passes its arguments; a read records no job."""
     wayfinder = _wayfinder()
     service = AdvisoryService(wayfinder)
-    history = wayfinder.review
-    service.list_nights()
-    history.query.assert_called_with(kind="nights", limit=10)
+    history = wayfinder.review.nights
+    history.query.return_value = list(range(12))
+    history.get_target_changes.return_value = list(range(8))
+    assert service.list_nights() == list(range(2, 12))
+    history.query.assert_called_with()
     service.get_night_quality("2026-10-23")
-    history.query.assert_called_with(kind="night_quality", session_id="2026-10-23")
-    service.list_target_changes("2026-10-23", limit=5)
-    history.query.assert_called_with(kind="target_changes", session_id="2026-10-23", limit=5)
+    history.get.assert_called_with("2026-10-23", required=True)
+    assert service.list_target_changes("2026-10-23", limit=5) == list(range(3, 8))
+    history.get_target_changes.assert_called_with("2026-10-23")
+    with pytest.raises(InvalidArgumentError):
+        service.list_nights(limit=0)
 
 
 def test_live_status_does_not_refresh_the_logs() -> None:
     """The live status reads the logs on disk and copies no new ones."""
     wayfinder = _wayfinder()
-    AdvisoryService(wayfinder).get_live_session_status(window_minutes=5.0, include=["captures"])
-    wayfinder.review.get_live_session_status.assert_called_once_with(
-        window_minutes=5.0, refresh=False, include=["captures"], limit=10
+    wayfinder.review.nights.get_live_status.return_value = SimpleNamespace(
+        details={"captures": {"total": 10, "shown": 10, "items": list(range(10))}}
     )
+    status = AdvisoryService(wayfinder).get_live_session_status(
+        window_minutes=5.0, include=["captures"], limit=4
+    )
+    wayfinder.review.nights.get_live_status.assert_called_once_with(window_min=5.0, include=["captures"])
+    assert status.details["captures"] == {"total": 10, "shown": 4, "items": [0, 3, 6, 9]}
 
 
 def test_safety_status_asks_only_for_the_policy() -> None:

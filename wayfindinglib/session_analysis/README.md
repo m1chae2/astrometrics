@@ -29,7 +29,7 @@ Nothing the analysis produces is stored. A stored recommendation would go stale 
 
 ## Live status
 
-`live_status.py` answers the questions an observer has during a session: Is guiding steady? Did the last dither work? Which frames are already ruined? It reads the newest Ekos analyze log and KStars text log, stores nothing, and recomputes on every call. `review.get_live_session_status` downloads the latest logs first and returns the result.
+`live_status.py` answers the questions an observer has during a session: Is guiding steady? Did the last dither work? Which frames are already ruined? It reads the newest Ekos analyze log and KStars text log, stores nothing, and recomputes on every call. `review.nights.get_live_status(force=True)` downloads the latest logs first and returns the result.
 
 It reports:
 
@@ -41,6 +41,6 @@ It reports:
 
 Every limit comes from the session's own data and is checked against the 2026-10-02 session, as the comments beside each constant record.
 
-Gathering one night's data from storage is not done here. `wayfindinglib/tasks/control_tasks/session_analysis_tasks.py` (guiding) and `wayfindinglib/analytics/capture_history.py` (capture) do it. `wayfindinglib/tasks/control_tasks/night_analysis.py` runs the analyses, `wayfindinglib/tasks/control_tasks/night_history.py` is the front door behind `review.query`: it picks the analysis and keeps the reply under a size limit. The entry points are `review.query(kind="guiding")` and `query(kind="capture")`. This keeps every stage a pure function of its input.
+Gathering one night's data from storage is not done here. `wayfindinglib/tasks/control_tasks/session_analysis_tasks.py` (guiding) and `wayfindinglib/analytics/capture_history.py` (capture) do it. `wayfindinglib/tasks/control_tasks/night_analysis.py` runs the analyses, `wayfindinglib/tasks/control_tasks/night_history.py` holds the owners the public methods call. The entry points are `review.guiding.get_night(night)` and `review.nights.get_capture(night)`. This keeps every stage a pure function of its input.
 
 For exact behavior, read the code. The code is the source of truth.

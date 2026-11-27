@@ -22,11 +22,14 @@ def test_the_wayfinder_sub_apis_are_reflected(registry: ToolRegistry) -> None:
     assert "planning_sessions_get" in names
 
 
-def test_history_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`review_query` needs a kind; the rest are optional."""
-    schema = registry.tools["review_query"]["tool_def"].input_schema
-    assert schema["required"] == ["kind"]
-    assert set(schema["properties"]) == {"kind", "session_id", "ekos_file_id", "include", "limit"}
+def test_review_reads_take_a_night_or_a_subject_id(registry: ToolRegistry) -> None:
+    """A night read needs the night; a target read takes an id and a filter."""
+    night = registry.tools["review_nights_get_capture"]["tool_def"].input_schema
+    assert night["required"] == ["night"]
+    guiding = registry.tools["review_targets_get_frame_guiding"]["tool_def"].input_schema
+    assert guiding["required"] == ["target"]
+    assert guiding["properties"]["target"]["type"] == "string"
+    assert guiding["properties"]["frames"]["type"] == "object"
 
 
 async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:

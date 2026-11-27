@@ -116,24 +116,27 @@ EXECUTION_MEMBERS = frozenset({
 })
 """The public members of `ObservationExecution`."""
 
-REVIEW_MEMBERS = frozenset({
-    "query",
-    "query_alignment_sessions",
-    "query_alignment_records",
-    "get_advisory",
-    "get_live_session_status",
-    "frame_guiding",
-    "get_performance_envelope",
-    "get_star_shape_review",
-    # What the recorded nights say about the equipment itself.
-    "measure_unguided_mount_error",
-    "measure_guiding_spectrum",
-    "measure_focus_temperature_coefficient",
-    "get_sky_rate_prediction",
-    # The wayfinding tuned values, worked out from the stored records.
-    "measure_tuned_parameters",
-})
-"""The public members of `ObservationReview`."""
+REVIEW_MEMBERS = frozenset({"nights", "targets", "guiding", "performance", "alignment"})
+"""The public members of `ObservationReview`: its five objects."""
+
+REVIEW_CHILDREN = {
+    "nights": {
+        "query",
+        "get",
+        "get_target_changes",
+        "get_capture",
+        "get_sky_coverage",
+        "get_recurring_issues",
+        "query_ekos_sessions",
+        "get_ekos_session",
+        "get_live_status",
+    },
+    "targets": {"get_report", "get_result", "get_star_shapes", "get_frame_guiding"},
+    "guiding": {"get_night", "query_runs", "measure_spectrum", "record_spectrum", "measure_unguided_error"},
+    "performance": {"get_envelope", "predict_sky_rate", "measure_focus_temperature"},
+    "alignment": {"query", "query_nights", "get_pointing_model", "get_polar_alignment", "record_external"},
+}
+
 
 ROOT_LIFECYCLE = frozenset({"close"})
 """Lifecycle methods on `control` itself, outside the operation count.
@@ -269,11 +272,21 @@ def test_review_offers_exactly_its_pinned_members(control: ObservatoryControl) -
     assert _public_names(ObservationReview(control)) == REVIEW_MEMBERS
 
 
+@pytest.mark.parametrize("child", sorted(REVIEW_CHILDREN))
+def test_each_review_object_offers_exactly_its_pinned_members(
+    control: ObservatoryControl, child: str
+) -> None:
+    """A review object's public members match the pinned list."""
+    assert _public_names(getattr(ObservationReview(control), child)) == REVIEW_CHILDREN[child]
+
+
 def test_review_shares_the_context_of_control(control: ObservatoryControl) -> None:
-    """Review reads through control's context and holds no reference to it."""
+    """Review and its objects share control's context, not control."""
     review = ObservationReview(control)
     assert review._context is control._context
     assert control not in vars(review).values()
+    for child in REVIEW_CHILDREN:
+        assert getattr(review, child)._context is control._context, child
 
 
 def test_no_background_job_can_skip_registering_a_job() -> None:

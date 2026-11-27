@@ -1286,7 +1286,7 @@ export interface AlignmentTrackPoint {
  * as tracking error. Drift is the slope of a straight-line fit of the
  * offsets against time.
  *
- * `ObservationReview.query_alignment_sessions` builds these from a list of
+ * `review.alignment.query` builds these from a list of
  * `AlignmentAttempt` records.
  */
 export interface AlignmentTargetSession {
@@ -1400,7 +1400,7 @@ export interface TrackingRiskMap {
  * anyone can redo it. `QualityLimit` has no place for them.
  * tracking_risk : `TrackingRiskMap` or `None`
  * How risky each part of the sky is for tracking with this
- * equipment. Filled in by `review.get_performance_envelope`;
+ * equipment. Filled in by `review.performance.get_envelope`;
  * `None` in the envelopes the night analyses use internally.
  */
 export interface PerformanceEnvelope {

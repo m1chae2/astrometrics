@@ -773,11 +773,12 @@ forbidden_modules = [
     "wayfindinglib.tasks.planning_tasks",
     "wayfindinglib.api.planning",
 ]
-# `ObservationReview.get_advisory` judges the data and results that exist and
-# shares its report code with the suggestion refresh in planning. This one
-# edge is the only way review reaches planning.
+# `review.targets` judges the data and results that exist and shares its
+# report code with the suggestion refresh in planning. These two edges are
+# the only way review reaches planning.
 ignore_imports = [
-    "wayfindinglib.api.review -> wayfindinglib.tasks.planning_tasks.advisory_tasks",
+    "wayfindinglib.api.review.targets -> wayfindinglib.tasks.planning_tasks.target_report_tasks",
+    "wayfindinglib.api.review.targets -> wayfindinglib.tasks.planning_tasks.result_judgment_tasks",
 ]
 
 [[tool.importlinter.contracts]]

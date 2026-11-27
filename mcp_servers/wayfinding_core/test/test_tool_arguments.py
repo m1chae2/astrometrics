@@ -18,8 +18,8 @@ def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry
     schema = registry.tools["planning_catalogs_predict_deep_catalog"]["tool_def"].input_schema
     assert "register_job" not in schema["properties"]
     assert "magnitude_max" in schema["properties"]
-    advisory = registry.tools["review_get_advisory"]["tool_def"].input_schema
-    assert advisory["required"] == ["kind", "target"]
+    result = registry.tools["review_targets_get_result"]["tool_def"].input_schema
+    assert result["required"] == ["star"]
 
 
 async def test_visibility_accepts_coordinates_and_an_offset_time(registry: ToolRegistry) -> None:

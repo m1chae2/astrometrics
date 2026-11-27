@@ -259,9 +259,9 @@ class Container:
         # 5. Initialize Domain Services with proper DI
         from backend.services.observatory.alignment_service import AlignmentService
 
-        # The service reads the stored attempts through `review`, and the
-        # INDI session and the external-alignment polling go through
-        # `control.mount`.
+        # The service reads the stored attempts, the polar alignment and the
+        # external-alignment polling through `review.alignment`, and runs
+        # centering through `control.mount`.
         self.alignment_service = AlignmentService(
             observatory_api=self.wayfinder.control,
             review=self.wayfinder.review,

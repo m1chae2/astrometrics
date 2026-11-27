@@ -34,6 +34,9 @@ def library_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
     monkeypatch.setattr(container.astrometrics.quality, "_config", configuration)
+    # The stored rows are read through `quality.records`, which keeps its own
+    # settings, so point it at the folder too.
+    monkeypatch.setattr(container.astrometrics.quality.records, "_config", configuration)
     return tmp_path
 
 

@@ -266,7 +266,7 @@ CLASSIFICATION_RULES = (
         "Writes settings to local storage.",
     ),
     _rule(
-        r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
+        r"^(observatory_guiding_(drain_external_pulses|refit_spectrum)|review_guiding_record_spectrum)$",
         "change-data",
         "low",
         "Clears or refits stored guiding state. Check.",
@@ -318,13 +318,13 @@ CLASSIFICATION_RULES = (
         "Returns a stored, derived or measured value.",
     ),
     _rule(
-        r"^review_query(_alignment_sessions)?$",
+        r"^review_(nights|guiding|alignment|targets|performance)_(query|query_[a-z_]+|get|get_[a-z_]+|measure_[a-z_]+|predict_[a-z_]+)$",
         "compute",
         "high",
         "Reads recorded nights and calculates the analyses.",
     ),
     _rule(
-        r"^observatory_remote_sync_(frames|logs)$",
+        r"^(observatory_remote_sync_(frames|logs)|review_alignment_record_external)$",
         "ingest",
         "high",
         "Brings new data from the telescope computer into the library. Never deletes.",
@@ -336,7 +336,7 @@ CLASSIFICATION_RULES = (
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(review_frame_guiding|planning_sky_get_visibility)$",
+        r"^(review_targets_get_frame_guiding|planning_sky_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",

@@ -525,14 +525,14 @@
       "category": "targets",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest stack file's time itself; the reply is one row per frame, sized for a table on screen. quality_set_aside_frames and review_get_star_shape_review serve an AI client."
+      "note": "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest stack file's time itself; the reply is one row per frame, sized for a table on screen. quality_set_aside_frames and review_targets_get_star_shapes serve an AI client."
     },
     "target_frames_query": {
       "tool_class": "unclassified",
       "category": "targets",
       "disposition": "drop",
       "interim_block": "",
-      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. review_frame_guiding already serves an AI client."
+      "note": "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. review_targets_get_frame_guiding already serves an AI client."
     },
     "target_frames_restore": {
       "tool_class": "change-data",

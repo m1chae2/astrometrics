@@ -19,7 +19,7 @@ The package root is the one supported entry point. It loads names on first use, 
 <!-- impl: wayfindinglib.api.planning.ObservationPlanning -->
 <!-- impl: wayfindinglib.api.execution.ObservationExecution -->
 <!-- impl: wayfindinglib.api.review.ObservationReview -->
-<!-- impl: wayfindinglib.api.review.ObservationReview.query_alignment_sessions -->
+<!-- impl: wayfindinglib.api.review.nights.ReviewNights -->
 
 ## 2. System architecture
 
@@ -208,9 +208,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 | `control.safety` | `apply_promotion_decision`, `enter_monitoring_mode` |
 | `control.equipment` | `connect`, `get_active`, `set_active` |
 
-`Wayfinder.review` (`api/review.py`) holds the night reads.
-
-The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `recurring_issues`, `ekos_sessions`, `guiding_runs`, `pointing_model`, `alignment`. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
+`Wayfinder.review` (`api/review/`) holds the night reads in five objects: `nights`, `targets`, `guiding`, `performance` and `alignment`. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
 
 <!-- impl: wayfindinglib.api.control.context.ControlContext -->
 <!-- impl: wayfindinglib.api.control.context.ControlChild -->
@@ -343,7 +341,7 @@ All in `tasks/control_tasks/` unless noted.
 
 `ekos_log_ingestion.py` downloads guide and analyze logs (`control.remote.sync_logs`) and ties each session to its equipment (`attribute_session_equipment`). Parsers: `drivers/phd2/guide_log_parser.py`, `drivers/ekos/analyze_log_parser.py`. `frame_pointing.py` records each solved frame's pointing error, one record per frame file name.
 
-`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `review.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
+`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `review.performance.get_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
 
 <!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion.attribute_session_equipment -->
 <!-- impl: wayfindinglib.models.session.telemetry.MEASURED_GUIDING_SAMPLE_SOURCES -->
@@ -360,8 +358,8 @@ All in `tasks/control_tasks/` unless noted.
 | Guiding (exposure length in `processing/measure_exposure_feasibility.py`) | `session_analysis/guiding/` | `GuidingSessionAnalysis`, `GuidingPerformance` (`models/session/session_quality.py`); `kind="guiding"` |
 | Capture | `session_analysis/capture/`, `wayfindinglib/analytics/capture_history.py` | `CaptureSessionAnalysis`, `CapturePerformance` (`models/session/capture_quality.py`); `kind="capture"` |
 | Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding._run_exposure_test`. Tested only against a simulated camera. |
-| Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `kind="sky_coverage"` |
-| Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `get_live_session_status`; `frame_guiding`; `kind="alignment"` |
+| Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `nights.get_sky_coverage` |
+| Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `nights.get_live_status`; `targets.get_frame_guiding`; `alignment.query` |
 
 <!-- impl: wayfindinglib.session_analysis.pipeline_base.SessionAnalysisRequest -->
 <!-- impl: wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibility.LOST_STAR_CYCLES -->
@@ -413,7 +411,7 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.10 Quality judgment and advice (Quality Judgment paper)
 
-The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.get_advisory` (kinds `quality`, `result`), `planning.sky.get_tonight_advice` and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.targets.get_report` and `get_result`, `planning.sky.get_tonight_advice` and `review.nights` (`get`, `query`, `get_target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
 
 Roles (decided 2026-11-01, issue #97): all gates and measurements stay in `astrometricslib`; every reading of good or bad is a suggestion in `wayfindinglib`. These rules compare a stored number with a copy of the library's limit, and a test pins each copy: `stack_rejected_fraction_high` ([STK-24](validation/stacking.md#stk-24)) and `stack_sharpness_poor` ([STK-25](validation/stacking.md#stk-25)) in `rules.py` and `judge_results.py`; `spectral_type_poor_match`, `spectral_class_ambiguous` and `spectral_subtype_ambiguous` ([SPE-16, SPE-18](validation/spectroscopy.md#spe-18)) in `star_result_rules.py`. `scripts/shadow_compare_verdicts.py` lists where the rules and the stored flags disagree.
 
@@ -436,7 +434,7 @@ Roles (decided 2026-11-01, issue #97): all gates and measurements stay in `astro
 | One star's result | `judge_star_result` (`result_judgment_tasks.py`), `star_result_rules.py` | [WAY-73](validation/wayfinding.md#way-73); WAY-D73 |
 | Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate`, `recommended_additional_frames_status_of_target` (`tonight_ranking_tasks.py`, `target_report_inputs.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, D33, D71, D72 |
 | Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50 to D54 |
-| Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55 to D57 |
+| Night list and target changes | `build_night_list`, `query_nights` (`night_history.py`); `find_target_changes` | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55 to D57 |
 | Monitor mode | `ALLOWED_IN_MONITOR_MODE`, the `test_monitor_mode_*` tests, guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
 | Reply size | `mcp_servers/common/reply_budget.py`; `fit_status_to_budget` | WAY-D58, D77 |
 
@@ -557,7 +555,7 @@ No module applies the gates of the architecture's Table 8; `DivergenceEvidenceSu
 | Scheduler | `planning.sessions.create(night, packages=...)` |
 | Capture | `planning.packages.create` |
 | Dome and weather interlock | `control.safety._execute_safe_state`, `_assess` |
-| Session recording | `execution.advance_session`, `create_recorder`, `review.query` |
+| Session recording | `execution.advance_session`, `create_recorder`, `review.nights` |
 
 ## References
 

@@ -159,7 +159,7 @@ class AlignmentTargetSession(BaseModel):
     as tracking error. Drift is the slope of a straight-line fit of the
     offsets against time.
 
-    `ObservationReview.query_alignment_sessions` builds these from a list of
+    `review.alignment.query` builds these from a list of
     `AlignmentAttempt` records.
     """
 
@@ -191,7 +191,7 @@ class AlignmentTargetSession(BaseModel):
 
 
 class ExternalAlignmentPoll(BaseModel):
-    """What `control.mount.poll_external_alignment` stored.
+    """What `review.alignment.record_external` stored.
 
     Attributes
     ----------
@@ -208,7 +208,7 @@ class ExternalAlignmentPoll(BaseModel):
 class AlignmentSessionsResult(BaseModel):
     """The alignment attempts, and the same attempts grouped by target.
 
-    Returned by `ObservationReview.query_alignment_sessions`.
+    Built by `analytics.alignment_sessions.group_alignment_attempts`.
     """
 
     model_config = ConfigDict(populate_by_name=True)

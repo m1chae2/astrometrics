@@ -31,7 +31,7 @@ The package root is the one supported entry point. It loads names on first use, 
 | --- | --- |
 | Foundation | `models/`, `astronomy/`, `data_access/`, `analytics/`, `drivers/butler.py`, `drivers/control_record_store.py`, `drivers/catalog/` |
 | Control | `tasks/control_tasks/`, `session_analysis/`, `watchdog/`, `api/control/`, and the hardware drivers (`drivers/`, except those above) |
-| Planning | `tasks/planning_tasks/`, `api/planning.py` |
+| Planning | `tasks/planning_tasks/`, `api/planning/` |
 | Execution | `tasks/execution_tasks/`, `api/execution.py` |
 | Composition root | `wayfindinglib/__init__.py`, `api/__init__.py` |
 
@@ -130,18 +130,18 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 ## 4. Observation planning (Architecture Section 4)
 
-Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` (`api/planning.py`), which loads no hardware driver.
+Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` (`api/planning/`: `sessions`, `packages`, `sky`, `catalogs`), which loads no hardware driver.
 
 - **Night window and visibility.** `night_window.py` (`resolve_night_window`), `astronomy/solar_position.py`, `visibility_tasks.py` (`visibility_state_at`, `find_earliest_visible_window`, `ever_visible`), `visibility_report.py`, `visibility_operations.py`.
 - **Placement.** `scheduling.py` (`PlacementRequest`, `place`, `schedule_session`, `_apply_advisory_boost`). Reasons: `InfeasibilityReasonCode`. The boost needs `quality_weighting_enabled`.
-- **Mosaics and advice.** `mosaic_tasks.py` (`calculate_panels`), `calibration_advisory_tasks.py` (`get_calibration_advice`, `get_tonight_advice`). The quality judgments are in Section 6.10.
-- **Plans.** `planning_operations.py` (`create_sequence`, `create_package`, `create_session`; `get_plan`, `add_to_queue`, `tick_checklist_item`).
+- **Sky answers and mosaics.** `sky_answers.py`, `mosaic_tasks.py` (`calculate_panels`). The quality judgments are in Section 6.10.
+- **Plans.** `session_records.py` (`edit_session`), `package_records.py`, `suggestion_refresh.py` (`record_suggestions`).
 - **Sky.** `sky_engine.py` (`SkyEngine`), `sky_sources.py`, `drivers/catalog/`, and the `*_operations.py` calculation modules.
 
 <!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.PlacementRequest -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.visibility_tasks.find_earliest_visible_window -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.sky_engine.SkyEngine -->
-<!-- impl: wayfindinglib.tasks.planning_tasks.planning_operations -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.session_records.edit_session -->
 <!-- impl: wayfindinglib.models.planning.sequence_plan.SequencePlan -->
 
 **Table 4.** Planning settings. `PlanningConfig` is in `models/planning/planning_config.py`.
@@ -413,7 +413,7 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.10 Quality judgment and advice (Quality Judgment paper)
 
-The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.get_advisory` (kinds `quality`, `result`), `planning.get_tonight_advice`, `planning.get_calibration_advice` and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.get_advisory` (kinds `quality`, `result`), `planning.sky.get_tonight_advice` and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
 
 Roles (decided 2026-11-01, issue #97): all gates and measurements stay in `astrometricslib`; every reading of good or bad is a suggestion in `wayfindinglib`. These rules compare a stored number with a copy of the library's limit, and a test pins each copy: `stack_rejected_fraction_high` ([STK-24](validation/stacking.md#stk-24)) and `stack_sharpness_poor` ([STK-25](validation/stacking.md#stk-25)) in `rules.py` and `judge_results.py`; `spectral_type_poor_match`, `spectral_class_ambiguous` and `spectral_subtype_ambiguous` ([SPE-16, SPE-18](validation/spectroscopy.md#spe-18)) in `star_result_rules.py`. `scripts/shadow_compare_verdicts.py` lists where the rules and the stored flags disagree.
 
@@ -554,8 +554,8 @@ No module applies the gates of the architecture's Table 8; `DivergenceEvidenceSu
 | Align | `control.mount._compute_pointing_correction`, `slew(center=True)` |
 | Focus | `focus_correction.compute_focus_correction` (no autofocus sweep call) |
 | Guide | `control.guiding._compute_correction`, `status(include=["live"])` |
-| Scheduler | `planning.create_session(..., requests=)` |
-| Capture | `planning.create_package` |
+| Scheduler | `planning.sessions.create(night, packages=...)` |
+| Capture | `planning.packages.create` |
 | Dome and weather interlock | `control.safety._execute_safe_state`, `_assess` |
 | Session recording | `execution.advance_session`, `create_recorder`, `review.query` |
 

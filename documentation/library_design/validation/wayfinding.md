@@ -427,21 +427,24 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. Tested on made-up sessions, on a session JSON rewritten to the old shape, and on a stale write. It has not been run with two real app windows.
 - **Data you need:** A night plan with at least one queue entry.
 - **Procedure:**
-  1. Create an empty plan with `create_session`, then change it with `add_checklist_items(..., expected_revision=0)`.
-  2. Repeat the same call with `expected_revision=0`. It must raise `PlanRevisionConflictError`, whose details name revision 1.
-  3. Read the plan with `get_plan` and check the revision is 1.
+  1. Create an empty plan with `sessions.create(night)`, then add a checklist item with `sessions.update(session, checklist=[...])`.
+  2. Repeat the same call with the session you read first, still at revision 0. It must raise `PlanRevisionConflictError`, whose details name revision 1.
+  3. Read the plan with `sessions.get(night)` and check the revision is 1.
 
   ```python
-  change = planning.add_checklist_items(session.id, [{"rule": "example"}], expected_revision=0)
-  print(change.revision, [item.kind for item in change.changes])
+  from wayfindinglib import ChecklistItem
+
+  session = planning.sessions.create("2026-09-24")
+  changed = planning.sessions.update(session, checklist=[ChecklistItem(rule="example")])
+  print(changed.revision, [item.rule for item in changed.checklist])
   ```
 
-  `ObservationSession` <!-- impl: wayfindinglib.models.session.observation_session.ObservationSession --> holds the plan, `PlanChange` <!-- impl: wayfindinglib.models.session.observation_session.PlanChange --> is what a write returns, and `DiskButler.put_session_if_revision` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_if_revision --> makes the check and the write one database statement.
+  `ObservationSession` <!-- impl: wayfindinglib.models.session.observation_session.ObservationSession --> holds the plan, `edit_session` <!-- impl: wayfindinglib.tasks.planning_tasks.session_records.edit_session --> makes each change, and `DiskButler.put_session_if_revision` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_if_revision --> makes the check and the write one database statement.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** Whether a stale write leaves the stored plan untouched, and whether an old stored session still loads.
 - **Our result:** Measured value not recorded.
 - **Verdict:** Not judged.
-- **Limits:** Execution saves with `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution -->, which merges: in one database transaction it reads the stored session again and keeps what Planning wrote (checklist, framing, revision and queue edits), taking only Execution's own fields from its copy. It does not bump the revision, so a Planning edit that loaded the plan before an Execution save and writes after it still overwrites that save's execution fields (statuses, telemetry) once; the next Execution checkpoint writes them again from its own copy. A plan edit that changes nothing (every change is an "already present" skip) stores nothing, keeps the revision and sends no `plan:changed` event. The backend must send the plan-changed event from `PlanChange`; the sequencer methods `sequencer:add`, `sequencer:remove`, `sequencer:reorder` and `sequencer:modify` edit the queue through the plan service and so send it too. `plan:tick_checklist_item` with a `ticked_at` that is not an ISO 8601 time returns the `invalid_argument` error.
+- **Limits:** Execution saves with `DiskButler.put_session_from_execution` <!-- impl: wayfindinglib.drivers.butler.DiskButler.put_session_from_execution -->, which merges: in one database transaction it reads the stored session again and keeps what Planning wrote (checklist, framing, revision and queue edits), taking only Execution's own fields from its copy. It does not bump the revision, so a Planning edit that loaded the plan before an Execution save and writes after it still overwrites that save's execution fields (statuses, telemetry) once; the next Execution checkpoint writes them again from its own copy. A plan edit that changes nothing (every change is an "already present" skip) stores nothing, keeps the revision and sends no `plan:changed` event. The backend sends the plan-changed event from the session the library returns; the sequencer methods `sequencer:add`, `sequencer:remove`, `sequencer:reorder` and `sequencer:modify` edit the queue through the plan service and so send it too. `plan:tick_checklist_item` with a `ticked_at` that is not an ISO 8601 time returns the `invalid_argument` error.
 - **To tune for your setup:** Nothing to tune.
 - **Regenerate with:** No script; run the example above.
 - **Guarded by tests:** `wayfindinglib/api/test/test_planning.py` (`test_a_stale_revision_is_refused_and_names_the_current_one`, `test_the_database_write_refuses_a_revision_that_moved`, `test_a_session_stored_before_the_night_plan_fields_still_loads`).
@@ -490,13 +493,13 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. The order and screen names come from the Ekos Capture module as we use it; the rows are tested on a made-up plan. The text of the Ekos screen names has not been compared with the current Ekos release.
 - **Data you need:** A night plan with a queue entry that has exposures and, optionally, dithering.
 - **Procedure:**
-  1. Read the plan with `get_plan`.
+  1. Read the plan with `sessions.get(night)`.
   2. Build the summary and compare the rows with your Ekos Capture screen.
 
   ```python
   from wayfindinglib.models.planning.sequence_summary import SequenceSummary
 
-  summary = SequenceSummary.from_session(planning.get_plan(session.id))
+  summary = SequenceSummary.from_session(planning.sessions.get("2026-09-24"))
   print([field.name for field in summary.rows[0].fields])
   ```
 
@@ -515,7 +518,7 @@ Every Python example assumes the library is installed and configured with your o
 
 **Framing with camera rotation**
 
-- **Claim:** `calculate_panels(rotation_deg=...)` turns the mosaic grid about its center by the camera rotation in degrees east of north, as Ekos and KStars give it. At 0 degrees the result is unchanged. At 90 degrees the two grid axes swap. Each panel center turned back by the rotation recovers the unrotated grid.
+- **Claim:** `sky.get_panels(center, rotation_deg=...)` turns the mosaic grid about its center by the camera rotation in degrees east of north, as Ekos and KStars give it. At 0 degrees the result is unchanged. At 90 degrees the two grid axes swap. Each panel center turned back by the rotation recovers the unrotated grid.
 - **Settings it supports:** None.
 - **Status:** Partly measured. The geometry is checked by the round trip and the axis swap on a made-up grid. It has not been compared with a plate-solved frame taken at a known rotation.
 - **Data you need:** A target position and, to check the sign, one plate-solved frame taken with a known camera rotation.
@@ -524,7 +527,10 @@ Every Python example assumes the library is installed and configured with your o
   2. Turn the second set back by the rotation and compare.
 
   ```python
-  panels = planning.calculate_panels("10:00:00", "+30:00:00", 2, 3, 10.0, rotation_deg=30.0)
+  from astrometricslib import StellarObject
+
+  center = StellarObject(id="center", name="center", ra=150.0, dec=30.0)
+  panels = planning.sky.get_panels(center, 2, 3, overlap_pct=10.0, rotation_deg=30.0)
   print([(panel.panel_id, panel.ra_deg, panel.dec_deg) for panel in panels])
   ```
 
@@ -548,12 +554,15 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. Adding, de-duplicating and ticking are tested on made-up plans. The return rule itself is built by a later batch.
 - **Data you need:** A night plan with a checklist item.
 - **Procedure:**
-  1. Add an item with `add_checklist_items(session_id, [...])`.
-  2. Tick it with `tick_checklist_item` and read the plan back.
+  1. Add an item with `sessions.update(session, checklist=[...])`.
+  2. Tick it: set the item's `ticked_at` and pass the checklist back with `sessions.update`. Read the plan back.
 
   ```python
-  change = planning.tick_checklist_item(session.id, item_id, expected_revision=change.revision)
-  print(change.session.checklist[0].tick_history)
+  from datetime import UTC, datetime
+
+  item = session.checklist[0].model_copy(update={"ticked_at": datetime.now(UTC)})
+  session = planning.sessions.update(session, checklist=[item])
+  print(session.checklist[0].tick_history)
   ```
 
   `ChecklistItem` <!-- impl: wayfindinglib.models.session.observation_session.ChecklistItem --> holds the item.
@@ -564,7 +573,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Limits:** Nothing here decides whether the fix worked.
 - **To tune for your setup:** Nothing to tune.
 - **Regenerate with:** No script; run the example above.
-- **Guarded by tests:** `wayfindinglib/api/test/test_planning.py` (`test_checklist_items_are_added_once_and_ticked`).
+- **Guarded by tests:** `wayfindinglib/api/test/test_planning.py` (`test_checklist_items_are_added_once_ticked_and_removed`).
 - **Raw record:** None kept.
 
 ### WAY-55

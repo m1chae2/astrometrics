@@ -13,6 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib import StellarObject
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import ConflictError
 from backend.services.data.stellar_service import StellarService
 from backend.services.infrastructure.heavy_read_limiter import HeavyReadLimiter
@@ -150,17 +152,17 @@ def test_stellar_service_listing_and_count_use_the_limiter() -> None:
     release = threading.Event()
     calls = []
 
-    def query(**kwargs: object) -> SimpleNamespace:
+    def query(**kwargs: object) -> Page[StellarObject]:
         """Record the call and wait, standing in for a slow scan.
 
         Returns
         -------
-        answer : `types.SimpleNamespace`
+        page : `Page` [`StellarObject`]
             One star and a total of one.
         """
         calls.append(kwargs)
         release.wait(5)
-        return SimpleNamespace(stars=[{"id": "A"}], total_matching=1)
+        return Page[StellarObject].of([StellarObject(id="A")])
 
     astrometrics = SimpleNamespace(stars=SimpleNamespace(query=query))
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
@@ -182,4 +184,6 @@ def test_stellar_service_listing_and_count_use_the_limiter() -> None:
         thread.join(timeout=10)
 
     assert len(calls) == 2
-    assert sorted(map(str, results)) == sorted(["[{'id': 'A'}]"] * 5 + ["1"] * 5)
+    listings = [result for result in results if isinstance(result, list)]
+    assert [[row["id"] for row in listing] for listing in listings] == [["A"]] * 5
+    assert [result for result in results if not isinstance(result, list)] == [1] * 5

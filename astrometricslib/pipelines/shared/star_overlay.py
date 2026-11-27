@@ -1,9 +1,9 @@
 """Purpose: Place a target's catalog stars on its image, for drawing labels.
 
-Description: `StellarCatalog.query(target_id=..., detail="overlay")` calls
-`build_overlay`. The app draws the result as labels over the target's
-reference image: its stacked image, or its processed image when there is no
-stack.
+Description: `Visualization.get_star_overlay` calls
+`place_target_stars`, which wraps `build_overlay`. The app draws the result
+as labels over the target's reference image: its stacked image, or its
+processed image when there is no stack.
 
 The image can be named by the caller (the file the app is showing). Without
 a name, the target's current stack is used.
@@ -48,19 +48,23 @@ from astrometricslib._internal.drivers.fits_access import (
     header_is_plate_solved,
     read_header,
 )
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import OverlayStar
+from astrometricslib.models.star_catalog import StarOverlay
 from astrometricslib.models.stellar_source import StellarObject, has_catalog_magnitude
+from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
 from astrometricslib.pipelines.shared.star_catalog_queries import (
     POSITION_ONLY_STAR_ID_PREFIX,
-    StarQuery,
-    run_star_query,
+    StarFilters,
+    query_stars,
+    star_summary_rows,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_overlay", "target_id_spellings"]
+__all__ = ["build_overlay", "place_target_stars", "target_id_spellings"]
 
 SUMMARY_PASS_MINIMUM = 100
 """Fewest summaries the first pass tries, whatever the limit."""
@@ -420,9 +424,7 @@ def build_overlay(
     use_saved_centers = _saved_centers_fit(target, chosen_path, reference_path)
 
     for spelling in spellings:
-        rows = run_star_query(
-            storage, StarQuery(target_id=spelling), "summary", None, 0, order="useful"
-        ).stars
+        rows = star_summary_rows(storage, StarFilters(target_id=spelling), order_by="useful")
         if rows:
             placed = _summary_pass(rows, wcs, width, height, limit)
             if placed:
@@ -437,7 +439,7 @@ def build_overlay(
     # of its id that has any. The other spellings name the same target, and
     # reading its tens of thousands of stars again only repeats the work.
     for spelling in spellings:
-        records = run_star_query(storage, StarQuery(target_id=spelling), "objects", None, 0).objects or []
+        records = list(query_stars(storage, StarFilters(target_id=spelling)))
         if records:
             placed = _record_pass(records, spellings, wcs, width, height, limit, use_saved_centers)
             reason = None
@@ -445,3 +447,42 @@ def build_overlay(
                 reason = wcs_reason or NO_SKY_SOLUTION_REASON
             return placed, reason
     return [], None
+
+
+def place_target_stars(
+    storage: Any, target: Target, image_path: str | None = None, limit: int | None = None
+) -> StarOverlay:
+    """Place a target's catalog stars on an image, as one answer.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    target : `Target`
+        The target.
+    image_path : `str`, optional
+        The image to place the stars on. By default, the target's current
+        stack.
+    limit : `int` or `None`, optional
+        Most stars to place, at least 1. `None` places every star found.
+
+    Returns
+    -------
+    overlay : `StarOverlay`
+        The placed stars (see `build_overlay`) and the reason when there
+        are none.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``target`` is not a `Target` or ``limit`` is below 1.
+    """
+    from astrometricslib.foundation.arguments import check_limit
+    from astrometricslib.pipelines.shared.star_catalog_queries import target_filter_id
+
+    target_id = target_filter_id(target)
+    if target_id is None:
+        raise InvalidArgumentError("A star overlay needs a target.")
+    check_limit(limit, 1, None)
+    placed, reason = build_overlay(storage, target_id, limit, image_path)
+    return StarOverlay(stars=tuple(placed), reason=reason)

@@ -128,7 +128,7 @@ def spectral_target_stars(
         height, width = header.get("NAXIS2"), header.get("NAXIS1")
         if not height or not width:
             continue
-        stars = astrometrics.stars.query(target_id=target.id, detail="objects", limit=None).objects or []
+        stars = list(astrometrics.stars.query(target=target))
         if stars:
             found.append(SpectralTargetStars(target.id, stack_path, (int(height), int(width)), stars, target))
     return found

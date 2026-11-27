@@ -49,7 +49,7 @@ from mcp_servers.inventory.tool_inventory import (
         ("processing_process_target", "change-data"),
         ("processing_stack", "process"),
         ("star_get", "observe"),
-        ("star_find_or_create_by_position", "change-data"),
+        ("star_record_periodicity", "change-data"),
         ("calibration_query", "observe"),
         ("quality_measure_stack", "compute"),
         ("visualization_plot", "compute"),
@@ -233,10 +233,10 @@ def test_a_tool_with_no_decision_stays_undecided() -> None:
 
 def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:
     """A class correction replaces the drafted class and records why."""
-    record = ToolRecord("srv", "star_analyze_periodicity", "", tool_class="compute")
+    record = ToolRecord("srv", "star_record_periodicity", "", tool_class="compute")
     apply_decisions(record)
     assert record.tool_class == "change-data"
-    assert record.disposition == "fix"
+    assert record.disposition == "withhold"
     assert "star catalog" in record.note
 
 

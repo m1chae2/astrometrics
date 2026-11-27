@@ -326,14 +326,16 @@ SUB_API_MEMBERS = {
         "select_frames",
     },
     "stars": {
-        "analyze_periodicity",
+        "count_by_class",
+        "count_by_target",
         "create",
-        "dataset_version",
         "delete",
-        "find_or_create_by_position",
         "get",
         "get_spectrum",
+        "get_statistics",
+        "measure_periodicity",
         "query",
+        "record_periodicity",
         "update",
     },
     "processing": {
@@ -404,6 +406,7 @@ SUB_API_MEMBERS = {
     },
     "visualization": {
         "get_last_captured_image",
+        "get_star_overlay",
         "place_stack_picture_on_sky",
         "plot",
         "render_fits",

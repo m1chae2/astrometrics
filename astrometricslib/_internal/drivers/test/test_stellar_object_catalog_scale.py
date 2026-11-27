@@ -9,6 +9,7 @@ This is much faster.
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,10 +34,24 @@ def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
     return config
 
 
+def _rows(catalog: Any, target_id: str | None = None) -> list[dict[str, Any]]:
+    """List a catalog's stars as summary rows through the owner.
+
+    Returns
+    -------
+    rows : `list` [`dict`]
+        One summary row per star, in id order.
+    """
+    from astrometricslib.pipelines.shared.star_catalog_queries import StarFilters, star_summary_rows
+
+    return star_summary_rows(catalog._catalog_access, StarFilters(target_id=target_id))
+
+
 def test_star_summaries_reports_the_expected_fields(tmp_path: Path) -> None:
     """Verify summaries carry id/name/targetIds/hasSpectra/hasPhotometry.
 
-    Exercises StellarCatalog.query end-to-end through a
+    Exercises `star_summary_rows` (the short rows behind
+    `StellarCatalog.query`) end-to-end through a
     real CatalogAccess -- has_spectra/has_photometry are real columns
     populated by drivers.catalog_access._stellar_extra_columns at write
     time (via StellarObject's own computed properties), not derived
@@ -56,7 +71,7 @@ def test_star_summaries_reports_the_expected_fields(tmp_path: Path) -> None:
     empty_star = StellarObject(id="EmptyStar", name="EmptyStar", target_ids=[])
     catalog._catalog_access.put([vega, betelgeuse, empty_star], "stellar_catalog", {})
 
-    summaries = {s["id"]: s for s in catalog.query(limit=None).stars}
+    summaries = {s["id"]: s for s in _rows(catalog)}
 
     assert summaries["Vega"]["hasSpectra"] is True
     assert summaries["Vega"]["hasPhotometry"] is False
@@ -87,7 +102,7 @@ def test_star_summaries_filters_by_target_id(tmp_path: Path) -> None:
     out_of_field = StellarObject(id="OutOfField", name="OutOfField", target_ids=["M 81"])
     catalog._catalog_access.put([in_field, out_of_field], "stellar_catalog", {})
 
-    summaries = catalog.query(target_id="M 13", limit=None).stars
+    summaries = _rows(catalog, target_id="M 13")
 
     assert [s["id"] for s in summaries] == ["InField"]
 
@@ -114,17 +129,16 @@ def test_star_summaries_target_id_substring_collision_is_still_exact(tmp_path: P
     in_both = StellarObject(id="InBoth", name="InBoth", target_ids=["M 1", "M 13"])
     catalog._catalog_access.put([in_m1, in_m13_only, in_both], "stellar_catalog", {})
 
-    summaries = catalog.query(target_id="M 1", limit=None).stars
+    summaries = _rows(catalog, target_id="M 1")
 
     assert {s["id"] for s in summaries} == {"InM1", "InBoth"}
 
 
-def test_star_summaries_are_capped_by_the_default_limit(tmp_path: Path) -> None:
-    """A browse-everything request must not return the whole catalog.
+def test_a_query_without_a_limit_returns_every_star_and_a_limit_pages(tmp_path: Path) -> None:
+    """The library returns every match by default; adapters cap pages.
 
-    The default limit bounds what an unfiltered listing transmits and
-    re-serializes -- without it, a catalog-browsing view with no target
-    filter hydrates and sends every row in the catalog on every poll.
+    The backend and the MCP servers pass their own page size, so a
+    browsing view never sends the whole catalog.
     """
     from astrometricslib._internal.drivers.catalog_access import CatalogAccess
     from astrometricslib.api.stars import StellarCatalog
@@ -136,11 +150,12 @@ def test_star_summaries_are_capped_by_the_default_limit(tmp_path: Path) -> None:
         [StellarObject(id=f"Star{i:03d}", name=f"Star{i}") for i in range(60)], "stellar_catalog", {}
     )
 
-    answer = catalog.query()
+    assert len(catalog.query()) == 60
+    answer = catalog.query(limit=50)
 
-    assert len(answer.stars) == 50
-    assert answer.total_matching == 60
-    assert answer.truncated is True
+    assert len(answer) == 50
+    assert answer.total == 60
+    assert answer.next_offset == 50
 
 
 def test_star_summaries_explicit_limit_overrides_the_default(tmp_path: Path) -> None:
@@ -155,7 +170,7 @@ def test_star_summaries_explicit_limit_overrides_the_default(tmp_path: Path) -> 
         [StellarObject(id=f"Star{i}", name=f"Star{i}") for i in range(10)], "stellar_catalog", {}
     )
 
-    assert len(catalog.query(limit=7).stars) == 7
+    assert len(catalog.query(limit=7)) == 7
 
 
 def test_star_summaries_without_a_limit_return_every_row(tmp_path: Path) -> None:
@@ -175,7 +190,7 @@ def test_star_summaries_without_a_limit_return_every_row(tmp_path: Path) -> None
         [StellarObject(id=f"Star{i:03d}", name=f"Star{i}") for i in range(60)], "stellar_catalog", {}
     )
 
-    assert len(catalog.query(limit=None).stars) == 60
+    assert len(_rows(catalog)) == 60
 
 
 def test_star_summaries_matches_the_model_computed_properties(tmp_path: Path) -> None:
@@ -199,7 +214,36 @@ def test_star_summaries_matches_the_model_computed_properties(tmp_path: Path) ->
     vega.photometry = {"timestamps": ["2026-01-01T00:00:00Z"], "fluxes": [1.0]}
     catalog._catalog_access.put([vega], "stellar_catalog", {})
 
-    (summary,) = catalog.query(limit=None).stars
+    (summary,) = _rows(catalog)
 
     assert summary["hasSpectra"] == vega.has_spectra
     assert summary["hasPhotometry"] == vega.has_photometry
+
+
+def test_stars_read_without_light_curves_keep_their_lengths(tmp_path: Path) -> None:
+    """The database takes the light-curve points out and counts them.
+
+    A star read this way cannot be saved back, since that would erase the
+    stored points; an unsafe record path is refused.
+    """
+    from astrometricslib._internal.drivers.catalog_access import CatalogAccess
+    from astrometricslib.foundation.errors import InvalidArgumentError
+    from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+
+    storage = CatalogAccess(_make_isolated_config(tmp_path))
+    star = StellarObject(
+        id="Vega", photometry=PhotometryResult(timestamps=["2026-01-01T00:00:00Z"] * 6, fluxes=[1.0] * 6)
+    )
+    storage.put([star], "stellar_catalog", {})
+
+    (light,) = storage.get_stars_without_light_curves(["Vega"])
+
+    assert light.photometry.timestamps == []
+    assert light.has_photometry
+    assert light.can_run_period_search
+    assert not light.light_curves_included
+    with pytest.raises(InvalidArgumentError, match="light curve"):
+        storage.merge_and_record("stellar_catalog", [light], lambda _current, updated: updated)
+    with pytest.raises(InvalidArgumentError, match="unsafe"):
+        storage._generic.get_by_ids_leaving_out("stellar_catalog", ["Vega"], ("photometry'); --",))
+    assert len(storage.get_by_ids("stellar_catalog", ["Vega"])[0].photometry.timestamps) == 6

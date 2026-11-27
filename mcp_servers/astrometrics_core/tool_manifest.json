@@ -394,28 +394,21 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Lists the frames lying in a target's _excluded folders with the kind and reason, and says whether the reason came from a stored quality row, the folder's manifest file, or nothing but the folder. Moves nothing and writes nothing."
     },
-    "star_analyze_periodicity": {
-      "tool_class": "change-data",
+    "star_count_by_class": {
+      "tool_class": "observe",
       "category": "stars",
-      "disposition": "fix",
+      "disposition": "keep",
       "interim_block": "",
-      "note": "Writes the result into the live star catalog. Needs a save=false option."
+      "note": "Since #206 the class counts that star_query's detail='class_counts' gave. Counts the stars of each spectral class from the indexed columns and writes nothing."
+    },
+    "star_count_by_target": {
+      "tool_class": "observe",
+      "category": "stars",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the per-target counts that star_query's detail='target_counts' gave. Counts each target's stars from the indexed columns and writes nothing."
     },
     "star_create": {
-      "tool_class": "change-data",
-      "category": "stars",
-      "disposition": "withhold",
-      "interim_block": "",
-      "note": "The AI is read-only, so a tool that writes is not offered."
-    },
-    "star_dataset_version": {
-      "tool_class": "unclassified",
-      "category": "stars",
-      "disposition": "drop",
-      "interim_block": "",
-      "note": "A change counter for the backend's answer cache. It tells an AI client nothing about the sky."
-    },
-    "star_find_or_create_by_position": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
@@ -436,12 +429,33 @@
       "interim_block": "",
       "note": "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     },
+    "star_get_statistics": {
+      "tool_class": "observe",
+      "category": "stars",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the library statistics that star_query's detail='stats' gave. Counts the star records and writes nothing."
+    },
+    "star_measure_periodicity": {
+      "tool_class": "compute",
+      "category": "stars",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the period and transit searches of star_record_periodicity without the save. Runs the searches on one star's light curve and writes nothing."
+    },
     "star_query": {
       "tool_class": "observe",
       "category": "stars",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
+      "note": "Built 2026-10-03. Library star lookup. Since #206 it returns a page of star records without their light curves; the tool's reply is cut to 50 stars and the tool asks for at most 200."
+    },
+    "star_record_periodicity": {
+      "tool_class": "change-data",
+      "category": "stars",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the period and transit results into the live star catalog. The AI is read-only, so it runs the same searches with star_measure_periodicity instead."
     },
     "star_update": {
       "tool_class": "change-data",
@@ -554,6 +568,13 @@
       "disposition": "fix",
       "interim_block": "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use visualization_render_fits with a path, which returns a real image.",
       "note": "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it into visualization_render_fits with a latest option."
+    },
+    "visualization_get_star_overlay": {
+      "tool_class": "observe",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Since #206 the overlay that star_query's detail='overlay' gave. Places a target's catalog stars in pixels on its stack or a named image and writes nothing."
     },
     "visualization_place_stack_picture_on_sky": {
       "tool_class": "unclassified",

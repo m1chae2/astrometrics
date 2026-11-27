@@ -1,6 +1,7 @@
 """Tests that star listings and counts are answered inside the database.
 
-`StellarCatalog.query` used to load every row of the star catalog, filter
+`StellarCatalog.query` (owner `query_stars`) used to load every row of
+the star catalog, filter
 and sort it in Python, and then cut one page. These tests build a small
 catalog of varied stars in a temporary database and check three things:
 every query shape gives the same answer through the database as through the
@@ -18,6 +19,7 @@ from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
+from astrometricslib.models.target import Target
 
 
 def _make_catalog(tmp_path: Path) -> StellarCatalog:
@@ -98,7 +100,7 @@ def _python_answer(catalog: StellarCatalog, mocker: MockerFixture, **arguments: 
 
     Returns
     -------
-    answer : `StarQueryResult`
+    answer : `Page` [`StellarObject`]
         The answer from the Python path.
     """
     mocker.patch.object(CatalogAccess, "query_star_summary_page", return_value=None)
@@ -106,6 +108,33 @@ def _python_answer(catalog: StellarCatalog, mocker: MockerFixture, **arguments: 
         return catalog.query(**arguments)
     finally:
         mocker.stopall()
+
+
+def _arguments(shape: dict[str, Any]) -> dict[str, Any]:
+    """Turn a query shape into `StellarCatalog.query` arguments.
+
+    A shape names its target by id, so the id becomes a `Target`.
+
+    Returns
+    -------
+    arguments : `dict` [`str`, `Any`]
+        The arguments.
+    """
+    arguments = dict(shape)
+    if "target_id" in arguments:
+        arguments["target"] = Target(id=arguments.pop("target_id"))
+    return arguments
+
+
+def _ids(page: Any) -> list[str]:
+    """List the ids of a page of stars.
+
+    Returns
+    -------
+    ids : `list` [`str`]
+        The ids, in the page's order.
+    """
+    return [star.id for star in page]
 
 
 QUERY_SHAPES: list[dict[str, Any]] = [
@@ -121,15 +150,15 @@ QUERY_SHAPES: list[dict[str, Any]] = [
     {"magnitude_min": 3.0, "magnitude_max": 8.0},
     {"magnitude_min": -10.0, "magnitude_max": 0.0, "include_unresolved": True},
     {"magnitude_max": 4.0},
-    {"search": "orion"},
-    {"search": "  ALPHA  "},
-    {"search": "hd 00"},
-    {"search": "%"},
-    {"search": "_"},
-    {"search": "odd%name"},
-    {"search": "star_"},
-    {"search": "m 13:", "include_unresolved": True},
-    {"search": "no such star"},
+    {"text": "orion"},
+    {"text": "  ALPHA  "},
+    {"text": "hd 00"},
+    {"text": "%"},
+    {"text": "_"},
+    {"text": "odd%name"},
+    {"text": "star_"},
+    {"text": "m 13:", "include_unresolved": True},
+    {"text": "no such star"},
     {"target_id": "M 1"},
     {"target_id": "M 13"},
     {"target_id": "Orion Field"},
@@ -142,7 +171,7 @@ QUERY_SHAPES: list[dict[str, Any]] = [
         "has_photometry": False,
         "magnitude_min": 0.0,
         "magnitude_max": 12.0,
-        "search": "a",
+        "text": "a",
     },
     {"spectral_class": "G"},
 ]
@@ -158,42 +187,39 @@ def test_database_answer_equals_python_answer(
     """Verify every filter and order gives the same pages and totals both ways.
 
     For each query shape this compares the full listing, then several pages
-    (first, middle, last, past the end) as summaries and as bare ids.
+    (first, middle, last, past the end).
     """
-    for limit, offset, detail in [
-        (None, 0, "summary"),
-        (7, 0, "summary"),
-        (7, 14, "summary"),
-        (50, 30, "ids"),
-        (3, 1000, "ids"),
-        (1, 0, "ids"),
-    ]:
-        arguments = {**shape, "order": order, "limit": limit, "offset": offset, "detail": detail}
+    for limit, offset in [(None, 0), (7, 0), (7, 14), (50, 30), (3, 1000), (1, 0)]:
+        arguments = {**_arguments(shape), "order_by": order, "limit": limit, "offset": offset}
         expected = _python_answer(catalog, mocker, **arguments)
         actual = catalog.query(**arguments)
-        assert actual.model_dump() == expected.model_dump(), arguments
+        assert (_ids(actual), actual.total, actual.next_offset) == (
+            _ids(expected),
+            expected.total,
+            expected.next_offset,
+        ), arguments
 
 
 def test_catalog_has_each_case_the_filters_look_at(catalog: StellarCatalog) -> None:
     """Verify the catalog holds the varied stars the tests rely on."""
-    everything = catalog.query(include_unresolved=True, limit=None)
-    visible = catalog.query(limit=None)
-    assert everything.total_matching == 240
-    assert 0 < visible.total_matching < everything.total_matching
-    assert catalog.query(has_spectra=True, limit=None).total_matching > 0
-    assert catalog.query(target_id="M 1", limit=None).total_matching > 0
-    assert catalog.query(search="%", limit=None).total_matching > 0
-    assert catalog.query(has_catalog_magnitude=True, limit=None).total_matching > 0
-    assert catalog.query(has_catalog_magnitude=False, limit=None).total_matching > 0
-    assert catalog.query(magnitude_max=0.0, limit=None).total_matching > 0
-    useful = catalog.query(order="useful", limit=None, detail="ids").ids
+    everything = catalog.query(include_unresolved=True)
+    visible = catalog.query()
+    assert everything.total == 240
+    assert 0 < visible.total < everything.total
+    assert catalog.query(has_spectra=True).total > 0
+    assert catalog.query(target=Target(id="M 1")).total > 0
+    assert catalog.query(text="%").total > 0
+    assert catalog.query(has_catalog_magnitude=True).total > 0
+    assert catalog.query(has_catalog_magnitude=False).total > 0
+    assert catalog.query(magnitude_max=0.0).total > 0
+    useful = _ids(catalog.query(order_by="useful"))
     assert useful != sorted(useful)
 
 
 def test_target_scoping_does_not_confuse_targets_that_start_alike(catalog: StellarCatalog) -> None:
     """Verify "M 1" matches only stars in "M 1", never stars only in "M 13"."""
-    for star in catalog.query(target_id="M 1", limit=None, include_unresolved=True).stars:
-        assert "M 1" in star["targetIds"]
+    for star in catalog.query(target=Target(id="M 1"), include_unresolved=True):
+        assert "M 1" in star.target_ids
 
 
 def test_count_reads_no_rows(catalog: StellarCatalog, mocker: MockerFixture) -> None:
@@ -205,9 +231,9 @@ def test_count_reads_no_rows(catalog: StellarCatalog, mocker: MockerFixture) -> 
     load_everything = mocker.spy(CatalogAccess, "list_star_summaries")
     list_projected = mocker.spy(type(catalog._catalog_access._generic), "list_projected")
     select_where = mocker.spy(type(catalog._catalog_access._generic), "select_where")
-    answer = catalog.query(detail="ids", limit=1, has_spectra=True)
-    assert answer.total_matching > 1
-    assert len(answer.ids) == 1
+    answer = catalog.query(limit=1, has_spectra=True)
+    assert answer.total > 1
+    assert len(answer) == 1
     assert load_everything.call_count == 0
     assert list_projected.call_count == 0
     assert len(select_where.spy_return) == 1
@@ -216,25 +242,24 @@ def test_count_reads_no_rows(catalog: StellarCatalog, mocker: MockerFixture) -> 
 def test_page_reads_only_the_page(catalog: StellarCatalog, mocker: MockerFixture) -> None:
     """Verify a page of ten stars reads ten rows from the database."""
     select_where = mocker.spy(type(catalog._catalog_access._generic), "select_where")
-    answer = catalog.query(limit=10, offset=20, order="useful")
-    assert len(answer.stars) == 10
+    answer = catalog.query(limit=10, offset=20, order_by="useful")
+    assert len(answer) == 10
     assert len(select_where.spy_return) == 10
-    assert answer.truncated is True
+    assert answer.next_offset == 30
 
 
 def test_non_ascii_search_falls_back_to_python(catalog: StellarCatalog, mocker: MockerFixture) -> None:
     """Verify a non-ASCII search, which SQLite cannot case-fold, works."""
-    answer = catalog.query(search="Ünknown", limit=None)
-    assert answer.total_matching == 0
+    assert catalog.query(text="Ünknown").total == 0
     assert catalog._catalog_access.query_star_summary_page(search="Ünknown") is None
 
 
-def test_other_selectors_and_match_order_still_use_the_python_path(
+def test_region_class_and_variable_filters_use_the_python_path(
     catalog: StellarCatalog, mocker: MockerFixture
 ) -> None:
-    """Verify ids, region and spectral class skip the database page query."""
+    """Verify a region, a class and the variable flag skip the page query."""
     spy = mocker.spy(CatalogAccess, "query_star_summary_page")
-    catalog.query(ids=["HD 0001"], limit=None)
-    catalog.query(ra_deg=10.0, dec_deg=10.0, radius_deg=5.0, limit=None)
-    catalog.query(spectral_class="G", limit=None)
+    catalog.query(ra_deg=10.0, dec_deg=10.0, radius_deg=5.0)
+    catalog.query(spectral_class="G")
+    catalog.query(variable=True)
     assert spy.call_count == 0

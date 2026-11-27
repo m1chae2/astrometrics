@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import FrameRecord, Target
-from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.exceptions import NotFoundError
+from astrometricslib.pipelines.stacking.frame_queries import query_frames
 from wayfindinglib.tasks.control_tasks.frame_guiding import FrameRange, link_frames_to_guiding
 
 
@@ -46,12 +46,12 @@ def _targets(target: Target | None) -> SimpleNamespace:
     Returns
     -------
     targets : `types.SimpleNamespace`
-        ``get`` finds the target, and ``select_frames`` runs the library's
-        own frame selection on it.
+        ``get`` finds the target, and ``frames.query`` runs the library's
+        own frame query on it.
     """
     return SimpleNamespace(
-        get=lambda _id, refresh=False: target,
-        select_frames=lambda chosen, **arguments: TargetCatalog.select_frames(None, chosen, **arguments),
+        get=lambda _id: target,
+        frames=SimpleNamespace(query=lambda chosen, **arguments: query_frames(chosen, None, **arguments)),
     )
 
 

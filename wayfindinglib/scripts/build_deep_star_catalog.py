@@ -193,7 +193,7 @@ def _choose_search_circles(
 
     circles = [(ra, dec, radius) for ra, dec, radius in arguments.near or []]
     if arguments.near_targets:
-        field_centers = Astrometrics(config).targets.imaged_field_centers().centers
+        field_centers = Astrometrics(config).targets.measure_field_centers().centers
         for field_center in field_centers:
             circles.append((
                 field_center.ra_deg,

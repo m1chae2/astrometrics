@@ -63,7 +63,7 @@ def test_get_sources(mock_global: MagicMock, mock_local: MagicMock) -> None:
 
     # Mock the local Astrometrics instance on the engine
     sky._astrometrics = MagicMock()
-    sky._astrometrics.targets.query.return_value.objects = [target]
+    sky._astrometrics.targets.query.return_value.items = [target]
     sky._astrometrics.stars.query.return_value.objects = []
 
     # 1. Local only
@@ -89,7 +89,7 @@ def test_astrometrics_catalog_includes_letterless_plate_solved_targets() -> None
     plate_solved_target = Target(id="T1", commonName="Target 1", ra="16 41 40.80", dec="36 27 35.64")
 
     fake_astrometrics = MagicMock()
-    fake_astrometrics.targets.query.return_value.objects = [plate_solved_target]
+    fake_astrometrics.targets.query.return_value.items = [plate_solved_target]
     fake_astrometrics.stars.query.return_value.objects = []
 
     fake_sky = MagicMock()
@@ -113,7 +113,7 @@ def test_astrometrics_catalog_skips_unparseable_target_without_dropping_others()
     bad_target = Target(id="BAD", commonName="Bad Target", ra="not a coordinate", dec="also not one")
 
     fake_astrometrics = MagicMock()
-    fake_astrometrics.targets.query.return_value.objects = [good_target, bad_target]
+    fake_astrometrics.targets.query.return_value.items = [good_target, bad_target]
     fake_astrometrics.stars.query.return_value.objects = []
 
     fake_sky = MagicMock()
@@ -137,7 +137,7 @@ def test_astrometrics_catalog_filters_stellar_objects_by_radius() -> None:
     no_coordinates_star = StellarObject(id="BLANK", ra="", dec="")
 
     fake_astrometrics = MagicMock()
-    fake_astrometrics.targets.query.return_value.objects = []
+    fake_astrometrics.targets.query.return_value.items = []
     fake_astrometrics.stars.query.return_value.objects = [near_star, far_star, no_coordinates_star]
 
     fake_sky = MagicMock()
@@ -161,7 +161,7 @@ def test_astrometrics_catalog_leaves_the_stars_alone_when_asked_not_to_load_them
     target = Target(id="T1", commonName="Target 1", ra="16h 41m 40s", dec="+36d 27m 36s")
 
     fake_astrometrics = MagicMock()
-    fake_astrometrics.targets.query.return_value.objects = [target]
+    fake_astrometrics.targets.query.return_value.items = [target]
     fake_astrometrics.stars.query.side_effect = AssertionError("stars were loaded")
 
     fake_sky = MagicMock()
@@ -306,7 +306,7 @@ def test_astrometrics_catalog_reads_only_the_stars_near_the_search_circle() -> N
     inside the circle being searched.
     """
     fake_astrometrics = MagicMock()
-    fake_astrometrics.targets.query.return_value.objects = []
+    fake_astrometrics.targets.query.return_value.items = []
     fake_astrometrics.stars.query.return_value.objects = []
     fake_sky = MagicMock()
     fake_sky._astrometrics = fake_astrometrics
@@ -329,7 +329,7 @@ def test_resolve_target_coordinates_asks_the_library_for_the_named_star_only() -
     unset = StellarObject(id="Vega", name="Vega", ra=0.0, dec=0.0)
     placed = StellarObject(id="* alf Lyr", name="Vega", ra=279.23, dec=38.78)
     fake_sky = MagicMock()
-    fake_sky._astrometrics.targets.query.return_value.objects = []
+    fake_sky._astrometrics.targets.query.return_value.items = []
     fake_sky._astrometrics.stars.query.return_value.objects = [unset, placed]
 
     resolved = resolve_target_coordinates(fake_sky, "Vega")

@@ -213,7 +213,7 @@ class FakeLibrary:
             Every stored measurement.
         """
         self.rows = rows
-        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=targets))
+        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=tuple(targets)))
         self.processing = no_camera_profiles_processing()
         self.quality = SimpleNamespace(
             query=self._query,
@@ -336,7 +336,7 @@ def test_the_sky_comes_from_the_history_without_a_model_and_says_so() -> None:
 def test_a_fitted_sky_model_is_used_for_tonight() -> None:
     """With enough nights the sky model sets the sky rate of the new frames."""
     library = _library()
-    deep = next(t for t in library.targets.query(detail="objects", limit=None).objects if t.id == "M 81")
+    deep = next(t for t in library.targets.query(include_empty=True).items if t.id == "M 81")
 
     ranking = _rank(library)
     candidate = {c.target_id: c for c in ranking.lists[0].candidates}["M 81"]

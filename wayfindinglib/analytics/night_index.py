@@ -247,7 +247,7 @@ def read_night_frames(context: Any) -> list[NightFrame]:
     try:
         astrometrics = context.astrometrics
         if document_signs is None:
-            targets = astrometrics.targets.query(detail="objects", limit=None).objects
+            targets = astrometrics.targets.query(include_empty=True).items
         else:
             changed = [
                 target_id
@@ -255,9 +255,9 @@ def read_night_frames(context: Any) -> list[NightFrame]:
                 if target_id not in memo.frames or memo.frames[target_id][0] != signs
             ]
             if len(changed) == len(document_signs):
-                targets = astrometrics.targets.query(detail="objects", limit=None).objects
+                targets = astrometrics.targets.query(include_empty=True).items
             else:
-                targets = [astrometrics.targets.get(target_id, refresh=True) for target_id in changed]
+                targets = [astrometrics.targets.get(target_id) for target_id in changed]
         targets = [target for target in targets if target is not None]
         found: dict[str, list[NightFrame]] = {target.id: [] for target in targets}
         for target, frame in capture_history.equipment_light_frames(

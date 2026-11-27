@@ -44,7 +44,7 @@ def _target_service(target: Target | None) -> MagicMock:
     target_service : `MagicMock`
         A service that finds ``target``. Its ``astrometrics.processing`` is
         a real `ProcessingPipelines` over a mock target catalog, so its
-        ``astrometrics.processing._targets.save`` records the save.
+        ``astrometrics.processing._targets._save`` records the save.
     """
     target_service = MagicMock()
     target_service.get_targets.return_value = target
@@ -76,7 +76,7 @@ def test_worker_runs_the_full_stacking_stage_on_the_chosen_frames() -> None:
     assert stage.call_args.args == (target,)
     assert stage.call_args.kwargs["frames_to_stack"] == target.frames[:2]
     assert stage.call_args.kwargs["job_id"] == "job-1"
-    target_service.astrometrics.processing._targets.save.assert_called_once()
+    target_service.astrometrics.processing._targets._save.assert_called_once()
     assert notification_service.notify.call_args.kwargs["status"] == "success"
 
 
@@ -113,7 +113,7 @@ def test_worker_reports_failure_and_does_not_save_when_nothing_was_stacked() -> 
         )
 
     assert result is None
-    target_service.astrometrics.processing._targets.save.assert_not_called()
+    target_service.astrometrics.processing._targets._save.assert_not_called()
     assert notification_service.notify.call_args.kwargs["status"] == "error"
 
 

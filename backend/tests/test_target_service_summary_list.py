@@ -30,7 +30,7 @@ def _service_with(*targets: Target) -> TargetService:
     """
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
-    service.astrometrics.targets.query.return_value.objects = list(targets)
+    service.astrometrics.targets.query.return_value = list(targets)
     service.astrometrics.targets.get.side_effect = lambda target_id: next(
         (target for target in targets if target.id == target_id), None
     )

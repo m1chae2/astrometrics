@@ -415,9 +415,9 @@ def test_frame_lookup_returns_only_light_frames_in_the_time_span() -> None:
                 Returns
                 -------
                 answer : `SimpleNamespace`
-                    ``objects`` holds a single target with five frames.
+                    ``items`` holds a single target with five frames.
                 """
-                return SimpleNamespace(objects=[_Target()])
+                return SimpleNamespace(items=(_Target(),))
 
     lookup = build_frame_lookup(_Astrometrics())
 

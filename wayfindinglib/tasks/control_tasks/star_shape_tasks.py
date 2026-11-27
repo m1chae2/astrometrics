@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from astrometricslib import Target
 from wayfindinglib.analytics.star_shape_review import (
     ROUNDNESS_LIMIT_NAME,
     judge_star_shape,
@@ -51,7 +52,9 @@ def get_star_shape_review(
         The verdicts, the set-aside frames, the typical elongation and the
         per-frame series.
     """
-    resolved = context.astrometrics.targets.get(target, refresh=True, required=True)
+    resolved = (
+        target if isinstance(target, Target) else context.astrometrics.targets.get(target, required=True)
+    )
     frames, stack, set_aside = read_star_shape_rows(context.astrometrics, resolved, night, frame_paths)
     limit = None
     if frames:

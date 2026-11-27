@@ -344,14 +344,16 @@ class IngestionService(BaseBackgroundService):
         self._log(job_id, "Starting full library re-index...")
 
         # 1. Reindex every target folder on disk. The library creates a
-        # target for a new folder and saves each target as it finishes.
-        def report_progress(index: int, total: int, folder: str) -> None:
-            """Log the target being indexed and move the job's progress."""
-            self._log(job_id, f"Indexing target {index + 1}/{total}: {folder}")
-            if self._job_service:
-                self._job_service.update_job(job_id, progress=int(((index + 1) / total) * 100))
+        # target for a new folder and saves each target as it finishes. Run
+        # as this job, the library logs each folder and counts them as the
+        # job's progress.
+        if self._job_service:
+            from astrometricslib.jobs import running_as_job
 
-        report = self._target_service.reindex_library(prune_missing=True, on_progress=report_progress)
+            with running_as_job(job_id, self._job_service.repository, job_type="reindex", target_id="global"):
+                report = self._target_service.reindex_library(prune_missing=True)
+        else:
+            report = self._target_service.reindex_library(prune_missing=True)
         for change in report.targets:
             if change.frames_after > change.frames_before:
                 self._start_measurement(job_id, change.target_id)
@@ -540,7 +542,6 @@ class IngestionService(BaseBackgroundService):
             target = self._target_service.get_targets(target_name)
             if not target:
                 self._target_service.create_target(target_name)
-                self._target_service.save_targets()
 
         # --- 1. Determine Source ---
         source_dir = ""
@@ -711,8 +712,6 @@ class IngestionService(BaseBackgroundService):
                 if not target:
                     target = self._target_service.create_target(target_name)
                 self._target_service.refresh_target_images(target)
-
-            self._target_service.save_targets()
 
         self._log(job_id, "Ingestion Complete.")
         return True

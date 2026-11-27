@@ -138,7 +138,7 @@ def _astrometrics(
     Returns
     -------
     astrometrics : `FakeAstrometrics`
-        Offers ``targets.query(detail="objects")`` and ``quality.query``.
+        Offers ``targets.query(include_empty=True)`` and ``quality.query``.
     """
     values = _STORED if stored is None else stored
     return FakeAstrometrics(frames, {frame.path: values for frame in frames}, camera_config=camera_config)

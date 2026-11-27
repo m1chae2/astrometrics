@@ -243,7 +243,7 @@ def collect_sky_sources(
         sky, ra_deg, dec_deg, radius_deg, include_catalog=include_online, include_stars=False
     )
     local_target_ids = (
-        {target.id for target in sky._astrometrics.targets.query(detail="objects", limit=None).objects}
+        {target.id for target in sky._astrometrics.targets.query(include_empty=True).items}
         if include_online
         else set()
     )

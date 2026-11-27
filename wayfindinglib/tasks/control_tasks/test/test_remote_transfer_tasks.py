@@ -93,9 +93,9 @@ def _patched_config(**overrides: str) -> _FakeConfig:
 def test_download_remote_frames_indexes_through_science_astrometrics_on_success() -> None:
     """Verify a successful download reindexes the target through Astrometrics.
 
-    `TargetCatalog.reindex_frames` is the science library's public way to
-    find new files on disk; it also recalculates the total exposure and
-    saves the target.
+    `TargetFrames.scan` is the science library's public way to find new
+    files on disk; it also recalculates the total exposure and saves the
+    target.
     """
     target = _FakeTarget("M 81", frame_paths=[])
     driver = Mock()
@@ -111,7 +111,7 @@ def test_download_remote_frames_indexes_through_science_astrometrics_on_success(
         success = remote_operations.download_remote_frames(observatory, target)
 
     assert success is True
-    observatory.astrometrics.targets.reindex_frames.assert_called_once_with(target)
+    observatory.astrometrics.targets.frames.scan.assert_called_once_with(target)
 
 
 def test_download_remote_frames_returns_false_without_indexing_on_failure() -> None:
@@ -130,7 +130,7 @@ def test_download_remote_frames_returns_false_without_indexing_on_failure() -> N
         success = remote_operations.download_remote_frames(observatory, target)
 
     assert success is False
-    observatory.astrometrics.targets.reindex_frames.assert_not_called()
+    observatory.astrometrics.targets.frames.scan.assert_not_called()
 
 
 @dataclass
@@ -155,21 +155,29 @@ class _FakeAstrometrics:
         self.saved = False
         self.prune_flags = []
         self.targets = self
-        self.add_frames_calls: list[tuple[list[str], str, str]] = []
+        self.frames = self
+        self.add_frames_calls: list[tuple[list[str], str]] = []
         self.added_paths: list[str] = []
 
-    def add_frames(self, paths: list[str], target: _FakeTargetRecord, *, telescope: str) -> list[str]:
-        """Record the call and give back the new paths a test set up.
+    def add(self, target: _FakeTargetRecord, paths: list[str]) -> list[FrameRecord]:
+        """Record the call, save, and give back the frames a test set up.
 
         Returns
         -------
-        added_paths : `list` [`str`]
-            The paths in `added_paths`.
+        frames : `list` [`FrameRecord`]
+            One record per path in `added_paths`.
         """
-        self.add_frames_calls.append((list(paths), target.id, telescope))
-        return list(self.added_paths)
+        self.add_frames_calls.append((list(paths), target.id))
+        self.saved = True
+        return [FrameRecord(path=path) for path in self.added_paths]
 
-    def get(self, target_id: str, refresh: bool = False) -> _FakeTargetRecord | None:
+    def scan(self, target: _FakeTargetRecord, prune_missing: bool = False) -> None:
+        """Record a rescan of the target and save it."""
+        target.reindexed = True
+        self.prune_flags.append(prune_missing)
+        self.saved = True
+
+    def get(self, target_id: str) -> _FakeTargetRecord | None:
         return self._existing.get(target_id)
 
     def create(self, target_id: str) -> _FakeTargetRecord:
@@ -178,14 +186,7 @@ class _FakeAstrometrics:
         self.created.append(target_id)
         return target
 
-    def reindex_frames(self, target: _FakeTargetRecord, prune_missing: bool = True) -> None:
-        target.reindexed = True
-        self.prune_flags.append(prune_missing)
-
-    def save(self) -> None:
-        self.saved = True
-
-    def read_frame_header(self, path: str) -> None:
+    def get_header(self, path: str) -> None:
         """Refuse to read a frame, as the library does for a missing file.
 
         Raises
@@ -422,7 +423,7 @@ def test_download_remote_targets_local_path_skips_download() -> None:
 
     assert success is True
     driver.download_target_folder.assert_not_called()
-    assert fake_astrometrics.add_frames_calls == [(["/local/lights/M81"], "M 81", "Apertura 75Q")]
+    assert fake_astrometrics.add_frames_calls == [(["/local/lights/M81"], "M 81")]
     assert fake_astrometrics.saved is True
 
 
@@ -431,7 +432,7 @@ def test_discover_unassociated_remote_targets_fuzzy_matches() -> None:
     driver = Mock()
     driver.list_remote_targets.return_value = ["M_81", "NGC 7000", "Unassociated Target"]
     context = _FakeObservatory(driver)
-    context.astrometrics.targets.query.return_value.objects = [
+    context.astrometrics.targets.query.return_value.items = [
         _FakeTarget("M 81", []),
         _FakeTarget("NGC-7000", []),
     ]
@@ -633,9 +634,9 @@ class _EmptyTargetCatalog:
         Returns
         -------
         answer : `SimpleNamespace`
-            An answer whose ``objects`` list is empty.
+            An answer whose ``items`` are empty.
         """
-        return SimpleNamespace(objects=[])
+        return SimpleNamespace(items=())
 
 
 class _EmptyAstrometrics:

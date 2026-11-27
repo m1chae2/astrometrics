@@ -45,7 +45,7 @@ def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | Ste
         If SIMBAD returns coordinates that cannot be read.
     """
     # 1. Search local targets
-    targets = sky._astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = sky._astrometrics.targets.query(include_empty=True).items
     for target in targets:
         is_name_match = target.id == target_name or (
             target.common_name and target.common_name.lower() == target_name.lower()

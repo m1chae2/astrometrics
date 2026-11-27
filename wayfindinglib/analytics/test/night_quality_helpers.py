@@ -149,13 +149,15 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(
-            query=lambda **_k: SimpleNamespace(objects=targets),
-            get=lambda target_id: next((target for target in targets if target.id == target_id), None),
+            query=lambda **_k: SimpleNamespace(items=tuple(targets)),
+            get=lambda target_id, required=False: next(
+                (target for target in targets if target.id == target_id), None
+            ),
+            frames=SimpleNamespace(get_set_aside=lambda _target: ()),
         )
         self.quality = SimpleNamespace(
             query=self._query,
             capture_settings=lambda ids=None: {1: SETTING},
-            set_aside_frames=lambda target_id: [],
         )
 
     def _query(

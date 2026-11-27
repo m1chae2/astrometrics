@@ -37,7 +37,7 @@ def _sky(tmp_path: Path, stars: list[StellarObject], targets: list[Target]) -> S
     if stars:
         catalog._catalog_access.put(stars, "stellar_catalog", {})
     astrometrics = SimpleNamespace(
-        stars=catalog, targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=targets))
+        stars=catalog, targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(items=tuple(targets)))
     )
     return SimpleNamespace(_astrometrics=astrometrics)
 

@@ -170,12 +170,13 @@ class FakeLibrary:
         self.object_types = object_types or {}
         self.read_failures: set[str] = set()
         self.targets = SimpleNamespace(
-            get=self._get_target, query=lambda **_k: SimpleNamespace(objects=self._list_targets())
+            get=self._get_target,
+            query=lambda **_k: SimpleNamespace(items=tuple(self._list_targets())),
+            frames=SimpleNamespace(get_set_aside=lambda _target: ()),
         )
         self.processing = no_camera_profiles_processing()
         self.quality = SimpleNamespace(
             query=self._query,
-            set_aside_frames=lambda _target: [],
             capture_settings=lambda ids=None: {},
         )
 

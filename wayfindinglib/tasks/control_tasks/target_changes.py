@@ -127,7 +127,7 @@ def library_target_positions(context: ControlContext) -> list[tuple[str, float, 
         coordinates cannot be read, is left out.
     """
     positions = []
-    for target in context.astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in context.astrometrics.targets.query(include_empty=True).items:
         try:
             ra_deg = target.ra_deg
             dec_deg = target.dec_deg

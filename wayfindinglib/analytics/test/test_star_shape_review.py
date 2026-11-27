@@ -353,7 +353,11 @@ def _library() -> SimpleNamespace:
             reason="few stars",
         ),
     ]
-    return SimpleNamespace(quality=_Quality(rows, set_aside))
+    quality = _Quality(rows, set_aside)
+    return SimpleNamespace(
+        quality=quality,
+        targets=SimpleNamespace(frames=SimpleNamespace(get_set_aside=quality.set_aside_frames)),
+    )
 
 
 def test_the_reader_gives_frames_oldest_first_with_the_stored_coherence() -> None:

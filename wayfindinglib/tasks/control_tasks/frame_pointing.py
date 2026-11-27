@@ -166,7 +166,7 @@ def record_frame_pointing_errors(context: ControlContext, paths: list[str]) -> i
         if not path.lower().endswith((".fits", ".fit")):
             continue
         try:
-            header = context.astrometrics.targets.read_frame_header(path)
+            header = context.astrometrics.targets.frames.get_header(path)
             attempt = pointing_error_from_header(header, path)
         except (NotFoundError, *FITS_READ_ERRORS) as error:
             logger.debug("Skipping %s: %s", path, error)

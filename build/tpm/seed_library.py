@@ -266,7 +266,6 @@ def seed(sandbox: Path) -> dict[str, int]:
         target.stacking.stacked_image = str(stack_path)
         target.stacking.processed_image = str(preview_path)
         astrometrics.targets.add(target)
-    astrometrics.targets.save()
 
     calibration_total = 0
     for kind, exposure in (("darks", 30.0), ("flats", 0.5), ("bias", 0.0)):

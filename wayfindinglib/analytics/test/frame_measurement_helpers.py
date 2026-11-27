@@ -82,7 +82,7 @@ class FakeAstrometrics:
             frames=frames,
             frame_subject_id=lambda frame: frame_subject_id(frame.path, target_id),
         )
-        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[target]))
+        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=(target,)))
         self.quality = SimpleNamespace(query=self._query)
         self.processing = (
             camera_profile_processing(camera_config)

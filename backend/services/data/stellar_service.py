@@ -648,7 +648,7 @@ class StellarService:
             picture's top-left corner).
         """
         pictures = []
-        for target in self.astrometrics.targets.query(detail="objects", limit=None).objects:
+        for target in self.astrometrics.targets.query(include_empty=True).items:
             entry = self._stack_sky_pictures.entry_for(target)
             if entry is not None:
                 pictures.append(entry)

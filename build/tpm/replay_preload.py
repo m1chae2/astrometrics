@@ -123,7 +123,6 @@ def add_targets(sandbox: Path) -> dict[str, tuple[float, float]]:
         astrometrics.targets.add(
             Target(id=name, ra=_sexagesimal(right_ascension, True), dec=_sexagesimal(declination, False))
         )
-    astrometrics.targets.save()
     return targets
 
 

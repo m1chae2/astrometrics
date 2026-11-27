@@ -220,8 +220,8 @@ def test_selection_is_its_own_class() -> None:
 _ENTRIES = [
     {
         "topic_id": "api/astrometricslib",
-        "anchor_id": "api-TargetCatalog-delete_images",
-        "qualified_name": "TargetCatalog.delete_images",
+        "anchor_id": "api-TargetFrames-get_rotation",
+        "qualified_name": "TargetFrames.get_rotation",
     },
     {
         "topic_id": "api/astrometricslib",
@@ -274,13 +274,13 @@ def fake_doc_index(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_doc_with_one_match_asks_the_app_to_open_it() -> None:
     """Doc with a name that fits one entry returns a request to open it."""
     service = ScriptingService()
-    envelope = service.execute_structured('doc("delete_images")', source="repl")
+    envelope = service.execute_structured('doc("get_rotation")', source="repl")
     assert envelope["app_requests"] == [
         {
             "kind": "doc",
             "topic_id": "api/astrometricslib",
-            "anchor_id": "api-TargetCatalog-delete_images",
-            "qualified_name": "TargetCatalog.delete_images",
+            "anchor_id": "api-TargetFrames-get_rotation",
+            "qualified_name": "TargetFrames.get_rotation",
         }
     ]
 
@@ -306,10 +306,10 @@ def test_doc_with_several_or_no_matches_prints_and_opens_nothing() -> None:
     assert several["app_requests"] == []
     assert "1. doc StellarCatalog.delete" in several["stdout"]
     assert "2. doc TargetCatalog.delete" in several["stdout"]
-    none = service.execute_structured('doc("delete_imagez")', source="repl")
+    none = service.execute_structured('doc("get_rotationz")', source="repl")
     assert none["app_requests"] == []
-    assert "No documentation found for delete_imagez." in none["stdout"]
-    assert "TargetCatalog.delete_images" in none["stdout"]
+    assert "No documentation found for get_rotationz." in none["stdout"]
+    assert "TargetFrames.get_rotation" in none["stdout"]
 
 
 def test_help_lists_the_new_names_and_terminal_commands() -> None:
@@ -321,10 +321,10 @@ def test_help_lists_the_new_names_and_terminal_commands() -> None:
 
 
 def test_doc_with_the_real_reference_index() -> None:
-    """The real reference index finds TargetCatalog.delete_images."""
+    """The real reference index finds TargetFrames.get_rotation."""
     service = ScriptingService(SimpleNamespace(astrometrics=None))
-    envelope = service.execute_structured('doc("TargetCatalog.delete_images")', source="repl")
+    envelope = service.execute_structured('doc("TargetFrames.get_rotation")', source="repl")
     assert [request["qualified_name"] for request in envelope["app_requests"]] == [
-        "TargetCatalog.delete_images"
+        "TargetFrames.get_rotation"
     ]
-    assert envelope["app_requests"][0]["anchor_id"] == "api-TargetCatalog-delete_images"
+    assert envelope["app_requests"][0]["anchor_id"] == "api-TargetFrames-get_rotation"

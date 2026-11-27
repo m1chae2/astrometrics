@@ -462,7 +462,7 @@ def _object_entry_names(obj: Any) -> list[str]:
     Returns
     -------
     names : `list` of `str`
-        Such as ``["TargetCatalog.delete_images"]``, most specific first.
+        Such as ``["TargetFrames.get_rotation"]``, most specific first.
     """
     if inspect.ismodule(obj):
         return []
@@ -485,7 +485,7 @@ def resolve_console_name(name: str, scope: dict[str, Any]) -> Any:
     Parameters
     ----------
     name : `str`
-        Such as ``"astrometrics.targets.delete_images"``.
+        Such as ``"astrometrics.targets.frames.delete"``.
     scope : `dict`
         The console's variables.
 

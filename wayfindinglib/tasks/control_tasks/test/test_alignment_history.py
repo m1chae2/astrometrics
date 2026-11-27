@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib._internal.catalog import TargetQueryResult
+from astrometricslib._internal.catalog import TargetNightCounts
 from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.tasks.control_tasks import night_history
 
@@ -90,7 +90,7 @@ def _context() -> SimpleNamespace:
         The log database and a target catalog that counts one target on
         the newer night.
     """
-    targets = SimpleNamespace(query=lambda detail: TargetQueryResult(detail=detail, nights={"2026-09-25": 1}))
+    targets = SimpleNamespace(count_by_night=lambda: TargetNightCounts(targets_by_night={"2026-09-25": 1}))
     return SimpleNamespace(records=_Logs(), astrometrics=SimpleNamespace(targets=targets))
 
 

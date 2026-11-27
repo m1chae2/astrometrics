@@ -1028,15 +1028,15 @@ def test_a_bad_position_dictionary_is_an_invalid_argument() -> None:
 
 
 def test_a_slew_target_id_is_read_fresh_from_the_library() -> None:
-    """A target id is looked up after re-reading the catalog."""
+    """A target id is looked up in the library, which reads what changed."""
     calls = []
 
-    def get(target_id: str, refresh: bool = False) -> None:
+    def get(target_id: str) -> None:
         """Record the lookup; no target has the id."""
-        calls.append((target_id, refresh))
+        calls.append(target_id)
 
     context = SimpleNamespace(astrometrics=SimpleNamespace(targets=SimpleNamespace(get=get)))
 
     with pytest.raises(NotFoundError, match="Nope"):
         ops.resolve_destination(context, "Nope")
-    assert calls == [("Nope", True)]
+    assert calls == ["Nope"]

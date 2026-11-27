@@ -10,7 +10,7 @@ belongs in the observatory-control library rather than the science
 library (`Wayfinding_Library_Architecture.md` Section 2.1, rule 4, the
 litmus test). Frame
 indexing goes through astrometricslib's public API
-(`Astrometrics.targets.reindex_frames`), never its internal modules.
+(`Astrometrics.targets.frames.add` and `scan`), never its internal modules.
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ def download_remote_frames(
     if success and local_subfolder == "lights":
         # Reindexing finds the new files, recomputes the total exposure and
         # saves the target.
-        context.astrometrics.targets.reindex_frames(target)
+        context.astrometrics.targets.frames.scan(target)
         return True
     return success
 
@@ -231,11 +231,9 @@ def download_remote_targets(
 
     config = get_configuration()
     astrometrics = context.astrometrics
-    target = astrometrics.targets.get(target_id, refresh=True)
+    target = astrometrics.targets.get(target_id)
     if not target:
         target = astrometrics.targets.create(target_id)
-
-    telescope_name = "Apertura 75Q"
 
     if local_path:
         scan_list = [local_path]
@@ -330,14 +328,15 @@ def download_remote_targets(
                 log_callback=log_callback,
                 selected_files=files_to_transfer,
             )
-        scan_list = [staging_dir]
+        # A staging folder that was never made (nothing to transfer) holds
+        # nothing to sort, and the library refuses a path that is not there.
+        scan_list = [staging_dir] if os.path.isdir(staging_dir) or not nothing_new_to_transfer else []
 
     if success:
         from wayfindinglib.tasks.control_tasks.frame_pointing import record_frame_pointing_errors
 
-        added_paths = astrometrics.targets.add_frames(scan_list, target, telescope=telescope_name)
-        astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
-        astrometrics.targets.save()
+        added_paths = [frame.path for frame in astrometrics.targets.frames.add(target, scan_list)]
+        astrometrics.targets.frames.scan(target, prune_missing=prune_missing)
         if added_paths and on_copied is not None:
             try:
                 on_copied(len(added_paths))
@@ -765,7 +764,7 @@ def discover_unassociated_remote_targets(context: ControlContext) -> list[str]:
     except AstrometricsError, OSError:
         return []
 
-    local_targets = context.astrometrics.targets.query(detail="objects", limit=None).objects
+    local_targets = context.astrometrics.targets.query(include_empty=True).items
 
     def fuzzy_normalize(name: str) -> str:
         """Normalize a target name for fuzzy comparison.
@@ -1140,7 +1139,7 @@ def sync_all_remote_folders(
         astrometrics = context.astrometrics
         known_target_ids = [
             target.id
-            for target in astrometrics.targets.query(detail="objects", limit=None).objects
+            for target in astrometrics.targets.query(include_empty=True).items
             if not is_calibration_folder(target.id)
         ]
         new_target_ids = [

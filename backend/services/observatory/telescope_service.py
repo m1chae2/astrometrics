@@ -255,14 +255,13 @@ class TelescopeService:
                 dec_deg=parse_coordinate_text(dec_str, is_right_ascension=False),
                 radius_deg=1.0,  # 1 degree tolerance for sensor FOV match
                 include_empty=True,
-                sort="separation",
+                order_by="separation",
                 limit=1,
             )
         except (AstrometricsError, sqlite3.Error) as exc:
             logger.debug("Target inference failed: %s", exc)
             return None
-        rows = nearest.targets or []
-        return rows[0]["id"] if rows else None
+        return nearest[0].id if len(nearest) else None
 
     def connect(self) -> bool:
         """Connect to the telescope hardware via the high-level interface.

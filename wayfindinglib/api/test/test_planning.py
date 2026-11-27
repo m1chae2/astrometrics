@@ -56,6 +56,7 @@ class _FakeTargetCatalog:
         self._targets = {target.id: target for target in targets}
         self.catalog_names = {"NGC 7331"}
         self.created: list[str] = []
+        self.frames = SimpleNamespace(get_set_aside=lambda _target: ())
 
     def get(
         self, target_id: str | Target, refresh: bool | str = False, *, required: bool = False
@@ -89,14 +90,14 @@ class _FakeTargetCatalog:
         return found
 
     def query(self, **_kwargs: object) -> SimpleNamespace:
-        """Give every target, as ``query(detail="objects")`` does.
+        """Give every target, as ``query(include_empty=True)`` does.
 
         Returns
         -------
         answer : `SimpleNamespace`
-            The library's targets in ``objects``.
+            The library's targets in ``items``.
         """
-        return SimpleNamespace(objects=list(self._targets.values()))
+        return SimpleNamespace(items=tuple(self._targets.values()))
 
     def add(self, target: Target) -> None:
         """Keep one more target.
@@ -157,7 +158,6 @@ class _FakeAstrometrics:
             query=lambda **_arguments: QualityQueryResult(),
             capture_settings=lambda ids=None: {},
             metrics=lambda **_arguments: [],
-            set_aside_frames=lambda _target_id: [],
             calibration_identities=lambda **_arguments: [],
         )
         self.stars = SimpleNamespace(get=lambda object_id: None)

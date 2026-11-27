@@ -17,7 +17,7 @@ stored rows and says what they suggest:
   stars share one direction, which points at tracking, guiding, wind or
   flexure. A low coherence points at seeing or focus.
 * **Set-aside frames**: the frames the stacker's quarantine set aside as
-  trailed (`astrometrics.quality.set_aside_frames`). The review does not
+  trailed (`astrometrics.targets.frames.get_set_aside`). The review does not
   judge the frames again; the quarantine owns that rule.
 * **Corners**: the corner widths compared with the center width. They are
   reported only. The corner measurements are exploratory (AST-18), so no tilt
@@ -237,7 +237,7 @@ def _read_set_aside_trailed(
         Oldest first; a frame with no capture time last.
     """
     found = []
-    for record in astrometrics.quality.set_aside_frames(target):
+    for record in astrometrics.targets.frames.get_set_aside(target):
         if record.kind != TRAILED_KIND:
             continue
         path = record.original_path or record.path

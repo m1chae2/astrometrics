@@ -141,10 +141,26 @@ def test_frames_in_an_excluded_folder_are_counted_with_their_manifest_reason() -
 def test_the_inputs_read_the_listing_and_note_a_listing_that_fails() -> None:
     """The inputs use the library listing, and note one that fails."""
     listed = [SimpleNamespace(subject_id="T:1", path="/p", kind="trailed", reason="", action_taken=None)]
-    good = SimpleNamespace(quality=SimpleNamespace(set_aside_frames=lambda target_id: listed))
+
+    def library(listing: Any) -> SimpleNamespace:
+        """Make a library whose set-aside listing is ``listing``.
+
+        Returns
+        -------
+        library : `SimpleNamespace`
+            A stand-in with ``targets.get`` and ``targets.frames``.
+        """
+        return SimpleNamespace(
+            targets=SimpleNamespace(
+                get=lambda target_id, required=False: SimpleNamespace(id=target_id),
+                frames=SimpleNamespace(get_set_aside=listing),
+            )
+        )
+
+    good = library(lambda target: listed)
     assert LibraryInputs(good, None, None).set_aside_reasons("T", []) == {"T:1": "trailed"}
 
-    def fail(target_id: str) -> list[Any]:
+    def fail(target: Any) -> list[Any]:
         """Raise like an unreadable folder.
 
         Raises
@@ -154,7 +170,7 @@ def test_the_inputs_read_the_listing_and_note_a_listing_that_fails() -> None:
         """
         raise OSError("disk gone")
 
-    broken = LibraryInputs(SimpleNamespace(quality=SimpleNamespace(set_aside_frames=fail)), None, None)
+    broken = LibraryInputs(library(fail), None, None)
     assert broken.set_aside_reasons("T", []) == {}
     assert any("could not be listed" in note for note in broken.notes)
 

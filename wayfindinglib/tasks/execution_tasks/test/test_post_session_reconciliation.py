@@ -85,6 +85,7 @@ class _FakeTargetRegistry:
     def __init__(self, targets: dict[str, _FakeTarget]) -> None:
         """Keep the targets by id."""
         self._targets = targets
+        self.frames = self
 
     def get(self, target_id: str) -> _FakeTarget | None:
         """Return the target with this id, if any.
@@ -96,17 +97,17 @@ class _FakeTargetRegistry:
         """
         return self._targets.get(target_id)
 
-    def sessions(self, target: _FakeTarget, night_date: date | None = None) -> list[Any]:
+    def get_nights(self, target: _FakeTarget, night: date | None = None) -> list[Any]:
         """Group a target's frames into sessions, as the library does.
 
         Returns
         -------
         sessions : `list`
-            The target's sessions, only those of `night_date` when given.
+            The target's sessions, only those of `night` when given.
         """
         target_id = next(key for key, value in self._targets.items() if value is target)
         found = derive_target_sessions(target_id, target.frames)
-        return [session for session in found if night_date is None or session.night_date == night_date]
+        return [session for session in found if night is None or session.night_date == night]
 
 
 class _FakeAstrometrics:

@@ -65,7 +65,7 @@ def _orchestrator(tmp_path: Path, identify: Any, frames: int = 30) -> AnalysisOr
         processing=SimpleNamespace(
             identify_stack=identify, get_stack_identification=lambda _p: _identification()
         ),
-        targets=SimpleNamespace(read_frame_header=lambda _p: {"STACKCNT": frames}),
+        targets=SimpleNamespace(frames=SimpleNamespace(get_header=lambda _p: {"STACKCNT": frames})),
     )
     return AnalysisOrchestrator(
         config_service=config,

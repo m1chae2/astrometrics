@@ -1,7 +1,9 @@
-"""Unit tests for deleting frames through the image service.
+"""Purpose: Unit tests for deleting frames through the image service.
 
-A deleted frame must not leave its stored quality measurements behind,
-whether or not the caller names the frame's target.
+Description: The service hands the paths, and the target when the app names
+one, to the library's ``targets.frames.delete``, which also clears the
+deleted frames' stored quality measurements. The service no longer reads a
+target out of a path itself.
 """
 
 from unittest.mock import MagicMock
@@ -19,7 +21,7 @@ def _service(deleted: list[str], target: Target | None) -> tuple[ImageService, M
         The service and the fake handle it uses.
     """
     astrometrics = MagicMock()
-    astrometrics.targets.delete_images.return_value.model_dump.return_value = {
+    astrometrics.targets.frames.delete.return_value.model_dump.return_value = {
         "deleted": deleted,
         "failed": [],
     }
@@ -29,33 +31,25 @@ def _service(deleted: list[str], target: Target | None) -> tuple[ImageService, M
     return ImageService(target_service), astrometrics
 
 
-def test_delete_without_target_forgets_measurements() -> None:
-    """The target is read from the lights folder; its numbers are forgotten."""
+def test_delete_without_target_lets_the_library_find_it() -> None:
+    """With no target named, the library gets `None` and the paths."""
     path = "/frames/lights/M 13/scope/cam/M_13_Light_001.fits"
     service, astrometrics = _service([path], Target(id="M 13"))
 
     result = service.delete_images([path])
 
     assert result["deleted"] == [path]
-    astrometrics.targets.get.assert_called_once_with("M 13")
-    astrometrics.quality.forget.assert_called_once_with(["M 13/scope/cam/M_13_Light_001.fits"])
+    astrometrics.targets.get.assert_not_called()
+    astrometrics.targets.frames.delete.assert_called_once_with(None, [path])
 
 
-def test_delete_with_target_leaves_forgetting_to_the_library() -> None:
-    """With a target named, the library forgets; the service does not."""
+def test_delete_with_target_passes_the_target() -> None:
+    """With a target named, the service looks it up and passes it on."""
     path = "/frames/lights/M 13/scope/cam/M_13_Light_001.fits"
-    service, astrometrics = _service([path], Target(id="M 13"))
+    target = Target(id="M 13")
+    service, astrometrics = _service([path], target)
 
     service.delete_images([path], target_id="M 13")
 
-    astrometrics.quality.forget.assert_not_called()
-
-
-def test_delete_of_an_unknown_target_forgets_nothing() -> None:
-    """A path of a target not in the library forgets nothing."""
-    path = "/frames/lights/Nowhere/scope/cam/x.fits"
-    service, astrometrics = _service([path], None)
-
-    service.delete_images([path])
-
-    astrometrics.quality.forget.assert_not_called()
+    astrometrics.targets.get.assert_called_once_with("M 13")
+    astrometrics.targets.frames.delete.assert_called_once_with(target, [path])

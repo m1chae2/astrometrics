@@ -16,7 +16,7 @@ from backend.services.infrastructure.agent_code_policy import check_agent_code
         "import numpy as np\nresult = np.mean([1, 2, 3])",
         "from astrometricslib import Astrometrics, Target",
         "import astrometricslib\nastrometricslib.Astrometrics",
-        "targets = astrometrics.targets.query(detail='objects', limit=None).objects\nresult = len(targets)",
+        "targets = astrometrics.targets.query(include_empty=True)\nresult = len(targets)",
         "import pandas as pd\ndf = pd.DataFrame({'a': [1]})\nresult = df.a.sum()",
         "import matplotlib.pyplot as plt\nplt.plot([1, 2])",
         "from scipy import stats",

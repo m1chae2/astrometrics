@@ -685,7 +685,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         """
         checked = self._checked_stack_path(stack_path)
         try:
-            frame_count = int(self.astrometrics.targets.read_frame_header(checked).get("STACKCNT", 0) or 0)
+            frame_count = int(self.astrometrics.targets.frames.get_header(checked).get("STACKCNT", 0) or 0)
         except (NotFoundError, *FITS_READ_ERRORS) as error:
             raise InvalidArgumentError(f"The stack could not be read: {error}") from error
         if frame_count <= 1:
@@ -1024,7 +1024,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             and (not filter_name or filter_name.upper() in ["NONE", "UNKNOWN", "LUMINANCE", "L", "ALL"])
         ):
             try:
-                header = self.astrometrics.targets.read_frame_header(unmatched_paths[0])
+                header = self.astrometrics.targets.frames.get_header(unmatched_paths[0])
                 fit_filter = header.get("FILTER")
                 if fit_filter and str(fit_filter).upper() in [
                     "SPEC",
@@ -1191,7 +1191,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             self._job_service.update_job(job_id, status_message=message)
         logger.info("[%s] %s", target_id, message)
         try:
-            self._target_service.save_targets()
+            self._target_service.save_target(target)
         except (AstrometricsError, sqlite3.Error, OSError) as error:
             log_failure(logger, error, "[%s] Failed to record target after the analysis", target_id)
         if self._notification_service and outcome.stages_run:
@@ -1356,7 +1356,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             )
 
             try:
-                self._target_service.save_targets()
+                self._target_service.save_target(target)
             except AstrometricsError, sqlite3.Error, OSError:
                 log.exception("[%s] Failed to record target after photometry analysis", target_id)
 

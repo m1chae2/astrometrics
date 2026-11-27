@@ -23,19 +23,22 @@ class _FakeTargetCatalog:
         self.targets: dict[str, Target] = {}
         self.saved = False
 
-    def add(self, target: Target) -> None:
-        """Keep one target.
+    def add(self, target: Target) -> Target:
+        """Keep and save one target, as the library's ``add`` does.
 
         Parameters
         ----------
         target : `Target`
             The target to keep.
+
+        Returns
+        -------
+        target : `Target`
+            The same target.
         """
         self.targets[target.id] = target
-
-    def save(self) -> None:
-        """Remember that the catalog was saved."""
         self.saved = True
+        return target
 
 
 class _FakeAstrometrics:

@@ -16,6 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from astrometricslib.drivers import resolve_mounted_path
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from backend.services.data.image_paths import PROCESSED_PICTURE_ENDING, resolve_allowed_image
 
 logger = logging.getLogger(__name__)
@@ -153,11 +154,30 @@ class ImageService:
         Returns
         -------
         path : `str`
-            Filesystem path of the matching frame.
+            Filesystem path of the matching frame. An index past the last
+            match gives the last one.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the gain or exposure is not a number.
+        NotFoundError
+            If no light frame has that gain and exposure.
         """
-        return self._astrometrics.targets.get_frame(
-            self.target_service.subjects.target(target_id), iso, exposure, index
-        )
+        target = self.target_service.subjects.target(target_id)
+        try:
+            gain, exposure_s = float(iso), float(exposure)
+        except (TypeError, ValueError) as error:
+            raise InvalidArgumentError(
+                "The gain and exposure must be numbers.", details={"iso": iso, "exposure": exposure}
+            ) from error
+        matches = self._astrometrics.targets.frames.query(target, gain=gain, exposure_s=exposure_s)
+        if not len(matches):
+            raise NotFoundError(
+                f"No frame found for ISO={iso} Exposure={exposure} Index={index}",
+                details={"target": target.id, "iso": iso, "exposure": exposure, "index": index},
+            )
+        return matches[max(0, min(index, len(matches) - 1))].path
 
     def _resolve(self, path: str) -> str:
         """Give the real path of an image the app sent, in the allowed folders.
@@ -367,36 +387,8 @@ class ImageService:
             could not be removed, with the reason).
         """
         resolved_paths = [resolve_mounted_path(path) for path in paths]
-        result = self._astrometrics.targets.delete_images(resolved_paths, target=target_id).model_dump()
-        if target_id is None:
-            self._forget_measurements_of_deleted(result["deleted"])
-        return result
-
-    def _forget_measurements_of_deleted(self, deleted_paths: list[str]) -> None:
-        """Forget the measurements of frames deleted without a target.
-
-        The library forgets the measurements itself when it is given the
-        target. When the caller names none, the target is read from the
-        library's folder layout (``lights/<target>/...``), so a deleted
-        frame never leaves its numbers behind. A path that is not under a
-        ``lights`` folder, or whose target is not in the library, is left.
-
-        Parameters
-        ----------
-        deleted_paths : `list` [`str`]
-            The paths the library reports as deleted.
-        """
-        subject_ids: list[str] = []
-        for path in deleted_paths:
-            parts = os.path.normpath(path).split(os.sep)
-            positions = [i for i, part in enumerate(parts) if part.lower() == "lights" and i + 2 < len(parts)]
-            if not positions:
-                continue
-            target = self._astrometrics.targets.get(parts[positions[-1] + 1])
-            if target is not None:
-                subject_ids.append(target.frame_subject_id(path))
-        if subject_ids:
-            self._astrometrics.quality.forget(subject_ids)
+        target = None if target_id is None else self._astrometrics.targets.get(target_id)
+        return self._astrometrics.targets.frames.delete(target, resolved_paths).model_dump()
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
         """Find the most recently created FITS file and draw it.

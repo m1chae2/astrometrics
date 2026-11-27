@@ -252,7 +252,7 @@ def set_aside_reasons(
     The stacker's quarantine step moves a frame to an ``_excluded`` folder.
     Three places can say so, and this reads them in order of trust. The first
     is the library's own listing of the ``_excluded`` folders
-    (``Astrometrics.quality.set_aside_frames``), which already prefers the
+    (``Astrometrics.targets.frames.get_set_aside``), which already prefers the
     stored rows, then the folder's manifest, then the folder alone. The
     second is a stored row whose ``action_taken`` says the frame was moved.
     The quarantine measurements (roundness, sky median) are stored for kept
@@ -585,7 +585,8 @@ class LibraryInputs:
         try:
             # A target already listed spares the library another listing.
             known = self._targets.get(target_id) if self._targets else None
-            listed = self.astrometrics.quality.set_aside_frames(known or target_id)
+            target = known or self.astrometrics.targets.get(target_id, required=True)
+            listed = list(self.astrometrics.targets.frames.get_set_aside(target))
         except (AstrometricsError, OSError, sqlite3.Error) as error:
             self.notes.append(f"The set-aside frames of {target_id} could not be listed: {error}")
             listed = []
@@ -601,8 +602,7 @@ class LibraryInputs:
         """
         if self._targets is None:
             self._targets = {
-                target.id: target
-                for target in self.astrometrics.targets.query(detail="objects", limit=None).objects
+                target.id: target for target in self.astrometrics.targets.query(include_empty=True).items
             }
         return self._targets
 

@@ -21,18 +21,14 @@ def _imaging_status() -> SimpleNamespace:
 
 def test_infer_target_at_coordinates() -> None:
     """Match the mount position to the nearest target within 1 degree."""
-    from astrometricslib._internal.catalog import TargetQueryResult
+    from astrometricslib import Target
+    from astrometricslib.arguments import Page
     from backend.services.observatory.telescope_service import TelescopeService
 
     target_service_mock = MagicMock()
     targets = target_service_mock.astrometrics.targets
-    # The library replies with a TargetQueryResult model, not a dict.
-    targets.query.side_effect = [
-        TargetQueryResult(
-            detail="summary", targets=[{"id": "M 27", "common_name": None, "separation_deg": 0.3}]
-        ),
-        TargetQueryResult(detail="summary", targets=[]),
-    ]
+    # The library replies with a page of targets, nearest first.
+    targets.query.side_effect = [Page.of([Target(id="M 27")]), Page.of([])]
 
     service = TelescopeService(target_service=target_service_mock)
 
@@ -40,9 +36,9 @@ def test_infer_target_at_coordinates() -> None:
     assert service._infer_target_at_coordinates("20h 01m 00s", "+22° 46′ 00″") == "M 27"
     asked = targets.query.call_args_list[0].kwargs
     assert asked["radius_deg"] == pytest.approx(1.0)
-    assert asked["sort"] == "separation"
+    assert asked["order_by"] == "separation"
     # The region search takes ra_deg / dec_deg (TargetCatalog.query).
-    assert set(asked) == {"ra_deg", "dec_deg", "radius_deg", "include_empty", "sort", "limit"}
+    assert set(asked) == {"ra_deg", "dec_deg", "radius_deg", "include_empty", "order_by", "limit"}
     assert asked["ra_deg"] == pytest.approx(300.25)
     assert asked["dec_deg"] == pytest.approx(22.7667, abs=1e-3)
 
@@ -56,14 +52,14 @@ def test_infer_target_at_coordinates_returns_the_id_not_the_common_name() -> Non
     Remote folders, the library and jobs are keyed by id, so the automatic
     download must ask for the id.
     """
-    from astrometricslib._internal.catalog import TargetQueryResult
+    from astrometricslib import Target
+    from astrometricslib.arguments import Page
     from backend.services.observatory.telescope_service import TelescopeService
 
     target_service_mock = MagicMock()
-    target_service_mock.astrometrics.targets.query.return_value = TargetQueryResult(
-        detail="summary",
-        targets=[{"id": "M 13", "common_name": "Test Target Name", "separation_deg": 0.0}],
-    )
+    target_service_mock.astrometrics.targets.query.return_value = Page.of([
+        Target(id="M 13", common_name="Test Target Name")
+    ])
     service = TelescopeService(target_service=target_service_mock)
 
     assert service._infer_target_at_coordinates("16h 41m 41s", "+36° 27′ 36″") == "M 13"

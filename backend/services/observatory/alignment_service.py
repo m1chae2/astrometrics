@@ -161,9 +161,7 @@ class AlignmentService:
         try:
             records = self._require_review().query_alignment_records(
                 session_id,
-                targets=self._targets.query(detail="objects", limit=None).objects
-                if self._targets is not None
-                else None,
+                targets=self._targets.query(include_empty=True).items if self._targets is not None else None,
             )
         except (StorageError, ValueError, TypeError) as exc:
             logger.debug("Error loading session %s alignment data: %s", session_id, exc)

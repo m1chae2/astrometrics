@@ -230,11 +230,10 @@ def _reindex_targets(astrometrics: Astrometrics, targets: list) -> None:
     reindexed_target_count = 0
     for target in targets:
         try:
-            astrometrics.targets.reindex_frames(target, refresh_headers=True)
+            astrometrics.targets.frames.scan(target)
             reindexed_target_count += 1
         except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as reindex_error:
             print(f"  [{target.id}] Reindex failed, continuing with stored frames: {reindex_error}")
-    astrometrics.targets.save()
     print(f"Reindexed {reindexed_target_count} of {len(targets)} target(s).")
 
 
@@ -1324,7 +1323,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         print(f"Wrote {row_count} row(s) to {arguments.review_list}.")
         return
 
-    targets = astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = astrometrics.targets.query(include_empty=True).items
     if not targets:
         print("No targets found in the database catalog.")
         return

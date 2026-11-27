@@ -246,7 +246,7 @@ def imaged_fields(monkeypatch: pytest.MonkeyPatch, fields: list[dict]) -> None:
     """
     centers = [FieldCenter(frames_examined=1, **field) for field in fields]
     library = types.SimpleNamespace(
-        targets=types.SimpleNamespace(imaged_field_centers=lambda: ImagedFieldCenters(centers=centers))
+        targets=types.SimpleNamespace(measure_field_centers=lambda: ImagedFieldCenters(centers=centers))
     )
     monkeypatch.setattr(script, "Astrometrics", lambda config: library)
 

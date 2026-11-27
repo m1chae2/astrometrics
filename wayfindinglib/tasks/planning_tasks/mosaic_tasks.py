@@ -344,5 +344,4 @@ def create_mosaic(
                     dither_config=dither_config,
                 )
             )
-    astrometrics.targets.save()
     return plan

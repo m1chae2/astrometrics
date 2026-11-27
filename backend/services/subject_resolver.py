@@ -32,7 +32,7 @@ class SubjectResolver:
         """Keep the library handle and build the table of lookups."""
         self._astrometrics = astrometrics
         self._lookups: dict[type, tuple[str, Callable[[str], Any]]] = {
-            Target: ("target", lambda target_id: astrometrics.targets.get(target_id, refresh=True)),
+            Target: ("target", lambda target_id: astrometrics.targets.get(target_id)),
             StellarObject: ("star", lambda star_id: astrometrics.stars.get(star_id)),
         }
 

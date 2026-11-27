@@ -212,7 +212,7 @@ def run_benchmark(argv: list[str] | None = None) -> int:
     wanted = {target_id.strip().casefold() for target_id in arguments.target_ids}
     targets = [
         target
-        for target in astrometrics.targets.query(detail="objects", limit=None).objects
+        for target in astrometrics.targets.query(include_empty=True).items
         if target.id.casefold() in wanted
     ]
     if not targets:

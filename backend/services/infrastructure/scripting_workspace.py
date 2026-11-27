@@ -487,9 +487,9 @@ class ConsoleWorkspaceMixin:
         Parameters
         ----------
         name : `Any`
-            A name such as ``"delete_images"``,
-            ``"TargetCatalog.delete_images"`` or
-            ``"astrometrics.targets.delete_images"``, or the object itself.
+            A name such as ``"get_rotation"``,
+            ``"TargetFrames.get_rotation"`` or
+            ``"astrometrics.targets.frames.delete"``, or the object itself.
             When a bare method name fits several classes, the full names
             are listed and nothing opens.
         """

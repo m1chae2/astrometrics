@@ -404,7 +404,7 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
         return sky_position_from(destination)
     target = destination
     if isinstance(destination, str):
-        target = context.astrometrics.targets.get(destination, refresh=True)
+        target = context.astrometrics.targets.get(destination)
         if target is None:
             raise NotFoundError(f"Target '{destination}' not found in library")
 

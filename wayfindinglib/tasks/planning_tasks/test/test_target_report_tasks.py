@@ -199,7 +199,12 @@ class _Library:
         self.set_aside = self._set_aside_frames()
         self.rows.extend(self._stack_rows())
         self.quality = _FakeQuality(self.rows, {1: SETTING})
-        self.targets = SimpleNamespace(get=lambda target_id: self.target if target_id == "T" else None)
+        self.targets = SimpleNamespace(
+            get=lambda target_id, required=False: self.target if target_id == "T" else None,
+            frames=SimpleNamespace(
+                get_set_aside=lambda target: self.quality.set_aside_frames(getattr(target, "id", None))
+            ),
+        )
         self.processing = SimpleNamespace(
             calibration=SimpleNamespace(
                 query=lambda **_arguments: CalibrationQueryResult(

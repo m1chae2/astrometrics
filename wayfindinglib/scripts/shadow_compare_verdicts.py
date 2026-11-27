@@ -905,7 +905,7 @@ def run_comparison(
     targets_checked = 0
     stars_checked = 0
     warning_counts = WarningCheckCounts()
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in astrometrics.targets.query(include_empty=True).items:
         if only_targets and target.id not in only_targets:
             continue
         targets_checked += 1

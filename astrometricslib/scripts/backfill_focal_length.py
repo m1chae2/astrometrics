@@ -216,7 +216,7 @@ def run_backfill(argv: list[str] | None = None) -> int:
         return 1
 
     astrometrics = Astrometrics()
-    targets = astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = astrometrics.targets.query(include_empty=True).items
     if arguments.target_ids:
         wanted = {target_id.strip().casefold() for target_id in arguments.target_ids}
         targets = [target for target in targets if target.id.strip().casefold() in wanted]

@@ -4,7 +4,7 @@ Description: Executes empirical pipeline validation across ZWO ASI 533MM
 Pro target datasets for all five processing pipelines (Spectroscopy,
 Photometry, Moving Object Recovery, Astrometry, and Stacking). Applies
 fault-tolerant execution and incremental state saving
-(astrometrics.targets.save()) after each target/pipeline step.
+(astrometrics.targets._save()) after each target/pipeline step.
 """
 
 import argparse
@@ -86,7 +86,7 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
                     failed_gates = failed_gate_names(summary)
                     print(f"  Target {t.id} Spectroscopy Completed. Failed gates: {failed_gates or 'none'}")
                     results[t.id] = {"status": "success", "failed_gates": failed_gates}
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {t.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Spectroscopy analysis error for {t.id}: {err}")
@@ -139,7 +139,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                 print(f"  Variable Star Candidates: {cand_count}")
                 results[target.id] = res
 
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {target.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Photometry error on {target.id}: {err}")
@@ -196,7 +196,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
                 print(f"  SkyBoT Ephemeris Matched: {eph}")
                 results[target.id] = res
 
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {target.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Asteroid detection notice for {target.id}: {err}")
@@ -241,7 +241,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                         "stars_detected": stars_count,
                     }
 
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {target.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Astrometry error for {target.id}: {err}")
@@ -323,7 +323,7 @@ def main() -> None:
         _ = run_stacking_validation(astrometrics, args.camera)
 
         # Final save
-        astrometrics.targets.save()
+        astrometrics.targets._save()
         print("\n==================================================")
         print("EMPIRICAL PIPELINE VALIDATION COMPLETED")
         print("==================================================")

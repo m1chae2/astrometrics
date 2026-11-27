@@ -176,7 +176,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:check_stack": ("stack_review_service", "start_stack_check"),
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
-    "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    "quality:set_aside_frames": ("target_service", "get_set_aside_frames"),
     # A typical frame and a reference star for the viewer's Blink button
     # (a read).
     "quality:choose_blink_pair": ("astrometrics.quality", "choose_blink_pair"),

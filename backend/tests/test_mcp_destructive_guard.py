@@ -43,7 +43,7 @@ def test_code_that_deletes_is_refused(code: str) -> None:
     "code",
     [
         "x = 1 + 2",
-        "astrometrics.targets.query(detail='objects', limit=None).objects",
+        "astrometrics.targets.query(include_empty=True)",
         "print('hello world')",
         "def broken(:",
     ],

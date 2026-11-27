@@ -17,6 +17,7 @@ import pytest
 
 from astrometricslib import Target
 from astrometricslib._internal.results import PreviewRemakeResult
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.reports import SetAsideFrameRecord
 from backend.container import container
@@ -47,7 +48,7 @@ def test_the_methods_are_declared_and_routed() -> None:
         "stack_review_service",
         "start_preview_remake",
     )
-    assert rpc_registry._handlers["quality:set_aside_frames"] == ("astrometrics.quality", "set_aside_frames")
+    assert rpc_registry._handlers["quality:set_aside_frames"] == ("target_service", "get_set_aside_frames")
 
 
 def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
@@ -220,18 +221,19 @@ def test_the_set_aside_reply_keeps_the_stored_kind_and_the_missing_reason(
     ]
     calls: list[str] = []
 
-    def set_aside_frames(target: str) -> list[SetAsideFrameRecord]:
+    def get_set_aside(target: Target) -> Page[SetAsideFrameRecord]:
         """Record the call and give the frames.
 
         Returns
         -------
-        frames : `list` [`SetAsideFrameRecord`]
+        frames : `Page` [`SetAsideFrameRecord`]
             The two frames.
         """
-        calls.append(target)
-        return frames
+        calls.append(target.id)
+        return Page.of(frames)
 
-    monkeypatch.setattr(container.astrometrics.quality, "set_aside_frames", set_aside_frames)
+    monkeypatch.setattr(container.astrometrics.targets, "get", lambda target_id: Target(id=target_id))
+    monkeypatch.setattr(container.astrometrics.targets.frames, "get_set_aside", get_set_aside)
 
     reply = asyncio.run(rpc_registry.execute("quality:set_aside_frames", {"target": "M 81"}))
 

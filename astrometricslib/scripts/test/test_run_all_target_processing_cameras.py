@@ -133,7 +133,7 @@ class FakeAstrometrics:
             The setups the config describes.
         """
         self.targets = SimpleNamespace(
-            query=lambda **_k: SimpleNamespace(objects=targets),
+            query=lambda **_k: SimpleNamespace(items=tuple(targets)),
             reindex_frames=lambda *args, **kwargs: None,
             save=lambda: None,
         )
@@ -760,9 +760,9 @@ def give_many_frames(fake: FakeAstrometrics, *target_ids: str, count: int = 9) -
             if target.id in target_ids
             else target.frames,
         )
-        for target in fake.targets.query(detail="objects", limit=None).objects
+        for target in fake.targets.query(include_empty=True).items
     ]
-    fake.targets.query = lambda **_k: SimpleNamespace(objects=copies)
+    fake.targets.query = lambda **_k: SimpleNamespace(items=tuple(copies))
 
 
 def run_stack_only(script: Any, tmp_path: Path, *extra: str) -> list[dict]:
@@ -1140,7 +1140,7 @@ def test_a_target_with_two_imaging_frames_is_stacked(
     """Check the smallest allowed number of frames still makes a stack."""
     monkeypatch.setattr(script, "MINIMUM_IMAGING_FRAMES_TO_STACK", 2)
     target = make_target("TwoFrames", ASI, ASI)
-    fake.targets.query = lambda **_k: SimpleNamespace(objects=[target])
+    fake.targets.query = lambda **_k: SimpleNamespace(items=(target,))
     progress_path = tmp_path / "progress.jsonl"
 
     script.run_full_processing([

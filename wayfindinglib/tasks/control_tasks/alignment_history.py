@@ -86,7 +86,7 @@ def _target_counts(context: ControlContext) -> dict[str, int]:
         Night id to target count. Empty if the catalog cannot be read.
     """
     try:
-        return context.astrometrics.targets.query(detail="nights").nights or {}
+        return dict(context.astrometrics.targets.count_by_night().targets_by_night)
     except AstrometricsError, sqlite3.Error:
         return {}
 

@@ -153,7 +153,7 @@ def find_candidates(astrometrics: Astrometrics, names: list[str] | None) -> list
     """
     frames_path = astrometrics.config.get_frames_path()
     candidates = []
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in astrometrics.targets.query(include_empty=True).items:
         name = target.id
         if names and name not in names:
             continue
@@ -234,7 +234,7 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
                     measured_at=datetime.now(UTC),
                     quality_recording=quality_recording,
                 )
-    astrometrics.targets.save()
+    astrometrics.targets._save()
 
 
 def main(arguments: list[str] | None = None) -> int:

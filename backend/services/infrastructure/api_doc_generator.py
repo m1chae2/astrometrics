@@ -86,7 +86,7 @@ def _class_hints(cls: type) -> dict[str, Any]:
 _DOTTED_NAME = re.compile(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)+([A-Za-z_][A-Za-z0-9_]*)")
 
 #: The anchor at the end of a reference line, such as
-#: ``{#api-TargetCatalog-delete_images}``. The Documentation tab turns it
+#: ``{#api-TargetFrames-get_rotation}``. The Documentation tab turns it
 #: into the ``id`` of the heading or list item and does not show it.
 _ENTRY_ANCHOR = re.compile(r"\s\{#(api-[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)?)\}\s*$")
 
@@ -222,7 +222,7 @@ def entry_anchor(owner: str, name: str = "") -> str:
     Returns
     -------
     anchor : `str`
-        Such as ``api-TargetCatalog-delete_images``, or ``api-Target``.
+        Such as ``api-TargetFrames-get_rotation``, or ``api-Target``.
     """
     return f"api-{owner}-{name}" if name else f"api-{owner}"
 
@@ -238,7 +238,7 @@ def _anchor_mark(anchor: str) -> str:
     Returns
     -------
     mark : `str`
-        Such as `` {#api-TargetCatalog-delete_images}``.
+        Such as `` {#api-TargetFrames-get_rotation}``.
     """
     return f" {{#{anchor}}}"
 
@@ -249,7 +249,7 @@ def _qualified_name_of_anchor(anchor: str, library: str) -> str:
     Parameters
     ----------
     anchor : `str`
-        Such as ``api-TargetCatalog-delete_images`` or
+        Such as ``api-TargetFrames-get_rotation`` or
         ``api-exceptions-NotFoundError``.
     library : `str`
         The library the topic documents.
@@ -257,7 +257,7 @@ def _qualified_name_of_anchor(anchor: str, library: str) -> str:
     Returns
     -------
     name : `str`
-        Such as ``TargetCatalog.delete_images`` or
+        Such as ``TargetFrames.get_rotation`` or
         ``astrometricslib.exceptions.NotFoundError``.
     """
     owner, _, name = anchor.removeprefix("api-").partition("-")
@@ -273,8 +273,8 @@ def api_doc_entries() -> list[dict[str, str]]:
     -------
     entries : `list` of `dict`
         ``topic_id`` (the reference topic), ``anchor_id`` (such as
-        ``api-TargetCatalog-delete_images``) and ``qualified_name`` (such as
-        ``TargetCatalog.delete_images``), in page order.
+        ``api-TargetFrames-get_rotation``) and ``qualified_name`` (such as
+        ``TargetFrames.get_rotation``), in page order.
     """
     if _ENTRIES_CACHE:
         return list(_ENTRIES_CACHE)
@@ -377,10 +377,10 @@ def _as_result(entry: dict[str, str], suggestion: bool) -> dict[str, Any]:
 def find_doc_entries(name: str) -> list[dict]:
     """Find the API reference entries that document a name.
 
-    The name may be bare (``delete_images``, which can fit several
-    classes), an owner and a name (``TargetCatalog.delete_images``), or a
+    The name may be bare (``get_rotation``, which can fit several
+    classes), an owner and a name (``TargetFrames.get_rotation``), or a
     path through the console's preloaded objects
-    (``astrometrics.targets.delete_images``). Exact matches come first. When
+    (``astrometrics.targets.frames.delete``). Exact matches come first. When
     nothing matches, close names are returned instead, each marked as a
     suggestion.
 
@@ -406,7 +406,7 @@ def find_doc_entries(name: str) -> list[dict]:
     parts = query.split(".")
     if parts[0] in CONSOLE_OBJECTS:
         # A console path: the method of the object the path reaches
-        # (``astrometrics.targets.delete_images``), or the object itself
+        # (``astrometrics.targets.frames.delete``), or the object itself
         # (``wayfinder.control.mount``).
         candidates = []
         owner = _console_path_class_name(parts[:-1]) if len(parts) > 1 else None
@@ -743,6 +743,7 @@ def generate_astrometricslib_docs() -> str:
         "",
         "- [Primary Facade: `Astrometrics`](#class-astrometrics)",
         "- [Target Catalog: `TargetCatalog`](#class-targetcatalog)",
+        "- [Target Frames: `TargetFrames`](#class-targetframes)",
         "- [Stellar Catalog: `StellarCatalog`](#class-stellarcatalog)",
         "- [Processing Pipelines: `ProcessingPipelines`](#class-processingpipelines)",
         "- [Visualization: `Visualization`](#class-visualization)",
@@ -778,6 +779,19 @@ def generate_astrometricslib_docs() -> str:
                 target_catalog_cls,
                 display_title="TargetCatalog",
                 console_alias="targets",
+            )
+        )
+        sections.append("\n---\n")
+
+    # 2b. TargetFrames, reached as astrometrics.targets.frames
+    sections.append('<a id="class-targetframes"></a>')
+    target_frames_cls = getattr(astrometricslib, "TargetFrames", None)
+    if target_frames_cls:
+        sections.append(
+            format_class_markdown(
+                target_frames_cls,
+                display_title="TargetFrames",
+                console_alias="targets.frames",
             )
         )
         sections.append("\n---\n")

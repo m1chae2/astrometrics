@@ -315,7 +315,9 @@ class ObservationPlanning(MovedNames):
         target : `Target`
             The library target.
         """
-        return self._astrometrics.targets.get(target, refresh=True, required=True)
+        if isinstance(target, Target):
+            return target
+        return self._astrometrics.targets.get(target, required=True)
 
     def _package(self, package_id: str) -> ObservationPackage:
         """Load one recorded observation package.
@@ -2931,9 +2933,7 @@ class ObservationPlanning(MovedNames):
         targets = (
             list(dict.fromkeys(target_ids))
             if target_ids is not None
-            else [
-                target.id for target in self._astrometrics.targets.query(detail="objects", limit=None).objects
-            ]
+            else [target.id for target in self._astrometrics.targets.query(include_empty=True).items]
         )
         reader = TargetFrameReader(self._astrometrics)
         noise_by_target: dict[str, Any] = {}

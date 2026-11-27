@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+from astrometricslib import Target
 from astrometricslib.arguments import check_choice, reject_unused_arguments
 from astrometricslib.exceptions import InvalidArgumentError
 
 if TYPE_CHECKING:
-    from astrometricslib import Target
     from wayfindinglib.models.planning.target_report import TargetDatasetReport
     from wayfindinglib.models.quality.statements import TargetStatement
 
@@ -71,7 +71,7 @@ def build_advisory(
     """
     check_choice("kind", kind, tuple(ADVISORY_ARGUMENTS))
     reject_unused_arguments(kind, ADVISORY_ARGUMENTS, {"target": True, "object_id": object_id is not None})
-    resolved = astrometrics.targets.get(target, refresh=True, required=True)
+    resolved = target if isinstance(target, Target) else astrometrics.targets.get(target, required=True)
     if kind == "quality":
         from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
 

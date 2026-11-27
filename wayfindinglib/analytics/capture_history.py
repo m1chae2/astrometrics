@@ -199,9 +199,7 @@ def equipment_light_frames(
     """
     camera_spellings = equipment_spellings(astrometrics, camera_name)
     telescope_spelling = normalize_name(telescope_name)
-    for target in (
-        astrometrics.targets.query(detail="objects", limit=None).objects if targets is None else targets
-    ):
+    for target in astrometrics.targets.query(include_empty=True).items if targets is None else targets:
         for frame in target.frames:
             if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
                 continue

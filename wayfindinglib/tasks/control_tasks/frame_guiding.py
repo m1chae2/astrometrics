@@ -215,12 +215,12 @@ def link_frames_to_guiding(
     NotFoundError
         If no target has the id `target_id`.
     """
-    target = context.astrometrics.targets.get(target_id, refresh=True)
+    target = context.astrometrics.targets.get(target_id)
     if target is None:
         raise NotFoundError(
             f"No target with id {target_id!r} in the library.", details={"target_id": target_id}
         )
-    chosen = context.astrometrics.targets.select_frames(
+    chosen = context.astrometrics.targets.frames.query(
         target,
         filter_name=selection.filter_name,
         first_file=selection.first_file,

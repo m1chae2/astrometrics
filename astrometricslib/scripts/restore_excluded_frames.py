@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
 
     astrometrics = Astrometrics()
     target_ids = arguments.targets or [
-        target.id for target in astrometrics.targets.query(detail="objects", limit=None).objects
+        target.id for target in astrometrics.targets.query(include_empty=True).items
     ]
 
     total = 0
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if arguments.apply:
         if touched:
-            astrometrics.targets.save()
+            astrometrics.targets._save()
         logger.info("Restored frames for %d target(s).", len(touched))
     else:
         logger.info("%d frame(s) set aside in all. Nothing moved (use --apply to restore).", total)

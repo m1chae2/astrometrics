@@ -35,6 +35,8 @@ The profile also offers the five tools that start a job in the app (see the next
 - puts a comment block at the top that says an AI client added the script, the date, and the description;
 - saves through the `terminal:list_scripts` and `terminal:save_script` RPC methods and calls no method that runs code.
 
+Its description tells the AI how to write the script: public `astrometrics` and `wayfinder` calls only, the analysis in a function with explicit inputs, and the console helpers (`selection`, `show`, `doc`) and printing only in a few driver lines that call it, so a useful function can move into the library ([library quick start](../../documentation/how_to/library_quick_start.md), Section 4).
+
 The Command Console reads its script list when it opens. Saving a script also sends the `scripts:changed` event, so an open console reloads its My scripts list at once. Its class is `author`, which the profile offers.
 
 `terminal_get_recent_runs` is read-only (class `observe`). It calls the `terminal:get_recent_runs` RPC method and returns the newest runs first, from 1 to 20 (default 1). Each run has its time, label, source, code, status, printed text (`stdout`), error text (`stderr`) and figure file paths. The backend keeps no workspace variables. With `include_plots`, each figure also comes back as a real MCP image (PNG), after the text, in run order. A figure wider than 1200 pixels is shrunk. The tool reads only `.png` files inside the app's scratch folder. A figure file that is gone or outside that folder is listed under `plot_images.problems` instead of as an image.

@@ -76,10 +76,6 @@ INTERIM_BLOCKS = {
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
         "tracking)."
     ),
-    "visualization_get_last_captured_image": (
-        "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use "
-        "visualization_render_fits with a path, which returns a real image."
-    ),
 }
 """Read-only tools that stay hidden from the AI until a known hazard is fixed.
 They keep their ``keep`` disposition."""
@@ -252,24 +248,25 @@ DECISIONS = {
     ),
     "visualization_render_fits": ToolDecision(
         "keep",
-        "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the "
-        "optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts "
-        "and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing.",
+        "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and a "
+        "manual brightness range; 1200 pixels on its longest side unless asked. Since #206 it is "
+        "visualization_render; the overlays moved to visualization_plot_image. Saves nothing.",
     ),
     "visualization_stack_sky_picture_files": ToolDecision(
         "drop",
-        "Built 2026-11-26 for the Planetarium's Images layer: names the picture and stretched stack that "
-        "place a target's picture on the sky. Of no use to an AI client.",
+        "Built 2026-11-26 for the Planetarium's Images layer: places a target's picture on the sky as a "
+        "grid of sky positions. Since #206 it is visualization_get_sky_picture. Of no use to an AI client.",
     ),
-    "visualization_place_stack_picture_on_sky": ToolDecision(
-        "drop",
-        "Built 2026-11-26 for the Planetarium's Images layer: a grid of sky positions for drawing a "
-        "picture on a sky chart. Of no use to an AI client.",
+    "visualization_render_newest": ToolDecision(
+        "keep",
+        "Since #206 the newest FITS file in the frames folder, drawn as a real image (the old "
+        "visualization_get_last_captured_image sent base64 text the reply limit cut). Saves nothing.",
     ),
-    "visualization_get_last_captured_image": ToolDecision(
-        "fix",
-        "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it "
-        "into visualization_render_fits with a latest option.",
+    "visualization_plot_image": ToolDecision(
+        "keep",
+        "Since #206 the figure kind of visualization_render_fits: one frame or stack at full resolution "
+        "with the optional detections and named-stars overlays; the registry sends it as a PNG image. "
+        "Saves nothing.",
     ),
     "observatory_mount_poll_external_alignment": ToolDecision(
         "drop",
@@ -565,8 +562,26 @@ DECISIONS = {
     ),
     "visualization_plot": ToolDecision(
         "keep",
-        "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
-        "Saves nothing.",
+        "Built 2026-10-05. Draws the combined chart of a target; the registry sends it as a PNG image. "
+        "Since #206 it is visualization_plot_target, and each other chart has its own tool. Saves nothing.",
+    ),
+    "visualization_plot_star": ToolDecision(
+        "keep", "Since #206 the star chart of visualization_plot: light curve over spectrum. Saves nothing."
+    ),
+    "visualization_plot_astrometry": ToolDecision(
+        "keep", "Since #206 the astrometry chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_photometry": ToolDecision(
+        "keep", "Since #206 the photometry chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_spectroscopy": ToolDecision(
+        "keep", "Since #206 the spectroscopy chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_focus": ToolDecision(
+        "keep", "Since #206 the focus against temperature chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_asteroids": ToolDecision(
+        "keep", "Since #206 the asteroid track chart of visualization_plot. Saves nothing."
     ),
     "planning_query_catalogs": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
     "planning_get_visibility": ToolDecision(
@@ -628,10 +643,24 @@ DECISIONS = {
     ),
     "jobs_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the "
-        "warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at "
-        "'started' after the app stopped still shows as active. The AI gets at most 50 jobs and 200 log "
-        "lines, and not detail=full.",
+        "Built 2026-10-03. Lists jobs from the logs database, opened read-only. A job stuck at 'started' "
+        "after the app stopped shows as stale. Since #206 the AI gets 20 jobs unless it asks, at most 50, "
+        "without their stored numbers; one job, its log, its warnings and a target's lineage have their "
+        "own tools.",
+    ),
+    "jobs_get": ToolDecision(
+        "keep", "Since #206 one job's whole record, with its stored result. Reads the logs database only."
+    ),
+    "jobs_get_log": ToolDecision(
+        "keep", "Since #206 the last lines of one job's log, at most 200. Reads the logs database only."
+    ),
+    "jobs_get_warnings": ToolDecision(
+        "keep",
+        "Since #206 the warnings one job detected: its failed quality checks, with value, limit and "
+        "register entry. Reads the quality database only.",
+    ),
+    "jobs_get_lineage": ToolDecision(
+        "keep", "Since #206 the pipeline runs that produced a target's data. Reads the logs database only."
     ),
     "quality_query": ToolDecision(
         "keep",
@@ -1005,6 +1034,10 @@ TOOL_RENAMES: dict[str, str] = {
     "calibration_reindex_frames": "calibration_frames_scan",
     "calibration_measure_frames": "calibration_frames_record",
     "calibration_camera_profile": "calibration_get_profile",
+    # Step 4f of #206: visualization.
+    "visualization_render_fits": "visualization_render",
+    "visualization_plot": "visualization_plot_target",
+    "visualization_stack_sky_picture_files": "visualization_get_sky_picture",
 }
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies

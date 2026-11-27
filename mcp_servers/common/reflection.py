@@ -14,8 +14,9 @@ argument into what the method takes, chosen by the parameter's type hint:
   `frame_choice_form` builds the choice with the public frame query.
 
 Every other argument is passed on as it is. A method marked with
-`background_job` is run as a recorded job in a background thread, so a
-slow call answers with the id of its job instead of blocking the server.
+`background_job` is run as a recorded job in a background thread
+(`job_wrapper`), so a slow call answers with the id of its job instead of
+blocking the server.
 A server can also narrow what a client may send to one tool with
 `ClientLimits`: hide arguments a client cannot send (an array of pixels),
 withhold choices of no use to it (a Matplotlib figure) and lower a count's
@@ -38,6 +39,7 @@ from mcp_servers.common.input_models import (
     model_parameter_of,
     model_schema,
 )
+from mcp_servers.common.job_wrapper import run_as_background_job
 from mcp_servers.common.resolvers import (
     SUBJECT_ENTRY_METHODS,
     SubjectParameter,
@@ -593,8 +595,6 @@ def _make_executor(
             # in a background thread (a pipeline it calls joins that job);
             # the client gets its real result if it finishes quickly, or the
             # job id to poll.
-            from astrometricslib.jobs import run_as_background_job
-
             return await asyncio.to_thread(
                 run_as_background_job,
                 lambda: target_callable(**kwargs),

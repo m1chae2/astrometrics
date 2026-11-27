@@ -7,13 +7,13 @@ take about ten minutes. Checking what a stack would do
 (``processing:check_stack``) reads every frame. Each is a call of the science
 library that records its own job.
 
-This service starts such a call in the background (with the library's
-`run_as_background_job`). A call that finishes within a short wait gives its
-answer at once. A slower one gives back its job id, and the app follows the
-job with ``jobs:query`` (``detail="full"``). When the job ends, its result is
-stored in the job's ``output_metrics["result"]``. A call that fails inside the
-short wait raises its error to the caller. A later failure shows up as a
-failed job with a message.
+This service starts such a call in the background (with
+`background_jobs.run_as_background_job`). A call that finishes within a short
+wait gives its answer at once. A slower one gives back its job id, and the app
+follows the job with ``jobs:query`` (``detail="full"``). When the job ends, its
+result is stored in the job's ``output_metrics["result"]``. A call that fails
+inside the short wait raises its error to the caller. A later failure shows up
+as a failed job with a message.
 """
 
 import logging
@@ -29,8 +29,8 @@ from astrometricslib.jobs import (
     RunAbandonment,
     bind_abandonment,
     report_started_jobs,
-    run_as_background_job,
 )
+from backend.services.infrastructure.background_jobs import run_as_background_job
 from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)

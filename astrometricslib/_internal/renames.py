@@ -22,7 +22,7 @@ from typing import NoReturn
 
 from astrometricslib.foundation.errors import MovedError
 
-__all__ = ["RENAMES", "MovedNames"]
+__all__ = ["RENAMES", "MovedNames", "moved_module_name"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
@@ -70,6 +70,49 @@ RENAMES: dict[str, str] = {
         "astrometrics.targets.frames.restore(target, frames)"
     ),
     "astrometricslib.QualityRecords.forget": "astrometrics.targets.frames.delete(target, frames)",
+    # Step 4f: visualization and jobs.
+    "astrometricslib.Visualization.render_fits": (
+        "astrometrics.visualization.render(image) for a picture, or "
+        "astrometrics.visualization.plot_image(image, overlays=...) for a figure"
+    ),
+    "astrometricslib.Visualization.plot": (
+        "astrometrics.visualization.plot_target(target), plot_star(star), plot_astrometry(target), "
+        "plot_photometry(target), plot_spectroscopy(target), plot_focus(target) or plot_asteroids(target)"
+    ),
+    "astrometricslib.Visualization.get_last_captured_image": "astrometrics.visualization.render_newest()",
+    "astrometricslib.Visualization.stack_sky_picture_files": (
+        "astrometrics.visualization.get_sky_picture(target)"
+    ),
+    "astrometricslib.Visualization.place_stack_picture_on_sky": (
+        "astrometrics.visualization.get_sky_picture(target)"
+    ),
+    # Step 4f: names the host modules no longer offer.
+    "astrometricslib.jobs.run_as_background_job": (
+        "astrometricslib.jobs.registered_job(...) around the call (the background thread is the "
+        "app's and the MCP servers' own wrapper)"
+    ),
+    "astrometricslib.drivers.LIBRARY_DATA_KINDS": "astrometricslib.drivers.get_library_data_version(config)",
+    "astrometricslib.drivers.LibraryFolders": "astrometricslib.drivers.library_folders(config_file)",
+    "astrometricslib.drivers.read_launch_identity": (
+        "astrometricslib.drivers.launch_identity_from_settings(settings)"
+    ),
+    "astrometricslib.drivers.healpix_pixels_of_points": "nothing public (a private sky-tile helper)",
+    "astrometricslib.drivers.tile_of_source_id": "nothing public (a private sky-tile helper)",
+    "astrometricslib.drivers.tiles_for_cone": "nothing public (a private sky-tile helper)",
+    "astrometricslib.drivers.tiles_for_footprint": "nothing public (a private sky-tile helper)",
+    "astrometricslib.parameters.run_tuning": "astrometricslib.parameters.tune(...)",
+    "astrometricslib.parameters.collect_tuners": "astrometricslib.parameters.tune(...)",
+    "astrometricslib.parameters.read_tuned_record": "astrometricslib.parameters.tune(...)",
+    "astrometricslib.parameters.record_basis": "nothing public (the pipelines record their run bases)",
+    "astrometricslib.parameters.current_parameter_context": (
+        "astrometricslib.parameters.frames_parameter_context(...)"
+    ),
+    "astrometricslib.parameters.parameter_context": (
+        "astrometricslib.parameters.frames_parameter_context(...)"
+    ),
+    "astrometricslib.parameters.setup_parameter_context": (
+        "astrometricslib.parameters.frames_parameter_context(...)"
+    ),
 }
 
 
@@ -99,3 +142,35 @@ class MovedNames:
         if moved is not None:
             raise moved
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}", name=name, obj=self)
+
+
+def moved_module_name(module_name: str, name: str) -> NoReturn:
+    """Refuse a name a public module no longer offers, saying where it went.
+
+    A host module (`astrometricslib.jobs`, `drivers`, `parameters`) calls
+    this from its module-level ``__getattr__``, which Python calls only for
+    a name the module does not have. A name in the rename table raises an
+    `ImportError` that says where it went, caused by its `MovedError`: an
+    `ImportError` passes through ``from astrometricslib.drivers import
+    <old name>`` with its message, where an `AttributeError` would be
+    replaced by a bare "cannot import name".
+
+    Parameters
+    ----------
+    module_name : `str`
+        The module's dotted name, such as ``"astrometricslib.drivers"``.
+    name : `str`
+        The name that was read.
+
+    Raises
+    ------
+    ImportError
+        When the rename table lists ``"<module>.<name>"``.
+    AttributeError
+        For any other name.
+    """
+    key = f"{module_name}.{name}"
+    if not name.startswith("__") and key in RENAMES:
+        moved = MovedError(key, RENAMES[key])
+        raise ImportError(str(moved), name=module_name) from moved
+    raise AttributeError(f"module {module_name!r} has no attribute {name!r}", name=name)

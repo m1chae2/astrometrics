@@ -156,8 +156,17 @@ DECISIONS = {
     "star_get_spectrum": ToolDecision(
         "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     ),
-    "star_analyze_periodicity": ToolDecision(
-        "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
+    "star_measure_periodicity": ToolDecision(
+        "keep",
+        "Since #206 the period and transit searches of star_record_periodicity without the save. Runs the "
+        "searches on one star's light curve and writes nothing.",
+        tool_class="compute",
+    ),
+    "star_record_periodicity": ToolDecision(
+        "withhold",
+        "Writes the period and transit results into the live star catalog. The AI is read-only, so it runs "
+        "the same searches with star_measure_periodicity instead.",
+        "change-data",
     ),
     "processing_plate_solve": ToolDecision(
         "keep",
@@ -185,10 +194,6 @@ DECISIONS = {
     ),
     # ---- Drop ----
     "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
-    "star_dataset_version": ToolDecision(
-        "drop",
-        "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",
-    ),
     "processing_stop_stacking_programs": ToolDecision(
         "drop", "Stops every Siril the library started. The backend calls it when it stops."
     ),
@@ -420,13 +425,52 @@ DECISIONS = {
         "fraction, star width against the inputs and each exposure group. Reads the saved summary.",
     ),
     "star_query": ToolDecision(
-        "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
+        "keep",
+        "Built 2026-10-03. Library star lookup. Since #206 it returns a page of star records without their "
+        "light curves; the tool's reply is cut to 50 stars and the tool asks for at most 200.",
     ),
     "star_get": ToolDecision("keep", "Reads one star's full record by id. Writes nothing."),
+    "visualization_get_star_overlay": ToolDecision(
+        "keep",
+        "Since #206 the overlay that star_query's detail='overlay' gave. Places a target's catalog stars "
+        "in pixels on its stack or a named image and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_count_by_class": ToolDecision(
+        "keep",
+        "Since #206 the class counts that star_query's detail='class_counts' gave. Counts the stars of each "
+        "spectral class from the indexed columns and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_count_by_target": ToolDecision(
+        "keep",
+        "Since #206 the per-target counts that star_query's detail='target_counts' gave. Counts each "
+        "target's stars from the indexed columns and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_get_statistics": ToolDecision(
+        "keep",
+        "Since #206 the library statistics that star_query's detail='stats' gave. Counts the star records "
+        "and writes nothing.",
+        tool_class="observe",
+    ),
     "calibration_query": ToolDecision(
         "keep",
-        "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
-        "reloads the index into memory and writes nothing.",
+        "Built 2026-10-05. Calibration counts per kind and setting, narrowed by a capture setting (also "
+        "for a plan with no frames yet). Writes nothing.",
+    ),
+    "calibration_match": ToolDecision(
+        "keep",
+        "Built 2026-11-27 from calibration_query's target match (#206): groups a target's light frames by "
+        "setting with the darks, biases and flats the stacker would use. Writes nothing.",
+        tool_class="observe",
+    ),
+    "calibration_measure_sensor_noise": ToolDecision(
+        "withhold",
+        "Since 2026-11-27 (#206) it only reads: it measures a setting's gain and read noise from the "
+        "library's flats and biases and writes nothing. Withheld until an AI use is reviewed; "
+        "calibration_record_sensor_noise is the writer.",
+        tool_class="compute",
     ),
     "quality_measure_star_profile": ToolDecision(
         "keep",
@@ -753,7 +797,6 @@ DECISIONS = {
         "Sets a raw INDI property, which commands a device. Belongs to the dropped control side.",
         "actuate",
     ),
-    "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess": ToolDecision(
         "keep",
         "Judges the dark, bias or flat sets of the library from the stored numbers. "
@@ -763,11 +806,13 @@ DECISIONS = {
         "withhold",
         "Writes the measured numbers of dark and bias frames to the quality store and their "
         "stamps to the calibration index. The AI is read-only.",
+        tool_class="compute",
     ),
-    "calibration_measure_sensor_noise": ToolDecision(
+    "calibration_record_sensor_noise": ToolDecision(
         "withhold",
-        "With save on, it writes a measured gain and read noise into the camera profile in the "
-        "configuration file. The AI is read-only.",
+        "It writes a measured gain and read noise into the camera profile in the configuration file. "
+        "The AI is read-only.",
+        tool_class="compute",
     ),
     "target_display_turn": ToolDecision(
         "drop",
@@ -872,7 +917,6 @@ DECISIONS = {
             "calibration_reindex_frames",
             "processing_process_target",
             "star_create",
-            "star_find_or_create_by_position",
             "star_update",
             "target_add",
             "target_create",
@@ -956,6 +1000,11 @@ TOOL_RENAMES: dict[str, str] = {
     "quality_frame_statuses": "target_frames_get_statuses",
     "quality_set_aside_frames": "target_frames_get_set_aside",
     "quality_put_back_set_aside_frames": "target_frames_restore",
+    # Step 4c of #206: calibration is a sub-API with a `frames` child.
+    "calibration_add_frames": "calibration_frames_add",
+    "calibration_reindex_frames": "calibration_frames_scan",
+    "calibration_measure_frames": "calibration_frames_record_measurements",
+    "calibration_camera_profile": "calibration_get_profile",
 }
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies

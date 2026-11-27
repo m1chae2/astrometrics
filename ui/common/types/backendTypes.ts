@@ -482,6 +482,7 @@ export interface OverlayStar {
  * How many stars belong to one target, and what data they have.
  */
 export interface TargetStarCount {
+  targetId?: string;
   starCount?: number;
   hasSpectra?: boolean;
   hasPhotometry?: boolean;
@@ -2630,15 +2631,19 @@ export interface QualityLimit {
  * `PIXEL_SCALE_SIGNIFICANT_FIGURES` significant figures.
  * filter_name : `str` or `None`
  * The filter in the light path, such as ``"L"`` or ``"Ha"``.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * The exposure time of one frame, in seconds.
- * gain_setting : `int` or `None`
+ * gain : `int` or `None`
  * The camera's gain setting (a unitless number in the FITS ``GAIN``
  * card, not electrons per ADU).
  * offset : `int` or `None`
  * The constant the camera adds to every pixel.
  * binning : `int` or `None`
  * The binning factor (1 means no binning).
+ * temperature_c : `float` or `None`
+ * The sensor temperature, in degrees Celsius. It says which darks a
+ * calibration call means. The quality store does not keep it, because
+ * a measurement's setting is the same at any temperature.
  */
 export interface CaptureSetting {
   camera: string;
@@ -2650,6 +2655,7 @@ export interface CaptureSetting {
   gainSetting?: number | null;
   offset?: number | null;
   binning?: number | null;
+  temperatureC?: number | null;
 }
 
 /**
@@ -4254,7 +4260,32 @@ export interface CameraNoiseSetting {
 }
 
 /**
- * The answer of `CalibrationCatalog.query`.
+ * The reply of ``calibration:query``.
+ *
+ * Attributes
+ * ----------
+ * detail : `str`
+ * The detail asked for.
+ * dark_temperature_tolerance_c : `float` or `None`
+ * How far, in degrees Celsius, a dark's sensor temperature may differ
+ * from a light frame's and still match.
+ * kind : `str` or `None`
+ * The kind asked for, or `None` for all.
+ * target_id : `str` or `None`
+ * The target, for the target details.
+ * darks, biases, flats : `list` [`dict`] or `None`
+ * ``counts``: one row per camera, setting and exposure (or filter).
+ * groups : `list` [`dict`] or `None`
+ * ``target_match``: the target's light frames grouped by filter, gain
+ * and exposure, each with the darks, biases and flats that match.
+ * lights : `list` [`dict`] or `None`
+ * ``target_frames``: the target's light frames counted by telescope,
+ * camera, gain, exposure and filter.
+ * camera_totals : `list` [`dict`] or `None`
+ * ``counts`` and ``match``: the frame totals of each camera.
+ * matched_row_keys : `list` [`str`] or `None`
+ * ``match``: the ``row_key`` of every counts row with the asked
+ * settings.
  */
 export interface CalibrationQueryResult {
   detail: string;

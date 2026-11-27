@@ -1,12 +1,12 @@
 """Purpose: The records that quality checks and stacks return.
 
-Description: The quality reports, the quality row shapes and
-`CaptureSetting`. A script imports these names from here. The night rule,
+Description: The quality reports and the quality row shapes. A script
+imports these names from here; the capture setting, an input as well as a
+result, is `astrometricslib.CaptureSetting`. The night rule,
 `observing_night_id`, is in `astrometricslib.arguments`. Each name is imported
 from the module where its code lives today.
 """
 
-from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import (
     SetAsideFrame,
     SetAsideFrameRecord,
@@ -37,7 +37,6 @@ __all__ = [
     "EARLIER_NIGHTS_VARIANT",
     "AstrometryPipelineQualityMetrics",
     "AstrometryQualitySummary",
-    "CaptureSetting",
     "ExposureGroupSummary",
     "InputQualityReport",
     "LimitTier",

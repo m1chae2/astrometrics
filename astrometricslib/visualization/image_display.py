@@ -144,17 +144,14 @@ def _photometry_star_names(stars: StellarCatalog, keys: list[str], target_id: st
         Each id that has photometry, mapped to its record's name (its id
         when the record has no name).
     """
-    if target_id:
-        answer = stars.query(target_id=target_id, has_photometry=True, detail="summary", limit=None)
-    elif keys:
-        answer = stars.query(ids=keys, has_photometry=True, detail="summary", limit=None)
-    else:
-        return {}
     names: dict[str, str] = {}
-    for row in answer.stars or []:
-        star_id = row.get("id")
-        if isinstance(star_id, str) and star_id:
-            names[star_id] = str(row.get("name") or star_id)
+    for key in keys:
+        star = stars.get(key)
+        if star is None or star.id != key or not star.has_photometry:
+            continue
+        if target_id and target_id not in (star.target_ids or []):
+            continue
+        names[key] = str(star.name or key)
     return names
 
 

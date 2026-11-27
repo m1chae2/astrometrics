@@ -12,7 +12,9 @@ equipment, a tuning run, the configuration or the default. A run sets a
 naming the setup whose equipment and tuned values it reads. The two spectrum
 match limits are public so that wayfindinglib judges spectra with the same
 limits the pipeline uses, and the stretched-star warning level so that its
-trailed-stars rule warns where the frame status flags. A `Tuner`
+trailed-stars rule warns where the frame status flags, and the dark
+temperature tolerance so that a reader of calibration counts quotes the
+tolerance the library matched darks with. A `Tuner`
 derives one family of tuned values, and `run_tuning` stores them with their
 provenance in the config. `tune` is the one entry point that picks a
 library's tuners and a setup and runs them; both libraries'
@@ -21,6 +23,7 @@ library's tuners and a setup and runs them; both libraries'
 where its code lives today.
 """
 
+from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.foundation.parameter_context import (
     ParameterContext,
     SetupEquipmentValues,
@@ -77,6 +80,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
 
 __all__ = [
     "AMBIGUOUS_RMS_GAP",
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
     "LOW_STAR_FRACTION",
     "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
     "NO_GOOD_MATCH_RMS",

@@ -14,7 +14,11 @@ from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.quality import QualityQueryResult
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualitySubject, SubjectLevel
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement
-from wayfindinglib.test.camera_profile_support import camera_profile_processing, no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import (
+    NO_CAMERAS,
+    camera_profile_calibration,
+    no_camera_profiles_calibration,
+)
 
 
 def stored_measurement(
@@ -84,11 +88,12 @@ class FakeAstrometrics:
         )
         self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=(target,)))
         self.quality = SimpleNamespace(query=self._query)
-        self.processing = (
-            camera_profile_processing(camera_config)
+        self.calibration = (
+            camera_profile_calibration(camera_config)
             if camera_config is not None
-            else no_camera_profiles_processing()
+            else no_camera_profiles_calibration()
         )
+        self.config = camera_config if camera_config is not None else NO_CAMERAS
 
     def _query(self, metric: str | None = None, level: str | None = None, **_: Any) -> QualityQueryResult:
         """Answer `astrometrics.quality.query` from the made-up rows.

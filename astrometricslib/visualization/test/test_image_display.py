@@ -23,6 +23,7 @@ from PIL import Image
 from astrometricslib.api.visualization import Visualization
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.models.stack_identification import IdentifiedStar, StackIdentification
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.models.target import ViewableImage
 
 STAR_POSITIONS = ((20.0, 30.0), (60.0, 15.0), (45.0, 70.0), (80.0, 85.0))
@@ -175,6 +176,23 @@ def test_a_figure_marks_the_star_finders_detections(tmp_path: Path) -> None:
     assert "4 detections" in figure.axes[0].get_title()
 
 
+_LIGHT_CURVE = PhotometryResult(timestamps=["2026-01-01T00:00:00Z"], fluxes=[1.0])
+
+
+def _library_stars(*records: StellarObject) -> MagicMock:
+    """Build a stand-in star catalog whose `get` finds these stars by exact id.
+
+    Returns
+    -------
+    stars : `MagicMock`
+        An object with a `get` method.
+    """
+    by_id = {record.id: record for record in records}
+    stars = MagicMock()
+    stars.get.side_effect = lambda star_id, **_: by_id.get(star_id)
+    return stars
+
+
 def test_a_figure_names_only_the_targets_stars_with_photometry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -185,8 +203,10 @@ def test_a_figure_names_only_the_targets_stars_with_photometry(
     monkeypatch.setattr(
         stack_identification, "read_stack_identification", lambda stack: _identification(path)
     )
-    stars = MagicMock()
-    stars.query.return_value = SimpleNamespace(stars=[{"id": "HD 222", "name": "* bet Cas"}])
+    stars = _library_stars(
+        StellarObject(id="HD 222", name="* bet Cas", target_ids=["Test Field"], photometry=_LIGHT_CURVE),
+        StellarObject(id="Gaia DR3 111", target_ids=["Other Field"], photometry=_LIGHT_CURVE),
+    )
 
     figure = _visualization(stars).render_fits(
         str(path), target="Test Field", kind="figure", overlays="stars"
@@ -194,9 +214,6 @@ def test_a_figure_names_only_the_targets_stars_with_photometry(
 
     # The label is the record's name, as the Astronomy Manager lists show.
     assert _star_names_drawn(figure) == ["* bet Cas"]
-    stars.query.assert_called_once_with(
-        target_id="Test Field", has_photometry=True, detail="summary", limit=None
-    )
     assert "1 star with photometry" in figure.axes[0].get_title()
 
 
@@ -210,13 +227,14 @@ def test_without_a_target_the_stars_are_asked_for_by_id(
     monkeypatch.setattr(
         stack_identification, "read_stack_identification", lambda stack: _identification(path)
     )
-    stars = MagicMock()
-    stars.query.return_value = SimpleNamespace(stars=[{"id": "Gaia DR3 111", "name": None}])
+    stars = _library_stars(
+        StellarObject(id="Gaia DR3 111", photometry=_LIGHT_CURVE), StellarObject(id="HD 222")
+    )
 
     figure = _visualization(stars).render_fits(str(path), kind="figure", overlays=["stars"])
 
     assert _star_names_drawn(figure) == ["Gaia DR3 111"]
-    assert stars.query.call_args.kwargs["ids"] == ["Gaia DR3 111", "HD 222"]
+    assert [call.args[0] for call in stars.get.call_args_list] == ["Gaia DR3 111", "HD 222"]
 
 
 def test_the_title_says_why_a_stack_has_no_names(tmp_path: Path) -> None:

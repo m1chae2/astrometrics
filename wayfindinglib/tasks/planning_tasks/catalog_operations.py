@@ -292,12 +292,7 @@ def astrometrics_catalog(
     # Targets above.
     # Only the stars near the search circle are read from the library, using
     # its sky-position index, not every star it holds.
-    stars = (
-        sky._astrometrics.stars.query(
-            ra_deg=ra_deg, dec_deg=dec_deg, radius_deg=radius_deg, detail="objects", limit=None
-        ).objects
-        or []
-    )
+    stars = list(sky._astrometrics.stars.query(ra_deg=ra_deg, dec_deg=dec_deg, radius_deg=radius_deg))
     candidate_stars: list[StellarObject] = []
     candidate_star_ra: list[Any] = []
     candidate_star_dec: list[Any] = []

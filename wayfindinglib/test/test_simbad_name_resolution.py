@@ -129,7 +129,7 @@ def _sky_with_empty_library() -> Any:
     """
     astrometrics = types.SimpleNamespace(
         targets=types.SimpleNamespace(query=lambda **_k: types.SimpleNamespace(items=())),
-        stars=types.SimpleNamespace(query=lambda **_: types.SimpleNamespace(objects=[])),
+        stars=types.SimpleNamespace(query=lambda **_: []),
     )
     return types.SimpleNamespace(_astrometrics=astrometrics)
 

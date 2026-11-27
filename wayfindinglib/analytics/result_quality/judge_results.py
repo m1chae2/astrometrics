@@ -28,8 +28,8 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from astrometricslib import CaptureSetting
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityLimit,
@@ -283,9 +283,9 @@ def _exposure_text(capture_setting: CaptureSetting | None) -> str:
     text : `str`
         For example ``"60 s"``, or ``"These"`` when the exposure is unknown.
     """
-    if capture_setting is None or capture_setting.exposure_seconds is None:
+    if capture_setting is None or capture_setting.exposure_s is None:
         return "These"
-    return f"{capture_setting.exposure_seconds:g} s"
+    return f"{capture_setting.exposure_s:g} s"
 
 
 def _limit_value(limits: Sequence[QualityLimit], index: int, rule_name: str) -> float:
@@ -513,7 +513,7 @@ def _judge_overexposed_setting(case: _Case) -> list[TargetStatement]:
     target_fraction = _limit_value(case.limits, 1, case.rule.name)
     if reading.value < clip_fraction:
         return []
-    exposure = case.capture_setting.exposure_seconds if case.capture_setting else None
+    exposure = case.capture_setting.exposure_s if case.capture_setting else None
     if exposure is not None and reading.value > 0:
         proposed_seconds = exposure * target_fraction / reading.value
         advice = f"Use {proposed_seconds:.3g} s or less."
@@ -589,7 +589,7 @@ def _judge_underexposed_setting(case: _Case) -> list[TargetStatement]:
     least_ratio = _limit_value(case.limits, 0, case.rule.name)
     if ratio >= least_ratio:
         return []
-    exposure = case.capture_setting.exposure_seconds if case.capture_setting else None
+    exposure = case.capture_setting.exposure_s if case.capture_setting else None
     if exposure is not None:
         needed_seconds = exposure * (least_ratio / max(ratio, 1e-9)) ** 2
         advice = f"Use {needed_seconds:.3g} s or longer, if the brightest star stays below the ceiling."
@@ -680,7 +680,7 @@ def _judge_trailed_stars(case: _Case) -> list[TargetStatement]:
     limit = _limit_value(case.limits, 0, case.rule.name)
     if reading.value <= limit:
         return []
-    exposure = case.capture_setting.exposure_seconds if case.capture_setting else None
+    exposure = case.capture_setting.exposure_s if case.capture_setting else None
     fields = {
         "elongation": reading.value,
         "exposure_text": _exposure_text(case.capture_setting),
@@ -1136,8 +1136,8 @@ def _setting_sort_key(capture_setting: CaptureSetting | None) -> tuple:
         1,
         capture_setting.camera,
         capture_setting.filter_name or "",
-        capture_setting.exposure_seconds or 0.0,
-        capture_setting.gain_setting or 0,
+        capture_setting.exposure_s or 0.0,
+        capture_setting.gain or 0,
         capture_setting.offset or 0,
         capture_setting.binning or 0,
     )

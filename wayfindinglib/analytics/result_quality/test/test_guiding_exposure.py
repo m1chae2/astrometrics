@@ -10,7 +10,7 @@ statement the report rule makes from the result. User decision,
 
 import pytest
 
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import CaptureSetting
 from wayfindinglib.analytics.result_quality.guiding_exposure import (
     TARGET_SHARP_FRACTION,
     allowed_guide_rms_arcsec,
@@ -23,7 +23,7 @@ from wayfindinglib.analytics.result_quality.report_rules import guiding_limits_s
 from wayfindinglib.models.quality.statements import ActionClass, StatementKind
 from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
-SETTING = CaptureSetting(camera="Cam", telescope="Scope", filter_name="L", exposure_seconds=120.0)
+SETTING = CaptureSetting(camera="Cam", telescope="Scope", filter_name="L", exposure_s=120.0)
 STAR_WIDTH_ARCSEC = 3.0
 NIGHT_SECONDS = 3000.0
 

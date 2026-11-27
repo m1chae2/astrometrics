@@ -1,8 +1,7 @@
-"""Tests for the star lookup tool.
+"""Tests for the star lookup, `StellarCatalog.query`.
 
-`StellarCatalog.query` replaces a dozen near-identical star tools and puts a
-hard cap on every answer. These tests use a small fake catalog and check the
-selectors, the filters, the paging, the caps and the errors.
+These tests use a small fake catalog and check the filters, the paging and
+the errors, and the class counts of `StellarCatalog.count_by_class`.
 """
 
 from types import SimpleNamespace
@@ -99,7 +98,32 @@ def catalog() -> StellarCatalog:
             and low <= s.magnitude <= high
         ]
 
-    access = SimpleNamespace(list_star_summaries=summaries, list_stars_in_region=region)
+    def records(ids: list[str]) -> list[StellarObject]:
+        """Build the star records of some fake stars.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The ids to read.
+
+        Returns
+        -------
+        records : `list` [`StellarObject`]
+            One record per fake star asked for.
+        """
+        by_id = {star.id: star for star in stars}
+        return [
+            StellarObject(id=star_id, name=by_id[star_id].name, magnitude=by_id[star_id].magnitude)
+            for star_id in ids
+            if star_id in by_id
+        ]
+
+    access = SimpleNamespace(
+        list_star_summaries=summaries,
+        list_stars_in_region=region,
+        get_stars_without_light_curves=records,
+        get_by_ids=lambda dataset, ids: records(ids),
+    )
     # The fake has no database to group in, so it counts the way any storage
     # without its own grouped count does.
     access.count_star_groups = lambda include_unresolved=False: AbstractCatalogAccess.count_star_groups(
@@ -108,56 +132,61 @@ def catalog() -> StellarCatalog:
     return StellarCatalog(None, access)
 
 
+def _ids(page: Any) -> list[str]:
+    """List the ids of a page of stars.
+
+    Returns
+    -------
+    ids : `list` [`str`]
+        The ids, in the page's order.
+    """
+    return [star.id for star in page]
+
+
 def test_browse_pages_in_id_order(catalog: StellarCatalog) -> None:
-    """With no selector the library is browsed in id order and paged."""
+    """With no filter the library is browsed in id order and paged."""
     first = catalog.query(limit=10)
     second = catalog.query(limit=10, offset=10)
-    assert [s["id"] for s in first.stars] == [f"S{n:03d}" for n in range(10)]
-    assert second.stars[0]["id"] == "S010"
-    assert first.total_matching == 30
-    assert first.truncated is True
+    assert _ids(first) == [f"S{n:03d}" for n in range(10)]
+    assert _ids(second)[0] == "S010"
+    assert first.total == 30
+    assert first.next_offset == 10
+    assert len(catalog.query()) == 30
 
 
 def test_region_and_magnitude_filters_combine(catalog: StellarCatalog) -> None:
     """A region search keeps only stars within the magnitude bounds."""
-    answer = catalog.query(ra_deg=10.0, dec_deg=0.0, radius_deg=3.0, magnitude_min=8.0, magnitude_max=11.0)
-    assert [s["id"] for s in answer.stars] == ["S008", "S009", "S010", "S011"]
-    assert answer.truncated is False
+    page = catalog.query(ra_deg=10.0, dec_deg=0.0, radius_deg=3.0, magnitude_min=8.0, magnitude_max=11.0)
+    assert _ids(page) == ["S008", "S009", "S010", "S011"]
+    assert page.next_offset is None
 
 
 def test_stars_without_a_magnitude_are_dropped_by_a_bound(catalog: StellarCatalog) -> None:
     """Giving a magnitude bound removes stars that have none."""
-    answer = catalog.query(magnitude_max=5.0, detail="ids")
-    assert "S001" not in answer.ids
-    assert answer.ids == ["S000", "S002", "S003", "S004", "S005"]
+    assert _ids(catalog.query(magnitude_max=5.0)) == ["S000", "S002", "S003", "S004", "S005"]
 
 
 def test_has_spectra_filters(catalog: StellarCatalog) -> None:
     """has_spectra keeps only stars with (or without) a spectrum."""
-    answer = catalog.query(has_spectra=True, detail="ids", limit=100)
-    assert answer.ids == ["S000", "S005", "S010", "S015", "S020", "S025"]
+    assert _ids(catalog.query(has_spectra=True)) == ["S000", "S005", "S010", "S015", "S020", "S025"]
 
 
-def test_a_limit_above_the_cap_is_refused_and_the_default_is_cut(catalog: StellarCatalog) -> None:
-    """A limit outside the detail's range raises; the default 50 is cut."""
-    for detail, limit in (("summary", 10_000), ("objects", 500), ("summary", 0)):
-        with pytest.raises(InvalidArgumentError, match="limit"):
-            catalog.query(detail=detail, limit=limit)
+def test_a_limit_or_offset_out_of_range_is_refused(catalog: StellarCatalog) -> None:
+    """A limit below 1 or a negative offset raises; a wide region is fine."""
+    with pytest.raises(InvalidArgumentError, match="limit"):
+        catalog.query(limit=0)
     with pytest.raises(InvalidArgumentError, match="offset"):
         catalog.query(offset=-1)
-    catalog._catalog_access.get_by_ids = lambda dataset, ids: [StellarObject(id=i) for i in ids]
-    assert len(catalog.query(detail="objects").objects) == 10
+    assert len(catalog.query(ra_deg=10.0, dec_deg=0.0, radius_deg=90.0)) == 29
 
 
 def test_bad_requests_are_errors(catalog: StellarCatalog) -> None:
-    """Two selectors, a wide region or an unknown detail are refused."""
+    """A circle given in part, a radius of 0 or an unknown order is refused."""
     bad_requests = [
-        ({"name": "x", "target_id": "T 1"}, "one selector"),
-        ({"ra_deg": 1.0, "dec_deg": 0.0, "radius_deg": 9.0}, "radius_deg"),
-        ({"radius_deg": 1.0}, "needs ra_deg and dec_deg"),
-        ({"ra_deg": 1.0, "dec_deg": 0.0, "radius_deg": 1.0, "tolerance_arcsec": 2.0}, "not both"),
-        ({"detail": "everything"}, "detail must be"),
-        ({"detail": "exists"}, "needs ids"),
+        ({"radius_deg": 1.0}, "ra_deg, dec_deg and radius_deg"),
+        ({"ra_deg": 1.0, "dec_deg": 0.0, "radius_deg": 0.0}, "radius_deg must be above 0"),
+        ({"order_by": "everything"}, "order_by must be"),
+        ({"include": ["spectra"]}, "Unknown include"),
     ]
     for arguments, message in bad_requests:
         with pytest.raises(InvalidArgumentError, match=message):
@@ -166,11 +195,11 @@ def test_bad_requests_are_errors(catalog: StellarCatalog) -> None:
 
 def test_spectral_class_filter_and_counts(catalog: StellarCatalog) -> None:
     """The fake stars are all class G, so G keeps them all and K keeps none."""
-    assert catalog.query(spectral_class="G2V", detail="ids", limit=100).total_matching == 30
-    assert catalog.query(spectral_class="K", detail="ids").total_matching == 0
+    assert catalog.query(spectral_class="G2V").total == 30
+    assert catalog.query(spectral_class="K").total == 0
     with pytest.raises(InvalidArgumentError, match="spectral_class must"):
         catalog.query(spectral_class="Z")
-    counts = catalog.query(detail="class_counts").classes
+    counts = [entry.model_dump(by_alias=True) for entry in catalog.count_by_class()]
     assert counts == [{"spectralClass": "G", "label": "Yellow dwarfs", "count": 30}]
 
 

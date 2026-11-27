@@ -278,7 +278,7 @@ def list_set_aside_frames_with_reasons(target: Target, config: Any) -> list[SetA
     })
     settings = store.get_capture_settings(setting_ids) if setting_ids else {}
     return build_set_aside_records(
-        target.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
+        target.id, folders, rows, {key: value.exposure_s for key, value in settings.items()}
     )
 
 

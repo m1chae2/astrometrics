@@ -771,23 +771,20 @@ def test_sync_calibration_folder_summarises_what_was_added(
         def get_frames_path(self) -> Path:
             return frames_path
 
-    class _Catalog:
-        def add_frames(self, paths: list[str], *, telescope: str) -> list[str]:
+    class _Frames:
+        def add(self, paths: list[str], *, telescope: str | None = None) -> list[SimpleNamespace]:
             added_paths = []
             for name in ("Dark_002.fits", "Dark_003.fits"):
                 (held_folder / name).write_bytes(b"y" * 10)
                 added_paths.append(str(held_folder / name))
-            return added_paths
-
-        def reindex_frames(self, kind: str) -> None:
-            pass
-
-        def save(self) -> None:
-            pass
+            return [
+                SimpleNamespace(kind="dark", added_paths=added_paths),
+                SimpleNamespace(kind="bias", added_paths=[]),
+            ]
 
     class _Astrometrics:
         def __init__(self, config: object) -> None:
-            self.processing = type("Processing", (), {"calibration": _Catalog()})()
+            self.calibration = SimpleNamespace(frames=_Frames())
 
     class _Api:
         astrometrics = _Astrometrics(None)

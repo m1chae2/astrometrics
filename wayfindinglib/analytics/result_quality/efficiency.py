@@ -51,7 +51,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import Telescope
+from astrometricslib import CaptureSetting, Telescope
 from astrometricslib.parameters import (
     EquipmentKind,
     HardcodedKind,
@@ -60,7 +60,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import (
     EfficiencyFactor,
@@ -401,7 +401,7 @@ class FrameObservation(BaseModel):
         """
         if self.exposure_seconds:
             return self.exposure_seconds
-        return self.capture_setting.exposure_seconds or None
+        return self.capture_setting.exposure_s or None
 
 
 class ReferenceOutcome(BaseModel):
@@ -714,7 +714,7 @@ def baseline_key(setting: CaptureSetting) -> str:
         setting.camera,
         part(setting.telescope),
         part(setting.filter_name),
-        part(setting.gain_setting, "gain"),
+        part(setting.gain, "gain"),
         part(setting.offset, "offset"),
         part(setting.binning, "bin"),
     ])

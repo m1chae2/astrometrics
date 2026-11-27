@@ -52,7 +52,7 @@ def judge_star_result(target_id: str, object_id: str, *, astrometrics: Any) -> l
         If the star is not in the catalog, or is recorded for other targets
         only.
     """
-    star = astrometrics.stars.get(object_id)
+    star = astrometrics.stars.get(object_id, include=["light_curves"])
     if star is None:
         raise NotFoundError(f"No star {object_id!r} in the catalog.", details={"object_id": object_id})
     if star.target_ids and target_id not in star.target_ids:

@@ -24,8 +24,8 @@ def _setting(pixel_scale_arcsec: float | None) -> CaptureSetting:
         focal_length_mm=405.0,
         pixel_scale_arcsec=pixel_scale_arcsec,
         filter_name="Luminance",
-        exposure_seconds=30.0,
-        gain_setting=0,
+        exposure_s=30.0,
+        gain=0,
         offset=0,
         binning=1,
     )
@@ -71,3 +71,28 @@ def test_setting_is_spectral_follows_the_filter_name() -> None:
     assert CaptureSetting(camera="Cam", filter_name="SPEC").is_spectral
     assert not CaptureSetting(camera="Cam", filter_name="L").is_spectral
     assert not CaptureSetting(camera="Cam").is_spectral
+
+
+def test_the_unit_named_fields_read_the_old_names_and_write_the_old_json() -> None:
+    """Old field names and the JSON names load; the JSON names are written."""
+    from_old_names = CaptureSetting.model_validate({
+        "camera": "Cam",
+        "gain_setting": 100,
+        "exposure_seconds": 60.0,
+    })
+    from_json = CaptureSetting.model_validate({"camera": "Cam", "gainSetting": 100, "exposureSeconds": 60.0})
+    new = CaptureSetting(camera="Cam", gain=100, exposure_s=60.0)
+
+    assert from_old_names == from_json == new
+    assert (new.gain, new.exposure_s) == (100, 60.0)
+    dumped = new.model_dump(by_alias=True)
+    assert (dumped["gainSetting"], dumped["exposureSeconds"]) == (100, 60.0)
+
+
+def test_the_sensor_temperature_is_an_optional_field() -> None:
+    """A setting can say which darks it means by their sensor temperature."""
+    setting = CaptureSetting(camera="Cam", temperature_c=-10.0)
+
+    assert setting.temperature_c == pytest.approx(-10.0)
+    assert setting.model_dump(by_alias=True)["temperatureC"] == pytest.approx(-10.0)
+    assert CaptureSetting(camera="Cam").temperature_c is None

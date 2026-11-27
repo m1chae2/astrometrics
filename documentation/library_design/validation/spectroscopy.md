@@ -128,8 +128,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   astrometrics = Astrometrics()
   target = astrometrics.targets.get("M 13")
   astrometrics.processing.process_target(target, stages=["spectroscopy"])
-  ids = astrometrics.stars.query(target_id=target.id, has_spectra=True, detail="ids", limit=2000).ids
-  for star in map(astrometrics.stars.get, ids):
+  for star in astrometrics.stars.query(target=target, has_spectra=True):
       own = star.spectroscopy.self_determined_spectral_type
       if star.spectral_type and own not in ("", "Unknown"):
           print(
@@ -492,8 +491,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   )  # internal
 
   astrometrics = Astrometrics()
-  ids = astrometrics.stars.query(has_spectra=True, detail="ids", limit=2000).ids
-  for star in map(astrometrics.stars.get, ids):
+  for star in astrometrics.stars.query(has_spectra=True):
       s = star.spectroscopy
       print(
           star.id,

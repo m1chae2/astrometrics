@@ -222,12 +222,12 @@ CLASSIFICATION_RULES = (
         "Adds or changes targets in the catalog.",
     ),
     _rule(
-        r"^star_(create|update|find_or_create_by_position)$",
+        r"^star_(create|update|record_periodicity)$",
         "change-data",
         "high",
         "Adds or changes stars in the catalog.",
     ),
-    _rule(r"^calibration_reindex_frames$", "change-data", "medium", "Probably rebuilds stored calibration."),
+    _rule(r"^calibration_frames_scan$", "change-data", "medium", "Rebuilds and saves the calibration index."),
     _rule(
         r"^processing_process_target$",
         "change-data",
@@ -413,7 +413,7 @@ CLASSIFICATION_RULES = (
         r"^calibration_query$",
         "observe",
         "high",
-        "Reads calibration counts. refresh reloads the index into memory and writes nothing.",
+        "Reads calibration counts. Writes nothing.",
     ),
     _rule(
         r"^quality_measure_stack$",

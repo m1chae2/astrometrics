@@ -2,9 +2,10 @@
 
 `ProcessingPipelines` stacks a target's frames, makes the preview picture of a
 stack again, and runs the analysis stages (astrometry, photometry,
-spectroscopy and the asteroid search). It holds one child that it builds
-once and shares: `CalibrationCatalog` keeps track of the dark, bias and
-flat frames that remove a camera's noise from the raw frames.
+spectroscopy and the asteroid search). A stack chooses its darks, biases
+and flats from the calibration library, `astrometrics.calibration`
+(`CalibrationCatalog`, in `calibration.py`), which the root object builds
+once and shares with it.
 
 Quality reads are not here. They start at `astrometrics.quality`
 (`QualityRecords`, in `quality.py`).
@@ -12,7 +13,7 @@ Quality reads are not here. They start at `astrometrics.quality`
 The stacking methods of `ProcessingPipelines` are written in
 `_processing_stacking.py` and its preview methods in `_processing_preview.py`,
 as functions that take the `ProcessingPipelines` as ``self``; the class binds
-them as its own methods. `CalibrationCatalog` is in `calibration.py`.
+them as its own methods.
 
 The methods here check their arguments and hand the work to `pipelines/`.
 They raise an error from `astrometricslib.foundation.errors` when a request
@@ -60,34 +61,6 @@ if TYPE_CHECKING:
 __all__ = ["ProcessingPipelines"]
 
 
-class _TargetsOnDemand:
-    """Find targets through a `ProcessingPipelines`, building its catalog late.
-
-    Parameters
-    ----------
-    pipelines : `ProcessingPipelines`
-        The pipelines whose target catalog to use.
-    """
-
-    def __init__(self, pipelines: ProcessingPipelines) -> None:
-        self._pipelines = pipelines
-
-    def get(self, target_id: str) -> Target | None:
-        """Find one target by its id.
-
-        Parameters
-        ----------
-        target_id : `str`
-            The target's id, matched loosely.
-
-        Returns
-        -------
-        target : `Target` or `None`
-            The target, or `None` when no target has that id.
-        """
-        return self._pipelines._targets.get(target_id)
-
-
 class ProcessingPipelines(MovedNames):
     """Stack targets, run the analysis stages and measure noise.
 
@@ -108,7 +81,9 @@ class ProcessingPipelines(MovedNames):
         The target catalog. It turns target names into targets and saves a
         target after a stack. One is built from ``storage`` when omitted.
     calibration : `CalibrationCatalog`, optional
-        The calibration library to share. One is built when omitted.
+        The calibration library to share (``astrometrics.calibration``). The
+        stack chooses its darks, biases and flats from it. One is built when
+        omitted.
     drivers : `Drivers`, optional
         The plate solver, stacking program and SIMBAD driver to use. Any
         left out is the built-in one (Astrometry.net, Siril, astroquery).
@@ -117,12 +92,6 @@ class ProcessingPipelines(MovedNames):
         for one target.
         `process_target` for several targets runs in worker processes, which
         cannot receive them, so it refuses to start when any were given.
-
-    Attributes
-    ----------
-    calibration : `CalibrationCatalog`
-        Tracking, querying, and refreshing dark, bias, and flat
-        calibration frames.
     """
 
     # The three stage lists are described by these comments, not in the
@@ -151,8 +120,7 @@ class ProcessingPipelines(MovedNames):
         self._storage = storage
         self._drivers = drivers or Drivers()
         self._target_catalog = targets
-        lookup = targets if targets is not None else _TargetsOnDemand(self)
-        self.calibration = calibration or CalibrationCatalog(config, storage, targets=lookup)
+        self._calibration = calibration or CalibrationCatalog(config, storage)
 
     @property
     def _targets(self) -> TargetCatalog:

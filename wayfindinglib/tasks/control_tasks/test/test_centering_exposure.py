@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import CaptureSetting
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
 from wayfindinglib.models.sky_position import SkyPosition
@@ -32,6 +32,7 @@ from wayfindinglib.tasks.control_tasks.centering_exposure import (
     predict_star_counts,
     star_electrons,
 )
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS
 
 FWHM_FOR_UNIT_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
 """A star width of one Gaussian sigma, so the noise area is exactly 4 pi."""
@@ -186,9 +187,7 @@ class _Quality:
             Setting 1: the test camera and telescope, luminance, gain 0.
         """
         return {
-            1: CaptureSetting(
-                camera="Cam", telescope="Scope", filter_name="L", gain_setting=0, offset=10, binning=1
-            )
+            1: CaptureSetting(camera="Cam", telescope="Scope", filter_name="L", gain=0, offset=10, binning=1)
         }
 
     def query(self, metric: str, **_: Any) -> SimpleNamespace:
@@ -239,11 +238,11 @@ def _context(quality: _Quality, profile: SimpleNamespace | None = None) -> Simpl
     context : `types.SimpleNamespace`
         With the settings, the configuration and the science library.
     """
-    calibration = SimpleNamespace(camera_profile=lambda name: profile or _profile())
+    calibration = SimpleNamespace(get_profile=lambda camera=None: profile or _profile())
     return SimpleNamespace(
         config=object(),
         correction_config=CorrectionConfig(alignment_exposure_seconds=5.0),
-        astrometrics=SimpleNamespace(quality=quality, processing=SimpleNamespace(calibration=calibration)),
+        astrometrics=SimpleNamespace(quality=quality, calibration=calibration, config=NO_CAMERAS),
     )
 
 

@@ -27,6 +27,28 @@ __all__ = ["RENAMES", "MovedNames"]
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
 RENAMES: dict[str, str] = {
+    # Step 4b (stars).
+    "astrometricslib.StellarCatalog.dataset_version": (
+        "astrometricslib.drivers.get_library_data_version(config) (the library's write counters)"
+    ),
+    "astrometricslib.StellarCatalog.find_or_create_by_position": (
+        "astrometrics.stars.query(ra_deg=..., dec_deg=..., radius_deg=...) to find the star, then "
+        "astrometrics.stars.create(name, ra_deg, dec_deg) for a new one"
+    ),
+    "astrometricslib.StellarCatalog.analyze_periodicity": (
+        "astrometrics.stars.record_periodicity(star) (measure_periodicity(star) saves nothing)"
+    ),
+    # Step 4c: calibration is a sub-API of its own, with a `frames` child.
+    "astrometricslib.ProcessingPipelines.calibration": "astrometrics.calibration",
+    "astrometricslib.CalibrationCatalog.add_frames": "astrometrics.calibration.frames.add(paths)",
+    "astrometricslib.CalibrationCatalog.reindex_frames": "astrometrics.calibration.frames.scan(kind)",
+    "astrometricslib.CalibrationCatalog.save": (
+        "astrometrics.calibration.frames.add(paths) or frames.scan(), which save the index"
+    ),
+    "astrometricslib.CalibrationCatalog.measure_frames": (
+        "astrometrics.calibration.frames.record_measurements(kind, setting=CaptureSetting(camera=...))"
+    ),
+    "astrometricslib.CalibrationCatalog.camera_profile": "astrometrics.calibration.get_profile(camera)",
     # Step 4a: targets and their frames.
     "astrometricslib.TargetCatalog.select_frames": "astrometrics.targets.frames.query(target, ...)",
     "astrometricslib.TargetCatalog.get_frame": (

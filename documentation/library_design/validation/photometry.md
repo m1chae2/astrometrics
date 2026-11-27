@@ -120,7 +120,7 @@ for target_id in ("M 13", "M 81", "NGC 2403"):
   - Config key `[Observatory.Camera.ZWO ASI533MM Pro] sensor_noise` in the configuration file: an entry for gain setting 0, offset 10, binning 1x1 holding `gain_e_per_adu` (0.783, kind `measured`) and `read_noise_e` (3.8, kind `measured`) (`astrometricslib/astrometrics.config.example.toml` ships it). The values are now keyed by camera setting: a frame at another gain, offset or binning does not use them. The pipeline reads them through the camera profile. Relation: derived from this entry. <!-- impl: astrometricslib.models.camera_profile.CameraProfile --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise -->
 - **Status:** Partly measured. One signal level; no full photon-transfer curve.
 - **Data you need:** For your camera, at one gain setting, offset and sensor temperature: 15 or more pairs of flat frames taken back to back at one exposure (a signal near half of full scale), and 5 or more pairs of bias frames (zero-length exposures).
-- **Procedure:** `astrometrics.processing.calibration.measure_sensor_noise(camera_id, gain, offset, binning)` runs these steps on the flats and bias frames in the calibration library (see [STK-35](stacking.md#stk-35); it reproduced these values on 2026-10-22). The steps, and the code that does them by hand with NumPy and Astropy, are:
+- **Procedure:** `astrometrics.calibration.measure_sensor_noise(camera, CaptureSetting(camera=camera.name, gain=gain, offset=offset, binning=binning))` runs these steps on the flats and bias frames in the calibration library (see [STK-35](stacking.md#stk-35); it reproduced these values on 2026-10-22). The steps, and the code that does them by hand with NumPy and Astropy, are:
   1. For each flat pair, take the central region of both frames, subtract the bias level, and form their difference. Half the variance of the difference is the random noise of one frame, because the difference cancels the fixed pixel-to-pixel pattern.
   2. For each bias pair, half the variance of the difference is the read variance in ADU squared.
   3. The gain is the mean signal divided by (the single-frame variance minus the read variance), all in ADU. The read noise in electrons is the read noise in ADU times the gain.
@@ -156,7 +156,7 @@ for a, b in flat_pairs:
 - **Verdict:** Not judged.
 - **Limits:** One signal level, so no photon-transfer curve was fitted. A flat panel that flickers between frames adds variance and lowers the gain, so 0.783 is more likely too low than too high. The values hold only at gain setting 0.
 - **To tune for your setup:** Measure your own camera at the gain setting you observe with. If your files store sensor ADU scaled up (as here), use the gain in stored ADU. Then re-run [PHO-02](#pho-02): the ensemble ratio should move toward 1.
-- **Regenerate with:** `astrometrics.processing.calibration.measure_sensor_noise(camera_id, gain, offset, binning)` (add `save=True` to write the camera profile). The 2026-10-11 values were measured by hand with the code above.
+- **Regenerate with:** `astrometrics.calibration.measure_sensor_noise(camera, CaptureSetting(camera=camera.name, gain=gain, offset=offset, binning=binning))` (`record_sensor_noise` with the same arguments writes the camera profile). The 2026-10-11 values were measured by hand with the code above.
 - **Guarded by tests:** None.
 - **Raw record:** None kept.
 
@@ -373,7 +373,7 @@ astrometrics = Astrometrics()
 result = astrometrics.processing.process_target("M 13", stages=["photometry"])
 astrometrics.targets.update(astrometrics.targets.get("M 13", required=True))
 print(result.quality.photometry.gate("variability_discrimination"))
-stars = astrometrics.stars.query(target_id="M 13", has_photometry=True, detail="objects", limit=None).objects
+stars = astrometrics.stars.query(target=astrometrics.targets.get("M 13"), has_photometry=True)
 scored = [s for s in stars if s.photometry and s.photometry.variability_score is not None]
 listed = [s for s in scored if s.known_variability == KnownVariability.KNOWN_VARIABLE]
 unlisted = [s for s in scored if s.known_variability == KnownVariability.NOT_LISTED]
@@ -561,7 +561,7 @@ from astrometricslib.scripts.validate_spectral_and_period_analysis import valida
 passed = validate_period_searches(25)
 ```
 <!-- impl: astrometricslib.scripts.validate_spectral_and_period_analysis.validate_period_searches --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.box_search -->
-  1. On a real star, use the public `Astrometrics().stars.analyze_periodicity(star_id)` and compare the saved period and verdict with the known ones. <!-- impl: astrometricslib.api.stars.StellarCatalog.analyze_periodicity -->
+  1. On a real star, use the public `Astrometrics().stars.record_periodicity(star)` and compare the saved period and verdict with the known ones. <!-- impl: astrometricslib.api.stars.StellarCatalog.record_periodicity -->
 
 - **Acceptance criterion:** The share of pure-noise curves called "detected" stays near 1%. The script fails above 3%.
 - **What to look at:** The share of pure-noise curves called "detected" (should stay near 1%; the script fails above 3%). The share of injected signals detected at each amplitude or depth.
@@ -988,16 +988,18 @@ print(median_signal_to_noise(table)[:10])
 - **Status:** Measured. One ISO and one signal level, so no photon transfer curve was fitted.
 - **Data you need:** For your camera at one ISO: 5 or more pairs of flat frames taken back to back at one exposure, and 3 or more pairs of bias frames (the shortest exposure the camera allows), all indexed in the calibration library.
 - **Procedure:**
-  1. Call `measure_sensor_noise` for the camera and ISO, with the offset 0 and one flat exposure, and leave `save` off to read without writing.
+  1. Call `measure_sensor_noise` for the camera and ISO, with the offset 0 and one flat exposure, which writes nothing.
   2. Check the gain spread across pairs, and repeat on the other flat exposure as a cross-check.
 
   ```python
-  from astrometricslib import Astrometrics
+  from astrometricslib import Astrometrics, CaptureSetting
 
   astro = Astrometrics()
-  result = astro.processing.calibration.measure_sensor_noise(
-      "Nikon D5300", 800, 0, "1x1", exposure_seconds=0.04, telescope="Nikkor 300mm"
+  camera = astro.observatories.configurations.query(text="D5300")[0].camera
+  setting = CaptureSetting(
+      camera=camera.name, gain=800, offset=0, binning=1, exposure_s=0.04, telescope="Nikkor 300mm"
   )
+  result = astro.calibration.measure_sensor_noise(camera, setting)
   print(result.gain_e_per_adu, result.gain_spread_e_per_adu, result.read_noise_adu, result.read_noise_e)
   ```
 

@@ -117,6 +117,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib import CaptureSetting
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -127,12 +128,12 @@ from astrometricslib.parameters import (
 )
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,
     SubjectLevel,
 )
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
     FixedPatternAccount,
@@ -2054,7 +2055,7 @@ def noise_model_setting_key(
     key : `tuple`
         ``(camera, telescope, gain_setting, offset, binning)``.
     """
-    return (setting.camera, setting.telescope, setting.gain_setting, setting.offset, setting.binning)
+    return (setting.camera, setting.telescope, setting.gain, setting.offset, setting.binning)
 
 
 def noise_model_error_sample(record: StackRunRecord, target_id: str) -> NoiseModelErrorSample | None:
@@ -2186,11 +2187,11 @@ def camera_gain_for_setting(astrometrics: Any, setting: CaptureSetting) -> float
         Electrons per ADU, or ``None`` when the camera has no profile or no
         entry for the setting.
     """
-    profile = astrometrics.processing.calibration.camera_profile(setting.camera)
+    profile = profile_for_name(astrometrics, setting.camera)
     if profile.is_generic_fallback:
         return None
     entry = profile.sensor_noise_for(
-        setting.gain_setting, setting.offset or 0, setting.binning or 1, clipped_at_zero=False
+        setting.gain, setting.offset or 0, setting.binning or 1, clipped_at_zero=False
     )
     if entry is None or entry.gain_e_per_adu is None:
         return None

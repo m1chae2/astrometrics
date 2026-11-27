@@ -22,7 +22,7 @@ from astrometricslib.reports import (
     SubjectLevel,
 )
 from wayfindinglib.analytics.frame_counting import EquipmentNames
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 NIGHT_START = datetime(2026, 10, 24, 22, 0, tzinfo=UTC)
 """A time during the night of 2026-10-24, used as frame time zero."""
@@ -174,7 +174,8 @@ class FakeLibrary:
             query=lambda **_k: SimpleNamespace(items=tuple(self._list_targets())),
             frames=SimpleNamespace(get_set_aside=lambda _target: ()),
         )
-        self.processing = no_camera_profiles_processing()
+        self.calibration = no_camera_profiles_calibration()
+        self.config = NO_CAMERAS
         self.quality = SimpleNamespace(
             query=self._query,
             capture_settings=lambda ids=None: {},

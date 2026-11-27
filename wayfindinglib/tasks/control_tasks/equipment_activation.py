@@ -26,6 +26,7 @@ from typing import Any
 
 from astrometricslib import AppConfiguration, Camera, FilterWheel, Mount, ObservatoryConfiguration
 from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
     ACTIVE_GUIDE_CAMERA_KEY,
@@ -335,7 +336,7 @@ def list_camera_noise(astrometrics: Any, camera_name: str) -> list[CameraNoiseSe
         has no profile or no entries ("not measured").
     """
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except ConfigurationError:
         logger.warning("Camera profiles could not be read for '%s'", camera_name, exc_info=True)
         return []

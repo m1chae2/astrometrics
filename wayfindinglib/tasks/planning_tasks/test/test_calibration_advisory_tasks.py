@@ -10,7 +10,7 @@ index, so the library's own matching rules are exercised.
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import FilterType
+from astrometricslib import AppConfiguration, FilterType
 from astrometricslib.api.calibration import CalibrationCatalog
 from wayfindinglib.models.planning.observation_package import FrameType
 from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
@@ -89,8 +89,8 @@ def _catalog() -> CalibrationCatalog:
             },
         ],
     }
-    catalog = CalibrationCatalog(SimpleNamespace(), None)
-    catalog._library = SimpleNamespace(get_stats=lambda: stats, load_library=lambda: None)
+    catalog = CalibrationCatalog(AppConfiguration(), None)
+    catalog._library = SimpleNamespace(get_stats=lambda: stats)
     return catalog
 
 

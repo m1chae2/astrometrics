@@ -59,7 +59,14 @@ def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | Ste
     # 2. Search local stellar objects
     # Only the stars that match the name are read from the library, not
     # every star in it.
-    for star in sky._astrometrics.stars.query(name=target_name, detail="objects", limit=None).objects or []:
+    # A star whose id or name equals the name, ignoring case; exact id first.
+    name_matches = [
+        star
+        for star in sky._astrometrics.stars.query(text=target_name)
+        if target_name.lower() in (star.id.lower(), (star.name or "").lower())
+    ]
+    name_matches.sort(key=lambda star: star.id != target_name)
+    for star in name_matches:
         # Only return if coordinates are initialized (nonzero)
         if (
             star.right_ascension != 0.0  # ruff: ignore[float-equality-comparison] -- exact sentinel: 0.0 means "uninitialized"
@@ -210,17 +217,28 @@ def get_library_star_summaries(
         ``magnitude`` and ``spectralType``.
     """
     magnitude_min, magnitude_max = magnitude_range if magnitude_range is not None else (None, None)
-    return (
-        sky._astrometrics.stars.query(
-            ra_deg=ra_deg,
-            dec_deg=dec_deg,
-            radius_deg=radius_deg,
-            magnitude_min=magnitude_min,
-            magnitude_max=magnitude_max,
-            limit=None,
-        ).stars
-        or []
+    stars = sky._astrometrics.stars.query(
+        ra_deg=ra_deg,
+        dec_deg=dec_deg,
+        radius_deg=radius_deg,
+        magnitude_min=magnitude_min,
+        magnitude_max=magnitude_max,
     )
+    return [
+        {
+            "id": star.id,
+            "name": star.name,
+            "ra": star.right_ascension,
+            "dec": star.declination,
+            "targetIds": star.target_ids,
+            "hasSpectra": star.has_spectra,
+            "hasPhotometry": star.has_photometry,
+            "magnitude": star.magnitude,
+            "hasCatalogMagnitude": star.has_catalog_magnitude,
+            "spectralType": star.spectral_type,
+        }
+        for star in stars
+    ]
 
 
 def get_online_catalog_sources(

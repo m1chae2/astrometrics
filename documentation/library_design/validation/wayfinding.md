@@ -454,7 +454,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Claim:** A plan may use a gain setting, offset and binning only if the camera profile measured that combination. For a camera with no measured combination the request is accepted and marked "setting not measured", never refused. Exact duplicate exposure requests merge and their counts add; requests that differ only in delay are refused.
 - **Settings it supports:** None. The entry backs a rule about what is accepted.
 - **Status:** Partly measured. Tested on stand-in profiles. It has not been run on the ASI533MM or Nikon profiles in the real configuration.
-- **Data you need:** A camera profile with `sensor_noise` entries, from `Astrometrics().processing.calibration.camera_profile(name)`.
+- **Data you need:** A camera profile with `sensor_noise` entries, from `Astrometrics().calibration.get_profile(camera)`.
 - **Procedure:**
   1. Resolve the profile of your camera. One matcher, `camera_names_match` <!-- impl: wayfindinglib.analytics.result_quality.allowed_capture_values.camera_names_match -->, accepts every spelling of the profile's camera name.
   2. Build the allowed values and check one measured and one unmeasured combination.
@@ -463,7 +463,9 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
   from wayfindinglib.analytics.result_quality.allowed_capture_values import allowed_capture_values  # internal
 
-  profile = Astrometrics().processing.calibration.camera_profile("ZWO ASI533MM Pro")
+  astro = Astrometrics()
+  camera = astro.observatories.configurations.query(text="ASI533")[0].camera
+  profile = astro.calibration.get_profile(camera)
   allowed = allowed_capture_values(profile)
   print(allowed.check(gain_setting=100, offset=10, binning=1))
   ```

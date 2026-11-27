@@ -16,11 +16,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import AppConfiguration, FilterType
+from astrometricslib import AppConfiguration, CaptureSetting, FilterType
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,
@@ -174,7 +173,7 @@ def more_frames(frame_count: int = 40, *, filter_name: str = "L", exposure: floa
         kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.CAPTURE_SETTINGS,
         capture_setting=CaptureSetting(
-            camera="Test Camera", telescope="Test Scope", filter_name=filter_name, exposure_seconds=exposure
+            camera="Test Camera", telescope="Test Scope", filter_name=filter_name, exposure_s=exposure
         ),
         message=f"Take {frame_count} more frames.",
         plain_message=f"Take {frame_count} more frames: we expect less noise.",

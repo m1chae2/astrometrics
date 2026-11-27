@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, CaptureSetting
 from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number, fold_exposure_lengths
 from astrometricslib.models.quality.calibration_identities import (
@@ -29,7 +29,6 @@ from astrometricslib.models.quality.calibration_identities import (
 )
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
-    CaptureSetting,
     MeasurementStatus,
     QualityMeasurement,
     SubjectLevel,
@@ -57,7 +56,7 @@ from wayfindinglib.models.planning.target_report import (
     RecommendedAdditionalFramesStatus,
 )
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
 START = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 APERTURES = 1000
 APERTURE_SET = "v3-156104df543d"
@@ -1110,9 +1109,7 @@ def _library_of_targets(multipliers: list[float], setting_id: int = 1) -> list[Q
     return rows
 
 
-_SETTING = CaptureSetting(
-    camera="ZWO ASI533MM Pro", telescope="Scope", gain_setting=100, offset=10, binning=1
-)
+_SETTING = CaptureSetting(camera="ZWO ASI533MM Pro", telescope="Scope", gain=100, offset=10, binning=1)
 
 
 def test_the_model_error_is_measured_only_from_five_targets_of_a_setting_group() -> None:
@@ -1134,7 +1131,7 @@ def test_the_model_error_is_measured_only_from_five_targets_of_a_setting_group()
 def test_the_setting_group_ignores_filter_and_exposure_but_not_gain() -> None:
     """Camera, optic, gain, offset and binning make the group."""
     other_filter = _SETTING.model_copy(update={"filter_name": "Ha", "exposure_seconds": 300.0})
-    other_gain = _SETTING.model_copy(update={"gain_setting": 200})
+    other_gain = _SETTING.model_copy(update={"gain": 200})
 
     assert fc.noise_model_setting_key(other_filter) == fc.noise_model_setting_key(_SETTING)
     assert fc.noise_model_setting_key(other_gain) != fc.noise_model_setting_key(_SETTING)

@@ -43,7 +43,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
@@ -54,7 +54,8 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementReference, QualityMeasurement
+from astrometricslib.reports import MeasurementReference, QualityMeasurement
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.data_versions import report_data_version
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,
@@ -1050,7 +1051,7 @@ def _more_frames_for_setting(
                 setting,
             )
         ]
-    new_exposure = setting.exposure_seconds or statistics.median(frame.exposure_seconds for frame in frames)
+    new_exposure = setting.exposure_s or statistics.median(frame.exposure_seconds for frame in frames)
     note = ""
     sky_noise = median_or_none(
         math.sqrt(o.sky_rate_e_per_s_per_px * (o.effective_exposure_seconds or 0.0))
@@ -1356,7 +1357,7 @@ def _quality_statements_of_settings(
         setting_observations = by_setting.get(setting, [])
         if not stopped:
             overheads = estimate_capture_overheads(
-                contexts_for_overheads, setting.exposure_seconds, setting.filter_name
+                contexts_for_overheads, setting.exposure_s, setting.filter_name
             )
             if frames_status != RecommendedAdditionalFramesStatus.NOT_CHECKED:
                 more_frames = _more_frames_for_setting(
@@ -1721,12 +1722,12 @@ def _guiding_exposure_statements(
             start = float(observation.start_epoch_seconds)
             windows_by_night[observation.night_id].append((
                 start,
-                start + float(setting.exposure_seconds),
+                start + float(setting.exposure_s),
             ))
-        if records is None or not setting.exposure_seconds:
+        if records is None or not setting.exposure_s:
             reason = (
                 "The setting has no exposure time."
-                if not setting.exposure_seconds
+                if not setting.exposure_s
                 else "No stored guide samples are available to this report."
             )
             statements.extend(guiding_limits_statements(setting, GuidingExposureOutcome(reason=reason)))
@@ -1738,7 +1739,7 @@ def _guiding_exposure_statements(
                     session_id=night, limit=GUIDE_SAMPLE_READ_LIMIT, sources=sources
                 )
         outcome = assess_guiding_exposure(
-            float(setting.exposure_seconds),
+            float(setting.exposure_s),
             [o.star_width_effective_arcsec for o in kept if o.star_width_effective_arcsec is not None],
             spans,
             {night: sample_cache[night] for night in spans},
@@ -1746,7 +1747,7 @@ def _guiding_exposure_statements(
                 FrameWindow(
                     frame_id=o.frame_id,
                     start_epoch_seconds=o.start_epoch_seconds,
-                    exposure_seconds=float(setting.exposure_seconds),
+                    exposure_seconds=float(setting.exposure_s),
                 )
                 for o in kept
             ],
@@ -1884,7 +1885,7 @@ def _camera_spellings(astrometrics: Any, camera_name: str) -> list[str]:
 
     names = [camera_name]
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except ConfigurationError:
         return names
     names.extend([profile.camera_name, profile.record_name, *profile.name_aliases])
@@ -1944,7 +1945,7 @@ def _clipping_note(astrometrics: Any, camera_name: str, goal: ScienceGoal) -> st
             "cannot be predicted."
         )
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except AstrometricsError:
         return note + " The camera's saturation limits are not known."
     clip, saturation = profile.clip_ceiling_adu, profile.pixel_saturation_level_adu

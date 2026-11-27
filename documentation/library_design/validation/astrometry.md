@@ -555,7 +555,7 @@ from astrometricslib import Astrometrics
 from astrometricslib.pipelines.shared.star_kinds import stored_position_degrees
 
 astrometrics = Astrometrics()
-stars = astrometrics.stars.query(detail="objects").objects
+stars = astrometrics.stars.query()
 positions = [stored_position_degrees(s) for s in stars if not s.id.startswith("FIELD_J")]
 positions = np.array([p for p in positions if p is not None])
 coords = SkyCoord(positions[:, 0] * u.deg, positions[:, 1] * u.deg)
@@ -1081,7 +1081,7 @@ from astrometricslib._internal.drivers.catalog_store import stars_in_tiles
 from astrometricslib._internal.drivers.sky_tiles import healpix_pixels_of_points
 
 astrometrics = Astrometrics()
-rows = [s for s in astrometrics.stars.query(detail="summary").stars if s.id.startswith("FIELD_J")]
+rows = [s for s in astrometrics.stars.query(text="FIELD_J") if s.id.startswith("FIELD_J")]
 ra = np.array([s.right_ascension for s in rows])
 dec = np.array([s.declination for s in rows])
 tiles = sorted(set(healpix_pixels_of_points(7, ra, dec).tolist()))

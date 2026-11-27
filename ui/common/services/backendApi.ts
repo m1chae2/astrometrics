@@ -483,7 +483,7 @@ export interface ActionRegistry {
     "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
     "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
     "calibration:measure_frames": { payload: { kind?: 'dark' | 'bias'; camera_id?: string; force?: boolean }; response: CalibrationMeasurementStart };
-    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; refresh?: boolean; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
+    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
 
     // Hand-off of the workspace to a paired phone
     "handoff:get_state": { payload: Record<string, never>; response: HandoffState };

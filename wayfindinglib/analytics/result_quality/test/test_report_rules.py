@@ -13,7 +13,8 @@ from collections import Counter
 
 import pytest
 
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.result_quality import report_rules as rr
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -56,8 +57,8 @@ SETTING = CaptureSetting(
     camera="ASI533MM Pro",
     telescope="RC8",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=50,
     binning=1,
 )

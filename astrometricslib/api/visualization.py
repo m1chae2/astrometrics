@@ -20,6 +20,7 @@ from astrometricslib._internal.renames import MovedNames
 from astrometricslib.foundation.arguments import check_choice, reject_unused_arguments
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.models.star_catalog import StarOverlay
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import RenderedImage, Target, ViewableImage
 from astrometricslib.pipelines.shared.api_arguments import TargetLookup, resolve_target
@@ -71,7 +72,7 @@ class Visualization(MovedNames):
     """Draw FITS frames as pictures, and plot the results of the pipelines.
 
     To draw the stars of a target on its stacked image, read their pixel
-    positions with `StellarCatalog.query` and ``detail="overlay"``.
+    positions with `get_star_overlay`.
     A target or star id that names nothing in the library raises
     `NotFoundError`. A file that cannot be drawn raises `ProcessingError`.
 
@@ -381,6 +382,39 @@ class Visualization(MovedNames):
         from astrometricslib.pipelines.shared import image_conversions
 
         return image_conversions.get_last_captured_image(self._config, stretch)
+
+    def get_star_overlay(
+        self, target: Target, *, image: str | None = None, limit: int | None = None
+    ) -> StarOverlay:
+        """Place a target's catalog stars on an image, for drawing labels.
+
+        Each star's pixel position comes from the image's plate solution,
+        or from the pixel center saved when the star was detected on the
+        target's only stack. Positions count from 1, as in FITS and DS9.
+
+        Owner:
+            astrometricslib.pipelines.shared.star_overlay.place_target_stars
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose stars to place.
+        image : `str`, optional
+            The image to place them on, such as the file the app shows. By
+            default, the target's current stack.
+        limit : `int` or `None`, optional
+            Most stars to place, at least 1, the most useful first. `None`
+            (the default) places every star found.
+
+        Returns
+        -------
+        overlay : `StarOverlay`
+            The placed stars, and why there are none when the image has no
+            sky solution.
+        """
+        from astrometricslib.pipelines.shared.star_overlay import place_target_stars
+
+        return place_target_stars(self._storage, target, image_path=image, limit=limit)
 
     def stack_sky_picture_files(self, target: str | Target) -> tuple[str, str]:
         """Name the files that place a target's stack picture on the sky.

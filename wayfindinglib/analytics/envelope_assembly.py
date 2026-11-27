@@ -33,6 +33,7 @@ from astrometricslib.parameters import (
     factor_for,
     resolve_parameter,
 )
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import (
     collect_capture_baseline_values,
     collect_capture_frames,
@@ -117,7 +118,7 @@ def sensor_limits_for_camera(astrometrics: Any, camera_name: str) -> SensorLimit
         from. A camera with no profile gets the generic stand-in, marked
         as such.
     """
-    profile = astrometrics.processing.calibration.camera_profile(camera_name)
+    profile = profile_for_name(astrometrics, camera_name)
     return SensorLimits(
         camera_name=profile.camera_name,
         clip_ceiling_adu=profile.clip_ceiling_adu.value,

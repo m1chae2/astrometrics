@@ -8,8 +8,7 @@ free-text filter is normalized, and where each field of the row comes from.
 
 import pytest
 
-from astrometricslib import FilterType
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import CaptureSetting, FilterType
 from wayfindinglib.analytics.result_quality.all_rules import ALL_RULES
 from wayfindinglib.analytics.result_quality.exposure_request import (
     exposure_request_from_statement,
@@ -43,8 +42,8 @@ def _setting(**changes: object) -> CaptureSetting:
     fields: dict[str, object] = {
         "camera": "ASI533MM",
         "filter_name": "Ha",
-        "exposure_seconds": 120.0,
-        "gain_setting": 100,
+        "exposure_s": 120.0,
+        "gain": 100,
         "offset": 50,
         "binning": 1,
     }
@@ -207,7 +206,7 @@ def test_calibration_actions_and_other_rules_make_no_row() -> None:
 
 def test_no_exposure_anywhere_makes_no_row() -> None:
     """With no exposure in the proposal or the setting there is no row."""
-    statement = _statement(action=ProposedAction(frame_count=5), setting=_setting(exposure_seconds=None))
+    statement = _statement(action=ProposedAction(frame_count=5), setting=_setting(exposure_s=None))
     assert exposure_request_from_statement(statement) is None
 
 
@@ -238,7 +237,7 @@ def test_a_diminishing_returns_statement_asks_for_the_doubling_frames() -> None:
         autofocus_from_records=False,
         gaps_used=0,
     )
-    setting = CaptureSetting(camera="ASI533MM Pro", telescope="RC8", filter_name="L", exposure_seconds=30.0)
+    setting = CaptureSetting(camera="ASI533MM Pro", telescope="RC8", filter_name="L", exposure_s=30.0)
     evidence = [MeasurementReference(row_id=1)]
     statement = report_rules.more_frames_statement(result, setting, overheads, evidence)
     assert statement is not None

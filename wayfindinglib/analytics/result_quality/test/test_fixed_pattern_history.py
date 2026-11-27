@@ -19,13 +19,14 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
@@ -44,7 +45,7 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     more_frames_statement,
 )
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
 START = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 APERTURE_SET = "v3-156104df543d"
 RECORD_PATH = "/library/T0/T0_stack_odd_even_apertures.json"

@@ -266,7 +266,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Measures a camera setting's gain and read noise from the library's
     # flat and bias frames. With `save` true it writes the camera profile in
     # the config (after a backup), so the AI's read-only profile withholds it.
-    "calibration:measure_sensor_noise": ("astrometrics.processing.calibration", "measure_sensor_noise"),
+    "calibration:measure_sensor_noise": ("calibration_service", "measure_sensor_noise"),
     # Starts the job that measures the dark and bias frames and returns at
     # once with the job's id. It stores numbers; it never changes a frame.
     "calibration:measure_frames": ("image_processing_service", "start_calibration_measurement"),
@@ -300,9 +300,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "history:target_changes": ("advisory_service", "list_target_changes"),
     "history:live_session_status": ("advisory_service", "get_live_session_status"),
     "observatory:safety_status": ("advisory_service", "get_safety_status"),
-    "calibration:query": ("astrometrics.processing.calibration", "query"),
+    "calibration:query": ("calibration_service", "query"),
     # Judges the sets of one kind from the stored numbers. A read.
-    "calibration:assess": ("astrometrics.processing.calibration", "assess"),
+    "calibration:assess": ("calibration_service", "assess"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),

@@ -10,18 +10,17 @@ from datetime import UTC, datetime
 
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import (
     PIXEL_BLUR_FWHM_SQUARED_FACTOR,
     MeasurementOrigin,
     QualitySubject,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 from wayfindinglib.analytics.result_quality import efficiency as eff
 from wayfindinglib.models.quality.efficiency import EfficiencyReference, NoiseRegime, ScienceGoal
 
-SETTING = CaptureSetting(
-    camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0, gain_setting=100
-)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0, gain=100)
 
 
 def _observation(
@@ -177,7 +176,7 @@ def test_baseline_needs_three_nights_and_takes_the_tenth_percentile() -> None:
 
 def test_baseline_key_ignores_exposure_and_marks_missing_parts() -> None:
     """The key has camera, telescope, filter, gain, offset and binning only."""
-    other = SETTING.model_copy(update={"exposure_seconds": 10.0})
+    other = SETTING.model_copy(update={"exposure_s": 10.0})
     assert eff.baseline_key(SETTING) == eff.baseline_key(other)
     assert eff.baseline_key(SETTING).endswith("gain100|?|?")
 

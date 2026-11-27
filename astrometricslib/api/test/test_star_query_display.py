@@ -1,11 +1,13 @@
-"""Tests for the display features of `StellarCatalog.query`.
+"""Tests for the display features of the star catalog and the star overlay.
 
 These cover what the app's star browser, class browser and image overlay
 need from the library: single-frame detections hidden by default, the search
 and photometry filters, the "most useful first" and "best spectrum match
-first" orders, the per-target counts, and stars placed in pixels on a
-target's image. Each test runs against a real `CatalogAccess` over an empty
-temporary library.
+first" orders, the per-target counts (`StellarCatalog.query` and its
+counts), and stars placed in pixels on a target's image
+(`place_target_stars`, the owner of `Visualization.get_star_overlay`).
+Each test runs against a real `CatalogAccess` over an empty temporary
+library.
 """
 
 from pathlib import Path
@@ -18,6 +20,7 @@ from astrometricslib._internal.drivers.catalog_access import CatalogAccess
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.star_catalog import StarOverlay
 from astrometricslib.models.stellar_source import (
     PhotometryResult,
     SpectroscopyResult,
@@ -26,9 +29,37 @@ from astrometricslib.models.stellar_source import (
 )
 from astrometricslib.models.target import StackConfigurationResult, Target, TargetStackingResult
 from astrometricslib.pipelines.shared.star_catalog_queries import is_unresolved_detection
+from astrometricslib.pipelines.shared.star_overlay import place_target_stars
 from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 DETECTION_ID = "M13:2026-05-01:100:30:Star_7"
+M13 = Target(id="M 13")
+
+
+def _ids(page: object) -> list[str]:
+    """List the ids of a page of stars.
+
+    Returns
+    -------
+    ids : `list` [`str`]
+        The ids, in the page's order.
+    """
+    return [star.id for star in page]
+
+
+def _overlay(
+    catalog: StellarCatalog, target_id: str, image_path: str | None = None, limit: int | None = None
+) -> StarOverlay:
+    """Place a target's stars on an image through the overlay owner.
+
+    Returns
+    -------
+    overlay : `StarOverlay`
+        The placed stars and the reason when there are none.
+    """
+    return place_target_stars(
+        catalog._catalog_access, Target(id=target_id), image_path=image_path, limit=limit
+    )
 
 
 def _catalog(tmp_path: Path) -> StellarCatalog:
@@ -112,8 +143,8 @@ def test_single_frame_detections_are_recognized_by_id() -> None:
 
 def test_single_frame_detections_are_hidden_unless_asked_for(catalog: StellarCatalog) -> None:
     """The default hides detections; include_unresolved brings them back."""
-    hidden = catalog.query(target_id="M 13", detail="ids", limit=None).ids
-    shown = catalog.query(target_id="M 13", detail="ids", include_unresolved=True, limit=None).ids
+    hidden = _ids(catalog.query(target=M13))
+    shown = _ids(catalog.query(target=M13, include_unresolved=True))
 
     assert DETECTION_ID not in hidden
     assert DETECTION_ID in shown
@@ -121,20 +152,21 @@ def test_single_frame_detections_are_hidden_unless_asked_for(catalog: StellarCat
 
 def test_class_counts_skip_single_frame_detections(catalog: StellarCatalog) -> None:
     """The class browser's counts leave detections out by default."""
-    counts = {row["spectralClass"]: row["count"] for row in catalog.query(detail="class_counts").classes}
-    with_detections = catalog.query(detail="class_counts", include_unresolved=True).classes
+    counts = {row.spectral_class: row.count for row in catalog.count_by_class()}
+    with_detections = catalog.count_by_class(include_unresolved=True)
 
     assert counts == {"G": 3, "K": 1}
-    assert {row["spectralClass"]: row["count"] for row in with_detections}["G"] == 4
+    assert {row.spectral_class: row.count for row in with_detections}["G"] == 4
 
 
 def test_target_counts_report_stars_and_data_per_target(catalog: StellarCatalog) -> None:
     """Each target gets its star count and spectra and photometry marks."""
-    counts = catalog.query(detail="target_counts").target_counts
+    counts = {entry.target_id: entry for entry in catalog.count_by_target()}
 
     assert counts["M 13"].star_count == 4
     assert counts["M 13"].has_spectra and counts["M 13"].has_photometry
     assert counts["NGC 1"].model_dump(by_alias=True) == {
+        "targetId": "NGC 1",
         "starCount": 1,
         "hasSpectra": False,
         "hasPhotometry": False,
@@ -143,18 +175,18 @@ def test_target_counts_report_stars_and_data_per_target(catalog: StellarCatalog)
 
 def test_search_and_photometry_filters(catalog: StellarCatalog) -> None:
     """Search matches id or name text; has_photometry keeps light curves."""
-    assert catalog.query(search="gam", detail="ids").ids == ["HD 3"]
-    assert catalog.query(search="hd ", detail="ids", limit=None).ids == ["HD 1", "HD 2", "HD 3", "HD 9"]
-    assert catalog.query(has_photometry=True, detail="ids").ids == ["HD 2"]
+    assert _ids(catalog.query(text="gam")) == ["HD 3"]
+    assert _ids(catalog.query(text="hd ")) == ["HD 1", "HD 2", "HD 3", "HD 9"]
+    assert _ids(catalog.query(has_photometry=True)) == ["HD 2"]
 
 
-def test_summary_rows_say_whether_the_magnitude_is_a_catalog_one(catalog: StellarCatalog) -> None:
+def test_stars_say_whether_the_magnitude_is_a_catalog_one(catalog: StellarCatalog) -> None:
     """Zero and instrumental magnitudes are not catalog magnitudes."""
-    rows = {row["id"]: row for row in catalog.query(target_id="M 13", limit=None).stars}
+    stars = {star.id: star for star in catalog.query(target=M13)}
 
-    assert rows["HD 2"]["hasCatalogMagnitude"] is True
-    assert rows["HD 3"]["hasCatalogMagnitude"] is False
-    assert rows["FIELD_J1"]["hasCatalogMagnitude"] is False
+    assert stars["HD 2"].has_catalog_magnitude is True
+    assert stars["HD 3"].has_catalog_magnitude is False
+    assert stars["FIELD_J1"].has_catalog_magnitude is False
 
 
 def test_catalog_magnitude_rule() -> None:
@@ -168,31 +200,27 @@ def test_catalog_magnitude_rule() -> None:
 
 def test_useful_order_puts_spectra_names_photometry_then_brightness_first(catalog: StellarCatalog) -> None:
     """Spectra first, then named stars, then photometry, then brightest."""
-    ids = catalog.query(target_id="M 13", detail="ids", order="useful", limit=None).ids
+    ids = _ids(catalog.query(target=M13, order_by="useful"))
 
     assert ids == ["HD 1", "HD 3", "HD 2", "FIELD_J1"]
 
 
-def test_match_order_ranks_by_spectrum_match_and_reports_it(catalog: StellarCatalog) -> None:
-    """The best-matched star comes first and rows carry the difference."""
-    rows = catalog.query(spectral_class="G", order="match", limit=None).stars
+def test_match_order_ranks_by_spectrum_match(catalog: StellarCatalog) -> None:
+    """The best-matched star comes first; each star carries its difference."""
+    stars = list(catalog.query(spectral_class="G", order_by="match"))
 
-    assert [row["id"] for row in rows] == ["HD 3", "HD 1", "HD 2"]
-    assert [row["selfDeterminedSpectralTypeRms"] for row in rows] == [0.02, 0.04, None]
+    assert [star.id for star in stars] == ["HD 3", "HD 1", "HD 2"]
+    assert [star.spectroscopy.self_determined_spectral_type_rms for star in stars] == [0.02, 0.04, None]
 
 
-def test_arguments_a_detail_does_not_use_are_refused(catalog: StellarCatalog) -> None:
-    """Whole-library and overlay details refuse filters and selectors."""
-    with pytest.raises(InvalidArgumentError, match="does not use: search"):
-        catalog.query(detail="class_counts", search="HD")
-    with pytest.raises(InvalidArgumentError, match="does not use: include_unresolved"):
-        catalog.query(detail="stats", include_unresolved=True)
-    with pytest.raises(InvalidArgumentError, match="needs target_id"):
-        catalog.query(detail="overlay")
-    with pytest.raises(InvalidArgumentError, match="does not use: has_spectra"):
-        catalog.query(target_id="M 13", detail="overlay", has_spectra=True)
+def test_bad_orders_and_overlay_arguments_are_refused(catalog: StellarCatalog) -> None:
+    """An unknown order, a missing target or a bad overlay limit raises."""
     with pytest.raises(InvalidArgumentError, match="order"):
-        catalog.query(order="brightest")
+        catalog.query(order_by="brightest")
+    with pytest.raises(InvalidArgumentError, match="Target"):
+        place_target_stars(catalog._catalog_access, "M 13")
+    with pytest.raises(InvalidArgumentError, match="limit"):
+        _overlay(catalog, "M 13", limit=0)
 
 
 def _write_reference_image(path: Path, plate_solved: bool = True) -> None:
@@ -220,7 +248,7 @@ def test_overlay_places_stars_through_the_image_wcs(catalog: StellarCatalog, tmp
     target = Target(id="M 13", stacking=TargetStackingResult(stacked_image=str(image)))
     catalog._catalog_access.put([target], "target_catalog", {})
 
-    overlay = catalog.query(target_id="M_13", detail="overlay", limit=10).overlay
+    overlay = _overlay(catalog, "M_13", limit=10).stars
 
     assert [star.id for star in overlay] == ["HD 3"]
     placed = overlay[0]
@@ -243,7 +271,7 @@ def test_overlay_uses_saved_centers_when_the_image_has_no_wcs(tmp_path: Path) ->
         {},
     )
 
-    overlay = catalog.query(target_id="M 13", detail="overlay").overlay
+    overlay = _overlay(catalog, "M 13").stars
 
     assert [(star.id, star.x, star.y, star.radius_px) for star in overlay] == [("HD 5", 13.2, 41.0, 3.5)]
     assert overlay[0].is_catalog_identified
@@ -305,7 +333,7 @@ def test_overlay_follows_the_named_image_not_the_current_stack(
     _write_reference_image(shown)
     catalog._catalog_access.put([_two_stack_target(current_stack, shown)], "target_catalog", {})
 
-    overlay = catalog.query(target_id="M 13", detail="overlay", image_path=str(shown)).overlay
+    overlay = _overlay(catalog, "M 13", image_path=str(shown)).stars
 
     assert [star.id for star in overlay] == ["HD 3"]
     assert overlay[0].x == pytest.approx(100.0, abs=0.2)
@@ -322,10 +350,10 @@ def test_overlay_ignores_saved_centers_from_another_stack(tmp_path: Path) -> Non
     _write_plain_image(other, 600, 400)
     catalog._catalog_access.put([_two_stack_target(current_stack, other)], "target_catalog", {})
 
-    answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(current_stack))
+    answer = _overlay(catalog, "M 13", image_path=str(current_stack))
 
-    assert answer.overlay == []
-    assert answer.overlay_reason == "No sky solution for this image yet"
+    assert answer.stars == ()
+    assert answer.reason == "No sky solution for this image yet"
 
 
 def test_overlay_does_not_draw_on_a_header_that_is_only_a_pointing_guess(tmp_path: Path) -> None:
@@ -338,10 +366,10 @@ def test_overlay_does_not_draw_on_a_header_that_is_only_a_pointing_guess(tmp_pat
     _write_plain_image(other, 600, 400)
     catalog._catalog_access.put([_two_stack_target(other, guess)], "target_catalog", {})
 
-    answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(guess))
+    answer = _overlay(catalog, "M 13", image_path=str(guess))
 
-    assert answer.overlay == []
-    assert answer.overlay_reason == "Header pointing only, not plate-solved"
+    assert answer.stars == ()
+    assert answer.reason == "Header pointing only, not plate-solved"
 
 
 def test_overlay_reads_fit_and_fts_files_in_any_case(catalog: StellarCatalog, tmp_path: Path) -> None:
@@ -353,7 +381,7 @@ def test_overlay_reads_fit_and_fts_files_in_any_case(catalog: StellarCatalog, tm
         _write_plain_image(current, 300, 150)
         catalog._catalog_access.put([_two_stack_target(current, shown)], "target_catalog", {})
 
-        overlay = catalog.query(target_id="M 13", detail="overlay", image_path=str(shown)).overlay
+        overlay = _overlay(catalog, "M 13", image_path=str(shown)).stars
 
         assert [star.id for star in overlay] == ["HD 3"], name
 
@@ -367,26 +395,16 @@ def test_overlay_uses_saved_centers_for_the_only_stack(tmp_path: Path) -> None:
     target = Target(id="M 13", stacking=TargetStackingResult(stacked_image=str(stack)))
     catalog._catalog_access.put([target], "target_catalog", {})
 
-    answer = catalog.query(target_id="M 13", detail="overlay", image_path=str(stack))
+    answer = _overlay(catalog, "M 13", image_path=str(stack))
 
-    assert [(star.id, star.x, star.y) for star in answer.overlay] == [("HD 5", 13.2, 41.0)]
-    assert answer.overlay_reason is None
-
-
-def test_an_image_path_is_refused_with_other_details(catalog: StellarCatalog) -> None:
-    """Only the overlay takes an image path."""
-    with pytest.raises(InvalidArgumentError, match="image_path"):
-        catalog.query(detail="ids", image_path="/tmp/x.fits")
+    assert [(star.id, star.x, star.y) for star in answer.stars] == [("HD 5", 13.2, 41.0)]
+    assert answer.reason is None
 
 
 def test_catalog_magnitude_filter_in_a_region(catalog: StellarCatalog) -> None:
     """A region search can keep only stars with a real catalog magnitude."""
-    ids = catalog.query(
-        ra_deg=250.42, dec_deg=36.45, radius_deg=0.5, has_catalog_magnitude=True, detail="ids", limit=None
-    ).ids
-    others = catalog.query(
-        ra_deg=250.42, dec_deg=36.45, radius_deg=0.5, has_catalog_magnitude=False, detail="ids", limit=None
-    ).ids
+    ids = _ids(catalog.query(ra_deg=250.42, dec_deg=36.45, radius_deg=0.5, has_catalog_magnitude=True))
+    others = _ids(catalog.query(ra_deg=250.42, dec_deg=36.45, radius_deg=0.5, has_catalog_magnitude=False))
 
     assert ids == ["HD 1", "HD 2"]
     assert others == ["FIELD_J1", "HD 3"]
@@ -409,7 +427,7 @@ def test_overlay_never_labels_clusters_or_field_detections(tmp_path: Path) -> No
         {},
     )
 
-    overlay = catalog.query(target_id="M 13", detail="overlay").overlay
+    overlay = _overlay(catalog, "M 13").stars
 
     assert [star.id for star in overlay] == ["FIELD_J249.7726+35.4880"]
 
@@ -437,7 +455,7 @@ def test_overlay_puts_catalog_identified_stars_first_and_respects_the_limit(tmp_
     )
     catalog._catalog_access.put([*field_stars, identified], "stellar_catalog", {})
 
-    overlay = catalog.query(target_id="M 13", detail="overlay", limit=3).overlay
+    overlay = _overlay(catalog, "M 13", limit=3).stars
 
     assert [star.id for star in overlay] == ["TYC 1234", "FIELD_J0", "FIELD_J1"]
     assert overlay[0].spectral_type == "O9.5V"

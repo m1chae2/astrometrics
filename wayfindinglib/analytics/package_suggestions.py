@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, CaptureSetting
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -31,7 +31,7 @@ from astrometricslib.parameters import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.reports import CaptureSetting, SubjectLevel
+from astrometricslib.reports import SubjectLevel
 from wayfindinglib.analytics.result_quality.forecast import NORMALIZED_NOISE_METRIC, PINNED_STACK_METRICS
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import ProposedAction
@@ -175,8 +175,8 @@ def capture_setting_key(setting: CaptureSetting | None) -> str:
         setting.camera,
         setting.telescope,
         setting.filter_name,
-        None if setting.exposure_seconds is None else f"{setting.exposure_seconds:g}",
-        setting.gain_setting,
+        None if setting.exposure_s is None else f"{setting.exposure_s:g}",
+        setting.gain,
         setting.offset,
         setting.binning,
     )

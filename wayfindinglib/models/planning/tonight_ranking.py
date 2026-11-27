@@ -21,7 +21,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.quality.statements import Confidence
 

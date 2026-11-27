@@ -10,10 +10,10 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import FrameRecord, Target
+from astrometricslib import CaptureSetting, FrameRecord, Target
 from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.efficiency import (
     PINNED_METRIC_VERSIONS,
     READ_NOISE_METRIC,
@@ -26,8 +26,8 @@ SETTING = CaptureSetting(
     camera="CamA",
     telescope="Scope",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=10,
     binning=1,
 )

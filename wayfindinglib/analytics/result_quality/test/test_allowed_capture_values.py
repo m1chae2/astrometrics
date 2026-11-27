@@ -14,7 +14,7 @@ from wayfindinglib.analytics.result_quality.allowed_capture_values import (
     NOT_MEASURED_NOTE,
     allowed_capture_values,
 )
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 
 def _profile(*settings: tuple[str, str, str], generic: bool = False) -> SimpleNamespace:
@@ -106,7 +106,7 @@ def _library() -> SimpleNamespace:
         An object whose camera-profile call refuses, as a configuration with
         no profiles does, so names are compared as written.
     """
-    return SimpleNamespace(processing=no_camera_profiles_processing())
+    return SimpleNamespace(calibration=no_camera_profiles_calibration(), config=NO_CAMERAS)
 
 
 def test_camera_names_match_through_every_spelling() -> None:
@@ -119,7 +119,7 @@ def test_camera_names_match_through_every_spelling() -> None:
 
 def test_the_filters_for_a_camera_come_from_that_cameras_library_settings() -> None:
     """Only settings of the named camera give filters."""
-    from astrometricslib.reports import CaptureSetting
+    from astrometricslib import CaptureSetting
     from wayfindinglib.analytics.result_quality.allowed_capture_values import (
         allowed_capture_values_for_camera,
     )

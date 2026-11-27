@@ -63,6 +63,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "Astrometrics",
     "CalibrationCatalog",
     "Camera",
+    "CaptureSetting",
     "FilterType",
     "FilterWheel",
     "Focuser",
@@ -125,7 +126,6 @@ EXPECTED_MODULE_NAMES = {
         "EARLIER_NIGHTS_VARIANT",
         "AstrometryPipelineQualityMetrics",
         "AstrometryQualitySummary",
-        "CaptureSetting",
         "ExposureGroupSummary",
         "InputQualityReport",
         "LimitTier",
@@ -167,6 +167,7 @@ EXPECTED_MODULE_NAMES = {
         "running_as_job",
     }),
     "astrometricslib.parameters": frozenset({
+        "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
         "ConfigurationValues",
         "EquipmentKind",
         "EquipmentValues",
@@ -336,14 +337,16 @@ SUB_API_MEMBERS = {
         "scan",
     },
     "stars": {
-        "analyze_periodicity",
+        "count_by_class",
+        "count_by_target",
         "create",
-        "dataset_version",
         "delete",
-        "find_or_create_by_position",
         "get",
         "get_spectrum",
+        "get_statistics",
+        "measure_periodicity",
         "query",
+        "record_periodicity",
         "update",
     },
     "processing": {
@@ -351,7 +354,6 @@ SUB_API_MEMBERS = {
         "DEFAULT_ANALYSIS_STAGES",
         "SELECTABLE_ANALYSIS_STAGES",
         "acquire_job_slot",
-        "calibration",
         "find_stack_configuration",
         "get_stack_identification",
         "identify_stack",
@@ -368,16 +370,16 @@ SUB_API_MEMBERS = {
         "stack_summary",
         "stop_stacking_programs",
     },
-    "processing.calibration": {
-        "add_frames",
+    "calibration": {
         "assess",
-        "camera_profile",
-        "measure_frames",
+        "frames",
+        "get_profile",
+        "match",
         "measure_sensor_noise",
         "query",
-        "reindex_frames",
-        "save",
+        "record_sensor_noise",
     },
+    "calibration.frames": {"add", "record_measurements", "scan"},
     "quality": {
         "blocks",
         "calibration_identities",
@@ -410,6 +412,7 @@ SUB_API_MEMBERS = {
     },
     "visualization": {
         "get_last_captured_image",
+        "get_star_overlay",
         "place_stack_picture_on_sky",
         "plot",
         "render_fits",
@@ -442,6 +445,7 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
 
     astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert _public_members(astrometrics) == {
+        "calibration",
         "config",
         "jobs",
         "observatories",
@@ -479,7 +483,7 @@ def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
     astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert astrometrics.processing._targets is astrometrics.targets
     assert astrometrics.quality._targets is astrometrics.targets
-    assert astrometrics.processing.calibration._targets is astrometrics.targets
+    assert astrometrics.processing._calibration is astrometrics.calibration
     assert astrometrics.visualization._stars is astrometrics.stars
 
 

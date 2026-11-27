@@ -36,26 +36,25 @@ def run_catalog_audit() -> None:
 
     print("Running Stellar Catalog Quality Auditing (Use Case 8.2)...")
     try:
-        audit_results = astrometrics.stars.query(detail="stats").stats
+        audit_results = astrometrics.stars.get_statistics()
 
         print("\n==========================================")
         print("STELLAR CATALOG AUDIT REPORT")
         print("==========================================")
-        print(f"Total Discovered Stellar Objects:   {audit_results.get('total_objects')}")
-        print(f"Identified (Named) Star Profiles:   {audit_results.get('identified_objects')}")
-        print(f"Spectral Profile Coverage:          {audit_results.get('spectral_coverage')}%")
-        print(f"Photometric Lightcurve Coverage:    {audit_results.get('photometric_coverage')}%")
+        print(f"Total Discovered Stellar Objects:   {audit_results.total_objects}")
+        print(f"Identified (Named) Star Profiles:   {audit_results.identified_objects}")
+        print(f"Spectral Profile Coverage:          {audit_results.spectral_coverage_pct}%")
+        print(f"Photometric Lightcurve Coverage:    {audit_results.photometric_coverage_pct}%")
 
-        stats = audit_results.get("stats", {})
         print("\nBreakdown Statistics:")
-        print(f"  Named Stars:                      {stats.get('names')}")
-        print(f"  Stars with Spectral Data:         {stats.get('spectral')}")
-        print(f"  Stars with Magnitude Data:        {stats.get('magnitude')}")
+        print(f"  Named Stars:                      {audit_results.identified_objects}")
+        print(f"  Stars with Spectral Data:         {audit_results.with_spectral_type}")
+        print(f"  Stars with Magnitude Data:        {audit_results.with_magnitude}")
         print("==========================================")
 
         # Basic verification check
         min_expected = getattr(args, "min_spectral_coverage", 0.0)
-        actual_cov = audit_results.get("spectral_coverage", 0.0)
+        actual_cov = audit_results.spectral_coverage_pct
         if actual_cov < min_expected:
             print(
                 f"WARNING: Spectral coverage ({actual_cov}%) is below expected threshold ({min_expected}%)."

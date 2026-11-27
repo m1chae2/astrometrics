@@ -7,10 +7,8 @@ lives today, so moving the code later changes this file only.
 """
 
 from astrometricslib.models.catalog_queries import (
-    CalibrationQueryResult,
     OverlayStar,
     ReindexReport,
-    StarQueryResult,
     TargetCameraCounts,
     TargetNightCounts,
     TargetReindexChange,
@@ -20,11 +18,16 @@ from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
 from astrometricslib.models.quality.quality_summary import TargetSessionContribution
 from astrometricslib.models.resolution import Resolution
+from astrometricslib.models.star_catalog import (
+    PeriodicitySearch,
+    SpectralClassCount,
+    StarCatalogStatistics,
+    StarOverlay,
+)
 from astrometricslib.models.stellar_source import FileItem, GroupedFrameStat, TargetFilesResponse
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
 
 __all__ = [
-    "CalibrationQueryResult",
     "FailedDeletion",
     "FieldCenter",
     "FileItem",
@@ -33,10 +36,13 @@ __all__ = [
     "ImageDeletionResult",
     "ImagedFieldCenters",
     "OverlayStar",
+    "PeriodicitySearch",
     "ReindexReport",
     "RenderedImage",
     "Resolution",
-    "StarQueryResult",
+    "SpectralClassCount",
+    "StarCatalogStatistics",
+    "StarOverlay",
     "TargetCameraCounts",
     "TargetFilesResponse",
     "TargetNightCounts",

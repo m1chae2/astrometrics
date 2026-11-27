@@ -12,8 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.models.catalog_queries import StarQueryResult
+from astrometricslib.models.page import Page
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
+from astrometricslib.models.target import Target
 from astrometricslib.scripts import compare_spectra_with_gaia_xp as script
 from astrometricslib.test.synthetic.gaia_xp_spectra import (
     CAMERA_NAME,
@@ -73,15 +74,15 @@ class FakeCatalog:
         """
         self.stars = {star.id: star for star in stars}
 
-    def query(self, **_arguments: object) -> StarQueryResult:
-        """Give every star as full records, like `StellarCatalog.query`.
+    def query(self, **_arguments: object) -> Page[StellarObject]:
+        """Give every star, like `StellarCatalog.query`.
 
         Returns
         -------
-        answer : `StarQueryResult`
-            The stars in the ``objects`` field.
+        page : `Page` [`StellarObject`]
+            Every star it holds.
         """
-        return StarQueryResult(detail="objects", objects=list(self.stars.values()))
+        return Page[StellarObject].of(list(self.stars.values()))
 
 
 def make_astrometrics(stars: list[StellarObject]) -> SimpleNamespace:
@@ -94,6 +95,7 @@ def make_astrometrics(stars: list[StellarObject]) -> SimpleNamespace:
     """
     return SimpleNamespace(
         stars=FakeCatalog(stars),
+        targets=SimpleNamespace(get=lambda target_id, **_: Target(id=target_id)),
         config=SimpleNamespace(get_primary_camera_name=lambda: CAMERA_NAME),
     )
 

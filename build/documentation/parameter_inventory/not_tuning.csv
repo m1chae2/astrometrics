@@ -71,6 +71,7 @@ astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory 
 astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
 astrometricslib/api/_target_frames.py,TargetFrames.query.offset,Pagination start; 0 means from the first row
+astrometricslib/api/calibration.py,CalibrationCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.offset,Pagination start; 0 means from the first row
@@ -86,7 +87,6 @@ astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item c
 astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
 astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/stars.py,StellarCatalog.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/targets.py,TargetCatalog.measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 means from the first row
@@ -292,9 +292,7 @@ astrometricslib/pipelines/shared/solved_star_list.py,SOLVED_STARS_FILE_VERSION,V
 astrometricslib/pipelines/shared/star_analysis.py,MAXIMUM_ROWS_PER_LIST,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,TOP_CANDIDATES,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,_round.digits,Rounding digits for display
-astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,Read cap for ranking
-astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_LIMITS,Reply size limits
-astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_MAXIMUM_RADIUS_DEGREES,Reply size cap on query radius
+astrometricslib/pipelines/shared/star_catalog_queries.py,query_stars.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
 astrometricslib/pipelines/shared/target_overview.py,query_targets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/target_sessions.py,SESSION_NIGHT_BOUNDARY_HOUR,Noon night boundary convention; duplicates item 193
@@ -376,6 +374,7 @@ astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database re
 astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,_LOAD_CHUNK_SIZE,Batch size for reading stored stars in a tuning run; affects only memory use
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
 astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUNDED_SIGMA,Unbounded sigma sentinel
+astrometricslib/pipelines/stacking/calibration_catalog.py,query_calibration_sets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,CALIBRATION_MEASUREMENT_WORKERS,software plumbing
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
@@ -756,7 +755,6 @@ wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentin
 wayfindinglib/tasks/control_tasks/target_changes.py,find_target_changes.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
 wayfindinglib/tasks/execution_tasks/session_recorder.py,ObservationSessionRecorder.__init__.snapshot_interval_seconds,Recording cadence; plumbing
-wayfindinglib/tasks/planning_tasks/calibration_advisory_tasks.py,_EXPOSURE_MATCH_TOLERANCE_SECONDS,Float round-off tolerance
 wayfindinglib/tasks/planning_tasks/depth_goal_tasks.py,DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
 wayfindinglib/tasks/planning_tasks/mosaic_tasks.py,calculate_panels.rotation_deg,0 means no rotation; the caller passes the angle
 wayfindinglib/tasks/planning_tasks/scheduling.py,_DEFAULT_STEP_MINUTES,Unused in file; step default dead

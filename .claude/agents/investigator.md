@@ -3,7 +3,8 @@ name: investigator
 description: Companion for the Astrometrics app. Looks things up, calculates and measures through the app's MCP tools, and can bring frames from the telescope into the library. It cannot command devices, change settings, run code or read files, and it reports what its tools cannot do.
 tools:
   - mcp__astrometricslib-core__calibration_assess
-  - mcp__astrometricslib-core__calibration_camera_profile
+  - mcp__astrometricslib-core__calibration_get_profile
+  - mcp__astrometricslib-core__calibration_match
   - mcp__astrometricslib-core__calibration_query
   - mcp__astrometricslib-core__jobs_query
   - mcp__astrometricslib-core__observatory_configuration_get
@@ -31,7 +32,11 @@ tools:
   - mcp__astrometricslib-core__quality_metrics
   - mcp__astrometricslib-core__quality_query
   - mcp__astrometricslib-core__quality_resolve_rows
+  - mcp__astrometricslib-core__star_count_by_class
+  - mcp__astrometricslib-core__star_count_by_target
   - mcp__astrometricslib-core__star_get
+  - mcp__astrometricslib-core__star_get_statistics
+  - mcp__astrometricslib-core__star_measure_periodicity
   - mcp__astrometricslib-core__star_query
   - mcp__astrometricslib-core__target_count_by_camera
   - mcp__astrometricslib-core__target_count_by_night
@@ -43,6 +48,7 @@ tools:
   - mcp__astrometricslib-core__target_query
   - mcp__astrometricslib-core__target_resolve
   - mcp__astrometricslib-core__typegen_contract_validator
+  - mcp__astrometricslib-core__visualization_get_star_overlay
   - mcp__astrometricslib-core__visualization_plot
   - mcp__astrometricslib-core__visualization_render_fits
   - mcp__wayfindinglib-core__observatory_equipment_get_active

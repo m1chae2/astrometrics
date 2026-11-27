@@ -33,9 +33,9 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib import FilterType
+from astrometricslib import CaptureSetting, FilterType
 from astrometricslib.exceptions import ConfigurationError
-from astrometricslib.reports import CaptureSetting
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import normalize_name
 
 NOT_MEASURED_NOTE = "setting not measured"
@@ -46,7 +46,7 @@ class CameraProfileLike(Protocol):
     """The parts of a camera profile this module reads.
 
     `astrometricslib` returns the profile from
-    `processing.calibration.camera_profile` but does not export its class
+    `calibration.get_profile` but does not export its class
     from the package root, and this library imports only from the public
     modules. A `Protocol` names what is needed.
     """
@@ -313,7 +313,7 @@ def allowed_capture_values(
     Parameters
     ----------
     camera_profile : `CameraProfileLike`
-        The camera's profile, from `processing.calibration.camera_profile`.
+        The camera's profile, from `calibration.get_profile`.
         Its measured settings are the allowed ones. The generic fallback
         profile counts as having none.
     configured_filter_names : `Iterable` [`str`], optional
@@ -381,7 +381,7 @@ def camera_names_match(astrometrics: Any, first: str, second: str) -> bool:
     for name in (first, second):
         spellings_of_name = {normalize_name(name)}
         try:
-            profile = astrometrics.processing.calibration.camera_profile(name)
+            profile = profile_for_name(astrometrics, name)
             spellings_of_name.update(
                 normalize_name(alias)
                 for alias in (profile.camera_name, profile.record_name, *profile.name_aliases)
@@ -422,7 +422,7 @@ def allowed_capture_values_for_camera(
         The allowed values, with a `check` method for a request.
     """
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except ConfigurationError:
         # A configuration with no camera profiles cannot say what was
         # measured. Treat the camera as unprofiled: requests are accepted and

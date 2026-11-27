@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from astrometricslib import CaptureSetting
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment, run_as_background_job
 from backend.services.error_logging import log_failure
@@ -138,7 +139,11 @@ class ImageProcessingService(BaseBackgroundService):
             background and records its progress in the job list.
         """
         return run_as_background_job(
-            lambda: self._calibration.measure_frames(kind=kind, camera_id=camera_id, force=force),
+            lambda: self._calibration.frames.record_measurements(
+                kind=kind,
+                setting=None if camera_id is None else CaptureSetting(camera=camera_id),
+                force=force,
+            ),
             grace_period_seconds=CALIBRATION_MEASUREMENT_GRACE_SECONDS,
         )
 
@@ -196,7 +201,7 @@ class ImageProcessingService(BaseBackgroundService):
             """
             try:
                 only_kind = next(iter(kinds)) if len(kinds) == 1 else None
-                return self._calibration.measure_frames(kind=only_kind, force=False)
+                return self._calibration.frames.record_measurements(kind=only_kind, force=False)
             finally:
                 self._finish_calibration_pass()
 

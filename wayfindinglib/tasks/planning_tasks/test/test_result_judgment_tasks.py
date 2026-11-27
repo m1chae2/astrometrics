@@ -26,7 +26,7 @@ def _library(*stars: StellarObject) -> SimpleNamespace:
         Has a ``stars`` catalog with ``get``.
     """
     by_id = {star.id: star for star in stars}
-    return SimpleNamespace(stars=SimpleNamespace(get=lambda object_id: by_id.get(object_id)))
+    return SimpleNamespace(stars=SimpleNamespace(get=lambda object_id, **_: by_id.get(object_id)))
 
 
 def _poor_spectrum_star() -> StellarObject:

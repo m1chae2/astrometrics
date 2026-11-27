@@ -525,7 +525,6 @@ HEAVY_LISTS: tuple[HeavyList, ...] = (
         "ObservationSessionWithProgress", ("weather_samples",), 0, "weather samples", _NIGHT_SAMPLES_NOTE
     ),
     HeavyList("LiveGuidingStatus", ("history",), 50, "guiding samples", "The newest samples are first."),
-    HeavyList("StarQueryResult", ("stars",), 50, "stars", _PAGE_NOTE),
     HeavyList("QualityQueryResult", ("rows",), 50, "rows", _PAGE_NOTE),
     HeavyList("FrameStatusReport", ("frames",), 50, "frames", "Ask about fewer frames."),
 )

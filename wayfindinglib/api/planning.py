@@ -844,7 +844,7 @@ class ObservationPlanning(MovedNames):
         from wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks import build_calibration_advisory
 
         return build_calibration_advisory(
-            self._astrometrics.processing.calibration,
+            self._astrometrics.calibration,
             camera_id,
             FrameType(frame_type),
             exposure_seconds,

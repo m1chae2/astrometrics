@@ -66,7 +66,7 @@ def test_new_methods_are_declared_and_served() -> None:
     for method, handler in NEW_READS.items():
         assert method in RPC_METHODS
         assert rpc_registry._handlers[method] == ("advisory_service", handler)
-    assert rpc_registry._handlers["calibration:query"] == ("astrometrics.processing.calibration", "query")
+    assert rpc_registry._handlers["calibration:query"] == ("calibration_service", "query")
     assert "calibration:query" in RPC_METHODS
 
 
@@ -234,10 +234,10 @@ def test_calibration_query_accepts_the_match_arguments() -> None:
     """The route target takes the match arguments (autospec checks names)."""
     from unittest.mock import create_autospec
 
-    from astrometricslib import CalibrationCatalog
+    from backend.services.processing.calibration_service import CalibrationService
 
-    catalog = create_autospec(CalibrationCatalog, instance=True)
-    catalog.query(
+    service = create_autospec(CalibrationService, instance=True)
+    service.query(
         detail="match",
         kind="bias",
         camera_id="ASI533",
@@ -246,7 +246,7 @@ def test_calibration_query_accepts_the_match_arguments() -> None:
         binning="2",
         temperature_c=-9.0,
     )
-    catalog.query.assert_called_once()
+    service.query.assert_called_once()
 
 
 def test_visibility_places_a_star_the_library_does_not_hold_by_its_position() -> None:

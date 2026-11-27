@@ -203,14 +203,14 @@ class CalibrationMeasurementReport(BaseModel):
 class CalibrationIngestReport(BaseModel):
     """What a rescan of the calibration library changed.
 
-    Returned by `CalibrationCatalog.refresh`, so a caller that has just
+    Returned by `calibration.frames.add` and `scan`, so a caller that has just
     downloaded new frames learns at once whether they were found, where
     they were filed and whether the new sets are good enough. The rescan
     measures no frame of a dark or bias set: those sets are judged from the
-    numbers `CalibrationCatalog.measure_frames` stored, so a new frame
+    numbers `calibration.frames.record_measurements` stored, so a new frame
     without numbers gives a set whose checks are ``not_checked`` with the
     reason. A new set of flats is measured, as it always was. The app
-    starts `CalibrationCatalog.measure_frames` after an ingest or a sync
+    starts `calibration.frames.record_measurements` after an ingest or a sync
     that added darks or biases; a script must call it itself.
     """
 
@@ -224,6 +224,8 @@ class CalibrationIngestReport(BaseModel):
     total_count: int = Field(alias="totalCount")
     # Only the groups that gained or lost frames.
     changes: list[CalibrationGroupChange] = Field(default_factory=list)
+    # The path of each frame the rescan added, sorted.
+    added_paths: list[str] = Field(default_factory=list, alias="addedPaths")
     # One health record for each set that gained frames, in the same model
     # `CalibrationCatalog.assess` returns.
     assessments: list[CalibrationSetHealth] = Field(default_factory=list)

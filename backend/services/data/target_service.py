@@ -17,6 +17,7 @@ from backend.services.data.image_paths import resolve_allowed_image
 from backend.services.data.image_service import ImageService
 from backend.services.error_logging import log_failure
 from backend.services.infrastructure.phone_share import send_file_to_phone
+from backend.services.processing.calibration_service import CalibrationService, light_frame_counts
 from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)
@@ -367,8 +368,7 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return {"lights": []}
-        lights = self.astrometrics.processing.calibration.query(detail="target_frames", target=target).lights
-        return {"lights": lights or []}
+        return {"lights": light_frame_counts(target)}
 
     def get_file_list(self, target_id: str) -> dict:
         """Return a formatted catalog file list with all frame details.
@@ -586,10 +586,7 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return []
-        answer = self.astrometrics.processing.calibration.query(
-            detail="target_match", target=target, camera_id=camera
-        )
-        return answer.groups or []
+        return CalibrationService(self.astrometrics).frame_groups(target, camera)
 
     def save_target(self, target: Target) -> None:
         """Save the changes a pipeline made to a target.

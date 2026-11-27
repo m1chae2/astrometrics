@@ -1,37 +1,27 @@
 """Data structures for the answers of the catalog lookups.
 
-The three catalogs each have one general lookup, `query`, that reads and
-never changes anything. These structures are what those lookups return:
+The target and star catalogs each have one general lookup, `query`, that
+reads and never changes anything. These structures are what those lookups
+return:
 
 - `TargetCameraCounts` from `TargetCatalog.count_by_camera`: the frames each
   camera took, and each target's frames per configured camera.
 - `TargetNightCounts` from `TargetCatalog.count_by_night`: how many targets
   have frames from each observing night.
-- `StarQueryResult` from `StellarCatalog.query`: star ids, summary rows,
-  analysis records, full star records, class counts, per-target star
-  counts (`TargetStarCount`), the stars drawn over a target's image
-  (`OverlayStar`), or library statistics.
-- `CalibrationQueryResult` from `CalibrationCatalog.query`: how many dark,
-  bias and flat frames the library holds, or how a target's frames match it.
+- `TargetStarCount` from `StellarCatalog.count_by_target`: one target's
+  star count and data flags. `OverlayStar` is one star drawn over a
+  target's image (`Visualization.get_star_overlay`).
 - `ReindexReport` from `TargetFrames.scan`, which does change data: how many
   frames each target gained or lost.
-
-For the star and calibration answers, only the fields that belong to the
-chosen ``detail`` are filled; the rest stay `None`. Rows are plain
-dictionaries, so a caller can pass them on as JSON unchanged.
 """
 
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.models.stellar_source import StellarObject
-
 __all__ = [
-    "CalibrationQueryResult",
     "OverlayStar",
     "ReindexReport",
-    "StarQueryResult",
     "TargetCameraCounts",
     "TargetNightCounts",
     "TargetReindexChange",
@@ -106,71 +96,15 @@ class OverlayStar(BaseModel):
 class TargetStarCount(BaseModel):
     """How many stars belong to one target, and what data they have."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
+    # The target's id. Empty in the app's per-target table, which keys the
+    # counts by target id instead.
+    target_id: str = Field(default="", alias="targetId")
     star_count: int = Field(default=0, alias="starCount")
     # True when at least one of the target's stars has that kind of data.
     has_spectra: bool = Field(default=False, alias="hasSpectra")
     has_photometry: bool = Field(default=False, alias="hasPhotometry")
-
-
-class StarQueryResult(BaseModel):
-    """The answer of `StellarCatalog.query`."""
-
-    detail: str
-    total_matching: int | None = None
-    offset: int | None = None
-    truncated: bool | None = None
-    # detail="ids": the star ids.
-    ids: list[str] | None = None
-    # detail="exists": which of the given ids are in the library.
-    found: list[str] | None = None
-    # detail="summary": id, name, position, magnitude, spectral type,
-    # targets and data flags, with the camelCase keys the app reads.
-    # detail="analysis": what the analysis found for each star.
-    stars: list[dict[str, Any]] | None = None
-    # detail="objects": the full star records.
-    objects: list[StellarObject] | None = None
-    # detail="class_counts": how many stars each spectral class has.
-    classes: list[dict[str, Any]] | None = None
-    # detail="target_counts": each target's star count and data flags.
-    target_counts: dict[str, TargetStarCount] | None = None
-    # detail="overlay": the target's stars placed on its reference image.
-    overlay: list[OverlayStar] | None = None
-    # detail="overlay": why the list is empty, when the image has no sky
-    # solution (WCS) and no saved pixel center fits it. Otherwise None.
-    overlay_reason: str | None = None
-    # detail="stats": counts and coverage for the whole library.
-    stats: dict[str, Any] | None = None
-
-
-class CalibrationQueryResult(BaseModel):
-    """The answer of `CalibrationCatalog.query`."""
-
-    detail: str
-    # How far, in degrees Celsius, a dark's sensor temperature may differ from
-    # a light frame's and still count as a match. Every answer states the
-    # tolerance the library matched with, so a caller need not keep a copy.
-    dark_temperature_tolerance_c: float | None = None
-    # The calibration kind asked for (dark, bias or flat), or None for all.
-    kind: str | None = None
-    target_id: str | None = None
-    # detail="counts": one row per camera, setting and exposure (or filter).
-    darks: list[dict[str, Any]] | None = None
-    biases: list[dict[str, Any]] | None = None
-    flats: list[dict[str, Any]] | None = None
-    # detail="target_match": the target's light frames grouped by filter,
-    # gain and exposure, each with the number of matching darks.
-    groups: list[dict[str, Any]] | None = None
-    # detail="target_frames": the target's light frames counted by
-    # telescope, camera, gain, exposure and filter.
-    lights: list[dict[str, Any]] | None = None
-    # detail="counts" and "match": the totals of each camera, so a reader
-    # does not add up rows.
-    camera_totals: list[dict[str, Any]] | None = None
-    # detail="match": the `row_key` of every counts row that has the asked
-    # settings.
-    matched_row_keys: list[str] | None = None
 
 
 class TargetReindexChange(BaseModel):

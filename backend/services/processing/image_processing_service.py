@@ -10,9 +10,8 @@ from typing import Any
 
 from astrometricslib import CaptureSetting
 from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment
+from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment, run_as_background_job
 from backend.services.error_logging import log_failure
-from backend.services.infrastructure.background_jobs import run_as_background_job
 from backend.services.infrastructure.base_service import BaseBackgroundService
 from backend.services.processing.stack_review_service import abandon_preview_job, is_preview_job_running
 

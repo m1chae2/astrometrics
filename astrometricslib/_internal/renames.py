@@ -87,10 +87,6 @@ RENAMES: dict[str, str] = {
         "astrometrics.visualization.get_sky_picture(target)"
     ),
     # Step 4f: names the host modules no longer offer.
-    "astrometricslib.jobs.run_as_background_job": (
-        "astrometricslib.jobs.registered_job(...) around the call (the background thread is the "
-        "app's and the MCP servers' own wrapper)"
-    ),
     "astrometricslib.drivers.LIBRARY_DATA_KINDS": "astrometricslib.drivers.get_library_data_version(config)",
     "astrometricslib.drivers.LibraryFolders": "astrometricslib.drivers.library_folders(config_file)",
     "astrometricslib.drivers.read_launch_identity": (

@@ -1,4 +1,4 @@
-"""Purpose: Tests for the backend's background job wrapper.
+"""Purpose: Tests for the shared background job helper.
 
 Description: A slow library call runs in a thread. A quick one hands back
 its result and the id of the job it recorded; a slow one hands back the job
@@ -13,8 +13,8 @@ import pytest
 
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.jobs.background import run_as_background_job
 from astrometricslib.jobs import registered_job
-from backend.services.infrastructure.background_jobs import run_as_background_job
 
 FINISHES_IN_TIME_S = 60.0
 """A grace period long enough for quick work to end inside it on a slow
@@ -69,7 +69,7 @@ def _stack_vega(result: dict, delay_seconds: float = 0.0) -> Callable[[], dict]:
 
 
 class TestRunAsBackgroundJob:
-    """Tests for `background_jobs.run_as_background_job`."""
+    """Tests for `background.run_as_background_job`."""
 
     def test_fast_work_returns_its_real_result_and_its_own_job_id(self, isolated_logs: str) -> None:
         """A quick call gets its result and the id of the job it recorded."""

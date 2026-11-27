@@ -17,6 +17,7 @@ from typing import NoReturn
 
 from astrometricslib._internal.renames import moved_module_name
 from astrometricslib.api.jobs import Jobs
+from astrometricslib.foundation.jobs.background import run_as_background_job
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
 from astrometricslib.foundation.jobs.runner import (
@@ -63,6 +64,7 @@ __all__ = [
     "raise_if_abandoned",
     "registered_job",
     "report_started_jobs",
+    "run_as_background_job",
     "running_as_job",
 ]
 

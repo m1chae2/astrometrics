@@ -1,18 +1,17 @@
 """Purpose: Run a slow library call in a thread, and answer with its job.
 
-Description: An MCP server has one connection to its client. A slow library
-call (one marked with `background_job`, such as running a pipeline) would
-block it for minutes. `run_as_background_job` runs the call in a thread of its
-own. A call that ends within a short wait gives back its real result; a slower
-one gives back the id of the job it recorded, which the client follows with
-the ``jobs_*`` tools. The thread keeps running whatever the client does next,
-so a client that stops waiting cannot kill the work partway through.
+Description: Some calls an app starts take longer than a request should
+wait: making a preview again, comparing two stacks, measuring the
+calibration frames, or any slow tool call. `run_as_background_job` runs such
+a call in a thread of its own. A call that ends within a short wait gives
+back its real result; a slower one gives back the id of the job it
+recorded, which the app follows in its job list. The thread keeps running
+whatever the app does next.
 
-Every pipeline run records its own job. This wrapper only listens for that
-job with the library's public job context tools (`report_started_jobs`,
-`registered_job`) and stores the call's result on it, so it is read back with
-``jobs_get``. The backend has its own copy of this wrapper, since the backend
-and the MCP servers may not import each other.
+Every pipeline run records its own job. This helper only listens for that
+job with the job context tools (`report_started_jobs`, `registered_job`) and
+stores the call's result on it. It is the one owner for both adapters, the
+backend and the MCP servers, which reach it through `astrometricslib.jobs`.
 """
 
 import dataclasses
@@ -21,7 +20,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from astrometricslib.jobs import registered_job, report_started_jobs
+from astrometricslib.foundation.jobs.runner import registered_job, report_started_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +62,7 @@ def run_as_background_job(
     grace_period_seconds: float = 5.0,
     job_type: str | None = None,
     target_id: str | None = None,
+    follow_hint: str = "follow it in the job list with this job id",
 ) -> dict[str, Any]:
     """Run work in a background thread and answer with its result or its job.
 
@@ -79,6 +79,9 @@ def run_as_background_job(
     target_id : `str`, optional
         The target the job works on, with ``job_type``. Defaults to the job
         type.
+    follow_hint : `str`, optional
+        How the caller follows a job that is still running, for the reply's
+        message (for example, which tool or screen shows it).
 
     Returns
     -------
@@ -142,8 +145,7 @@ def run_as_background_job(
         "jobId": job.job_id if job else None,
         "logFilePath": job.log_file_path if job else None,
         "message": (
-            f"Still running after {grace_period_seconds:.0f}s; follow it with jobs_get and jobs_get_log "
-            "using this job id."
+            f"Still running after {grace_period_seconds:.0f}s; {follow_hint}."
             if job
             else f"Still running after {grace_period_seconds:.0f}s in the background. It records no job "
             "to follow; check its effect once it has had time to finish."

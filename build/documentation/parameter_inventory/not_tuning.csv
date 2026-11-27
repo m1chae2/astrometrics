@@ -96,6 +96,8 @@ astrometricslib/foundation/config.py,[Processing.Parallelism] worker_niceness,Pr
 astrometricslib/foundation/config.py,[Processing.Siril] flat_match_time_limit_seconds,Operational time budget of the flat-to-light match; not tuning
 astrometricslib/foundation/config.py,[Processing] prefetch_workers,Plumbing: worker count
 astrometricslib/foundation/errors.py,RPC_CODES,Plumbing or protocol constant
+astrometricslib/foundation/jobs/background.py,JOB_RECORD_WAIT_SECONDS,Extra wait for a slow disk to write the job row; plumbing
+astrometricslib/foundation/jobs/background.py,run_as_background_job.grace_period_seconds,How long a caller waits before answering with the job id; plumbing
 astrometricslib/foundation/jobs/runner.py,JobHandle.mark.progress_current,Progress value of a finished job; plumbing
 astrometricslib/foundation/jobs/runner.py,_BorrowedJobHandle.mark.progress_current,Progress value of a finished job; plumbing
 astrometricslib/foundation/jobs/runner.py,background_job.grace_period_seconds,Job wait before returning a handle; plumbing

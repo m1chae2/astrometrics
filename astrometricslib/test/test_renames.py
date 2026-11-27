@@ -99,7 +99,6 @@ def test_the_table_maps_text_to_text() -> None:
 @pytest.mark.parametrize(
     ("module_name", "name"),
     [
-        ("astrometricslib.jobs", "run_as_background_job"),
         ("astrometricslib.drivers", "LibraryFolders"),
         ("astrometricslib.parameters", "run_tuning"),
     ],

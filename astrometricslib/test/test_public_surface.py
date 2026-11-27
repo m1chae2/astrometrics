@@ -164,6 +164,7 @@ EXPECTED_MODULE_NAMES = {
         "raise_if_abandoned",
         "registered_job",
         "report_started_jobs",
+        "run_as_background_job",
         "running_as_job",
     }),
     "astrometricslib.parameters": frozenset({

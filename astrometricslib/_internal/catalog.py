@@ -9,7 +9,6 @@ lives today, so moving the code later changes this file only.
 from astrometricslib.models.catalog_queries import (
     OverlayStar,
     ReindexReport,
-    StarQueryResult,
     TargetQueryResult,
     TargetReindexChange,
     TargetStarCount,
@@ -17,6 +16,12 @@ from astrometricslib.models.catalog_queries import (
 from astrometricslib.models.field_centers import FieldCenter, ImagedFieldCenters
 from astrometricslib.models.image_deletion import FailedDeletion, ImageDeletionResult
 from astrometricslib.models.quality.quality_summary import TargetSessionContribution
+from astrometricslib.models.star_catalog import (
+    PeriodicitySearch,
+    SpectralClassCount,
+    StarCatalogStatistics,
+    StarOverlay,
+)
 from astrometricslib.models.stellar_source import FileItem, GroupedFrameStat, TargetFilesResponse
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
 
@@ -29,9 +34,12 @@ __all__ = [
     "ImageDeletionResult",
     "ImagedFieldCenters",
     "OverlayStar",
+    "PeriodicitySearch",
     "ReindexReport",
     "RenderedImage",
-    "StarQueryResult",
+    "SpectralClassCount",
+    "StarCatalogStatistics",
+    "StarOverlay",
     "TargetFilesResponse",
     "TargetQueryResult",
     "TargetReindexChange",

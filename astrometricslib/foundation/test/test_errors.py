@@ -359,7 +359,7 @@ def test_every_error_class_of_both_libraries_is_a_category() -> None:
                 # `OfflineModeError` is also a `ConnectionError`), but a class
                 # whose only bases are built-in errors is outside the family.
                 if bases and bases <= _BUILT_IN_ERRORS:
-                    offenders.append(f"{path.relative_to(root.parent)}:{node.name}")
+                    offenders.append(f"{path.relative_to(root.parent).as_posix()}:{node.name}")
     allowed = {"astrometricslib/foundation/errors.py:AstrometricsError"}
     assert set(offenders) <= allowed, (
         f"error classes outside the categories: {sorted(set(offenders) - allowed)}"

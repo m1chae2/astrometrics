@@ -1,7 +1,7 @@
 """Purpose: Unit tests for StellarService.get_astrometry_overlay_stars.
 
 Description: The library places a target's stars on its image
-(`StellarCatalog.query(detail="overlay")`; its rules are tested in
+(`Visualization.get_star_overlay`; its rules are tested in
 `astrometricslib/api/test/test_star_query_display.py`). These tests check
 what the backend adds: the request reaches the library with the right
 arguments, the answer comes back with the app's camelCase keys, and a repeat
@@ -15,7 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib._internal.catalog import OverlayStar, StarQueryResult
+from astrometricslib import Target
+from astrometricslib._internal.catalog import OverlayStar, StarOverlay
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.storage.data_versions import bump_data_version
@@ -28,17 +29,16 @@ def test_an_empty_target_id_returns_no_stars() -> None:
     service = StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
     assert service.get_astrometry_overlay_stars(target_id="") == {"stars": [], "reason": None}
-    astrometrics.stars.query.assert_not_called()
+    astrometrics.visualization.get_star_overlay.assert_not_called()
 
 
 def test_the_overlay_comes_from_the_library_with_camel_case_keys(tmp_path: Path) -> None:
     """The library's overlay stars reach the app under the keys it reads."""
     astrometrics = MagicMock()
     astrometrics.targets.get.return_value = None
-    astrometrics.stars.query.return_value = StarQueryResult(
-        detail="overlay",
-        overlay_reason=None,
-        overlay=[
+    astrometrics.visualization.get_star_overlay.return_value = StarOverlay(
+        reason=None,
+        stars=[
             OverlayStar(
                 id="HD 1",
                 name="HD 1",
@@ -57,7 +57,10 @@ def test_the_overlay_comes_from_the_library_with_camel_case_keys(tmp_path: Path)
 
     results = service.get_astrometry_overlay_stars(target_id="M 13", limit=3)
 
-    astrometrics.stars.query.assert_called_once_with(target_id="M 13", detail="overlay", limit=3)
+    # A target the library does not hold is still asked about by its id.
+    astrometrics.visualization.get_star_overlay.assert_called_once_with(
+        Target(id="M 13"), image=None, limit=3
+    )
     assert results["reason"] is None
     assert results["stars"] == [
         {

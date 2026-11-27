@@ -7,10 +7,9 @@ return:
 - `TargetQueryResult` from `TargetCatalog.query`: target rows, full `Target`
   records, one target's full record, the cameras used, the observing
   nights, or each target's frames per camera.
-- `StarQueryResult` from `StellarCatalog.query`: star ids, summary rows,
-  analysis records, full star records, class counts, per-target star
-  counts (`TargetStarCount`), the stars drawn over a target's image
-  (`OverlayStar`), or library statistics.
+- `TargetStarCount` from `StellarCatalog.count_by_target`: one target's
+  star count and data flags. `OverlayStar` is one star drawn over a
+  target's image (`Visualization.get_star_overlay`).
 - `ReindexReport` from `TargetCatalog.reindex_frames`, which does change
   data: how many frames each target gained or lost.
 
@@ -23,13 +22,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 
 __all__ = [
     "OverlayStar",
     "ReindexReport",
-    "StarQueryResult",
     "TargetQueryResult",
     "TargetReindexChange",
     "TargetStarCount",
@@ -92,42 +89,15 @@ class OverlayStar(BaseModel):
 class TargetStarCount(BaseModel):
     """How many stars belong to one target, and what data they have."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
+    # The target's id. Empty in the app's per-target table, which keys the
+    # counts by target id instead.
+    target_id: str = Field(default="", alias="targetId")
     star_count: int = Field(default=0, alias="starCount")
     # True when at least one of the target's stars has that kind of data.
     has_spectra: bool = Field(default=False, alias="hasSpectra")
     has_photometry: bool = Field(default=False, alias="hasPhotometry")
-
-
-class StarQueryResult(BaseModel):
-    """The answer of `StellarCatalog.query`."""
-
-    detail: str
-    total_matching: int | None = None
-    offset: int | None = None
-    truncated: bool | None = None
-    # detail="ids": the star ids.
-    ids: list[str] | None = None
-    # detail="exists": which of the given ids are in the library.
-    found: list[str] | None = None
-    # detail="summary": id, name, position, magnitude, spectral type,
-    # targets and data flags, with the camelCase keys the app reads.
-    # detail="analysis": what the analysis found for each star.
-    stars: list[dict[str, Any]] | None = None
-    # detail="objects": the full star records.
-    objects: list[StellarObject] | None = None
-    # detail="class_counts": how many stars each spectral class has.
-    classes: list[dict[str, Any]] | None = None
-    # detail="target_counts": each target's star count and data flags.
-    target_counts: dict[str, TargetStarCount] | None = None
-    # detail="overlay": the target's stars placed on its reference image.
-    overlay: list[OverlayStar] | None = None
-    # detail="overlay": why the list is empty, when the image has no sky
-    # solution (WCS) and no saved pixel center fits it. Otherwise None.
-    overlay_reason: str | None = None
-    # detail="stats": counts and coverage for the whole library.
-    stats: dict[str, Any] | None = None
 
 
 class TargetReindexChange(BaseModel):

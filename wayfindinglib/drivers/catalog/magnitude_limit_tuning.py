@@ -90,8 +90,9 @@ def gaia_magnitudes_of(rows: Iterable[Mapping[str, Any]]) -> list[float]:
     Parameters
     ----------
     rows : `~collections.abc.Iterable` [`~collections.abc.Mapping`]
-        Star summary rows, as `Astrometrics.stars.query` returns them, with
-        ``id``, ``magnitude`` and ``hasCatalogMagnitude``.
+        Star summary rows with ``id``, ``magnitude`` and
+        ``hasCatalogMagnitude``, built from the stars of
+        `Astrometrics.stars.query`.
 
     Returns
     -------
@@ -154,12 +155,13 @@ def tune_magnitude_limit(inputs: TuningInputs) -> TuningResult:
     """
     wayfinder = inputs.service("wayfinder")
     try:
-        answer = wayfinder.astrometrics.stars.query(
-            has_photometry=True, has_catalog_magnitude=True, detail="summary", limit=None
-        )
+        stars = wayfinder.astrometrics.stars.query(has_photometry=True, has_catalog_magnitude=True)
     except (AttributeError, OSError, ValueError) as error:
         raise TuningSkippedError(f"the library's stars cannot be read: {error}") from error
-    magnitudes = gaia_magnitudes_of(answer.stars or [])
+    magnitudes = gaia_magnitudes_of(
+        {"id": star.id, "magnitude": star.magnitude, "hasCatalogMagnitude": star.has_catalog_magnitude}
+        for star in stars
+    )
     if not magnitudes:
         raise TuningSkippedError("no star with a measured light curve has a Gaia magnitude")
     percent = resolve_parameter(MAGNITUDE_LIMIT_PERCENTILE).value

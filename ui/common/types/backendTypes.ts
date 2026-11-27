@@ -481,6 +481,7 @@ export interface OverlayStar {
  * How many stars belong to one target, and what data they have.
  */
 export interface TargetStarCount {
+  targetId?: string;
   starCount?: number;
   hasSpectra?: boolean;
   hasPhotometry?: boolean;

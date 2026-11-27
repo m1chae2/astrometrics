@@ -1,87 +1,85 @@
-"""Purpose: Find stars in the library's star catalog, and record new ones.
+"""Purpose: Read, count and change the stars of the library's star catalog.
 
-Description: `StellarCatalog` is the public door to the star catalog. Its
-methods check their arguments and call the functions here, which do the
-work against the catalog storage (`AbstractCatalogAccess`):
+Description: `StellarCatalog` is the public door to the star catalog. Each of
+its methods is a thin wrapper of one function here, which does the work
+against the catalog storage (`AbstractCatalogAccess`):
 
-* `run_star_query` answers `StellarCatalog.query`: it picks stars by ids,
-  name, target, a region or a position, filters them by magnitude, data,
-  spectral class and a search text, hides single-frame detections, sorts
-  and pages them, and returns ids, summary rows, analysis records, full
-  records, class counts, per-target counts, overlay positions or library
-  statistics.
-* `find_star` finds one star by id, allowing small spelling differences.
-* `find_or_create_star` finds the star at a sky position, or gives a new,
+* `get_star` finds one star by id, allowing small spelling differences, and
+  `get_star_spectrum` reads its spectrum.
+* `query_stars` lists the stars that match some filters (a target, a patch
+  of sky, a magnitude range, the data they hold, a spectral class, whether
+  the catalogs list them as variable, a search text) as a `Page` of star
+  records. `star_summary_rows` gives the same matches as short rows, for
+  library code that must stay cheap on a large catalog (the image overlay).
+* `count_stars_by_class`, `count_stars_by_target` and
+  `get_star_catalog_statistics` count stars without reading their records.
+* `create_star`, `update_star` and `delete_star` change the catalog, and
+  `find_or_create_star` finds the star at a sky position or gives a new,
   unsaved one there (the catalog keeps only measured stars).
 
-The storage reads only what each question needs. Summary rows come from the
-indexed columns, so no full star record is loaded to list or count stars.
+A star's light curve is the bulk of its record, so it is read only when the
+caller asks for it (``include=["light_curves"]``). The filters run on the
+indexed summary columns, and only the stars of the page asked for are read
+in full.
 """
 
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from astrometricslib._internal.drivers.catalog_access import UNRESOLVED_DETECTION_ID
-from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.models.catalog_queries import StarQueryResult, TargetStarCount
+from astrometricslib.foundation.arguments import check_choice, check_include, check_limit
+from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, NotFoundError
+from astrometricslib.models.catalog_queries import TargetStarCount
+from astrometricslib.models.known_variability import KnownVariability
+from astrometricslib.models.page import Page
+from astrometricslib.models.star_catalog import SpectralClassCount, StarCatalogStatistics
 from astrometricslib.models.stellar_source import (
     BRIGHTEST_CATALOG_MAGNITUDE,
+    SpectroscopyResult,
     StellarObject,
     has_catalog_magnitude,
 )
-from astrometricslib.pipelines.shared.star_analysis import (
-    SPECTRAL_CLASS_LABELS,
-    spectral_class_letter,
-    summarize_star,
-)
+from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.star_analysis import SPECTRAL_CLASS_LABELS, spectral_class_letter
 
 __all__ = [
-    "QUERY_DETAILS",
-    "QUERY_LIMITS",
-    "QUERY_MAXIMUM_RADIUS_DEGREES",
-    "QUERY_ORDERS",
-    "StarQuery",
+    "STAR_INCLUDE_PARTS",
+    "STAR_ORDERS",
+    "StarFilters",
+    "count_stars_by_class",
+    "count_stars_by_target",
+    "create_star",
+    "delete_star",
     "find_or_create_star",
     "find_star",
+    "get_star",
+    "get_star_catalog_statistics",
+    "get_star_spectrum",
     "is_unresolved_detection",
-    "run_star_query",
+    "query_stars",
+    "read_stars",
+    "star_summary_rows",
+    "summary_row",
+    "target_filter_id",
+    "update_star",
 ]
 
-QUERY_LIMITS = {"ids": 2000, "summary": 500, "analysis": 10, "objects": 10, "overlay": 200}
-"""Most stars one answer holds, by detail level, when the caller gives a
-limit. An analysis record is about two kilobytes, so ten fit well inside a
-reply."""
+STAR_INCLUDE_PARTS = ("light_curves",)
+"""The heavy parts a star read can add with ``include=``."""
 
-MAXIMUM_MATCH_RANKING = 200
-"""Most stars with spectra read when ranking a class by spectrum match."""
-
-QUERY_MAXIMUM_RADIUS_DEGREES = 5.0
-"""Widest region a query searches. A wider circle on a 274,000-star library
-returns more than a client can use."""
-
-QUERY_DETAILS = (
-    "exists",
-    "ids",
-    "summary",
-    "analysis",
-    "objects",
-    "overlay",
-    "class_counts",
-    "target_counts",
-    "stats",
-)
-"""The detail levels `StellarCatalog.query` accepts."""
-
-QUERY_ORDERS = ("id", "useful", "match")
-"""The orders `StellarCatalog.query` can sort stars in."""
+STAR_ORDERS = ("id", "useful", "match")
+"""The orders `query_stars` can sort stars in."""
 
 POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 """Start of the id given to a star found in an image but never matched to a
 catalog. Must match `POSITION_ONLY_STAR_ID_PREFIX` in
 `astrometricslib/_internal/drivers/catalog_access.py`."""
+
+_VARIABLE_ANSWERS = frozenset({KnownVariability.KNOWN_VARIABLE, KnownVariability.SUSPECTED_VARIABLE})
+"""What the catalogs must say about a star for ``variable=True`` to keep it."""
 
 
 def is_unresolved_detection(star_id: str) -> bool:
@@ -102,97 +100,77 @@ def is_unresolved_detection(star_id: str) -> bool:
     return bool(UNRESOLVED_DETECTION_ID.search(star_id))
 
 
-@dataclass
-class StarQuery:
-    """The selectors and filters of one star query.
+@dataclass(frozen=True)
+class StarFilters:
+    """The filters of one star query.
 
     Attributes
     ----------
-    ids : `list` [`str`] or `None`
-        Star ids to look up.
-    name : `str` or `None`
-        A star id or name.
     target_id : `str` or `None`
         Stars that belong to this target.
-    ra_deg, dec_deg : `float` or `None`
-        Centre of a region or position search, in degrees.
-    radius_deg : `float` or `None`
-        Radius of a region search, in degrees.
-    tolerance_arcsec : `float` or `None`
-        Match radius of a position search, in arcseconds.
+    ra_deg, dec_deg, radius_deg : `float` or `None`
+        A circle on the sky (ICRS), in degrees. All three or none.
     magnitude_range : `tuple` [`float`, `float`] or `None`
         Lowest and highest magnitude to keep.
-    has_spectra : `bool` or `None`
-        Keep only stars with (or without) a spectrum.
-    has_photometry : `bool` or `None`
-        Keep only stars with (or without) a light curve.
+    has_spectra, has_photometry : `bool` or `None`
+        Keep only stars with (or without) a spectrum or a light curve.
     has_catalog_magnitude : `bool` or `None`
         Keep only stars whose magnitude is (or is not) a real catalog
         magnitude (see `has_catalog_magnitude`).
     spectral_class : `str` or `None`
-        Keep only stars of this spectral class.
-    search : `str` or `None`
+        Keep only stars of this catalog spectral class.
+    variable : `bool` or `None`
+        Keep only stars the catalogs list (or do not list) as variable.
+    text : `str` or `None`
         Keep only stars whose id or name contains this text, ignoring case.
     include_unresolved : `bool`
         Keep the single-frame photometry detections (see
         `is_unresolved_detection`). They are hidden by default.
-    image_path : `str` or `None`
-        For ``detail="overlay"`` only: the image to place the stars on.
     """
 
-    ids: list[str] | None = None
-    name: str | None = None
     target_id: str | None = None
     ra_deg: float | None = None
     dec_deg: float | None = None
     radius_deg: float | None = None
-    tolerance_arcsec: float | None = None
     magnitude_range: tuple[float, float] | None = None
     has_spectra: bool | None = None
     has_photometry: bool | None = None
     has_catalog_magnitude: bool | None = None
     spectral_class: str | None = None
-    search: str | None = None
+    variable: bool | None = None
+    text: str | None = None
     include_unresolved: bool = False
-    image_path: str | None = None
 
-    def selector(self) -> str | None:
-        """Name the one selector given.
-
-        Returns
-        -------
-        selector : `str` or `None`
-            ``"ids"``, ``"name"``, ``"target_id"``, ``"region"`` or
-            ``"position"``, or `None` to browse the whole library.
+    def check(self) -> None:
+        """Refuse filters that do not make sense together.
 
         Raises
         ------
         InvalidArgumentError
-            If several selectors are given, both a radius and a tolerance
-            are given, or a region or position lacks its centre.
+            If a circle is given only in part, its radius is not above 0,
+            or the spectral class is not one the catalog groups by.
         """
-        region_given = self.radius_deg is not None
-        position_given = self.tolerance_arcsec is not None
-        if region_given and position_given:
+        circle = (self.ra_deg, self.dec_deg, self.radius_deg)
+        if any(value is not None for value in circle) and any(value is None for value in circle):
+            raise InvalidArgumentError("A sky circle needs ra_deg, dec_deg and radius_deg together.")
+        if self.radius_deg is not None and self.radius_deg <= 0:
+            raise InvalidArgumentError("radius_deg must be above 0.", details={"radius_deg": self.radius_deg})
+        if self.spectral_class is not None and not spectral_class_letter(self.spectral_class):
             raise InvalidArgumentError(
-                "Give radius_deg (a region) or tolerance_arcsec (one position), not both."
+                f"spectral_class must start with one of: {', '.join(SPECTRAL_CLASS_LABELS)}.",
+                details={"spectral_class": self.spectral_class},
             )
-        if (region_given or position_given) and (self.ra_deg is None or self.dec_deg is None):
-            raise InvalidArgumentError("A region or position search needs ra_deg and dec_deg.")
-        chosen = [
-            label
-            for label, given in (
-                ("ids", self.ids is not None),
-                ("name", self.name is not None),
-                ("target_id", self.target_id is not None),
-                ("region", region_given),
-                ("position", position_given),
-            )
-            if given
-        ]
-        if len(chosen) > 1:
-            raise InvalidArgumentError(f"Give one selector, not several: {', '.join(chosen)}.")
-        return chosen[0] if chosen else None
+
+    @property
+    def in_region(self) -> bool:
+        """Whether the filters name a circle on the sky.
+
+        Returns
+        -------
+        in_region : `bool`
+            `True` when ``radius_deg`` is given.
+        """
+        return self.radius_deg is not None
 
 
 def summary_row(star: Any) -> dict[str, Any]:
@@ -295,14 +273,55 @@ def _spelling_free_index(storage: Any) -> dict[str, str]:
     return index
 
 
-def find_star(storage: Any, star_id: str) -> StellarObject | None:
-    """Find one star by id, allowing small differences in spelling.
+def _stored_star_id(storage: Any, star_id: str) -> str | None:
+    """Find the stored id that a given id names.
 
     An exact id is tried first, which is fast. If that fails, the ids are
     compared ignoring spaces, underscores and capital letters, using a map
     of the ids that is kept until the star catalog is next written to (see
-    `_spelling_free_index`). Only the id column is read to build it, never
-    the stars' full records.
+    `_spelling_free_index`). Only the id column is read.
+
+    Returns
+    -------
+    stored_id : `str` or `None`
+        The stored id, or `None` when no star has it.
+    """
+    if storage.existing_star_ids([star_id]):
+        return star_id
+    return _spelling_free_index(storage).get(_spelling_free(star_id))
+
+
+def read_stars(storage: Any, star_ids: list[str], *, light_curves: bool) -> list[StellarObject]:
+    """Read some stars by their exact ids, in the order given.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    star_ids : `list` [`str`]
+        The stored ids.
+    light_curves : `bool`
+        Read the light-curve points too. Without them a star reads much
+        faster; its `StellarObject.light_curves_included` is then `False`.
+
+    Returns
+    -------
+    stars : `list` [`StellarObject`]
+        The stars found, in the order of ``star_ids``. An id with no star is
+        skipped.
+    """
+    if not star_ids:
+        return []
+    if light_curves:
+        found = storage.get_by_ids("stellar_catalog", star_ids)
+    else:
+        found = storage.get_stars_without_light_curves(star_ids)
+    by_id = {star.id: star for star in found}
+    return [by_id[star_id] for star_id in star_ids if star_id in by_id]
+
+
+def find_star(storage: Any, star_id: str) -> StellarObject | None:
+    """Find one star by id, with its light curve, allowing spelling slips.
 
     Parameters
     ----------
@@ -314,7 +333,7 @@ def find_star(storage: Any, star_id: str) -> StellarObject | None:
     Returns
     -------
     star : `StellarObject` or `None`
-        The star, or `None` if there is none.
+        The whole star, or `None` if there is none.
     """
     exact = storage.get_by_ids("stellar_catalog", [star_id])
     if exact:
@@ -326,58 +345,76 @@ def find_star(storage: Any, star_id: str) -> StellarObject | None:
     return matches[0] if matches else None
 
 
-def _find_all_by_name(storage: Any, name: str) -> list[StellarObject]:
-    """Find every star whose id or name equals a name, ignoring case.
-
-    Returns
-    -------
-    stars : `list` [`StellarObject`]
-        The matches, an exact id match first.
-    """
-    matching_ids = storage.find_star_ids_by_name(name)
-    if name in matching_ids:
-        matching_ids.remove(name)
-        matching_ids.insert(0, name)
-    by_id = {star.id: star for star in storage.get_by_ids("stellar_catalog", matching_ids)}
-    return [by_id[star_id] for star_id in matching_ids if star_id in by_id]
-
-
-def _find_nearest(
-    storage: Any, ra_deg: float, dec_deg: float, tolerance_arcsec: float
+def get_star(
+    storage: Any, star_id: str, *, include: Iterable[str] | None = None, required: bool = False
 ) -> StellarObject | None:
-    """Find the star nearest a spot on the sky, within a tolerance.
+    """Find one star by its id, allowing small differences in spelling.
 
-    Only stars near the spot are read, through the declination index.
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    star_id : `str`
+        The star's id. Spaces, underscores and capital letters may differ
+        from the stored id.
+    include : `Iterable` [`str`] or `None`, optional
+        Heavy parts to read too: ``"light_curves"``.
+    required : `bool`, optional
+        Raise instead of returning `None` when no star has the id.
 
     Returns
     -------
     star : `StellarObject` or `None`
-        The nearest star inside the tolerance, or `None`.
-    """
-    import astropy.units as u
-    from astropy.coordinates import SkyCoord
+        The star, or `None` when none has the id and ``required`` is
+        `False`.
 
-    spot = SkyCoord(ra=ra_deg, dec=dec_deg, unit=(u.deg, u.deg))
-    nearest_id: str | None = None
-    nearest_separation = tolerance_arcsec
-    for candidate in storage.list_stars_in_region(ra_deg, dec_deg, tolerance_arcsec / 3600.0):
-        # A stored 0.0 means "position never set", not the point (0, 0) on
-        # the sky, so those stars are never matched.
-        if not candidate.right_ascension or not candidate.declination:
-            continue
-        try:
-            place = SkyCoord(
-                ra=float(candidate.right_ascension), dec=float(candidate.declination), unit=(u.deg, u.deg)
-            )
-        except ValueError, TypeError:
-            continue
-        separation = spot.separation(place).arcsecond
-        if separation < nearest_separation:
-            nearest_id, nearest_separation = candidate.id, separation
-    if nearest_id is None:
+    Raises
+    ------
+    InvalidArgumentError
+        If ``star_id`` is empty or an include part is unknown.
+    NotFoundError
+        If ``required`` is `True` and no star has the id.
+    """
+    parts = check_include(include, STAR_INCLUDE_PARTS)
+    if not isinstance(star_id, str) or not star_id.strip():
+        raise InvalidArgumentError("star_id must be a non-empty star id.", details={"star_id": star_id})
+    stored_id = _stored_star_id(storage, star_id)
+    found = read_stars(storage, [stored_id], light_curves="light_curves" in parts) if stored_id else []
+    if not found:
+        if required:
+            raise NotFoundError(f"No star with id {star_id!r} in the library.", details={"star_id": star_id})
         return None
-    matches = storage.get_by_ids("stellar_catalog", [nearest_id])
-    return matches[0] if matches else None
+    return found[0]
+
+
+def get_star_spectrum(storage: Any, star: StellarObject) -> SpectroscopyResult | None:
+    """Read a star's spectrum.
+
+    The spectrum lives on the star's own record. Older libraries also hold
+    a separate copy of the star whose id ends in ``::spectroscopy``. When
+    the star's own record has no spectrum, that copy is read instead, so a
+    script does not need to know the copy exists.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    star : `StellarObject`
+        The star, as `get_star` or `query_stars` gave it.
+
+    Returns
+    -------
+    spectrum : `SpectroscopyResult` or `None`
+        The star's spectrum, or `None` when it has none.
+    """
+    if star.has_spectra:
+        return star.spectroscopy
+    suffix = "::spectroscopy"
+    base_id = star.id[: -len(suffix)] if star.id.endswith(suffix) else star.id
+    for candidate in read_stars(storage, [base_id, base_id + suffix], light_curves=False):
+        if candidate.has_spectra:
+            return candidate.spectroscopy
+    return None
 
 
 def _within_magnitudes(
@@ -397,48 +434,90 @@ def _within_magnitudes(
     return [row for row in rows if row["magnitude"] is not None and low <= row["magnitude"] <= high]
 
 
-def _selected_rows(storage: Any, query: StarQuery, selector: str | None) -> list[dict[str, Any]]:
-    """Find the stars a selector names, as summary rows.
+def _selected_rows(storage: Any, filters: StarFilters) -> list[dict[str, Any]]:
+    """Find the stars of a target or a sky circle, as summary rows.
 
     Returns
     -------
     rows : `list` [`dict`]
-        One row per star, inside the magnitude range. Empty when a position
-        search finds nothing.
+        One row per star, inside the magnitude range.
     """
-    if selector == "region":
-        magnitude_range = query.magnitude_range
-        if query.has_catalog_magnitude:
+    if filters.in_region:
+        magnitude_range = filters.magnitude_range
+        if filters.has_catalog_magnitude:
             # Only catalog magnitudes are wanted, so the database can skip
             # every star whose magnitude is missing or instrumental.
             low, high = magnitude_range or (BRIGHTEST_CATALOG_MAGNITUDE, 60.0)
             magnitude_range = (max(low, BRIGHTEST_CATALOG_MAGNITUDE), high)
-        return [
+        rows = [
             summary_row(star)
             for star in storage.list_stars_in_region(
-                query.ra_deg, query.dec_deg, query.radius_deg, magnitude_range
+                filters.ra_deg, filters.dec_deg, filters.radius_deg, magnitude_range
             )
         ]
-    if selector == "ids":
-        stars = storage.get_by_ids("stellar_catalog", list(query.ids))
-    elif selector == "name":
-        stars = _find_all_by_name(storage, query.name)
-    elif selector == "position":
-        star = _find_nearest(storage, query.ra_deg, query.dec_deg, query.tolerance_arcsec)
-        stars = [star] if star is not None else []
-    else:
-        summaries = storage.list_star_summaries(target_id=query.target_id)
-        return _within_magnitudes([summary_row(star) for star in summaries], query.magnitude_range)
-    return _within_magnitudes([summary_row(star) for star in stars], query.magnitude_range)
+        if filters.target_id is not None:
+            rows = [row for row in rows if filters.target_id in (row["targetIds"] or [])]
+        return rows
+    summaries = storage.list_star_summaries(target_id=filters.target_id)
+    return _within_magnitudes([summary_row(star) for star in summaries], filters.magnitude_range)
 
 
-def _best_matched_first(
-    storage: Any, rows: list[dict[str, Any]], ranking_cap: int | None
-) -> tuple[list[dict[str, Any]], dict[str, float]]:
+def _known_variability_of(storage: Any, star_ids: list[str]) -> dict[str, KnownVariability]:
+    """Say what the catalogs record about each star being variable.
+
+    Only the three catalog fields are read where the storage can read
+    single fields; other storages read the stars without their light
+    curves.
+
+    Returns
+    -------
+    answers : `dict` [`str`, `KnownVariability`]
+        One answer per star found.
+    """
+    reader = getattr(storage, "read_star_known_variability", None)
+    if callable(reader):
+        return reader(star_ids)
+    return {star.id: star.known_variability for star in read_stars(storage, star_ids, light_curves=False)}
+
+
+def _filtered_rows(storage: Any, filters: StarFilters) -> list[dict[str, Any]]:
+    """Find the stars the filters select, as summary rows, not yet sorted.
+
+    Returns
+    -------
+    rows : `list` [`dict`]
+        Summary rows.
+    """
+    rows = _selected_rows(storage, filters)
+    if not filters.include_unresolved:
+        rows = [row for row in rows if not is_unresolved_detection(str(row["id"]))]
+    if filters.has_spectra is not None:
+        rows = [row for row in rows if bool(row["hasSpectra"]) is filters.has_spectra]
+    if filters.has_photometry is not None:
+        rows = [row for row in rows if bool(row["hasPhotometry"]) is filters.has_photometry]
+    if filters.has_catalog_magnitude is not None:
+        rows = [row for row in rows if row["hasCatalogMagnitude"] is filters.has_catalog_magnitude]
+    if filters.spectral_class is not None:
+        wanted = spectral_class_letter(filters.spectral_class)
+        rows = [row for row in rows if spectral_class_letter(row["spectralType"] or "") == wanted]
+    needle = (filters.text or "").strip().lower()
+    if needle:
+        rows = [
+            row
+            for row in rows
+            if needle in str(row["id"]).lower() or needle in str(row["name"] or "").lower()
+        ]
+    if filters.variable is not None:
+        answers = _known_variability_of(storage, [row["id"] for row in rows])
+        rows = [row for row in rows if (answers.get(row["id"]) in _VARIABLE_ANSWERS) is filters.variable]
+    return rows
+
+
+def _best_matched_first(storage: Any, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Put stars whose own spectrum matched best first.
 
-    Only stars that have a spectrum are measured; the rest keep their order
-    at the end. Ranking stops after ``ranking_cap`` stars with spectra.
+    Only stars that have a spectrum are read, without their light curves;
+    the rest keep their order at the end.
 
     Parameters
     ----------
@@ -446,26 +525,19 @@ def _best_matched_first(
         The catalog storage.
     rows : `list` [`dict`]
         Summary rows, already in id order.
-    ranking_cap : `int` or `None`
-        Most stars with spectra to read for ranking. `None` reads them all.
 
     Returns
     -------
     rows : `list` [`dict`]
         The same rows, matched stars first, lowest difference first.
-    match_rms : `dict` [`str`, `float`]
-        Each matched star's difference from its closest reference spectrum.
     """
-    with_spectra = [row for row in rows if row["hasSpectra"]]
-    if ranking_cap is not None:
-        with_spectra = with_spectra[:ranking_cap]
+    with_spectra = [row["id"] for row in rows if row["hasSpectra"]]
     scored: dict[str, float] = {}
-    for star in storage.get_by_ids("stellar_catalog", [row["id"] for row in with_spectra]):
+    for star in read_stars(storage, with_spectra, light_curves=False):
         rms = star.spectroscopy.self_determined_spectral_type_rms if star.spectroscopy else None
         if rms is not None:
             scored[star.id] = rms
-    ordered = sorted(rows, key=lambda row: (row["id"] not in scored, scored.get(row["id"], 0.0)))
-    return ordered, scored
+    return sorted(rows, key=lambda row: (row["id"] not in scored, scored.get(row["id"], 0.0)))
 
 
 def _useful_order_key(row: dict[str, Any]) -> tuple:
@@ -497,68 +569,193 @@ def _useful_order_key(row: dict[str, Any]) -> tuple:
     )
 
 
-def library_stats(storage: Any) -> dict[str, Any]:
-    """Count how much data the star catalog holds.
+def _page_in_storage(
+    storage: Any, filters: StarFilters, order_by: str, limit: int | None, offset: int
+) -> tuple[int, list[dict[str, Any]]] | None:
+    """Let the storage filter, order, count and page the listing.
 
-    The counts come from the indexed summary columns, so no full star record
-    is loaded. Every record is counted, single-frame detections included.
-
-    Parameters
-    ----------
-    storage : `AbstractCatalogAccess`
-        The catalog storage.
+    Only the plain listing qualifies: no sky circle, spectral class or
+    variability filter, and the id or useful order. The database then counts
+    the matches and reads one page, instead of this module loading every
+    star and filtering it in Python.
 
     Returns
     -------
-    stats : `dict` [`str`, `Any`]
-        ``total_objects``, ``identified_objects``, ``spectral_coverage`` and
-        ``photometric_coverage`` (percentages), and the raw counts.
+    answer : `tuple` [`int`, `list` [`dict`]] or `None`
+        The total number of matches and the page as summary rows, or
+        `None` when the query needs the full listing.
     """
-    summaries = storage.list_star_summaries()
-    total = len(summaries)
-    with_names = len([s for s in summaries if s.name and "Star_" not in s.id])
-    with_spectral = len([s for s in summaries if s.spectral_type and s.spectral_type != "Unknown"])
-    # None means "not known yet"; 0.0 is a real measured magnitude.
-    with_magnitude = len([s for s in summaries if s.magnitude is not None])
-    return {
-        "total_objects": total,
-        "identified_objects": with_names,
-        "spectral_coverage": round((with_spectral / total * 100), 2) if total > 0 else 0,
-        "photometric_coverage": round((with_magnitude / total * 100), 2) if total > 0 else 0,
-        "stats": {"names": with_names, "spectral": with_spectral, "magnitude": with_magnitude},
-    }
+    if filters.in_region or filters.spectral_class is not None or filters.variable is not None:
+        return None
+    if order_by not in ("id", "useful"):
+        return None
+    method = getattr(storage, "query_star_summary_page", None)
+    if method is None:
+        return None
+    answer = method(
+        target_id=filters.target_id,
+        magnitude_range=filters.magnitude_range,
+        has_spectra=filters.has_spectra,
+        has_photometry=filters.has_photometry,
+        has_catalog_magnitude=filters.has_catalog_magnitude,
+        search=filters.text,
+        include_unresolved=filters.include_unresolved,
+        order=order_by,
+        limit=limit,
+        offset=offset,
+    )
+    if answer is None:
+        return None
+    total, summaries = answer
+    return total, [summary_row(star) for star in summaries]
 
 
-def spectral_class_counts(storage: Any, include_unresolved: bool = False) -> list[dict[str, Any]]:
-    """Count the library's stars by catalog spectral class.
+def _matching_page(
+    storage: Any, filters: StarFilters, order_by: str | None, limit: int | None, offset: int
+) -> tuple[int, list[dict[str, Any]]]:
+    """Find, sort and page the stars the filters select, as summary rows.
+
+    Returns
+    -------
+    answer : `tuple` [`int`, `list` [`dict`]]
+        How many stars match in all, and the rows of the page.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if the filters do not make sense, the
+    order is unknown, or ``limit`` or ``offset`` is out of range.
+    """
+    filters.check()
+    order = order_by or "id"
+    check_choice("order_by", order, STAR_ORDERS)
+    check_limit(limit, 1, None)
+    check_limit(offset, 0, None, name="offset", allow_none=False)
+    paged = _page_in_storage(storage, filters, order, limit, offset)
+    if paged is not None:
+        return paged
+    rows = _filtered_rows(storage, filters)
+    if order == "useful":
+        rows.sort(key=_useful_order_key)
+    else:
+        rows.sort(key=lambda row: row["id"])
+    if order == "match":
+        rows = _best_matched_first(storage, rows)
+    page = rows[offset:] if limit is None else rows[offset : offset + limit]
+    return len(rows), page
+
+
+def star_summary_rows(
+    storage: Any, filters: StarFilters, *, order_by: str | None = None, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """List the stars the filters select as short summary rows.
+
+    For library code that needs only the indexed facts of many stars (the
+    image overlay, the catalog checks): no star record is read.
 
     Parameters
     ----------
     storage : `AbstractCatalogAccess`
         The catalog storage.
+    filters : `StarFilters`
+        The filters.
+    order_by : `str`, optional
+        One of `STAR_ORDERS`. By default, id order.
+    limit : `int` or `None`, optional
+        Most rows to return. `None` returns every match.
+
+    Returns
+    -------
+    rows : `list` [`dict`]
+        One `summary_row` per star.
+    """
+    return _matching_page(storage, filters, order_by, limit, 0)[1]
+
+
+def query_stars(
+    storage: Any,
+    filters: StarFilters,
+    *,
+    order_by: str | None = None,
+    include: Iterable[str] | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> Page[StellarObject]:
+    """List the stars that match some filters.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    filters : `StarFilters`
+        The filters.
+    order_by : `str`, optional
+        ``"id"`` (the default), ``"useful"`` (stars with spectra first, then
+        named stars, then stars with photometry, then brightest first) or
+        ``"match"`` (stars whose own spectrum best matches a reference
+        spectrum first).
+    include : `Iterable` [`str`] or `None`, optional
+        Heavy parts to read too: ``"light_curves"``.
+    limit : `int` or `None`, optional
+        Most stars to return, at least 1. `None` returns every match.
+    offset : `int`, optional
+        How many matches to skip, at least 0.
+
+    Returns
+    -------
+    page : `Page` [`StellarObject`]
+        The stars of the page, in order, with ``total`` and
+        ``next_offset``.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if the filters do not make sense, an
+    argument is out of range, or an include part is unknown.
+    """
+    parts = check_include(include, STAR_INCLUDE_PARTS)
+    total, rows = _matching_page(storage, filters, order_by, limit, offset)
+    stars = read_stars(storage, [row["id"] for row in rows], light_curves="light_curves" in parts)
+    end = offset + len(rows)
+    return Page[StellarObject](items=tuple(stars), total=total, next_offset=end if end < total else None)
+
+
+def count_stars_by_class(
+    storage: Any, *, target_id: str | None = None, include_unresolved: bool = False
+) -> Page[SpectralClassCount]:
+    """Count the library's stars by catalog spectral class.
+
+    One grouped count over the stars' indexed columns; no star record is
+    read.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    target_id : `str`, optional
+        Count only the stars of this target.
     include_unresolved : `bool`, optional
         Also count single-frame detections. Defaults to `False`.
 
     Returns
     -------
-    classes : `list` [`dict`]
-        One entry per class present, in class order, with the letter
-        (``spectralClass``), a short ``label`` and the ``count``. Stars with
-        no catalog type are not counted.
+    classes : `Page` [`SpectralClassCount`]
+        One entry per class present, in class order (O, B, A, F, G, K, M, C,
+        W). Stars with no catalog type are not counted.
     """
     counts: dict[str, int] = {}
     for group in storage.count_star_groups(include_unresolved):
+        if target_id is not None and target_id not in group.target_ids:
+            continue
         letter = spectral_class_letter(group.spectral_type)
         if letter:
             counts[letter] = counts.get(letter, 0) + group.count
-    return [
-        {"spectralClass": letter, "label": SPECTRAL_CLASS_LABELS[letter], "count": counts[letter]}
+    return Page[SpectralClassCount].of([
+        SpectralClassCount(spectral_class=letter, label=SPECTRAL_CLASS_LABELS[letter], count=counts[letter])
         for letter in SPECTRAL_CLASS_LABELS
         if letter in counts
-    ]
+    ])
 
 
-def target_star_counts(storage: Any, include_unresolved: bool = False) -> dict[str, TargetStarCount]:
+def count_stars_by_target(storage: Any, *, include_unresolved: bool = False) -> Page[TargetStarCount]:
     """Count each target's stars and say what data they have.
 
     One grouped count over the stars' indexed columns, so a target list can
@@ -574,318 +771,292 @@ def target_star_counts(storage: Any, include_unresolved: bool = False) -> dict[s
 
     Returns
     -------
-    counts : `dict` [`str`, `TargetStarCount`]
-        One entry per target id that at least one star belongs to.
+    counts : `Page` [`TargetStarCount`]
+        One entry per target id that at least one star belongs to, in
+        target id order.
     """
-    counts: dict[str, TargetStarCount] = {}
+    tallies: dict[str, list[Any]] = {}
     for group in storage.count_star_groups(include_unresolved):
         for target_id in group.target_ids:
-            entry = counts.setdefault(target_id, TargetStarCount())
-            entry.star_count += group.count
-            entry.has_spectra = entry.has_spectra or group.has_spectra
-            entry.has_photometry = entry.has_photometry or group.has_photometry
-    return counts
+            tally = tallies.setdefault(target_id, [0, False, False])
+            tally[0] += group.count
+            tally[1] = tally[1] or group.has_spectra
+            tally[2] = tally[2] or group.has_photometry
+    return Page[TargetStarCount].of([
+        TargetStarCount(target_id=target_id, star_count=count, has_spectra=spectra, has_photometry=photometry)
+        for target_id, (count, spectra, photometry) in sorted(tallies.items())
+    ])
 
 
-def _refuse_unused(detail: str, given: dict[str, bool]) -> None:
-    """Refuse arguments that a detail level does not use.
+def get_star_catalog_statistics(storage: Any) -> StarCatalogStatistics:
+    """Count how much data the star catalog holds.
 
-    Parameters
-    ----------
-    detail : `str`
-        The detail level asked for.
-    given : `dict` [`str`, `bool`]
-        For each argument the detail does not use, whether the caller gave
-        it.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If any of those arguments was given.
-    """
-    unused = sorted(name for name, was_given in given.items() if was_given)
-    if unused:
-        raise InvalidArgumentError(
-            f"detail={detail!r} does not use: {', '.join(unused)}.",
-            details={"detail": detail, "unused": unused},
-        )
-
-
-def _filter_arguments_given(query: StarQuery) -> dict[str, bool]:
-    """Say which row filters a query gives.
-
-    Returns
-    -------
-    given : `dict` [`str`, `bool`]
-        For each filter argument, whether it differs from its default.
-    """
-    return {
-        "magnitude_min/magnitude_max": query.magnitude_range is not None,
-        "has_spectra": query.has_spectra is not None,
-        "has_photometry": query.has_photometry is not None,
-        "has_catalog_magnitude": query.has_catalog_magnitude is not None,
-        "spectral_class": query.spectral_class is not None,
-        "search": query.search is not None,
-    }
-
-
-def _whole_library_answer(
-    storage: Any, query: StarQuery, selector: str | None, detail: str
-) -> StarQueryResult:
-    """Answer a detail level that covers the whole library.
-
-    Returns
-    -------
-    answer : `StarQueryResult`
-        Library statistics, class counts or per-target counts.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If a selector, a filter, or (for statistics) ``include_unresolved``
-        is given.
-    """
-    if selector is not None:
-        raise InvalidArgumentError(f"detail={detail!r} covers the whole library and takes no selector.")
-    _refuse_unused(
-        detail,
-        {
-            **_filter_arguments_given(query),
-            "include_unresolved": detail == "stats" and query.include_unresolved,
-        },
-    )
-    if detail == "stats":
-        return StarQueryResult(detail=detail, stats=library_stats(storage))
-    if detail == "class_counts":
-        return StarQueryResult(
-            detail=detail, classes=spectral_class_counts(storage, query.include_unresolved)
-        )
-    return StarQueryResult(detail=detail, target_counts=target_star_counts(storage, query.include_unresolved))
-
-
-def _filtered_rows(storage: Any, query: StarQuery, selector: str | None) -> list[dict[str, Any]]:
-    """Find the stars a query selects and keep those its filters allow.
-
-    Returns
-    -------
-    rows : `list` [`dict`]
-        Summary rows, not yet sorted.
-    """
-    rows = _selected_rows(storage, query, selector)
-    if not query.include_unresolved:
-        rows = [row for row in rows if not is_unresolved_detection(str(row["id"]))]
-    if query.has_spectra is not None:
-        rows = [row for row in rows if bool(row["hasSpectra"]) is query.has_spectra]
-    if query.has_photometry is not None:
-        rows = [row for row in rows if bool(row["hasPhotometry"]) is query.has_photometry]
-    if query.has_catalog_magnitude is not None:
-        rows = [row for row in rows if row["hasCatalogMagnitude"] is query.has_catalog_magnitude]
-    if query.spectral_class is not None:
-        wanted = spectral_class_letter(query.spectral_class)
-        rows = [row for row in rows if spectral_class_letter(row["spectralType"] or "") == wanted]
-    needle = (query.search or "").strip().lower()
-    if needle:
-        rows = [
-            row
-            for row in rows
-            if needle in str(row["id"]).lower() or needle in str(row["name"] or "").lower()
-        ]
-    return rows
-
-
-def _page_in_storage(
-    storage: Any,
-    query: StarQuery,
-    selector: str | None,
-    order: str | None,
-    page_size: int | None,
-    offset: int,
-) -> tuple[int, list[dict[str, Any]]] | None:
-    """Let the storage filter, order, count and page the listing.
-
-    Only the plain listing qualifies: no selector or a target, id or
-    useful order, and no spectral class. The database then counts the
-    matches and reads one page, instead of this module loading every
-    star and filtering it in Python.
-
-    Returns
-    -------
-    answer : `tuple` [`int`, `list` [`dict`]] or `None`
-        The total number of matches and the page as summary rows, or
-        `None` when the query needs the full listing (another selector, a
-        spectral class, the match order, or a storage that cannot page).
-    """
-    if selector not in (None, "target_id") or query.spectral_class is not None:
-        return None
-    if order not in (None, "id", "useful"):
-        return None
-    method = getattr(storage, "query_star_summary_page", None)
-    if method is None:
-        return None
-    answer = method(
-        target_id=query.target_id,
-        magnitude_range=query.magnitude_range,
-        has_spectra=query.has_spectra,
-        has_photometry=query.has_photometry,
-        has_catalog_magnitude=query.has_catalog_magnitude,
-        search=query.search,
-        include_unresolved=query.include_unresolved,
-        order="useful" if order == "useful" else "id",
-        limit=page_size,
-        offset=offset,
-    )
-    if answer is None:
-        return None
-    total, summaries = answer
-    return total, [summary_row(star) for star in summaries]
-
-
-def run_star_query(
-    storage: Any,
-    query: StarQuery,
-    detail: str,
-    limit: int | None,
-    offset: int,
-    order: str | None = None,
-) -> StarQueryResult:
-    """Answer a star query with a cap on how many stars come back.
+    The counts come from the indexed summary columns, so no full star record
+    is loaded. Every record is counted, single-frame detections included.
 
     Parameters
     ----------
     storage : `AbstractCatalogAccess`
         The catalog storage.
-    query : `StarQuery`
-        The selectors and filters.
-    detail : `str`
-        One of `QUERY_DETAILS`.
-    limit : `int` or `None`
-        Most stars to return, cut to the detail's cap in `QUERY_LIMITS`.
-        `None` returns every match.
-    offset : `int`
-        How many stars to skip, for paging.
-    order : `str` or `None`, optional
-        One of `QUERY_ORDERS`, or `None` for the default: a name search
-        keeps the exact id match first, ``"analysis"`` with a spectral
-        class ranks by spectrum match, and everything else is in id order.
 
     Returns
     -------
-    answer : `StarQueryResult`
-        The stars for the detail, ``total_matching``, and whether the
-        answer was cut.
+    statistics : `StarCatalogStatistics`
+        The counts and the coverage percentages.
+    """
+    summaries = storage.list_star_summaries()
+    total = len(summaries)
+    with_names = len([s for s in summaries if s.name and "Star_" not in s.id])
+    with_spectral = len([s for s in summaries if s.spectral_type and s.spectral_type != "Unknown"])
+    # None means "not known yet"; 0.0 is a real measured magnitude.
+    with_magnitude = len([s for s in summaries if s.magnitude is not None])
+    return StarCatalogStatistics(
+        total_objects=total,
+        identified_objects=with_names,
+        with_spectral_type=with_spectral,
+        with_magnitude=with_magnitude,
+        spectral_coverage_pct=round((with_spectral / total * 100), 2) if total > 0 else 0.0,
+        photometric_coverage_pct=round((with_magnitude / total * 100), 2) if total > 0 else 0.0,
+    )
+
+
+def _check_fields(changes: Collection[str], refused: Collection[str] = ()) -> None:
+    """Refuse change names that are not star fields.
 
     Raises
     ------
     InvalidArgumentError
-        If the request does not make sense: several selectors, a region that
-        is too wide, an unknown spectral class, ``detail="exists"`` without
-        ids, a selector with a detail that covers the whole library, or an
-        argument the detail does not use.
+        If a name is not a `StellarObject` field, or is one of ``refused``.
     """
-    from astrometricslib.pipelines.shared.star_overlay import build_overlay
-
-    selector = query.selector()
-    if query.image_path is not None and detail != "overlay":
-        raise InvalidArgumentError("image_path is used only with detail='overlay'.")
-    if detail in ("stats", "class_counts", "target_counts"):
-        _refuse_unused(detail, {"order": order is not None, "offset": bool(offset)})
-        return _whole_library_answer(storage, query, selector, detail)
-    if query.spectral_class is not None and not spectral_class_letter(query.spectral_class):
+    unknown = sorted(set(changes) - set(StellarObject.model_fields))
+    if unknown:
         raise InvalidArgumentError(
-            f"spectral_class must start with one of: {', '.join(SPECTRAL_CLASS_LABELS)}."
+            f"Unknown star field(s): {', '.join(unknown)}.", details={"unknown": unknown}
         )
-    if detail == "exists":
-        if query.ids is None:
-            raise InvalidArgumentError("detail='exists' needs ids.")
-        _refuse_unused(
-            detail,
-            {
-                **_filter_arguments_given(query),
-                "include_unresolved": query.include_unresolved,
-                "order": order is not None,
-            },
+    not_allowed = sorted(set(changes) & set(refused))
+    if not_allowed:
+        raise InvalidArgumentError(
+            f"These star fields cannot be changed this way: {', '.join(not_allowed)}.",
+            details={"refused": not_allowed},
         )
-        if limit is not None and len(query.ids) > QUERY_LIMITS["ids"]:
-            raise InvalidArgumentError(f"At most {QUERY_LIMITS['ids']} ids per call.")
-        return StarQueryResult(detail=detail, found=sorted(storage.existing_star_ids(query.ids)))
-    if detail == "overlay":
-        if selector != "target_id":
-            raise InvalidArgumentError("detail='overlay' needs target_id, and no other selector.")
-        _refuse_unused(
-            detail,
-            {
-                **_filter_arguments_given(query),
-                "include_unresolved": query.include_unresolved,
-                "order": order is not None,
-                "offset": bool(offset),
-            },
-        )
-        cap = None if limit is None else max(1, min(int(limit), QUERY_LIMITS["overlay"]))
-        overlay, reason = build_overlay(storage, query.target_id, cap, query.image_path)
-        return StarQueryResult(
-            detail=detail, total_matching=len(overlay), offset=0, overlay=overlay, overlay_reason=reason
-        )
-    # The radius cap protects a capped answer, meant to be read in full.
-    # A program that asks for every match (limit=None), such as the sky
-    # map, may search a wider circle.
-    if selector == "region" and (
-        query.radius_deg <= 0 or (limit is not None and query.radius_deg > QUERY_MAXIMUM_RADIUS_DEGREES)
-    ):
-        raise InvalidArgumentError(f"radius_deg must be above 0 and at most {QUERY_MAXIMUM_RADIUS_DEGREES}.")
 
-    if order is None:
-        order = "match" if detail == "analysis" and query.spectral_class is not None else None
-    offset = max(0, int(offset))
-    page_size = None if limit is None else max(1, min(int(limit), QUERY_LIMITS[detail]))
-    match_rms: dict[str, float] | None = None
-    paged = _page_in_storage(storage, query, selector, order, page_size, offset)
-    if paged is not None:
-        total, page = paged
-    else:
-        rows = _filtered_rows(storage, query, selector)
-        if order == "useful":
-            rows.sort(key=_useful_order_key)
-        elif order is not None or selector != "name":
-            # A name search keeps the exact id match first; every other list is
-            # in id order, so offset paging is stable.
-            rows.sort(key=lambda row: row["id"])
-        if order == "match":
-            rows, match_rms = _best_matched_first(
-                storage, rows, None if limit is None else MAXIMUM_MATCH_RANKING
+
+def _check_position(ra_deg: float | None, dec_deg: float | None) -> None:
+    """Refuse a sky position that is not a number in range.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``ra_deg`` is outside 0 to 360 or ``dec_deg`` outside -90 to 90.
+    """
+    for name, value, low, high in (("ra_deg", ra_deg, 0.0, 360.0), ("dec_deg", dec_deg, -90.0, 90.0)):
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int | float) or not low <= value <= high:
+            raise InvalidArgumentError(
+                f"{name} must be a number of degrees from {low:g} to {high:g}.", details={name: value}
             )
-        total = len(rows)
-        page = rows[offset:] if page_size is None else rows[offset : offset + page_size]
-    answer = StarQueryResult(
-        detail=detail, total_matching=total, offset=offset, truncated=offset + len(page) < total
+
+
+def create_star(
+    storage: Any, name: str, ra_deg: float | None = None, dec_deg: float | None = None, **fields: Any
+) -> StellarObject:
+    """Record a new star in the catalog.
+
+    The catalog keeps only stars with a light curve or a spectrum, so a new
+    star given neither (in ``fields``) is returned but not saved.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    name : `str`
+        The star's name, which is also its id.
+    ra_deg, dec_deg : `float`, optional
+        The position (ICRS), in degrees: 0 up to 360 and -90 to 90.
+    **fields
+        Other `StellarObject` fields, by field name (``spectral_type``,
+        ``photometry``, ``target_ids`` and so on).
+
+    Returns
+    -------
+    star : `StellarObject`
+        The new star, read back with its light curve when it was saved.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``name`` is empty, a position is not a number in range, or a
+        field is not a star field (or is ``id``, ``right_ascension`` or
+        ``declination``, which the arguments give).
+    ConflictError
+        If a star with that id is already in the catalog.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise InvalidArgumentError("A star's name cannot be empty.", details={"name": name})
+    _check_position(ra_deg, dec_deg)
+    _check_fields(fields, refused=("id", "right_ascension", "declination"))
+    if _stored_star_id(storage, name) is not None:
+        raise ConflictError(f"A star with id {name!r} is already in the catalog.", details={"star_id": name})
+    new_star = StellarObject(id=name, name=fields.pop("name", name) or name)
+    if ra_deg is not None:
+        new_star.right_ascension = float(ra_deg)
+    if dec_deg is not None:
+        new_star.declination = float(dec_deg)
+    for field_name, value in fields.items():
+        setattr(new_star, field_name, value)
+    storage.merge_and_record(
+        "stellar_catalog", [new_star], lambda current, updated: current if current is not None else updated
     )
-    if detail == "ids":
-        answer.ids = [row["id"] for row in page]
-    elif detail == "summary":
-        if match_rms is not None:
-            page = [{**row, "selfDeterminedSpectralTypeRms": match_rms.get(row["id"])} for row in page]
-        answer.stars = page
-    else:
-        by_id = {star.id: star for star in storage.get_by_ids("stellar_catalog", [row["id"] for row in page])}
-        records = [by_id[row["id"]] for row in page if row["id"] in by_id]
-        if detail == "objects":
-            answer.objects = records
-        else:
-            answer.stars = [summarize_star(star) for star in records]
-    return answer
+    saved = read_stars(storage, [name], light_curves=True)
+    return saved[0] if saved else new_star
+
+
+def update_star(storage: Any, star: StellarObject, **changes: Any) -> StellarObject:
+    """Change some of a stored star's fields and save it.
+
+    The stored record is read again, with its light curve, and the changes
+    are made to it, so a star read without its light curve can be updated
+    safely. The star given is not changed.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    star : `StellarObject`
+        The star, as `get_star` or `query_stars` gave it.
+    **changes
+        New values, by `StellarObject` field name (``spectral_type``, not
+        ``spectralType``). The id cannot change.
+
+    Returns
+    -------
+    star : `StellarObject`
+        The saved star, with its light curve. When the change leaves it with
+        no measurement, the catalog drops it and the changed star is
+        returned unsaved.
+
+    Raises
+    ------
+    NotFoundError
+        If the star is not in the catalog.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if a name is not a star field, or is
+    ``id``. Nothing is changed then.
+    """
+    _check_fields(changes, refused=("id",))
+    stored = read_stars(storage, [star.id], light_curves=True)
+    if not stored:
+        raise NotFoundError(f"No star with id {star.id!r} in the catalog.", details={"star_id": star.id})
+    changed = stored[0].model_copy(deep=True)
+    for key, value in changes.items():
+        setattr(changed, key, value)
+
+    def _apply_changes(current: StellarObject | None, updated: StellarObject) -> StellarObject:
+        """Write the changed fields onto the stored star.
+
+        Returns
+        -------
+        star : `StellarObject`
+            The stored star (or the new one) with the changes.
+        """
+        target_obj = current if current is not None else updated
+        for key, value in changes.items():
+            setattr(target_obj, key, value)
+        return target_obj
+
+    storage.merge_and_record("stellar_catalog", [changed], _apply_changes)
+    saved = read_stars(storage, [star.id], light_curves=True)
+    return saved[0] if saved else changed
+
+
+def delete_star(storage: Any, star: StellarObject) -> None:
+    """Delete a star from the catalog.
+
+    Parameters
+    ----------
+    storage : `AbstractCatalogAccess`
+        The catalog storage.
+    star : `StellarObject`
+        The star to delete.
+
+    Raises
+    ------
+    NotFoundError
+        If the star is not in the catalog.
+    """
+    if not storage.existing_star_ids([star.id]):
+        raise NotFoundError(f"No star with id {star.id!r} in the catalog.", details={"star_id": star.id})
+    storage.delete_by_ids("stellar_catalog", [star.id])
+
+
+def _find_nearest(
+    storage: Any, ra_deg: float, dec_deg: float, tolerance_arcsec: float
+) -> StellarObject | None:
+    """Find the star nearest a spot on the sky, within a tolerance.
+
+    Only stars near the spot are read, through the declination index.
+
+    Returns
+    -------
+    star : `StellarObject` or `None`
+        The nearest star inside the tolerance, with its light curve, or
+        `None`.
+    """
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+
+    spot = SkyCoord(ra=ra_deg, dec=dec_deg, unit=(u.deg, u.deg))
+    nearest_id: str | None = None
+    nearest_separation = tolerance_arcsec
+    for candidate in storage.list_stars_in_region(ra_deg, dec_deg, tolerance_arcsec / 3600.0):
+        # A stored 0.0 means "position never set", not the point (0, 0) on
+        # the sky, so those stars are never matched.
+        if not candidate.right_ascension or not candidate.declination:
+            continue
+        try:
+            place = SkyCoord(
+                ra=float(candidate.right_ascension), dec=float(candidate.declination), unit=(u.deg, u.deg)
+            )
+        except ValueError, TypeError:
+            continue
+        separation = spot.separation(place).arcsecond
+        if separation < nearest_separation:
+            nearest_id, nearest_separation = candidate.id, separation
+    if nearest_id is None:
+        return None
+    matches = storage.get_by_ids("stellar_catalog", [nearest_id])
+    return matches[0] if matches else None
+
+
+def _save_changes(storage: Any, star: StellarObject, changes: dict[str, Any]) -> StellarObject:
+    """Apply changes to a star `find_or_create_star` found, saving if stored.
+
+    Returns
+    -------
+    star : `StellarObject`
+        The saved star, or the star changed in memory when it is not stored
+        (it holds no measurement).
+    """
+    try:
+        return update_star(storage, star, **changes)
+    except NotFoundError:
+        for field_name, value in changes.items():
+            setattr(star, field_name, value)
+        return star
 
 
 def find_or_create_star(
     storage: Any,
-    update: Callable[[str, dict[str, Any]], Any],
-    create: Callable[..., Any],
-    delete: Callable[[str], bool],
     ra_deg: float,
     dec_deg: float,
-    name: str | None,
-    spectral_type: str | None,
-    magnitude: float | None,
-    target_id: str | None,
-    tolerance_arcsec: float,
+    name: str | None = None,
+    spectral_type: str | None = None,
+    magnitude: float | None = None,
+    target_id: str | None = None,
+    tolerance_arcsec: float | None = None,
 ) -> StellarObject:
     """Find the star at a spot on the sky, or make a new one there.
 
@@ -900,29 +1071,31 @@ def find_or_create_star(
     ----------
     storage : `AbstractCatalogAccess`
         The catalog storage.
-    update, create, delete : `Callable`
-        `StellarCatalog.update`, `StellarCatalog.create` and
-        `StellarCatalog.delete`, which write the changes. ``create`` is no
-        longer called, since a new star is not saved; it is kept so the
-        call stays the same.
     ra_deg, dec_deg : `float`
         The position, in degrees.
-    name : `str` or `None`
+    name : `str` or `None`, optional
         The star's catalog name. Also becomes the id of a new star.
-    spectral_type : `str` or `None`
+    spectral_type : `str` or `None`, optional
         Spectral type to record if the star has none.
-    magnitude : `float` or `None`
+    magnitude : `float` or `None`, optional
         Magnitude to record if the star has none.
-    target_id : `str` or `None`
+    target_id : `str` or `None`, optional
         Target to add to the star's list of targets.
-    tolerance_arcsec : `float`
-        How close in position counts as the same star, in arcseconds.
+    tolerance_arcsec : `float` or `None`, optional
+        How close in position counts as the same star, in arcseconds. By
+        default the library's registered same-star distance (2
+        arcseconds), the one every other star-recording step uses.
 
     Returns
     -------
     star : `StellarObject`
         The star that was found or created.
     """
+    if tolerance_arcsec is None:
+        from astrometricslib.foundation.parameters import resolve
+        from astrometricslib.pipelines.shared.catalog_star_identity import SAME_STAR_POSITION_TOLERANCE_ARCSEC
+
+        tolerance_arcsec = float(resolve(SAME_STAR_POSITION_TOLERANCE_ARCSEC).value)
 
     def missing_fields(star: StellarObject) -> dict[str, Any]:
         """List the fields this call adds to an existing star.
@@ -948,44 +1121,28 @@ def find_or_create_star(
         if matches:
             existing = matches[0]
             updates = missing_fields(existing)
-            if updates:
-                update(existing.id, updates)
-                existing = find_star(storage, existing.id)
-            return existing
+            return _save_changes(storage, existing, updates) if updates else existing
 
     # 2. Otherwise a star at the same spot is the same star.
     nearby = _find_nearest(storage, ra_deg, dec_deg, tolerance_arcsec)
     if nearby is not None:
         updates = {}
-        new_id = nearby.id
         if name and (not nearby.name or "Star_" in nearby.id) and not find_star(storage, name):
             # A field detection that a catalog has now named takes the
             # catalog name, unless that name is already another star.
             updates["name"] = name
             if "Star_" in nearby.id:
-                new_id = name
-                updates["id"] = name
-        updates.update(missing_fields(nearby))
-        if updates:
-            if new_id != nearby.id:
                 # Move the whole record to its new id, keeping its light
                 # curve and spectra, then remove the old one.
                 old_id = nearby.id
                 renamed = nearby.model_copy(deep=True)
-                renamed.id = new_id
+                renamed.id = name
                 storage.merge_and_record("stellar_catalog", [renamed], lambda _existing, updated: updated)
-                delete(old_id)
+                if storage.existing_star_ids([old_id]):
+                    storage.delete_by_ids("stellar_catalog", [old_id])
                 nearby = renamed
-            saved = update(new_id, updates)
-            if saved is None:
-                # Not saved (it holds no measurement): apply the updates in
-                # memory so the caller still gets the star it asked for.
-                for field_name, value in updates.items():
-                    if field_name != "id":
-                        setattr(nearby, field_name, value)
-                return nearby
-            nearby = find_star(storage, new_id) or nearby
-        return nearby
+        updates.update(missing_fields(nearby))
+        return _save_changes(storage, nearby, updates) if updates else nearby
 
     # 3. Nothing there yet: record a new star.
     if name:
@@ -1009,3 +1166,31 @@ def find_or_create_star(
         magnitude=magnitude,
         target_ids=[target_id] if target_id else [],
     )
+
+
+def target_filter_id(target: Target | None) -> str | None:
+    """Give the target id a star filter compares, for a `Target` or `None`.
+
+    Parameters
+    ----------
+    target : `Target` or `None`
+        The target.
+
+    Returns
+    -------
+    target_id : `str` or `None`
+        The target's id, or `None` for no target.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``target`` is not a `Target`.
+    """
+    if target is None:
+        return None
+    if not isinstance(target, Target):
+        raise InvalidArgumentError(
+            "target must be a Target; read one with astrometrics.targets.get(...).",
+            details={"target": repr(target)[:80]},
+        )
+    return target.id

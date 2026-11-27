@@ -157,8 +157,17 @@ DECISIONS = {
     "star_get_spectrum": ToolDecision(
         "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     ),
-    "star_analyze_periodicity": ToolDecision(
-        "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
+    "star_measure_periodicity": ToolDecision(
+        "keep",
+        "Since #206 the period and transit searches of star_record_periodicity without the save. Runs the "
+        "searches on one star's light curve and writes nothing.",
+        tool_class="compute",
+    ),
+    "star_record_periodicity": ToolDecision(
+        "withhold",
+        "Writes the period and transit results into the live star catalog. The AI is read-only, so it runs "
+        "the same searches with star_measure_periodicity instead.",
+        "change-data",
     ),
     "processing_plate_solve": ToolDecision(
         "keep",
@@ -186,10 +195,6 @@ DECISIONS = {
     ),
     # ---- Drop ----
     "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
-    "star_dataset_version": ToolDecision(
-        "drop",
-        "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",
-    ),
     "processing_stop_stacking_programs": ToolDecision(
         "drop", "Stops every Siril the library started. The backend calls it when it stops."
     ),
@@ -404,9 +409,35 @@ DECISIONS = {
         "fraction, star width against the inputs and each exposure group. Reads the saved summary.",
     ),
     "star_query": ToolDecision(
-        "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
+        "keep",
+        "Built 2026-10-03. Library star lookup. Since #206 it returns a page of star records without their "
+        "light curves; the tool's reply is cut to 50 stars and the tool asks for at most 200.",
     ),
     "star_get": ToolDecision("keep", "Reads one star's full record by id. Writes nothing."),
+    "visualization_get_star_overlay": ToolDecision(
+        "keep",
+        "Since #206 the overlay that star_query's detail='overlay' gave. Places a target's catalog stars "
+        "in pixels on its stack or a named image and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_count_by_class": ToolDecision(
+        "keep",
+        "Since #206 the class counts that star_query's detail='class_counts' gave. Counts the stars of each "
+        "spectral class from the indexed columns and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_count_by_target": ToolDecision(
+        "keep",
+        "Since #206 the per-target counts that star_query's detail='target_counts' gave. Counts each "
+        "target's stars from the indexed columns and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_get_statistics": ToolDecision(
+        "keep",
+        "Since #206 the library statistics that star_query's detail='stats' gave. Counts the star records "
+        "and writes nothing.",
+        tool_class="observe",
+    ),
     "calibration_query": ToolDecision(
         "keep",
         "Built 2026-10-05. Calibration counts per kind and setting, narrowed by a capture setting (also "
@@ -876,7 +907,6 @@ DECISIONS = {
             "calibration_reindex_frames",
             "processing_process_target",
             "star_create",
-            "star_find_or_create_by_position",
             "star_update",
             "target_add",
             "target_create",

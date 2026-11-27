@@ -35,6 +35,13 @@ BRANCH_PREFIXES = {
 }
 """Sub-API of `Astrometrics` -> the prefix of its tools' names."""
 
+STAR_QUERY_DEFAULT_STARS = 50
+"""How many stars one ``star_query`` call lists when the client gives no
+limit. The library lists every match by default."""
+
+STAR_QUERY_MAXIMUM_STARS = 200
+"""Most stars one ``star_query`` call lists for an AI client."""
+
 JOBS_QUERY_MAXIMUM_JOBS = 50
 """Most jobs one ``jobs_query`` call lists for an AI client."""
 
@@ -47,6 +54,9 @@ CLIENT_LIMITS = {
     ),
     "observatory_configuration_query": ClientLimits(hidden_parameters=("camera", "telescope")),
     "target_select_frames": ClientLimits(hidden_parameters=("configuration",)),
+    "star_query": ClientLimits(
+        maximums={"limit": STAR_QUERY_MAXIMUM_STARS}, defaults={"limit": STAR_QUERY_DEFAULT_STARS}
+    ),
     "jobs_query": ClientLimits(
         hidden_parameters=("max_line_chars",),
         withheld_choices={"detail": ("full",)},
@@ -56,6 +66,7 @@ CLIENT_LIMITS = {
 """What an AI client may not send to a tool. `render_fits` draws a
 Matplotlib figure for a script or a notebook, and an array of pixels cannot
 travel in JSON, so a client gets the PNG and the data URL kinds only.
+`star_query` lists 50 stars unless asked for more, and at most 200.
 `jobs_query` keeps the short answers: at most 50 jobs, at most 200 log lines
 cut to 500 characters, and no whole job records. The app's screens ask the
 library for more. A camera, telescope or observatory configuration is an

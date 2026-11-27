@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.known_variability import (
@@ -1316,6 +1316,45 @@ class StellarObject(BaseModel):
     # see CatalogMatchQuality. `None` for a star that was never matched
     # (a FIELD_J... position-only id).
     catalog_match_quality: CatalogMatchQuality | None = Field(default=None, alias="catalogMatchQuality")
+    # The stored lengths of the light-curve lists ("timestamps",
+    # "magnitudes", "fluxes") when the star was read without its light
+    # curve (`light_curves_included` is then False). `None` when the lists
+    # are on the record itself. Kept out of the saved record.
+    _left_out_light_curve_lengths: dict[str, int] | None = PrivateAttr(default=None)
+
+    def _light_curve_length(self, list_name: str) -> int:
+        """Count the points of one light-curve list, even when it was left out.
+
+        Parameters
+        ----------
+        list_name : `str`
+            ``"timestamps"``, ``"magnitudes"`` or ``"fluxes"``.
+
+        Returns
+        -------
+        length : `int`
+            The stored length when the light curve was left out of this
+            copy, else the length of the list on the record.
+        """
+        if self._left_out_light_curve_lengths is not None:
+            return self._left_out_light_curve_lengths.get(list_name, 0)
+        values = getattr(self.photometry, list_name, None) if self.photometry else None
+        return len(values) if values else 0
+
+    @property
+    def light_curves_included(self) -> bool:
+        """Say whether this copy of the star holds its light-curve points.
+
+        A star read with `StellarCatalog.get` or `query` without
+        ``include=["light_curves"]`` has empty point lists in `photometry`,
+        though its period results and summaries are there.
+
+        Returns
+        -------
+        included : `bool`
+            `False` when the light-curve points were left out of this copy.
+        """
+        return self._left_out_light_curve_lengths is None
 
     @property
     def known_variability(self) -> KnownVariability:
@@ -1398,8 +1437,7 @@ class StellarObject(BaseModel):
         `True` with at least `MINIMUM_POINTS_FOR_PERIOD_SEARCH` (5)
         measurements.
         """
-        points = len(self.photometry.timestamps) if self.photometry else 0
-        return points >= resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
+        return self._light_curve_length("timestamps") >= resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
 
     @computed_field(alias="canRunTransitSearch")
     @property
@@ -1409,21 +1447,13 @@ class StellarObject(BaseModel):
         `True` with at least `MINIMUM_POINTS_FOR_TRANSIT_SEARCH` (8)
         measurements.
         """
-        points = len(self.photometry.timestamps) if self.photometry else 0
-        return points >= resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
+        return self._light_curve_length("timestamps") >= resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
 
     @computed_field(alias="hasPhotometry")
     @property
     def has_photometry(self) -> bool:
         """Check if this star's brightness has been tracked over time."""
-        return bool(
-            self.photometry
-            and (
-                (self.photometry.timestamps and len(self.photometry.timestamps) > 0)
-                or (self.photometry.magnitudes and len(self.photometry.magnitudes) > 0)
-                or (self.photometry.fluxes and len(self.photometry.fluxes) > 0)
-            )
-        )
+        return any(self._light_curve_length(name) > 0 for name in ("timestamps", "magnitudes", "fluxes"))
 
     @computed_field(alias="plotData")
     @property

@@ -212,9 +212,9 @@ def compare_target(
     """
     camera_name = camera_name or astrometrics.config.get_primary_camera_name()
     line_spread = load_line_spread_profile(camera_name)
-    answer = astrometrics.stars.query(target_id=target_id, has_spectra=True, detail="objects", limit=None)
+    target = astrometrics.targets.get(target_id, required=True)
     results = []
-    for star in answer.objects or []:
+    for star in astrometrics.stars.query(target=target, has_spectra=True):
         if star.id.endswith("::spectroscopy"):
             continue
         comparison = compare_star(star, driver, line_spread)

@@ -222,7 +222,7 @@ CLASSIFICATION_RULES = (
         "Adds or changes targets in the catalog.",
     ),
     _rule(
-        r"^star_(create|update|find_or_create_by_position)$",
+        r"^star_(create|update|record_periodicity)$",
         "change-data",
         "high",
         "Adds or changes stars in the catalog.",

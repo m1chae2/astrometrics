@@ -255,3 +255,12 @@ def test_quality_metrics_offers_optional_arguments(registry: ToolRegistry) -> No
     schema = registry.tools["quality_metrics"]["tool_def"].input_schema
     assert set(schema["properties"]) == {"name", "checkpoint", "detail"}
     assert not schema.get("required")
+
+
+def test_star_query_lists_a_page_of_stars_for_an_ai_client(registry: ToolRegistry) -> None:
+    """`star_query` lists 50 stars unless asked, and refuses more than 200."""
+    schema = registry.tools["star_query"]["tool_def"].input_schema
+    assert schema["properties"]["limit"]["maximum"] == 200
+    assert "uses 50 when it is left out" in schema["properties"]["limit"]["description"]
+    content = asyncio.run(registry.execute("star_query", {"limit": 201}))
+    assert "invalid_argument" in content[0].text

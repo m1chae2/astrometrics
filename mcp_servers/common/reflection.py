@@ -64,11 +64,16 @@ class ClientLimits:
         For a count argument, the largest value a client may send, lower
         than the library's own maximum so that the answers stay small. The
         schema gives it as ``maximum``, and a call above it is refused.
+    defaults : `Mapping` [`str`, `Any`]
+        For an argument the client leaves out, the value the tool sends the
+        library instead of the library's own default, such as a page size
+        for a query that would otherwise return every match.
     """
 
     hidden_parameters: tuple[str, ...] = ()
     withheld_choices: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     maximums: Mapping[str, int] = field(default_factory=dict)
+    defaults: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -403,6 +408,10 @@ def _apply_client_limits(schema: dict[str, Any], method: Callable[..., Any], lim
             continue
         schema["properties"][name]["maximum"] = maximum
         schema["properties"][name]["description"] += f" This tool allows at most {maximum}."
+    for name, default in limits.defaults.items():
+        if name not in schema["properties"]:
+            continue
+        schema["properties"][name]["description"] += f" This tool uses {default!r} when it is left out."
 
 
 def _check_client_limits(tool_name: str, arguments: Mapping[str, Any], limits: ClientLimits) -> None:
@@ -572,6 +581,8 @@ def _make_executor(
         """
         if limits is not None:
             _check_client_limits(tool_name, kwargs, limits)
+            left_out = {name: value for name, value in limits.defaults.items() if kwargs.get(name) is None}
+            kwargs = {**kwargs, **left_out}
         if plan is not None and (plan.subjects or plan.models or plan.frame_choices):
             # A lookup reads storage, so it runs off the event loop too.
             kwargs = await asyncio.to_thread(prepare_arguments, api_root, plan, kwargs)

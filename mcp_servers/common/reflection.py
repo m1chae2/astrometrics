@@ -465,7 +465,7 @@ def register_reflected_tools(
         Mapping of attribute name on the high-level interface
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
         key of ``""`` maps to root astrometrics methods. A dotted name
-        (e.g. ``"processing.calibration"``) walks nested attributes.
+        (e.g. ``"calibration.frames"``) walks nested attributes.
     skip : `Collection` [`str`], optional
         Tool names to leave out, such as the tools another server serves
         (`mcp_servers.common.app_job_tools.APP_JOB_TOOLS`).

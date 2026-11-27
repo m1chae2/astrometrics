@@ -220,7 +220,7 @@ def stack(
         measured_at=datetime.now(UTC),
         quality_recording=FrameQualityRecording(
             self._config,
-            self.calibration._calibration_library,
+            self._calibration._calibration_library,
             save_target=lambda: save_quality_stamps(self._targets, resolved),
         ),
     )
@@ -390,7 +390,7 @@ def predict_stack(
     if not checks:
         return list_chosen_frames(resolved, chosen, kind)
     # A prediction is a read, not a pipeline run, so it records no job.
-    return predict_stack(resolved, chosen, kind, self.calibration._calibration_library)
+    return predict_stack(resolved, chosen, kind, self._calibration._calibration_library)
 
 
 def measure_noise(

@@ -56,8 +56,8 @@ SETTING = CaptureSetting(
     camera="ASI533MM Pro",
     telescope="RC8",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=50,
     binning=1,
 )

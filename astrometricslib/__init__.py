@@ -24,8 +24,10 @@ settings by itself::
 - `stars` (`StellarCatalog`): the library's star records, catalog queries
   and light-curve (brightness over time) analysis.
 - `processing` (`ProcessingPipelines`): stack a target, remake its preview
-  and run the analysis stages and noise measurements. Its `calibration`
-  child (`CalibrationCatalog`) manages darks, biases and flats.
+  and run the analysis stages and noise measurements.
+- `calibration` (`CalibrationCatalog`): the darks, biases and flats, which
+  sets fit some light frames, how good each set is, and each camera's noise
+  profile. Its `frames` child adds, rescans and measures the files.
 - `quality` (`QualityRecords`): stored quality measurements, the metric list
   and live checks of raw frames and stacks.
 - `visualization` (`Visualization`): draw frames and stacks as pictures and
@@ -41,7 +43,7 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 24 names:
+The package root holds 25 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
@@ -52,6 +54,8 @@ The package root holds 24 names:
   `Observatories`);
 - the core records: `Target`, `FrameRecord`, `StellarObject` and
   `FilterType`;
+- the input model `CaptureSetting`, which says which calibration sets a
+  call means;
 - the equipment: `ObservatoryConfiguration` and the models it is built
   from, `Telescope`, `Camera`, `GuideScope`, `Mount`, `Focuser` and
   `FilterWheel`.
@@ -105,6 +109,7 @@ from astrometricslib.models.observatory_configuration import (
     ObservatoryConfiguration,
     Telescope,
 )
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
@@ -178,7 +183,8 @@ class Astrometrics(MovedNames):
 
     This class only builds the sub-APIs and holds them. It has no methods
     of its own: stacking, preview pictures and the analysis stages live on
-    `processing`, the target list on `targets`, the star catalog on
+    `processing`, the calibration frames on `calibration`, the target list
+    on `targets`, the star catalog on
     `stars`, pictures and plots on `visualization`, the job history on
     `jobs`, and quality reads on `quality`. Each sub-API is built once
     here and shared, so they all read and write the same storage.
@@ -197,7 +203,9 @@ class Astrometrics(MovedNames):
     stars : `StellarCatalog`
         Identified stars, catalog queries, and light-curve analysis.
     processing : `ProcessingPipelines`
-        Frame calibration, stacking, and scientific analysis stages.
+        Stacking and the scientific analysis stages.
+    calibration : `CalibrationCatalog`
+        The dark, bias and flat frames and the camera noise profiles.
     visualization : `Visualization`
         Rendering FITS images to PNGs/data URLs and diagnostic plots.
     jobs : `Jobs`
@@ -241,6 +249,7 @@ class Astrometrics(MovedNames):
             The outside programs and services to use. `Drivers()` means the
             built-in ones.
         """
+        from astrometricslib.api.calibration import CalibrationCatalog
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.observatories import Observatories
         from astrometricslib.api.processing import ProcessingPipelines
@@ -259,8 +268,13 @@ class Astrometrics(MovedNames):
             self.config, self._catalog_access, drivers=drivers, quality=lambda: self.quality
         )
         self.stars = StellarCatalog(self.config, self._catalog_access)
+        self.calibration = CalibrationCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
-            self.config, self._catalog_access, targets=self.targets, drivers=drivers
+            self.config,
+            self._catalog_access,
+            targets=self.targets,
+            calibration=self.calibration,
+            drivers=drivers,
         )
         self.visualization = Visualization(
             self.config, self._catalog_access, targets=self.targets, stars=self.stars
@@ -269,7 +283,7 @@ class Astrometrics(MovedNames):
             self.config,
             self._catalog_access,
             targets=self.targets,
-            calibration_library=lambda: self.processing.calibration._calibration_library,
+            calibration_library=lambda: self.calibration._calibration_library,
             drivers=drivers,
             owner=lambda: self,
         )
@@ -282,6 +296,7 @@ __all__ = [
     "Astrometrics",
     "CalibrationCatalog",
     "Camera",
+    "CaptureSetting",
     "FilterType",
     "FilterWheel",
     "Focuser",

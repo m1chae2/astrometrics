@@ -18,7 +18,6 @@ from astrometricslib import AppConfiguration, Target, Telescope
 from astrometricslib._internal.quality import QualityQueryResult
 from astrometricslib._internal.results import RestoreReport
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
-from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
@@ -39,7 +38,7 @@ from wayfindinglib.models.session.observation_session import (
     QueueRequest,
     StartTimeMode,
 )
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 
 class _FakeTargetCatalog:
@@ -165,13 +164,12 @@ class _FakeAstrometrics:
             restore_excluded_frames=lambda target, apply=False: RestoreReport(
                 targetId=getattr(target, "id", target), applied=False
             ),
-            calibration=SimpleNamespace(
-                query=lambda **_arguments: CalibrationQueryResult(
-                    detail="counts", darks=[], biases=[], flats=[]
-                ),
-                camera_profile=no_camera_profiles_processing().calibration.camera_profile,
-            ),
         )
+        self.calibration = SimpleNamespace(
+            query=lambda kind=None, **_arguments: [],
+            get_profile=no_camera_profiles_calibration().get_profile,
+        )
+        self.config = NO_CAMERAS
 
 
 def _target(target_id: str, ra: str = "09:55:33", dec: str = "+69:03:55") -> Target:
@@ -829,7 +827,7 @@ def test_a_measured_camera_refuses_an_unmeasured_setting(
     """A gain setting the profile never measured is refused."""
     planning = _planning(isolated_butler, _target("M 81"))
     monkeypatch.setattr(
-        planning._astrometrics.processing.calibration, "camera_profile", lambda name: _measured_profile()
+        planning._astrometrics.calibration, "get_profile", lambda camera=None: _measured_profile()
     )
     session = _session(planning)
     package = _package(planning)

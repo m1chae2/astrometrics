@@ -457,11 +457,9 @@ def score_candidate(
 
     # The new frames follow the main setting's past frames, with tonight's sky.
     template = [
-        frame for frame in existing if abs(frame.exposure_seconds - (setting.exposure_seconds or 0.0)) < 0.5
+        frame for frame in existing if abs(frame.exposure_seconds - (setting.exposure_s or 0.0)) < 0.5
     ] or list(existing)
-    exposure_seconds = float(
-        setting.exposure_seconds or np.median([frame.exposure_seconds for frame in template])
-    )
+    exposure_seconds = float(setting.exposure_s or np.median([frame.exposure_seconds for frame in template]))
     sky_rate: float | None = None
     sky_source = "history"
     model = sky_models.get(baseline_key(setting))
@@ -825,11 +823,11 @@ def rank_tonight(
             Measured from the records when there are enough, else the
             design estimates.
         """
-        key = (setting.exposure_seconds, setting.filter_name)
+        key = (setting.exposure_s, setting.filter_name)
         if key not in overhead_cache:
             overhead_cache[key] = estimate_capture_overheads(
                 list(ekos_contexts or []),
-                exposure_seconds=setting.exposure_seconds,
+                exposure_seconds=setting.exposure_s,
                 filter_name=setting.filter_name,
             )
         return overhead_cache[key]

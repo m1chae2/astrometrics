@@ -1,52 +1,64 @@
-"""Purpose: Test `CalibrationCatalog.camera_profile`.
+"""Purpose: Test `calibration.get_profile`.
 
-Description: The call gives callers the stored camera profile for a camera
-name written in any known spelling. These tests check that it passes the
-catalog's own configuration to the profile lookup and that a real lookup
-returns a `CameraProfile`, with the generic fallback for an unknown name.
+Description: The call gives the stored noise profile of a `Camera`. These
+tests check that it reads the catalog's own configuration, that it matches
+the camera's aliases when its name has no profile, and that no camera, or a
+camera with no profile, gives the generic fallback.
 """
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
-from astrometricslib.api import calibration
+from astrometricslib import Camera
 from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import CameraProfile
+from astrometricslib.pipelines.stacking import calibration_catalog
 
 
-def test_camera_profile_passes_its_own_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+def _camera(name: str, *aliases: str) -> Camera:
+    """Make a camera with the given name and other spellings.
+
+    Returns
+    -------
+    camera : `Camera`
+        A small camera.
+    """
+    return Camera(
+        id=name, name=name, pixel_size_um=3.76, sensor_width_px=3008, sensor_height_px=3008, aliases=aliases
+    )
+
+
+def test_get_profile_passes_its_own_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     """The lookup reads the configuration the catalog was built with."""
     config = AppConfiguration()
-    profile = MagicMock(spec=CameraProfile)
+    profile = MagicMock(spec=CameraProfile, is_generic_fallback=False)
     lookup = MagicMock(return_value=profile)
-    monkeypatch.setattr(calibration, "resolve_camera_profile", lookup)
+    monkeypatch.setattr(calibration_catalog, "resolve_camera_profile", lookup)
 
     catalog = CalibrationCatalog(config, MagicMock())
 
-    assert catalog.camera_profile("ZWO ASI 533MM Pro") is profile
+    assert catalog.get_profile(_camera("ZWO ASI 533MM Pro")) is profile
     lookup.assert_called_once_with("ZWO ASI 533MM Pro", config)
 
 
-def test_camera_profile_gives_a_profile_and_the_generic_fallback() -> None:
-    """A missing or unlisted name gives the generic profile."""
+def test_get_profile_tries_the_aliases_after_the_name() -> None:
+    """A camera whose name has no profile is found by an alias."""
     catalog = CalibrationCatalog(AppConfiguration(), MagicMock())
 
-    unnamed = catalog.camera_profile(None)
+    profile = catalog.get_profile(_camera("My Mono Camera", "ZWO ASI 533MM Pro"))
+
+    assert profile.is_generic_fallback is False
+    assert profile == catalog.get_profile(_camera("ZWO ASI 533MM Pro"))
+
+
+def test_no_camera_or_an_unknown_camera_gives_the_generic_fallback() -> None:
+    """`None` or a camera with no profile gives the generic profile."""
+    catalog = CalibrationCatalog(AppConfiguration(), MagicMock())
+
+    unnamed = catalog.get_profile()
 
     assert isinstance(unnamed, CameraProfile)
     assert unnamed.is_generic_fallback is True
-    assert catalog.camera_profile("No Such Camera 9000").is_generic_fallback is True
-
-
-def test_calibration_query_states_the_dark_temperature_tolerance() -> None:
-    """Every answer holds the tolerance the library matches darks with."""
-    catalog = CalibrationCatalog(AppConfiguration(), MagicMock())
-    catalog._library = MagicMock()
-    catalog._library.get_stats.return_value = {}
-
-    answer = catalog.query()
-
-    assert answer.dark_temperature_tolerance_c == DEFAULT_DARK_TEMPERATURE_TOLERANCE_C.default
+    assert catalog.get_profile(_camera("No Such Camera 9000")).is_generic_fallback is True

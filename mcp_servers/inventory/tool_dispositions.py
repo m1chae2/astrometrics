@@ -409,8 +409,21 @@ DECISIONS = {
     "star_get": ToolDecision("keep", "Reads one star's full record by id. Writes nothing."),
     "calibration_query": ToolDecision(
         "keep",
-        "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
-        "reloads the index into memory and writes nothing.",
+        "Built 2026-10-05. Calibration counts per kind and setting, narrowed by a capture setting (also "
+        "for a plan with no frames yet). Writes nothing.",
+    ),
+    "calibration_match": ToolDecision(
+        "keep",
+        "Built 2026-11-27 from calibration_query's target match (#206): groups a target's light frames by "
+        "setting with the darks, biases and flats the stacker would use. Writes nothing.",
+        tool_class="observe",
+    ),
+    "calibration_measure_sensor_noise": ToolDecision(
+        "withhold",
+        "Since 2026-11-27 (#206) it only reads: it measures a setting's gain and read noise from the "
+        "library's flats and biases and writes nothing. Withheld until an AI use is reviewed; "
+        "calibration_record_sensor_noise is the writer.",
+        tool_class="compute",
     ),
     "quality_measure_star_profile": ToolDecision(
         "keep",
@@ -737,7 +750,6 @@ DECISIONS = {
         "Sets a raw INDI property, which commands a device. Belongs to the dropped control side.",
         "actuate",
     ),
-    "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess": ToolDecision(
         "keep",
         "Judges the dark, bias or flat sets of the library from the stored numbers. "
@@ -747,11 +759,13 @@ DECISIONS = {
         "withhold",
         "Writes the measured numbers of dark and bias frames to the quality store and their "
         "stamps to the calibration index. The AI is read-only.",
+        tool_class="compute",
     ),
-    "calibration_measure_sensor_noise": ToolDecision(
+    "calibration_record_sensor_noise": ToolDecision(
         "withhold",
-        "With save on, it writes a measured gain and read noise into the camera profile in the "
-        "configuration file. The AI is read-only.",
+        "It writes a measured gain and read noise into the camera profile in the configuration file. "
+        "The AI is read-only.",
+        tool_class="compute",
     ),
     "target_display_turn": ToolDecision(
         "drop",
@@ -933,7 +947,13 @@ DECISIONS = {
 }
 """Tool name -> the decision about it. Every served tool has one."""
 
-TOOL_RENAMES: dict[str, str] = {}
+TOOL_RENAMES: dict[str, str] = {
+    # Step 4c of #206: calibration is a sub-API with a `frames` child.
+    "calibration_add_frames": "calibration_frames_add",
+    "calibration_reindex_frames": "calibration_frames_scan",
+    "calibration_measure_frames": "calibration_frames_record_measurements",
+    "calibration_camera_profile": "calibration_get_profile",
+}
 """Old tool name -> new tool name, for a tool whose public method was
 renamed. The decision recorded under the old name in ``DECISIONS`` applies
 to the new name. Empty when every row uses the current name."""

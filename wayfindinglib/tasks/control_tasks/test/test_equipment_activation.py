@@ -425,7 +425,7 @@ def test_camera_noise_status_is_partly_measured_when_only_one_number_is(
     base = resolve_camera_profile("ZWO ASI533MM Pro", shipped_config)
     profile = CameraProfile(**{**dict(base), "sensor_noise": (entry,)})
     library = library_with_camera_profiles(shipped_config)
-    library.processing.calibration.camera_profile = lambda name: profile
+    library.calibration.get_profile = lambda camera=None: profile
     (setting,) = list_camera_noise(library, "ZWO ASI533MM Pro")
     assert setting.status == "partly_measured"
     assert setting.gain.status == "measured"

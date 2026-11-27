@@ -515,8 +515,8 @@ def build_capture_setting(frame: FrameRecord) -> CaptureSetting:
         focal_length_mm=frame.focal_length_mm,
         pixel_scale_arcsec=frame.pixel_scale_arcsec,
         filter_name=None if filter_name in ("", "None") else filter_name,
-        exposure_seconds=exposure_seconds,
-        gain_setting=_whole_number(canonical_gain_setting(frame.iso)),
+        exposure_s=exposure_seconds,
+        gain=_whole_number(canonical_gain_setting(frame.iso)),
         offset=_whole_number(canonical_offset_setting(frame.offset)),
         binning=_whole_number(canonical_binning_setting(frame.binning).split("x")[0]),
     )

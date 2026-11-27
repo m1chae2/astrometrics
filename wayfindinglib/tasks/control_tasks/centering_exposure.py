@@ -47,6 +47,7 @@ from astrometricslib.parameters import (
     resolve_parameter,
 )
 from astrometricslib.reports import CaptureSetting, QualityMeasurement
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import equipment_spellings, normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, baseline_key
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -563,12 +564,10 @@ def _sensor_numbers(
     pixel_scale = (
         ARCSEC_PER_RADIAN * equipment.pixel_size_um * 1e-6 * binning / (equipment.focal_length_mm * 1e-3)
     )
-    profile = context.astrometrics.processing.calibration.camera_profile(setting.camera)
+    profile = profile_for_name(context.astrometrics, setting.camera)
     if profile.is_generic_fallback:
         raise _MissingInputError("the camera has no profile, so its gain and read noise are unknown")
-    entry = profile.sensor_noise_for(
-        setting.gain_setting, setting.offset or 0, binning, clipped_at_zero=False
-    )
+    entry = profile.sensor_noise_for(setting.gain, setting.offset or 0, binning, clipped_at_zero=False)
     if entry is None or entry.gain_e_per_adu is None or entry.read_noise_e is None:
         raise _MissingInputError("the camera profile has no gain and read noise for the capture setting")
     prediction = sky_rate_tasks.get_sky_rate_prediction(

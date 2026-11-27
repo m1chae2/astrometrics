@@ -22,7 +22,6 @@ import pytest
 from astrometricslib import AppConfiguration, Astrometrics, Target
 from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
-from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.reports import (
     CaptureSetting,
@@ -49,7 +48,7 @@ from wayfindinglib.models.session.observation_session import (
 from wayfindinglib.tasks.planning_tasks import target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import assign_stacks_to_settings
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)
 SETTING = CaptureSetting(
@@ -57,14 +56,40 @@ SETTING = CaptureSetting(
     telescope="RC8",
     pixel_scale_arcsec=1.0,
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=50,
     binning=1,
 )
 NIGHT_STARTS = [datetime(2026, 10, day, 4, 0, tzinfo=UTC) for day in (1, 2, 3)]
 STACK_ID = "T/T_stack.fits"
 MOVED = "frame moved to _excluded/"
+
+
+def _count_row(row: dict[str, Any]) -> SimpleNamespace:
+    """Turn a counts row written with the table's keys into a library row.
+
+    Parameters
+    ----------
+    row : `dict` [`str`, `Any`]
+        A row with ``camera``, ``iso``, ``offset``, ``binning``,
+        ``temperature_c``, ``exposure``, ``filter`` and ``count``.
+
+    Returns
+    -------
+    row : `types.SimpleNamespace`
+        The row with the fields of a ``calibration.query`` row.
+    """
+    return SimpleNamespace(
+        camera=row.get("camera"),
+        gain=row.get("iso"),
+        offset=row.get("offset"),
+        binning=row.get("binning"),
+        temperature_c=row.get("temperature_c"),
+        exposure_s=row.get("exposure"),
+        filter_name=row.get("filter"),
+        count=row.get("count", 0),
+    )
 
 
 class _FakeQuality:
@@ -200,18 +225,13 @@ class _Library:
         self.rows.extend(self._stack_rows())
         self.quality = _FakeQuality(self.rows, {1: SETTING})
         self.targets = SimpleNamespace(get=lambda target_id: self.target if target_id == "T" else None)
-        self.processing = SimpleNamespace(
-            calibration=SimpleNamespace(
-                query=lambda **_arguments: CalibrationQueryResult(
-                    detail="counts",
-                    darks=darks or [],
-                    biases=[],
-                    flats=flats or [],
-                    dark_temperature_tolerance_c=3.0,
-                ),
-                camera_profile=no_camera_profiles_processing().calibration.camera_profile,
-            ),
+        self.processing = SimpleNamespace()
+        rows_by_kind = {"dark": darks or [], "flat": flats or []}
+        self.calibration = SimpleNamespace(
+            query=lambda kind=None, **_arguments: [_count_row(row) for row in rows_by_kind.get(kind, [])],
+            get_profile=no_camera_profiles_calibration().get_profile,
         )
+        self.config = NO_CAMERAS
 
     def _row(
         self,
@@ -978,7 +998,7 @@ def test_a_stack_of_two_settings_goes_to_the_setting_with_most_frames() -> None:
     """The assignment follows the majority of member frames."""
     library = _Library()
     # Give the last 10 frames a second setting.
-    second = SETTING.model_copy(update={"exposure_seconds": 120.0})
+    second = SETTING.model_copy(update={"exposure_s": 120.0})
     for row in library.rows:
         if row.subject.level == SubjectLevel.FRAME and row.subject.subject_id.endswith(("f020.fits",)):
             row.subject.capture_setting_id = 2
@@ -1118,8 +1138,8 @@ def _busy_library() -> _Library:
     library = _Library()
     settings = {
         1: SETTING,
-        2: SETTING.model_copy(update={"exposure_seconds": 30.0}),
-        3: SETTING.model_copy(update={"exposure_seconds": 120.0}),
+        2: SETTING.model_copy(update={"exposure_s": 30.0}),
+        3: SETTING.model_copy(update={"exposure_s": 120.0}),
     }
     library.quality = _FakeQuality(library.rows, settings)
     registered = Astrometrics().quality.metrics(detail="full")
@@ -1132,7 +1152,7 @@ def _busy_library() -> _Library:
         frames.append(
             FrameRecord(
                 path=path,
-                exposure=str(int(settings[setting_id].exposure_seconds)),
+                exposure=str(int(settings[setting_id].exposure_s)),
                 timestamp=start.timestamp(),
                 camera="ASI533MM Pro",
                 telescope="RC8",
@@ -1284,7 +1304,7 @@ def test_the_clipping_note_uses_the_ceiling_when_the_threshold_cannot_be_reached
         photometric_linearity_limit_adu=None,
     )
     library = SimpleNamespace(
-        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=lambda name: profile))
+        calibration=SimpleNamespace(get_profile=lambda camera=None: profile), config=NO_CAMERAS
     )
     note = target_report_tasks._clipping_note(library, "Nikon D5300", ScienceGoal.FAINT_POINT_SOURCE)
     assert "at or above 16383 ADU (measured: raw maximum)" in note
@@ -1305,7 +1325,7 @@ def test_the_clipping_note_names_the_linearity_limit_when_there_is_one(
         photometric_linearity_limit_adu=_provenanced(60000, "measured", "Antonov 2026"),
     )
     library = SimpleNamespace(
-        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=lambda name: profile))
+        calibration=SimpleNamespace(get_profile=lambda camera=None: profile), config=NO_CAMERAS
     )
     note = target_report_tasks._clipping_note(library, "ZWO ASI 533MM Pro", ScienceGoal.FAINT_POINT_SOURCE)
     assert "at or above 65000 ADU (assumed: default)" in note

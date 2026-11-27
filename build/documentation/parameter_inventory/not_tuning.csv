@@ -70,6 +70,7 @@ astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID forma
 astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
 astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
+astrometricslib/api/calibration.py,CalibrationCatalog.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.offset,Pagination start; 0 means from the first row
@@ -379,6 +380,7 @@ astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database re
 astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,_LOAD_CHUNK_SIZE,Batch size for reading stored stars in a tuning run; affects only memory use
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
 astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUNDED_SIGMA,Unbounded sigma sentinel
+astrometricslib/pipelines/stacking/calibration_catalog.py,query_calibration_sets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,CALIBRATION_MEASUREMENT_WORKERS,software plumbing
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
@@ -758,7 +760,6 @@ wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentin
 wayfindinglib/tasks/control_tasks/target_changes.py,find_target_changes.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
 wayfindinglib/tasks/execution_tasks/session_recorder.py,ObservationSessionRecorder.__init__.snapshot_interval_seconds,Recording cadence; plumbing
-wayfindinglib/tasks/planning_tasks/calibration_advisory_tasks.py,_EXPOSURE_MATCH_TOLERANCE_SECONDS,Float round-off tolerance
 wayfindinglib/tasks/planning_tasks/depth_goal_tasks.py,DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
 wayfindinglib/tasks/planning_tasks/mosaic_tasks.py,calculate_panels.rotation_deg,0 means no rotation; the caller passes the angle
 wayfindinglib/tasks/planning_tasks/scheduling.py,_DEFAULT_STEP_MINUTES,Unused in file; step default dead

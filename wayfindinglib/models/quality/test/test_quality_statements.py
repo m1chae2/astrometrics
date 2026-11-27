@@ -60,7 +60,7 @@ def test_a_full_statement_round_trips_through_json() -> None:
     """Every nested model survives a dump with aliases and a reload."""
     statement = _statement(
         severity=Severity.ADVICE,
-        capture_setting=CaptureSetting(camera="ASI533MM", exposure_seconds=60.0, gain_setting=100),
+        capture_setting=CaptureSetting(camera="ASI533MM", exposure_s=60.0, gain=100),
         reason="Noise falls as the square root of the time.",
         proposed_action=ProposedAction(exposure_seconds=90.0, frame_count=20, refocus_every_degc=1.4),
         expected_effect=ExpectedEffect(noise_change_fraction=-0.29, description="Noise falls by about 29%."),

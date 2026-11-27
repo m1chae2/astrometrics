@@ -3,7 +3,8 @@ name: investigator
 description: Companion for the Astrometrics app. Looks things up, calculates and measures through the app's MCP tools, and can bring frames from the telescope into the library. It cannot command devices, change settings, run code or read files, and it reports what its tools cannot do.
 tools:
   - mcp__astrometricslib-core__calibration_assess
-  - mcp__astrometricslib-core__calibration_camera_profile
+  - mcp__astrometricslib-core__calibration_get_profile
+  - mcp__astrometricslib-core__calibration_match
   - mcp__astrometricslib-core__calibration_query
   - mcp__astrometricslib-core__jobs_query
   - mcp__astrometricslib-core__observatory_configuration_get

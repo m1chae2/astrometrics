@@ -41,6 +41,8 @@ VERBS = frozenset({
     "remove",
     "restore",
     "scan",
+    "match",
+    "assess",
     "measure",
     "predict",
     "record",

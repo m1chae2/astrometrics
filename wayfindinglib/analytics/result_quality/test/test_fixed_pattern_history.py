@@ -44,7 +44,7 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     more_frames_statement,
 )
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
 START = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 APERTURE_SET = "v3-156104df543d"
 RECORD_PATH = "/library/T0/T0_stack_odd_even_apertures.json"

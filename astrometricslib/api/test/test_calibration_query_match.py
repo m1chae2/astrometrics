@@ -1,13 +1,15 @@
-"""Tests for the ``match`` detail and camera totals of the calibration query.
+"""Tests for `calibration.query` and its capture-setting matching.
 
 The library is a stand-in that returns fixed counts rows, so the tests check
-only what the query adds: row keys, camera totals and the matching rules.
+only what the query adds: the rows, their keys, paging and the matching
+rules of a `CaptureSetting`.
 """
 
 from types import SimpleNamespace
 
 import pytest
 
+from astrometricslib import AppConfiguration, CaptureSetting
 from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.errors import InvalidArgumentError
 
@@ -43,49 +45,59 @@ def catalog() -> CalibrationCatalog:
     catalog : `CalibrationCatalog`
         A catalog whose library gives `STATS`.
     """
-    catalog = CalibrationCatalog(None, None)
-    catalog._library = SimpleNamespace(get_stats=lambda: STATS, load_library=lambda: None)
+    catalog = CalibrationCatalog(AppConfiguration(), None)
+    catalog._library = SimpleNamespace(get_stats=lambda: STATS)
     return catalog
 
 
-def test_counts_rows_carry_row_keys_and_cameras_carry_totals(catalog: CalibrationCatalog) -> None:
-    """Every counts row has a unique key, and each camera has its totals."""
-    result = catalog.query()
+def test_counts_rows_carry_unique_row_keys_in_kind_order(catalog: CalibrationCatalog) -> None:
+    """Each row has a unique key, darks first; a kind narrows the page."""
+    page = catalog.query()
 
-    keys = [row["row_key"] for rows in (result.darks, result.biases, result.flats) for row in rows]
-    assert len(set(keys)) == len(keys) == 5
-    assert result.camera_totals == [
-        {"camera": "ASI533", "dark_count": 20, "bias_count": 35, "flat_count": 25},
-        {"camera": "D5300", "dark_count": 0, "bias_count": 7, "flat_count": 0},
-    ]
-
-
-def test_match_normalizes_binning_and_compares_gain_as_numbers(catalog: CalibrationCatalog) -> None:
-    """Binning "2" equals "2x2", and gain "100.0" equals "100"."""
-    result = catalog.query(
-        detail="match", kind="bias", camera_id="asi533", gain="100.0", offset=10.0, binning="2"
+    assert [row.kind for row in page] == ["dark", "bias", "bias", "bias", "flat"]
+    assert len({row.row_key for row in page}) == page.total == 5
+    assert [row.count for row in catalog.query("bias")] == [30, 5, 7]
+    dark = catalog.query("dark")[0]
+    assert (dark.gain, dark.offset, dark.binning, dark.temperature_c, dark.exposure_s) == (
+        "100",
+        10.0,
+        "1x1",
+        -9.0,
+        60.0,
     )
-
-    biases = {row["row_key"] for row in catalog.query().biases if row["binning"] == "2x2"}
-    assert set(result.matched_row_keys) == biases
-    assert result.camera_totals[0]["bias_count"] == 35
+    assert catalog.query("flat")[0].filter_name == "L"
 
 
-def test_match_without_a_kind_looks_at_every_kind_and_uses_the_dark_temperature_slot(
+def test_paging_cuts_the_rows(catalog: CalibrationCatalog) -> None:
+    """A limit gives a page with the next offset; the total counts all."""
+    page = catalog.query(limit=2)
+
+    assert len(page) == 2
+    assert page.total == 5
+    assert page.next_offset == 2
+
+
+def test_a_setting_normalizes_binning_and_compares_gain_as_numbers(catalog: CalibrationCatalog) -> None:
+    """Binning 2 equals "2x2", and the camera matches ignoring case."""
+    matched = catalog.query("bias", setting=CaptureSetting(camera="asi533", gain=100, offset=10, binning=2))
+
+    assert [(row.camera, row.binning, row.count) for row in matched] == [("ASI533", "2x2", 30)]
+
+
+def test_a_setting_without_a_kind_uses_the_dark_temperature_slot_and_exposure(
     catalog: CalibrationCatalog,
 ) -> None:
-    """A dark matches on its temperature slot; a flat ignores temperature."""
-    result = catalog.query(detail="match", camera_id="ASI533", gain=100, binning=1, temperature_c=-10.2)
-    all_rows = catalog.query()
+    """A dark matches on temperature slot and exposure; a flat on filter."""
+    setting = CaptureSetting(camera="ASI533", gain=100, binning=1, temperature_c=-10.2)
+    assert [row.kind for row in catalog.query(setting=setting)] == ["dark"]
+    assert catalog.query("dark", setting=setting.model_copy(update={"exposure_s": 60.02})).total == 1
+    assert catalog.query("dark", setting=setting.model_copy(update={"exposure_s": 120.0})).total == 0
+    flat = CaptureSetting(camera="ASI533", binning=2, filter_name="Luminance", temperature_c=5.0)
+    assert [row.kind for row in catalog.query("flat", setting=flat)] == ["flat"]
+    assert catalog.query("flat", setting=flat.model_copy(update={"filter_name": "Ha"})).total == 0
 
-    assert result.matched_row_keys == [all_rows.darks[0]["row_key"]]
-    flat = catalog.query(detail="match", kind="flat", camera_id="ASI533", binning="2x2", temperature_c=5.0)
-    assert flat.matched_row_keys == [all_rows.flats[0]["row_key"]]
 
-
-def test_match_needs_a_camera_and_refuses_unrelated_arguments(catalog: CalibrationCatalog) -> None:
-    """The match detail needs `camera_id`; others refuse the new arguments."""
+def test_an_unknown_kind_is_refused(catalog: CalibrationCatalog) -> None:
+    """Only dark, bias and flat are kinds."""
     with pytest.raises(InvalidArgumentError):
-        catalog.query(detail="match", gain=100)
-    with pytest.raises(InvalidArgumentError):
-        catalog.query(detail="counts", gain=100)
+        catalog.query("lamp")  # ty: ignore[invalid-argument-type]

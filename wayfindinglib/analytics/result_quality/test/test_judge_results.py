@@ -34,9 +34,7 @@ from wayfindinglib.models.quality.statements import (
 from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 _NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)
-_SETTING = CaptureSetting(
-    camera="ASI533MM Pro", exposure_seconds=60.0, gain_setting=100, offset=50, binning=1
-)
+_SETTING = CaptureSetting(camera="ASI533MM Pro", exposure_s=60.0, gain=100, offset=50, binning=1)
 
 _next_row_id = 0
 

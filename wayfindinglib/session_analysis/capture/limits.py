@@ -2,14 +2,15 @@
 
 Description: The capture analysis judges clipping and dark temperatures with
 limits the science library owns: the saturated-pixel metric lists the blob
-size and the clipped-frame share, and a calibration query reports the
-temperature tolerance it matched darks with. This module reads them from
-those rows, so the analysis keeps no copy of the numbers.
+size and the clipped-frame share, and the library's parameters give the
+temperature tolerance it matches darks with. This module reads them from
+there, so the analysis keeps no copy of the numbers.
 """
 
 from typing import Any
 
 from astrometricslib.exceptions import ConfigurationError
+from astrometricslib.parameters import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, resolve_parameter
 from wayfindinglib.models.session.capture_quality import CaptureLimits
 
 __all__ = ["SATURATED_PIXEL_METRIC", "read_capture_limits"]
@@ -41,11 +42,9 @@ def read_capture_limits(astrometrics: Any) -> CaptureLimits:
     """
     (declaration,) = astrometrics.quality.metrics(name=SATURATED_PIXEL_METRIC, detail="full")
     by_unit = {limit.unit: limit.value for limit in declaration.limits}
-    tolerance = astrometrics.processing.calibration.query(kind="dark").dark_temperature_tolerance_c
-    if "pixels" not in by_unit or "fraction" not in by_unit or tolerance is None:
-        raise ConfigurationError(
-            f"The library lists no saturation limits for {SATURATED_PIXEL_METRIC} or no dark tolerance."
-        )
+    tolerance = resolve_parameter(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value
+    if "pixels" not in by_unit or "fraction" not in by_unit:
+        raise ConfigurationError(f"The library lists no saturation limits for {SATURATED_PIXEL_METRIC}.")
     return CaptureLimits(
         saturated_star_minimum_pixels=round(by_unit["pixels"]),
         clipped_frame_fraction=by_unit["fraction"],

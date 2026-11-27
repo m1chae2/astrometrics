@@ -1262,7 +1262,7 @@ def _row_text(kind: str, row: Mapping[str, object]) -> str:
     kind : `str`
         ``"dark"``, ``"bias"`` or ``"flat"``.
     row : `Mapping` [`str`, `object`]
-        The row from ``CalibrationCatalog.query(detail="counts")``.
+        A ``calibration.query`` row, as `read_calibration_rows` writes it.
 
     Returns
     -------
@@ -1322,7 +1322,7 @@ def _shared_setting_matches(setting: CaptureSetting, row: Mapping[str, object]) 
     """
     differences: list[str] = []
     gain = _as_float(row.get("iso"))
-    if setting.gain_setting is not None and (gain is None or abs(gain - setting.gain_setting) > 1e-6):
+    if setting.gain is not None and (gain is None or abs(gain - setting.gain) > 1e-6):
         differences.append("gain")
     offset = _as_float(row.get("offset"))
     if setting.offset is not None and (offset is None or abs(offset - setting.offset) > 1e-6):
@@ -1351,15 +1351,15 @@ def _setting_words(setting: CaptureSetting, temperature_c: float | None, with_ex
         For example ``"gain 100, offset 50, bin 1, 60 s, -10 C"``.
     """
     parts = []
-    if setting.gain_setting is not None:
-        parts.append(f"gain {setting.gain_setting}")
+    if setting.gain is not None:
+        parts.append(f"gain {setting.gain}")
     if setting.offset is not None:
         parts.append(f"offset {setting.offset}")
     if setting.binning is not None:
         parts.append(f"bin {setting.binning}")
     if with_exposure:
-        if setting.exposure_seconds is not None:
-            parts.append(f"{setting.exposure_seconds:g} s")
+        if setting.exposure_s is not None:
+            parts.append(f"{setting.exposure_s:g} s")
         if temperature_c is not None:
             parts.append(f"{temperature_c:.0f} C")
     elif setting.filter_name:
@@ -1387,8 +1387,8 @@ def find_calibration_gaps(
     groups : `Sequence` [`LightFrameGroup`]
         The light frame settings of the target.
     dark_rows, flat_rows : `Sequence` [`Mapping`]
-        The rows of ``CalibrationCatalog.query(detail="counts")`` for darks
-        and flats.
+        The dark and flat rows of ``calibration.query``, as
+        `read_calibration_rows` writes them.
     dark_temperature_tolerance_c : `float`
         How far a dark's temperature may differ from the light frames', in
         degrees Celsius. It is the tolerance the same query reports
@@ -1410,9 +1410,9 @@ def find_calibration_gaps(
             if _shared_setting_matches(setting, row):
                 continue
             exposure = _as_float(row.get("exposure"))
-            if setting.exposure_seconds is not None and (
+            if setting.exposure_s is not None and (
                 exposure is None
-                or abs(exposure - setting.exposure_seconds) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
+                or abs(exposure - setting.exposure_s) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             ):
                 continue
             temperature = _as_float(row.get("temperature_c"))
@@ -1509,9 +1509,9 @@ def _nearest_text(
         found = _shared_setting_matches(setting, row)
         if kind == "dark":
             exposure = _as_float(row.get("exposure"))
-            if setting.exposure_seconds is not None and (
+            if setting.exposure_s is not None and (
                 exposure is None
-                or abs(exposure - setting.exposure_seconds) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
+                or abs(exposure - setting.exposure_s) > resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             ):
                 found.append("exposure")
             temperature = _as_float(row.get("temperature_c"))

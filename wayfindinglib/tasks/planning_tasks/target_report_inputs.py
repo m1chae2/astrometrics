@@ -45,7 +45,7 @@ import numpy as np
 from astrometricslib import Target
 from astrometricslib.drivers import VersionedCache, get_stack_quality_data_version
 from astrometricslib.exceptions import AstrometricsError
-from astrometricslib.parameters import resolve_parameter
+from astrometricslib.parameters import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, resolve_parameter
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.analytics.result_quality.forecast import (
@@ -479,9 +479,8 @@ def assign_stacks_to_settings(
                 setting_id
                 for setting_id, setting in settings.items()
                 if exposure is not None
-                and setting.exposure_seconds is not None
-                and abs(setting.exposure_seconds - exposure)
-                <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
+                and setting.exposure_s is not None
+                and abs(setting.exposure_s - exposure) <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             )
             if len(matches) == 1:
                 assignment[stack_id] = matches[0]
@@ -514,6 +513,32 @@ def assign_stacks_to_settings(
 # -----------------------------------------------------------------------------
 
 
+def _calibration_row(row: Any) -> dict[str, Any]:
+    """Write one library counts row as the calibration rule reads it.
+
+    Parameters
+    ----------
+    row : `CalibrationSetCount`
+        A row of ``calibration.query``.
+
+    Returns
+    -------
+    row : `dict` [`str`, `Any`]
+        ``camera``, ``iso`` (the gain as text), ``offset``, ``binning``,
+        ``temperature_c``, ``exposure``, ``filter`` and ``count``.
+    """
+    return {
+        "camera": row.camera,
+        "iso": row.gain,
+        "offset": row.offset,
+        "binning": row.binning,
+        "temperature_c": row.temperature_c,
+        "exposure": row.exposure_s,
+        "filter": row.filter_name,
+        "count": row.count,
+    }
+
+
 def read_calibration_rows(
     astrometrics: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float | None, str | None]:
@@ -527,16 +552,17 @@ def read_calibration_rows(
     Returns
     -------
     darks, flats, tolerance, problem : `tuple`
-        The rows of ``processing.calibration.query(detail="counts")``, the
-        dark temperature tolerance the same answer reports (degrees Celsius),
-        and a sentence saying why they could not be read (``None`` when they
-        could).
+        The dark and flat rows of ``calibration.query`` (see
+        `_calibration_row`), the dark temperature tolerance the library
+        matches darks with (degrees Celsius), and a sentence saying why they
+        could not be read (``None`` when they could).
     """
     try:
-        answer = astrometrics.processing.calibration.query(detail="counts")
+        darks = [_calibration_row(row) for row in astrometrics.calibration.query("dark")]
+        flats = [_calibration_row(row) for row in astrometrics.calibration.query("flat")]
     except (AstrometricsError, OSError) as error:
         return [], [], None, f"The calibration library could not be read: {error}"
-    return list(answer.darks or []), list(answer.flats or []), answer.dark_temperature_tolerance_c, None
+    return darks, flats, resolve_parameter(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value, None
 
 
 def sessions_of_target(butler: Any, target_id: str) -> list[ObservationSession]:

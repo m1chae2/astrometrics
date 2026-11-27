@@ -18,8 +18,8 @@ from wayfindinglib.analytics.result_quality.efficiency import (
 )
 from wayfindinglib.models.quality.efficiency import EfficiencyReference, ScienceGoal
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
-OTHER = CaptureSetting(camera="CamA", telescope="Scope", filter_name="Ha", exposure_seconds=300.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
+OTHER = CaptureSetting(camera="CamA", telescope="Scope", filter_name="Ha", exposure_s=300.0)
 
 
 def _reference_for(setting: CaptureSetting) -> EfficiencyReference | None:
@@ -75,7 +75,7 @@ def _frame(
         capture_setting=setting,
         night_id=night,
         target_id="T",
-        exposure_seconds=setting.exposure_seconds,
+        exposure_seconds=setting.exposure_s,
         star_width_effective_arcsec=width,
         sky_rate_e_per_s_per_px=sky,
         read_noise_e=1.5,

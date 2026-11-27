@@ -61,6 +61,8 @@ The checks treat the first two positional arguments as subject and operands. The
 | `add`, `remove` | Put an item into a collection, or take it out. |
 | `restore` | Undo a `remove` or a set-aside. |
 | `scan` | Read the files on disk again and index what changed. |
+| `match` | Pair the given items with the stored items that fit them. Writes nothing. |
+| `assess` | Judge stored items against their limits. Writes nothing. |
 | `measure`, `measure_<noun>` | Compute a result. Writes nothing. |
 | `predict`, `predict_<noun>` | Compute what a run or an observation would give, without running it. |
 | `record`, `record_<noun>` | Compute a result and store it. |

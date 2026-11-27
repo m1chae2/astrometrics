@@ -1,6 +1,6 @@
 """Purpose: Test add_frames, sessions and get_aperture_record.
 
-Description: `TargetCatalog.add_frames` and `CalibrationCatalog.add_frames`
+Description: `TargetCatalog.add_frames` and `calibration.frames.add`
 sort new FITS files into the library and return where they went. `sessions`
 groups a target's frames by night, and `QualityRecords.get_aperture_record`
 reads the per-aperture noise file beside a stack.
@@ -87,18 +87,21 @@ def test_target_add_frames_moves_lights_under_the_target(tmp_path: Path) -> None
     assert "M31" in Path(added[0]).parts
 
 
-def test_calibration_add_frames_leaves_lights_and_moves_darks(tmp_path: Path) -> None:
-    """A folder with a light and a dark moves only the dark."""
+def test_calibration_frames_add_leaves_lights_and_moves_and_indexes_darks(tmp_path: Path) -> None:
+    """A folder with a light and a dark moves only the dark, and indexes it."""
     incoming = tmp_path / "incoming"
     incoming.mkdir()
     light = _write_frame(incoming / "light.fits", "Light")
     _write_frame(incoming / "dark.fits", "Dark")
     catalog = CalibrationCatalog(_library_config(tmp_path / "library"), MagicMock())
 
-    added = catalog.add_frames([str(incoming)], telescope="Scope")
+    reports = catalog.frames.add([str(incoming)], telescope="Scope")
 
+    assert [report.kind for report in reports] == ["dark", "bias", "flat"]
+    added = [path for report in reports for path in report.added_paths]
     assert len(added) == 1
     assert "darks" in Path(added[0]).parts
+    assert reports[0].added_count == 1
     assert Path(light).exists()
 
 

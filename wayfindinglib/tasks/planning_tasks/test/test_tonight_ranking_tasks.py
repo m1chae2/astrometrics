@@ -40,21 +40,21 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedCandidate, RankedUse
 from wayfindinglib.tasks.planning_tasks import tonight_ranking_tasks as tr
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 SITE = SiteProfile(id="site", name="Home", latitude_deg=45.76, longitude_deg=-110.74, elevation_m=1400.0)
 SETTING = CaptureSetting(
     camera="CamA",
     telescope="Scope",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=10,
     binning=1,
 )
 SPECTRAL_SETTING = SETTING.model_copy(update={"filter_name": "Star Analyzer 200"})
 """The same camera behind the grating: a spectroscopy setting (id 2)."""
-SHORT_SETTING = SETTING.model_copy(update={"exposure_seconds": 30.0})
+SHORT_SETTING = SETTING.model_copy(update={"exposure_s": 30.0})
 """The same camera with 30 s frames: the short exposure group (id 3)."""
 TONIGHT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 FIRST_NIGHT = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)
@@ -214,7 +214,8 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=targets))
-        self.processing = no_camera_profiles_processing()
+        self.calibration = no_camera_profiles_calibration()
+        self.config = NO_CAMERAS
         self.quality = SimpleNamespace(
             query=self._query,
             capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING},

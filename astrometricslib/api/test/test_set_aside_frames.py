@@ -222,7 +222,7 @@ def test_a_stored_row_gives_the_reason_exposure_and_setting(quality: QualityReco
     folder = _camera_folder(tmp_path)
     _excluded_folder(folder, ["a.fits", "b.fits"], ["a.fits", "b.fits"])
     store = QualityStore(str(tmp_path / "astrometrics.db"))
-    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="Camera", exposure_seconds=120.0))
+    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="Camera", exposure_s=120.0))
     action = set_aside_action_text("trailed", "stars stretched")
     store.write_measurements([
         QualityMeasurement(

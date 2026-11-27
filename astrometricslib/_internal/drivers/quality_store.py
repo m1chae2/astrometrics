@@ -285,6 +285,14 @@ _CAPTURE_SETTING_FIELDS = (
     "binning",
 )
 
+# The `CaptureSetting` field each column holds. Two columns keep the names
+# they were created with, before the model's fields took unit names.
+_CAPTURE_SETTING_FIELD_OF_COLUMN = {
+    **{name: name for name in _CAPTURE_SETTING_FIELDS},
+    "exposure_seconds": "exposure_s",
+    "gain_setting": "gain",
+}
+
 # These statements are built only from the fixed column names above, never
 # from caller input, so no value can reach the SQL text.
 _INSERT_CAPTURE_SETTING_SQL = (
@@ -944,7 +952,9 @@ class QualityStore:
         capture_setting_id : `int`
             The same id every time for the same settings.
         """
-        values = [getattr(setting, name) for name in _CAPTURE_SETTING_FIELDS]
+        values = [
+            getattr(setting, _CAPTURE_SETTING_FIELD_OF_COLUMN[name]) for name in _CAPTURE_SETTING_FIELDS
+        ]
         with self._write_transaction() as connection:
             connection.execute(_INSERT_CAPTURE_SETTING_SQL, values)
             row = connection.execute(_SELECT_CAPTURE_SETTING_ID_SQL, values).fetchone()
@@ -972,7 +982,9 @@ class QualityStore:
             ).fetchone()
         if row is None:
             return None
-        return CaptureSetting(**{name: row[name] for name in _CAPTURE_SETTING_FIELDS})
+        return CaptureSetting(**{
+            _CAPTURE_SETTING_FIELD_OF_COLUMN[name]: row[name] for name in _CAPTURE_SETTING_FIELDS
+        })
 
     def get_capture_settings(
         self, capture_setting_ids: Sequence[int] | None = None
@@ -1008,7 +1020,7 @@ class QualityStore:
                 ).fetchall()
         return {
             int(row["capture_setting_id"]): CaptureSetting(**{
-                name: row[name] for name in _CAPTURE_SETTING_FIELDS
+                _CAPTURE_SETTING_FIELD_OF_COLUMN[name]: row[name] for name in _CAPTURE_SETTING_FIELDS
             })
             for row in rows
         }

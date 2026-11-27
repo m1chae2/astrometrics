@@ -163,6 +163,12 @@ KNOWN_WALL_CLOCK_SITES = frozenset({
     # Writes when a color picture was made, in its JSON record, like the
     # preview's settings record. It dates the picture, not any observation.
     "pipelines/stacking/post_processing/color_from_other_stack.py",
+    # Stamps when the dark and bias numbers were stored. It dates the
+    # measurement run, not any frame's observation.
+    "pipelines/stacking/calibration_catalog.py",
+    # Writes the date of a sensor noise measurement into its provenance
+    # sentence. It dates the measurement, not any frame's observation.
+    "pipelines/stacking/sensor_noise_run.py",
 })
 
 

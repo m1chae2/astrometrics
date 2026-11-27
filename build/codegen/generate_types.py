@@ -24,7 +24,7 @@ from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_ingest import CalibrationMeasurementReport, CalibrationSetHealth
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
-from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
+from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
 from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, JobWarning, LineageRun
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
@@ -167,6 +167,7 @@ from backend.services.infrastructure.system_status_service import (
     SystemPulse,
     TelescopePulse,
 )
+from backend.services.processing.calibration_service import CalibrationQueryResult
 from backend.services.processing.stack_review_service import StackReviewStart
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.control_status import SafetyStatus

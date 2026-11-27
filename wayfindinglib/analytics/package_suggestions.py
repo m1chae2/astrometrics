@@ -175,8 +175,8 @@ def capture_setting_key(setting: CaptureSetting | None) -> str:
         setting.camera,
         setting.telescope,
         setting.filter_name,
-        None if setting.exposure_seconds is None else f"{setting.exposure_seconds:g}",
-        setting.gain_setting,
+        None if setting.exposure_s is None else f"{setting.exposure_s:g}",
+        setting.gain,
         setting.offset,
         setting.binning,
     )

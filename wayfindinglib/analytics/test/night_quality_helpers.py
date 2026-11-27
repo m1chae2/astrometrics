@@ -26,8 +26,8 @@ SETTING = CaptureSetting(
     camera="CamA",
     telescope="Scope",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=10,
     binning=1,
 )

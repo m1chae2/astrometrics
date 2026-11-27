@@ -788,7 +788,7 @@ def _unobserved_set_aside(
         setting = capture_settings[setting_id]
         found[frame_id] = SetAsideInput(
             frame_id=frame_id,
-            exposure_seconds=setting.exposure_seconds or 0.0,
+            exposure_seconds=setting.exposure_s or 0.0,
             reason=reasons[frame_id],
             capture_setting=setting,
             night_id=night_id,

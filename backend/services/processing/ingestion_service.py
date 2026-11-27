@@ -358,15 +358,10 @@ class IngestionService(BaseBackgroundService):
         self._log(job_id, f"Light frames of {len(report.targets)} target folders indexed and saved.")
 
         # 3. Refresh calibration frames
-        added_kinds: list[str] = []
-        for kind in ("dark", "bias", "flat"):
-            self._log(job_id, f"Scanning {kind} frames...")
-            report = self._calibration.reindex_frames(kind, prune_missing=True)
-            if report.added_count:
-                added_kinds.append(kind)
-
-        self._log(job_id, "Calibration frames indexed. Saving library...")
-        self._calibration.save()
+        self._log(job_id, "Scanning dark, bias and flat frames...")
+        reports = self._calibration.frames.scan(prune_missing=True)
+        added_kinds = [report.kind for report in reports if report.added_count]
+        self._log(job_id, "Calibration frames indexed and saved.")
         self._measure_new_calibration_frames(job_id, added_kinds)
 
         # 4. Migrate Stellar Objects to SQLite
@@ -695,11 +690,8 @@ class IngestionService(BaseBackgroundService):
             try:
                 if self._calibration:
                     added_kinds = [
-                        kind
-                        for kind in ("dark", "bias", "flat")
-                        if self._calibration.reindex_frames(kind).added_count
+                        report.kind for report in self._calibration.frames.scan() if report.added_count
                     ]
-                    self._calibration.save()
                     self._measure_new_calibration_frames(job_id, added_kinds)
             except (AstrometricsError, *FITS_READ_ERRORS) as e:
                 logger.warning("Failed to refresh calibration library in ingestion job: %s", e)

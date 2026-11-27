@@ -10,7 +10,10 @@ through the libraries' public API (``targets.get``, ``stars.get``,
 
 `SUBJECT_KINDS` is the table: one row per object type, keyed by the type's
 library and class name, so no private class is imported. A new subject
-type, such as an observatory configuration, is one more row.
+type, such as an observatory configuration, is one more row. A camera is
+named by any spelling of its name: the cameras in the settings and in the
+stored observatory configurations are searched by name, by alias and by the
+names their noise profiles list.
 
 `subject_kind_of` tells whether a parameter's type hint names a subject (the
 object alone, or with `str` and `None` beside it, or a list of them), and
@@ -18,6 +21,7 @@ object alone, or with `str` and `None` beside it, or a list of them), and
 `NotFoundError` with ``report="error"``, because the client asked for it.
 """
 
+import re
 import types
 import typing
 from collections.abc import Callable
@@ -125,6 +129,56 @@ def _find_package(api_root: Any, package_id: str) -> Any:
     return next((package for package in packages if package.id == package_id), None)
 
 
+def _spelling(name: str | None) -> str:
+    """Reduce a camera name to lowercase letters and digits.
+
+    Parameters
+    ----------
+    name : `str` or `None`
+        A camera name.
+
+    Returns
+    -------
+    spelling : `str`
+        The name without case, spaces or punctuation.
+    """
+    return re.sub(r"[^a-z0-9]", "", (name or "").casefold())
+
+
+def _find_camera(api_root: Any, name: str) -> Any:
+    """Look up a camera by any spelling of its name.
+
+    Parameters
+    ----------
+    api_root : `Astrometrics` or `Wayfinder`
+        The server's API object.
+    name : `str`
+        The camera's name, an alias, or a name its noise profile lists.
+
+    Returns
+    -------
+    camera : `Camera` or `None`
+        The camera from the settings, else from a stored observatory
+        configuration, or `None`.
+    """
+    astrometrics = _astrometrics(api_root)
+    wanted = _spelling(name)
+    cameras = list(astrometrics.config.get_cameras())
+    for configuration in astrometrics.observatories.configurations.query():
+        cameras.extend(camera for camera in (configuration.camera, configuration.guide_camera) if camera)
+    for camera in cameras:
+        if wanted in {_spelling(spelling) for spelling in (camera.name, *camera.aliases)}:
+            return camera
+    for camera in cameras:
+        profile = astrometrics.calibration.get_profile(camera)
+        if not profile.is_generic_fallback and wanted in {
+            _spelling(spelling)
+            for spelling in (profile.camera_name, profile.record_name, *profile.name_aliases)
+        }:
+            return camera
+    return None
+
+
 @dataclass(frozen=True)
 class SubjectKind:
     """One type of object a client names by its id.
@@ -152,6 +206,7 @@ SUBJECT_KINDS: dict[tuple[str, str], SubjectKind] = {
     for kind in (
         SubjectKind("astrometricslib", "Target", "target", _find_target),
         SubjectKind("astrometricslib", "StellarObject", "star", _find_star),
+        SubjectKind("astrometricslib", "Camera", "camera", _find_camera),
         SubjectKind("wayfindinglib", "ObservationSession", "observing session", _find_session),
         SubjectKind("wayfindinglib", "ObservationPackage", "observation package", _find_package),
     )

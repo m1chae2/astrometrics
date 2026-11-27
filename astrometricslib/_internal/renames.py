@@ -26,7 +26,19 @@ __all__ = ["RENAMES", "MovedNames"]
 
 #: Old qualified name -> new call text. Each step of issue #206 adds the names
 #: it renames or removes.
-RENAMES: dict[str, str] = {}
+RENAMES: dict[str, str] = {
+    # Step 4c: calibration is a sub-API of its own, with a `frames` child.
+    "astrometricslib.ProcessingPipelines.calibration": "astrometrics.calibration",
+    "astrometricslib.CalibrationCatalog.add_frames": "astrometrics.calibration.frames.add(paths)",
+    "astrometricslib.CalibrationCatalog.reindex_frames": "astrometrics.calibration.frames.scan(kind)",
+    "astrometricslib.CalibrationCatalog.save": (
+        "astrometrics.calibration.frames.add(paths) or frames.scan(), which save the index"
+    ),
+    "astrometricslib.CalibrationCatalog.measure_frames": (
+        "astrometrics.calibration.frames.record_measurements(kind, setting=CaptureSetting(camera=...))"
+    ),
+    "astrometricslib.CalibrationCatalog.camera_profile": "astrometrics.calibration.get_profile(camera)",
+}
 
 
 class MovedNames:

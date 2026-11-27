@@ -24,12 +24,12 @@ from backend.services.observatory.target_imaging_executor import TargetImagingEx
 from wayfindinglib import ObservationPackage, ObservationPlanning
 
 
-def _no_camera_profile(camera_name: str) -> None:
+def _no_camera_profile(camera: object = None) -> None:
     """Say that a camera has no profile, as the library does for one.
 
     Parameters
     ----------
-    camera_name : `str`
+    camera : `Camera` or `None`
         The camera asked about.
 
     Raises
@@ -37,7 +37,7 @@ def _no_camera_profile(camera_name: str) -> None:
     ConfigurationError
         Always.
     """
-    raise ConfigurationError(f"No profile for camera {camera_name!r}.")
+    raise ConfigurationError(f"No profile for camera {camera!r}.")
 
 
 @pytest.fixture
@@ -65,7 +65,8 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
             capture_settings=lambda ids=None: {}, query=lambda **kwargs: QualityQueryResult()
         ),
         # No camera has a profile here, so no setting is checked.
-        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=_no_camera_profile)),
+        config=SimpleNamespace(get_cameras=lambda: []),
+        calibration=SimpleNamespace(get_profile=_no_camera_profile),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(

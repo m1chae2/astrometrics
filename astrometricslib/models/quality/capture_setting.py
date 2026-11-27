@@ -7,11 +7,21 @@ so the same settings are not repeated on every row.
 
 Only the camera is required. A frame from an older session may lack some
 header cards, and a partial record is still worth storing.
+
+A caller also passes a `CaptureSetting` to say which calibration frames it
+means (`calibration.query`, `assess` and `measure_sensor_noise`). The fields
+it leaves empty are not compared.
+
+The field names carry their units (``exposure_s``). The JSON names stay the
+ones the app and the stored rows have always used (``gainSetting``,
+``exposureSeconds``), and the old field names ``gain_setting`` and
+``exposure_seconds`` are still read, so a record saved before the rename
+loads unchanged.
 """
 
 import math
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
@@ -89,15 +99,19 @@ class CaptureSetting(BaseModel):
         `PIXEL_SCALE_SIGNIFICANT_FIGURES` significant figures.
     filter_name : `str` or `None`
         The filter in the light path, such as ``"L"`` or ``"Ha"``.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure time of one frame, in seconds.
-    gain_setting : `int` or `None`
+    gain : `int` or `None`
         The camera's gain setting (a unitless number in the FITS ``GAIN``
         card, not electrons per ADU).
     offset : `int` or `None`
         The constant the camera adds to every pixel.
     binning : `int` or `None`
         The binning factor (1 means no binning).
+    temperature_c : `float` or `None`
+        The sensor temperature, in degrees Celsius. It says which darks a
+        calibration call means. The quality store does not keep it, because
+        a measurement's setting is the same at any temperature.
     """
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
@@ -107,10 +121,23 @@ class CaptureSetting(BaseModel):
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
     filter_name: str | None = Field(default=None, alias="filterName")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
-    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureSeconds",
+        validation_alias=AliasChoices("exposureSeconds", "exposure_s", "exposure_seconds"),
+    )
+    gain: int | None = Field(
+        default=None,
+        alias="gainSetting",
+        validation_alias=AliasChoices("gainSetting", "gain", "gain_setting"),
+    )
     offset: int | None = None
     binning: int | None = None
+    temperature_c: float | None = Field(
+        default=None,
+        alias="temperatureC",
+        validation_alias=AliasChoices("temperatureC", "temperature_c"),
+    )
 
     @classmethod
     def unknown(cls) -> CaptureSetting:

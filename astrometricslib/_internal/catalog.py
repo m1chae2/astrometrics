@@ -7,7 +7,6 @@ lives today, so moving the code later changes this file only.
 """
 
 from astrometricslib.models.catalog_queries import (
-    CalibrationQueryResult,
     OverlayStar,
     ReindexReport,
     StarQueryResult,
@@ -22,7 +21,6 @@ from astrometricslib.models.stellar_source import FileItem, GroupedFrameStat, Ta
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
 
 __all__ = [
-    "CalibrationQueryResult",
     "FailedDeletion",
     "FieldCenter",
     "FileItem",

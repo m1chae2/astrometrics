@@ -41,6 +41,7 @@ class Container:
         # Core Infrastructure
         self.config_service = None
         self.calibration = None
+        self.calibration_service = None
 
         # Domain Services
         self.astrometrics = None
@@ -210,8 +211,11 @@ class Container:
         self.maintenance_service = MaintenanceService(self.job_service)
         # Reuse the library's one calibration catalog, and load its index
         # from disk now (the first question builds and loads it).
-        self.calibration = self.astrometrics.processing.calibration
+        self.calibration = self.astrometrics.calibration
         self.calibration.query()
+        from backend.services.processing.calibration_service import CalibrationService
+
+        self.calibration_service = CalibrationService(self.astrometrics)
 
         # 3. Initialize Hardware Drivers: the Wayfinder builds its own (above).
 

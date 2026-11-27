@@ -961,7 +961,7 @@ class QualityRecords(MovedNames):
         })
         settings = self.capture_settings(setting_ids) if setting_ids else {}
         return build_set_aside_records(
-            resolved.id, folders, rows, {key: value.exposure_seconds for key, value in settings.items()}
+            resolved.id, folders, rows, {key: value.exposure_s for key, value in settings.items()}
         )
 
     def frame_statuses(self, target: str | Target) -> FrameStatusReport:

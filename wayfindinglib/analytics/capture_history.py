@@ -35,6 +35,7 @@ from astrometricslib.parameters import (
     resolve_parameter,
 )
 from astrometricslib.reports import MeasurementStatus
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_ATTEMPTS_PER_NIGHT,
     MINIMUM_FRAMES_PER_NIGHT,
@@ -112,7 +113,7 @@ def equipment_spellings(astrometrics: Any, camera_name: str) -> set[str]:
         The name itself, the profile's name, its record name and its
         aliases, each normalized.
     """
-    profile = astrometrics.processing.calibration.camera_profile(camera_name)
+    profile = profile_for_name(astrometrics, camera_name)
     return {
         normalize_name(name)
         for name in (camera_name, profile.camera_name, profile.record_name, *profile.name_aliases)

@@ -1,7 +1,8 @@
 """Data structures for the answers of the catalog lookups.
 
-The three catalogs each have one general lookup, `query`, that reads and
-never changes anything. These structures are what those lookups return:
+The target and star catalogs each have one general lookup, `query`, that
+reads and never changes anything. These structures are what those lookups
+return:
 
 - `TargetQueryResult` from `TargetCatalog.query`: target rows, full `Target`
   records, one target's full record, the cameras used, the observing
@@ -10,8 +11,6 @@ never changes anything. These structures are what those lookups return:
   analysis records, full star records, class counts, per-target star
   counts (`TargetStarCount`), the stars drawn over a target's image
   (`OverlayStar`), or library statistics.
-- `CalibrationQueryResult` from `CalibrationCatalog.query`: how many dark,
-  bias and flat frames the library holds, or how a target's frames match it.
 - `ReindexReport` from `TargetCatalog.reindex_frames`, which does change
   data: how many frames each target gained or lost.
 
@@ -28,7 +27,6 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 
 __all__ = [
-    "CalibrationQueryResult",
     "OverlayStar",
     "ReindexReport",
     "StarQueryResult",
@@ -130,35 +128,6 @@ class StarQueryResult(BaseModel):
     overlay_reason: str | None = None
     # detail="stats": counts and coverage for the whole library.
     stats: dict[str, Any] | None = None
-
-
-class CalibrationQueryResult(BaseModel):
-    """The answer of `CalibrationCatalog.query`."""
-
-    detail: str
-    # How far, in degrees Celsius, a dark's sensor temperature may differ from
-    # a light frame's and still count as a match. Every answer states the
-    # tolerance the library matched with, so a caller need not keep a copy.
-    dark_temperature_tolerance_c: float | None = None
-    # The calibration kind asked for (dark, bias or flat), or None for all.
-    kind: str | None = None
-    target_id: str | None = None
-    # detail="counts": one row per camera, setting and exposure (or filter).
-    darks: list[dict[str, Any]] | None = None
-    biases: list[dict[str, Any]] | None = None
-    flats: list[dict[str, Any]] | None = None
-    # detail="target_match": the target's light frames grouped by filter,
-    # gain and exposure, each with the number of matching darks.
-    groups: list[dict[str, Any]] | None = None
-    # detail="target_frames": the target's light frames counted by
-    # telescope, camera, gain, exposure and filter.
-    lights: list[dict[str, Any]] | None = None
-    # detail="counts" and "match": the totals of each camera, so a reader
-    # does not add up rows.
-    camera_totals: list[dict[str, Any]] | None = None
-    # detail="match": the `row_key` of every counts row that has the asked
-    # settings.
-    matched_row_keys: list[str] | None = None
 
 
 class TargetReindexChange(BaseModel):

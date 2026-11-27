@@ -102,7 +102,7 @@ def exposure_request_from_statement(statement: TargetStatement) -> ExposureReque
     setting = statement.capture_setting
     exposure_seconds = action.exposure_seconds
     if exposure_seconds is None and setting is not None:
-        exposure_seconds = setting.exposure_seconds
+        exposure_seconds = setting.exposure_s
     if exposure_seconds is None:
         return None
     filter_type = normalize_filter_name(setting.filter_name if setting is not None else None)
@@ -115,7 +115,7 @@ def exposure_request_from_statement(statement: TargetStatement) -> ExposureReque
         count=action.frame_count,
         gain_setting=action.gain_setting
         if action.gain_setting is not None
-        else _setting_value(setting, "gain_setting"),
+        else _setting_value(setting, "gain"),
         offset=action.offset if action.offset is not None else _setting_value(setting, "offset"),
         binning=action.binning if action.binning is not None else _setting_value(setting, "binning"),
     )
@@ -129,7 +129,7 @@ def _setting_value(setting: CaptureSetting | None, name: str) -> int | None:
     setting : `CaptureSetting` or `None`
         The capture setting.
     name : `str`
-        ``"gain_setting"``, ``"offset"`` or ``"binning"``.
+        ``"gain"``, ``"offset"`` or ``"binning"``.
 
     Returns
     -------

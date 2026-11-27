@@ -401,7 +401,7 @@ class FrameObservation(BaseModel):
         """
         if self.exposure_seconds:
             return self.exposure_seconds
-        return self.capture_setting.exposure_seconds or None
+        return self.capture_setting.exposure_s or None
 
 
 class ReferenceOutcome(BaseModel):
@@ -714,7 +714,7 @@ def baseline_key(setting: CaptureSetting) -> str:
         setting.camera,
         part(setting.telescope),
         part(setting.filter_name),
-        part(setting.gain_setting, "gain"),
+        part(setting.gain, "gain"),
         part(setting.offset, "offset"),
         part(setting.binning, "bin"),
     ])

@@ -15,8 +15,8 @@ from backend.services.processing.image_processing_service import ImageProcessing
 from backend.services.processing.ingestion_service import IngestionService
 
 
-class _Calibration:
-    """A calibration catalog that records measuring calls and can wait."""
+class _Frames:
+    """The ``frames`` child of a calibration catalog stand-in."""
 
     def __init__(self) -> None:
         """Start with no calls; a call waits for the release."""
@@ -24,11 +24,8 @@ class _Calibration:
         self.release = threading.Event()
         self.release.set()
 
-    def measure_frames(
-        self,
-        kind: str | None = None,
-        camera_id: str | None = None,
-        force: bool = False,
+    def record_measurements(
+        self, kind: str | None = None, *, setting: Any = None, force: bool = False
     ) -> dict[str, int]:
         """Record the call and wait for the release.
 
@@ -40,6 +37,16 @@ class _Calibration:
         self.calls.append({"kind": kind, "force": force})
         self.release.wait(timeout=5.0)
         return {"measuredCount": 1}
+
+
+class _Calibration:
+    """A calibration catalog that records measuring calls and can wait."""
+
+    def __init__(self) -> None:
+        """Build the ``frames`` child and point at its calls and release."""
+        self.frames = _Frames()
+        self.calls = self.frames.calls
+        self.release = self.frames.release
 
 
 def _service(calibration: _Calibration, events: list[tuple[str, dict]]) -> ImageProcessingService:

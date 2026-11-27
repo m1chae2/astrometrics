@@ -30,13 +30,12 @@ if TYPE_CHECKING:
     from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
 
-# Matches the private `_CalibrationKind` literal that
-# `astrometricslib.api.calibration.CalibrationCatalog.reindex_frames` accepts.
+# The calibration kinds `astrometrics.calibration.frames.scan` accepts.
 CalibrationKind = Literal["dark", "bias", "flat"]
 
 # Remote folder name (case-insensitive) -> the calibration kind
-# `CalibrationCatalog.reindex_frames` understands. These are calibration-frame
-# folders on the telescope, never astronomical targets.
+# `astrometrics.calibration.frames.scan` understands. These are
+# calibration-frame folders on the telescope, never astronomical targets.
 CALIBRATION_FOLDER_KINDS: dict[str, CalibrationKind] = {"bias": "bias", "dark": "dark", "flat": "flat"}
 
 # Telescope name used to route classified flat frames into their
@@ -993,12 +992,8 @@ def sync_calibration_folder(context: ControlContext, remote_folder_name: str) ->
 
     # The sorter reports where it put each new file, so the summary needs no
     # walk of the whole calibration library (slow on a network drive).
-    added_paths = astrometrics.processing.calibration.add_frames(
-        [staging_dir], telescope=_DEFAULT_TELESCOPE_NAME
-    )
-
-    astrometrics.processing.calibration.reindex_frames(kind)
-    astrometrics.processing.calibration.save()
+    reports = astrometrics.calibration.frames.add([staging_dir], telescope=_DEFAULT_TELESCOPE_NAME)
+    added_paths = [path for report in reports for path in report.added_paths]
 
     added_by_folder: dict[str, int] = {}
     for added_path in added_paths:

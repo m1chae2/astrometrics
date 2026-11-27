@@ -222,8 +222,8 @@ def test_capture_setting_get_or_create_is_stable(store: QualityStore) -> None:
         focal_length_mm=1000.0,
         pixel_scale_arcsec=0.8,
         filter_name="L",
-        exposure_seconds=30.0,
-        gain_setting=100,
+        exposure_s=30.0,
+        gain=100,
         offset=10,
         binning=1,
     )
@@ -240,10 +240,10 @@ def test_capture_setting_get_or_create_is_stable(store: QualityStore) -> None:
 def test_capture_settings_batch_read(store: QualityStore, tmp_path: Path) -> None:
     """One read gives several settings and creates no file."""
     first = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM"))
-    second = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM", gain_setting=100))
+    second = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM", gain=100))
     everything = store.get_capture_settings()
     assert set(everything) == {first, second}
-    assert everything[second].gain_setting == 100
+    assert everything[second].gain == 100
     assert set(store.get_capture_settings([second, 9999])) == {second}
     assert store.get_capture_settings([]) == {}
     missing = tmp_path / "absent" / "astrometrics.db"
@@ -660,7 +660,7 @@ def test_version_4_merge_keeps_the_smallest_id_and_matches_the_model(tmp_path: P
     store = QualityStore(str(path))
     store.write_measurements([make_measurement(run_id="after")])
     same_setting = CaptureSetting(
-        camera="ASI533MM", focal_length_mm=300.0, pixel_scale_arcsec=1.9152790075, exposure_seconds=10.0
+        camera="ASI533MM", focal_length_mm=300.0, pixel_scale_arcsec=1.9152790075, exposure_s=10.0
     )
     assert store.get_or_create_capture_setting(same_setting) == 1
     assert store.get_capture_settings([1, 2]) == {1: same_setting}

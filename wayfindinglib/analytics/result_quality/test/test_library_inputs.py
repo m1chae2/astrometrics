@@ -161,7 +161,7 @@ def test_the_inputs_read_the_listing_and_note_a_listing_that_fails() -> None:
 
 def test_the_dominant_setting_holds_the_most_exposure() -> None:
     """The setting with the most exposure time wins."""
-    other = SETTING.model_copy(update={"exposure_seconds": 120.0})
+    other = SETTING.model_copy(update={"exposure_s": 120.0})
     observations = [
         FrameObservation(frame_id="a", capture_setting=SETTING, exposure_seconds=60.0),
         FrameObservation(frame_id="b", capture_setting=other, exposure_seconds=120.0),

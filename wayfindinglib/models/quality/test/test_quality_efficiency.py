@@ -116,7 +116,7 @@ def test_loss_account_needs_reasons_and_round_trips() -> None:
 def test_capture_setting_summary_round_trips() -> None:
     """The summary dumps with aliases and loads back equal."""
     summary = CaptureSettingSummary(
-        capture_setting=CaptureSetting(camera="ASI533MM", exposure_seconds=60.0),
+        capture_setting=CaptureSetting(camera="ASI533MM", exposure_s=60.0),
         frames_taken=40,
         nights=2,
         frames_set_aside=3,

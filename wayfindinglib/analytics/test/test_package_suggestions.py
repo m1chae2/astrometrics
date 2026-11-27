@@ -112,9 +112,7 @@ def test_a_package_fingerprint_does_not_depend_on_row_order() -> None:
 
 def test_source_keys_name_rule_target_and_setting() -> None:
     """A row key names rule, target and setting; ranking: use, night."""
-    setting = CaptureSetting(
-        camera="ASI533", telescope="RedCat", filter_name="L", exposure_seconds=60.0, gain_setting=120
-    )
+    setting = CaptureSetting(camera="ASI533", telescope="RedCat", filter_name="L", exposure_s=60.0, gain=120)
     assert capture_setting_key(setting) == "ASI533/RedCat/L/60/120/-/-"
     assert capture_setting_key(None) == "-"
     assert row_source_key("more_frames", "M 81", setting) == "more_frames|M 81|ASI533/RedCat/L/60/120/-/-"

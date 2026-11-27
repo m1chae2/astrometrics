@@ -475,8 +475,8 @@ def test_the_capture_setting_describes_the_frame(target: Target) -> None:
 
     assert setting.camera == "Test Camera"
     assert setting.telescope == "Scope"
-    assert setting.exposure_seconds == pytest.approx(10.0)
-    assert setting.gain_setting == 100
+    assert setting.exposure_s == pytest.approx(10.0)
+    assert setting.gain == 100
     assert setting.offset == 0
     assert setting.binning == 1
     assert setting.filter_name is None

@@ -30,6 +30,11 @@ from astrometricslib.models.tuned_parameter import (
 
 PACKAGE_LOGGER_NAME = "astrometricslib"
 
+FINISHES_IN_TIME_S = 60.0
+"""A grace period long enough for quick work to end inside it on a slow
+Windows runner. Waiting returns as soon as the work ends, so it costs
+nothing."""
+
 
 @pytest.fixture
 def isolated_logs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[str]:
@@ -333,7 +338,7 @@ class TestRunAsBackgroundJob:
         from astrometricslib.foundation.jobs.store import JobStore
 
         outcome = run_as_background_job(
-            _stack_vega({"stackedImage": "Vega_Stacked.fits"}), grace_period_seconds=2.0
+            _stack_vega({"stackedImage": "Vega_Stacked.fits"}), grace_period_seconds=FINISHES_IN_TIME_S
         )
 
         assert outcome["result"] == {"stackedImage": "Vega_Stacked.fits"}
@@ -412,13 +417,13 @@ class TestRunAsBackgroundJob:
                 raise RuntimeError("stacking blew up")
 
         with pytest.raises(RuntimeError, match="stacking blew up"):
-            run_as_background_job(broken_work, grace_period_seconds=2.0)
+            run_as_background_job(broken_work, grace_period_seconds=FINISHES_IN_TIME_S)
 
     def test_work_that_records_no_job_still_returns_its_result(self, isolated_logs: str) -> None:
         """Without a job of its own, the result comes back with no job id."""
         from astrometricslib.foundation.jobs.runner import run_as_background_job
 
-        outcome = run_as_background_job(lambda: {"success": True}, grace_period_seconds=2.0)
+        outcome = run_as_background_job(lambda: {"success": True}, grace_period_seconds=FINISHES_IN_TIME_S)
 
         assert outcome == {"jobId": None, "result": {"success": True}}
 
@@ -467,7 +472,9 @@ def test_background_work_with_a_job_type_records_one_job(isolated_logs: str) -> 
         with registered_job(job_type="stacking", target_id="Vega"):
             return {"done": True}
 
-    outcome = run_as_background_job(work, grace_period_seconds=5.0, job_type="stacking", target_id="Vega")
+    outcome = run_as_background_job(
+        work, grace_period_seconds=FINISHES_IN_TIME_S, job_type="stacking", target_id="Vega"
+    )
     assert outcome["result"] == {"done": True} and outcome["jobId"]
     assert [job.id for job in JobStore(isolated_logs).get_jobs_by_target("Vega")] == [outcome["jobId"]]
 

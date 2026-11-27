@@ -249,6 +249,8 @@ def _error_response(request: Request, info: ErrorInfo) -> JSONResponse:
 async def expected_error_handler(request: Request, exc: AstrometricsError) -> JSONResponse:
     """Turn an expected error from an HTTP route into an error reply.
 
+    The error is logged at its own ``log_level``.
+
     Parameters
     ----------
     request : `~fastapi.Request`
@@ -262,7 +264,14 @@ async def expected_error_handler(request: Request, exc: AstrometricsError) -> JS
         The error reply built by `_error_response`.
     """
     info = to_error_info(exc, new_request_id())
-    logger.warning("%s %s failed (%s): %s", request.method, request.url.path, info.code, info.message)
+    logger.log(
+        info.log_level_number,
+        "%s %s failed (%s): %s",
+        request.method,
+        request.url.path,
+        info.code,
+        info.message,
+    )
     return _error_response(request, info)
 
 

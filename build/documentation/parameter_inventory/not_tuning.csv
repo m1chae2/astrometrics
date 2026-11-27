@@ -140,6 +140,7 @@ astrometricslib/foundation/storage/process_locks.py,acquire_resource_slot.poll_i
 astrometricslib/foundation/storage/process_locks.py,describe_slot_holders.max_slots,Slot count of the shared work lock; plumbing
 astrometricslib/foundation/storage/process_locks.py,list_slot_holders.max_slots,Slot count of the shared work lock; plumbing
 astrometricslib/foundation/versioned_cache.py,VERSIONED_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
+astrometricslib/models/page.py,Page.of.offset,Default start of a page: the first match
 astrometricslib/models/stellar_source.py,BRIGHTEST_CATALOG_MAGNITUDE,Physical limit of apparent magnitudes (Sirius)
 astrometricslib/pipelines/asteroid_detection/detection.py,_LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON,Division-by-zero guard
 astrometricslib/pipelines/asteroid_detection/detection.py,_POLAR_COS_DEC_LIMIT,Switch to exact distance near poles; accuracy guard

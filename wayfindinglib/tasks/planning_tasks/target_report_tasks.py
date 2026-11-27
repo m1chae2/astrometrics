@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib import Target
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import (
@@ -53,12 +54,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import (
-    CaptureSetting,
-    MeasurementReference,
-    QualityMeasurement,
-    observing_night_id,
-)
+from astrometricslib.reports import CaptureSetting, MeasurementReference, QualityMeasurement
 from wayfindinglib.analytics.data_versions import report_data_version
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,

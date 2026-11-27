@@ -13,7 +13,7 @@ import math
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.analytics.tracking_risk import TrackedTarget, build_tracking_risk_map
 

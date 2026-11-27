@@ -40,16 +40,17 @@ from astrometricslib import (
     StellarObject,
     Target,
 )
-from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
-from astrometricslib.jobs import background_job, get_current_job, registered_job
-from astrometricslib.parameters import resolve_parameter
-from wayfindinglib._internal.arguments import (
+from astrometricslib.arguments import (
     TimeInput,
     check_choice,
     check_include,
     check_limit,
     reject_unused_arguments,
 )
+from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, NotFoundError
+from astrometricslib.jobs import background_job, get_current_job, registered_job
+from astrometricslib.parameters import resolve_parameter
+from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     TargetFrameReader,
@@ -217,7 +218,7 @@ def _advisory_time(at: datetime | str | None) -> datetime:
     return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
 
 
-class ObservationPlanning:
+class ObservationPlanning(MovedNames):
     """Decide what to observe: visibility, advice, mosaics and plans.
 
     Parameters
@@ -664,8 +665,8 @@ class ObservationPlanning:
     def get_visibility(
         self,
         objects: list[str | Target | StellarObject | dict[str, Any]] | None = None,
-        time: TimeInput = None,
-        end_time: TimeInput = None,
+        time: TimeInput | None = None,
+        end_time: TimeInput | None = None,
         step_minutes: float | None = None,
         include: list[str] | None = None,
         minimum_altitude_deg: float = 0.0,
@@ -2908,7 +2909,7 @@ class ObservationPlanning:
         """
         import sqlite3
 
-        from astrometricslib.reports import observing_night_id
+        from astrometricslib.arguments import observing_night_id
         from wayfindinglib.analytics.package_suggestions import (
             RANKING_SUGGESTIONS_PER_USE,
             read_target_noise,

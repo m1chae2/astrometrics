@@ -43,6 +43,7 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import factor_for
 from astrometricslib.models.tuned_parameter import (
@@ -101,7 +102,7 @@ def _read_exposure_seconds(header: Any) -> float:
     return 1.0
 
 
-class ObservationTimeError(ValueError):
+class ObservationTimeError(ProcessingError):
     """A frame's capture time is missing or cannot be read.
 
     The message is a short sentence saying why. Callers store it as the

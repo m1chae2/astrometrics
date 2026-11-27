@@ -26,10 +26,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from astrometricslib import Target
+from astrometricslib.arguments import TimeInput, check_limit, to_epoch_seconds
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import background_job, get_current_job, registered_job
 from astrometricslib.parameters import TuningReport
-from wayfindinglib._internal.arguments import TimeInput, check_limit, to_epoch_seconds
 from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.focus_temperature_fit import FocusSource, FocusTemperatureFit
@@ -434,8 +434,8 @@ class ObservationReview(ControlChild):
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: TimeInput = None,
-        until: TimeInput = None,
+        since: TimeInput | None = None,
+        until: TimeInput | None = None,
         limit: int = 60,
         include: list[str] | None = None,
     ) -> FrameGuidingReport:
@@ -545,7 +545,7 @@ class ObservationReview(ControlChild):
         self,
         session_id: str | None = None,
         limit: int = 50,
-        since: TimeInput = None,
+        since: TimeInput | None = None,
         targets: list[Target] | None = None,
     ) -> AlignmentRecords:
         """Read the stored alignment attempts, grouped by target.

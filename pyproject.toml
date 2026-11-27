@@ -430,6 +430,7 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "wayfindinglib.** -> astrometricslib.exceptions",
+    "wayfindinglib.** -> astrometricslib.arguments",
     "wayfindinglib.** -> astrometricslib.reports",
     "wayfindinglib.** -> astrometricslib.jobs",
     "wayfindinglib.** -> astrometricslib.drivers",
@@ -453,6 +454,7 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "simulator.** -> astrometricslib.exceptions",
+    "simulator.** -> astrometricslib.arguments",
     "simulator.** -> astrometricslib.reports",
     "simulator.** -> astrometricslib.jobs",
     "simulator.** -> astrometricslib.drivers",
@@ -534,6 +536,7 @@ source_modules = ["mcp_servers"]
 forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
 ignore_imports = [
     "mcp_servers.** -> astrometricslib.exceptions",
+    "mcp_servers.** -> astrometricslib.arguments",
     "mcp_servers.** -> astrometricslib.reports",
     "mcp_servers.** -> astrometricslib.jobs",
     "mcp_servers.** -> astrometricslib.drivers",
@@ -569,6 +572,7 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "backend.** -> astrometricslib.exceptions",
+    "backend.** -> astrometricslib.arguments",
     "backend.** -> astrometricslib.reports",
     "backend.** -> astrometricslib.jobs",
     "backend.** -> astrometricslib.drivers",

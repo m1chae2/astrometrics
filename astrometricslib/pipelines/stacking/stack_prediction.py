@@ -35,6 +35,7 @@ from astrometricslib.models.processing_results import (
 )
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.camera_selection import split_frames_by_camera
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.frame_screening import (
     BACKGROUND_SPLIT_REASON,
@@ -44,7 +45,6 @@ from astrometricslib.pipelines.stacking.frame_screening import (
     FrameScreening,
     screen_frames,
 )
-from astrometricslib.pipelines.stacking.pre_processing.camera_selection import split_frames_by_camera
 from astrometricslib.pipelines.stacking.stack_runner import split_into_stack_batches
 
 __all__ = ["predict_stack"]

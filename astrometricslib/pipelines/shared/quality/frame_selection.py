@@ -286,7 +286,7 @@ def select_target_light_frames(
         less than 1.
     """
     # The shared argument reader imports this module, so it is imported here.
-    from astrometricslib.pipelines.shared.api_arguments import to_epoch_seconds
+    from astrometricslib.foundation.arguments import to_epoch_seconds
 
     selection = FrameSelection(
         filter_name=filter_name,

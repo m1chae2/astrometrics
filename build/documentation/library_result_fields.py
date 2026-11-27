@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _PUBLIC_MODULES = {
     "astrometricslib": (
         "astrometricslib",
+        "astrometricslib.arguments",
         "astrometricslib.exceptions",
         "astrometricslib.reports",
         "astrometricslib.jobs",

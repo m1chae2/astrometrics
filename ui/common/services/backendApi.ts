@@ -798,6 +798,7 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
                 details: data?.details,
                 retryable: data?.retryable,
                 requestId: data?.requestId,
+                report: data?.report,
             });
         }
 
@@ -956,8 +957,10 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             if (error instanceof BackendError) {
                 // A background read that fails because a device or remote computer is
                 // unreachable is a status (the status chips show it), not an error.
+                // So is any error the backend marks as a status (`report: 'status'`).
                 const isUnavailableRead = isIdempotent && error.code === 'external_service';
-                if (!quiet && !isUnavailableRead) {
+                const isStatus = error.report === 'status';
+                if (!quiet && !isUnavailableRead && !isStatus) {
                     const presentation = presentBackendError(error);
                     emitToast(presentation.text, presentation.kind, `API:${action}`);
                 }

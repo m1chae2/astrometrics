@@ -21,7 +21,7 @@ from backend.services.infrastructure.agent_code_policy import check_agent_code
         "import matplotlib.pyplot as plt\nplt.plot([1, 2])",
         "from scipy import stats",
         "from astrometricslib.exceptions import NotFoundError",
-        "from astrometricslib.reports import observing_night_id",
+        "from astrometricslib.arguments import observing_night_id",
         "from astrometricslib.jobs import ProcessingJob",
         "from astrometricslib.drivers import connect_db",
         "from wayfindinglib.exceptions import PlanRevisionConflictError",

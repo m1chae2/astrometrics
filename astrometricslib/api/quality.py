@@ -40,7 +40,16 @@ from pydantic import ValidationError
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib._internal.drivers.driver_set import Drivers
+from astrometricslib._internal.renames import MovedNames
 from astrometricslib.api._quality_building_blocks import QualityBlocks
+from astrometricslib.foundation.arguments import (
+    TimeInput,
+    check_choice,
+    check_include,
+    check_limit,
+    reject_unused_arguments,
+    to_epoch_seconds,
+)
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -71,14 +80,8 @@ from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
     StackKind,
     TargetLookup,
-    TimeInput,
-    check_choice,
-    check_include,
-    check_limit,
     make_frame_selection,
-    reject_unused_arguments,
     resolve_target,
-    to_epoch_seconds,
 )
 from astrometricslib.pipelines.shared.position_mapping import RecordCache
 
@@ -116,7 +119,7 @@ _FRAME_QUALITY_SECTIONS_BY_KIND = {
 }
 
 
-class QualityRecords:
+class QualityRecords(MovedNames):
     """The start of every quality read: stored measurements and live checks.
 
     `query` and `metrics` read what earlier runs stored. The other methods
@@ -215,7 +218,7 @@ class QualityRecords:
         observing_night_id: str | None = None,
         camera_id: str | None = None,
         telescope: str | None = None,
-        since: TimeInput = None,
+        since: TimeInput | None = None,
         row_ids: list[int] | None = None,
         latest_only: bool = True,
         variant: str | None = None,
@@ -589,8 +592,8 @@ class QualityRecords:
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: TimeInput = None,
-        until: TimeInput = None,
+        since: TimeInput | None = None,
+        until: TimeInput | None = None,
         trend_frames: int | None = None,
         trend_threshold_percent: float | None = None,
         exposure_seconds: float | None = None,
@@ -783,8 +786,8 @@ class QualityRecords:
         filter_name: str | None = None,
         first_file: str | None = None,
         last_file: str | None = None,
-        since: TimeInput = None,
-        until: TimeInput = None,
+        since: TimeInput | None = None,
+        until: TimeInput | None = None,
         camera_id: str | None = None,
         bias_level_adu: float | None = None,
         register_job: bool = True,

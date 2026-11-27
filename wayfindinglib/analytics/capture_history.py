@@ -26,6 +26,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -33,7 +34,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import MeasurementStatus, observing_night_id
+from astrometricslib.reports import MeasurementStatus
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_ATTEMPTS_PER_NIGHT,
     MINIMUM_FRAMES_PER_NIGHT,

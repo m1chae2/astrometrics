@@ -108,7 +108,7 @@ def night_of(row: dict[str, Any]) -> str | None:
     night : `str` or `None`
         The night, or `None` when the row has neither a session nor a time.
     """
-    from astrometricslib.reports import observing_night_id
+    from astrometricslib.arguments import observing_night_id
 
     session = row.get("session_id")
     if session:

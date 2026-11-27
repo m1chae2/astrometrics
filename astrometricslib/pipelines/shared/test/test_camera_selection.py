@@ -11,12 +11,12 @@ import pytest
 
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.stacking import stage as stacking_tasks
-from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
+from astrometricslib.pipelines.shared.camera_selection import (
     choose_camera_frames,
     ensure_single_camera,
     split_frames_by_camera,
 )
+from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
 ASI = "ZWO ASI 533MM Pro"
 NIKON = "Nikon DSLR DSC D5300"

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AppConfiguration, Astrometrics
 from astrometricslib.exceptions import ConfigurationError, NotFoundError
+from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.phd2.phd2_client import DEFAULT_PHD2_PORT, PHD2Client
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
@@ -52,7 +53,7 @@ __all__ = [
 ]
 
 
-class ObservationExecution:
+class ObservationExecution(MovedNames):
     """Run and recover an observing session.
 
     Parameters

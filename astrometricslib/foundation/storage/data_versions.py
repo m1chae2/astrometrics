@@ -246,7 +246,7 @@ def get_camera_data_versions(
         The camera names, as the capture settings store them.
     finished_before_night : `str`, optional
         The observing night that is not finished yet, as
-        `~astrometricslib.reports.observing_night_id` names it (the night
+        `~astrometricslib.arguments.observing_night_id` names it (the night
         of now). Measurements of this night and later ones are not counted.
         Defaults to counting every measurement.
 

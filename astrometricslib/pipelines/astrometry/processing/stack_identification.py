@@ -57,6 +57,7 @@ from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError
 from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.stack_identification import IdentifiedStar, StackIdentification
 from astrometricslib.pipelines.astrometry.processing.catalog_matching import (
     nearest_catalog_entries,
@@ -95,7 +96,6 @@ from astrometricslib.utilities.gaia_record_ids import GAIA_DR3_PREFIX, gaia_reco
 __all__ = [
     "IDENTIFICATION_SIDECAR_SUFFIX",
     "UNNAMED_STAR",
-    "StackIdentificationStoppedError",
     "identify_stack_stars",
     "read_stack_identification",
 ]
@@ -139,10 +139,6 @@ _PROGRESS_SIMBAD_DONE = 0.9
 
 ProgressReport = Callable[[float, str], None]
 StopCheck = Callable[[], bool]
-
-
-class StackIdentificationStoppedError(AstrometricsError):
-    """The person stopped the identification before it finished."""
 
 
 def read_stack_identification(stack_path: str) -> StackIdentification | None:
@@ -240,11 +236,12 @@ def _check(should_stop: StopCheck | None) -> None:
 
     Raises
     ------
-    StackIdentificationStoppedError
-        When `should_stop` says so.
+    RunAbandonedError
+        When `should_stop` says so: the person stopped the identification
+        before it finished.
     """
     if should_stop is not None and should_stop():
-        raise StackIdentificationStoppedError("The star identification was stopped.")
+        raise RunAbandonedError("The star identification was stopped.")
 
 
 def _report(progress: ProgressReport | None, fraction: float, message: str) -> None:
@@ -650,7 +647,7 @@ def identify_stack_stars(
 
     Notes
     -----
-    A `StackIdentificationStoppedError` passes through when `should_stop`
+    A `RunAbandonedError` passes through when `should_stop`
     asked to stop.
     """
     if config is None:

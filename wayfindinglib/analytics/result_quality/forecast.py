@@ -117,6 +117,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -131,7 +132,6 @@ from astrometricslib.reports import (
     MeasurementStatus,
     QualityMeasurement,
     SubjectLevel,
-    observing_night_id,
 )
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.fixed_pattern_location import (

@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.foundation.arguments import check_choice, reject_unused_arguments
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, current_job_id, registered_job
@@ -40,12 +42,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.api_arguments import (
-    TargetLookup,
-    check_choice,
-    reject_unused_arguments,
-    resolve_target,
-)
+from astrometricslib.pipelines.shared.api_arguments import TargetLookup, resolve_target
 from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
 from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
@@ -245,7 +242,7 @@ def _calibration_row_matches(
     )
 
 
-class CalibrationCatalog:
+class CalibrationCatalog(MovedNames):
     """The library of calibration frames: darks, biases and flats.
 
     Cameras add noise to every picture. Calibration frames are pictures

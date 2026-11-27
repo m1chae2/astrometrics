@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+from astrometricslib.arguments import check_choice, reject_unused_arguments
 from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib._internal.arguments import check_choice, reject_unused_arguments
 
 if TYPE_CHECKING:
     from astrometricslib import Target

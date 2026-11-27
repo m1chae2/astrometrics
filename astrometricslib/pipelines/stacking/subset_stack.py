@@ -273,8 +273,8 @@ def stack_frame_subset(
         If there are fewer than `MINIMUM_SUBSET_FRAMES` frames, or the output
         path is not absolute.
     """
-    from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
-    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
+    from astrometricslib.pipelines.shared.camera_selection import ensure_single_camera
+    from astrometricslib.pipelines.shared.optic_selection import ensure_single_optic
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
     from astrometricslib.pipelines.stacking.stack_settings import (
         choose_weight_for_frames,

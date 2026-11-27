@@ -17,7 +17,7 @@ have an Ekos session record or a guiding run. It also works out a digest of
 what the finished nights contain, and a signature of what tonight contains.
 A part is rebuilt only when its own digest or signature changes.
 
-Nights are named as `astrometricslib.reports.observing_night_id` names them,
+Nights are named as `astrometricslib.arguments.observing_night_id` names them,
 from local noon to local noon. A night is finished when it is older than the
 night of the moment asked about.
 
@@ -34,9 +34,9 @@ from functools import cached_property
 from itertools import chain
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import get_target_document_signs
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError
-from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.analytics.data_versions import nights_context_signs
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog

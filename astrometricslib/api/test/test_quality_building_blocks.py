@@ -325,6 +325,33 @@ def test_a_raw_mosaic_is_refused_unless_debayered(records: QualityBlocks, tmp_pa
         assert (x, y) == pytest.approx((star_x, star_y), abs=1.0)
 
 
+def test_a_debayered_mosaic_noise_follows_the_true_noise(records: QualityBlocks, tmp_path: Path) -> None:
+    """Verify super-pixel noise from whole-number mosaics follows the noise.
+
+    The super-pixels are averages of whole numbers, so they lie on a grid of
+    a fraction of an ADU. The old noise landed on one grid value for every
+    frame (the Nikon D5300 case, 11.18). Frames with a different true noise
+    now give different, correct values.
+    """
+    header = fits.Header()
+    header["BAYERPAT"] = "RGGB"
+    noises = (8.0, 8.4, 8.8, 9.2)
+    found = []
+    for index, noise in enumerate(noises):
+        rng = np.random.default_rng(40 + index)
+        mosaic = np.round(rng.normal(700.0, noise, (1600, 1600))).astype(np.uint16)
+        path = tmp_path / f"nikon_{index}.fits"
+        fits.writeto(path, mosaic, header)
+        sky = records.measure_sky(str(path), debayer=True)
+        assert sky is not None
+        found.append(sky.noise)
+    # A super-pixel is the mean of four numbers (the green is two of them), so
+    # its noise is about half of one pixel's.
+    expected = np.array(noises) / 2.0
+    np.testing.assert_allclose(found, expected, rtol=0.06)
+    assert len(set(np.round(found, 6))) == len(noises)
+
+
 def test_debayer_needs_a_mosaic(records: QualityBlocks, image_path: Path) -> None:
     """Verify debayer=True on an array or a mono frame is refused."""
     with pytest.raises(InvalidArgumentError):

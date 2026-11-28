@@ -4,8 +4,8 @@ Description: Plate solving works out exactly which part of the sky an
 image shows, from the pattern of its stars. The result is a FITS header
 with a World Coordinate System (WCS), the mapping from pixel positions to
 sky coordinates. `PlateSolveDriver` is the abstract base class every
-plate solver's driver implements. Astrometry.net is the solver in use
-(`AstrometryNetPlateSolveDriver` in `drivers/astrometry_net_driver.py`).
+plate solver's driver implements. Siril's own plate solver is the solver in
+use (`SirilPlateSolveDriver` in `drivers/siril/astrometry/solve_driver.py`).
 
 A solver may also report how well its fit matched the stars. It does so by
 returning a `PlateSolveHeader`, a FITS header that carries two optional

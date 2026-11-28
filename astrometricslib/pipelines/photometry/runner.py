@@ -344,33 +344,33 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # most stars once sessions mix).
         photometry_frames_with_timestamp = [f for f in photometry_frames if f.timestamp is not None]
         photometry_frames_without_timestamp = [f for f in photometry_frames if f.timestamp is None]
-        # Leave out the frames the frame quarantine sets aside (clouded,
+        # Leave out the frames the set-aside check sets aside (clouded,
         # trailed, off field, or already in `_excluded`), before any session
         # or comparison star is chosen. Each is logged as a job warning.
         # `run` has not started, so the warnings are collected here and
         # `validate_output` adds them to the run's own.
         with collect_logged_warnings() as skip_collector:
-            photometry_frames_with_timestamp, quarantine_skipped_frames = skip_set_aside_frames(
+            photometry_frames_with_timestamp, set_aside_skipped_frames = skip_set_aside_frames(
                 target.id, photometry_frames_with_timestamp, get_configuration().get_frames_path()
             )
         input_logged_warnings = skip_collector.warnings()
-        if quarantine_skipped_frames:
-            skipped_paths = {frame.path for frame, _reason in quarantine_skipped_frames}
+        if set_aside_skipped_frames:
+            skipped_paths = {frame.path for frame, _reason in set_aside_skipped_frames}
             image_paths = [path for path in image_paths if path not in skipped_paths]
         photometry_sessions = derive_target_sessions(target.id, photometry_frames_with_timestamp)
 
         if not photometry_sessions:
-            if quarantine_skipped_frames:
+            if set_aside_skipped_frames:
                 no_work_reason = (
-                    f"Every frame with a capture timestamp ({len(quarantine_skipped_frames)}) is set aside "
-                    f"by the frame quarantine, so none is measured, for filter: {filter_type}"
+                    f"Every frame with a capture timestamp ({len(set_aside_skipped_frames)}) is set aside "
+                    f"by the cloud and target alignment check, so none is measured, for filter: {filter_type}"
                 )
             else:
                 no_work_reason = (
                     f"No frames with a usable capture timestamp to assign a session for filter: {filter_type}"
                 )
             empty_result = _empty_photometry_result(no_work_reason)
-            empty_result.payload["quarantine_skipped_frames"] = quarantine_skipped_frames
+            empty_result.payload["set_aside_skipped_frames"] = set_aside_skipped_frames
             empty_result.payload["input_logged_warnings"] = input_logged_warnings
             return empty_result
 
@@ -378,7 +378,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             payload={
                 "image_paths": image_paths,
                 "photometry_frames_without_timestamp": photometry_frames_without_timestamp,
-                "quarantine_skipped_frames": quarantine_skipped_frames,
+                "set_aside_skipped_frames": set_aside_skipped_frames,
                 "input_logged_warnings": input_logged_warnings,
                 "photometry_sessions": photometry_sessions,
             },
@@ -762,7 +762,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "long_term_candidates_formatted": long_term_candidates_formatted,
                 "image_paths": image_paths,
                 "photometry_frames_without_timestamp": photometry_frames_without_timestamp,
-                "quarantine_skipped_frames": result.payload.get("quarantine_skipped_frames", []),
+                "set_aside_skipped_frames": result.payload.get("set_aside_skipped_frames", []),
                 "input_logged_warnings": result.payload.get("input_logged_warnings", []),
             },
         )
@@ -827,8 +827,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             ExcludedFrame(path=frame.path, reason=frame.reason) for frame in frames_without_solution
         ]
         rejected_frames += [
-            ExcludedFrame(path=frame.path, reason=f"skipped, set aside by the frame quarantine: {reason}")
-            for frame, reason in payload.get("quarantine_skipped_frames", [])
+            ExcludedFrame(
+                path=frame.path,
+                reason=f"skipped, set aside by the cloud and target alignment check: {reason}",
+            )
+            for frame, reason in payload.get("set_aside_skipped_frames", [])
         ]
         rejected_frames += [
             ExcludedFrame(path=frame.path, reason=reason)

@@ -224,8 +224,8 @@ def test_renamed_derived_file_is_moved(
     assert "MOVED (info): lights/M 1/old.jpg -> lights/M 1/new.jpg" in capsys.readouterr().out
 
 
-def test_quarantine_record_is_derived_but_excluded_fits_is_not() -> None:
-    """Treat the quarantine JSON as derived and an `_excluded/` FITS as raw."""
+def test_set_aside_record_is_derived_but_excluded_fits_is_not() -> None:
+    """Treat the set-aside JSON as derived and an `_excluded/` FITS as raw."""
     folder = "lights/M 81/2026-10-01/_excluded"
     assert integrity.is_derived_path(f"{folder}/excluded_frames.json")
     assert not integrity.is_derived_path(f"{folder}/Light_001.fits")

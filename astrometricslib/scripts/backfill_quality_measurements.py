@@ -1306,11 +1306,11 @@ _STACKING_VALUES: tuple[ValueMapping, ...] = (
         older_path=("inputQuality", "framesExcludedForBackground"),
     ),
     _value(
-        "stacking.frames_quarantined_count",
+        "stacking.frames_set_aside_count",
         "stackingMetrics",
-        "framesQuarantined",
+        "framesSetAside",
         subject=_STACK,
-        older_path=("inputQuality", "framesQuarantined"),
+        older_path=("inputQuality", "framesSetAside"),
     ),
 )
 

@@ -1,4 +1,4 @@
-"""Purpose: Leave out of photometry the frames the frame quarantine sets aside.
+"""Purpose: Leave out of photometry the frames the set-aside check sets aside.
 
 Description: A cloudy, trailed or off-field frame has stars that are missing,
 smeared or in the wrong place. If it stays in a session, the comparison-star
@@ -6,7 +6,7 @@ choice sees stars that are missing from some frames and drops them. On M 27
 on 2026-09-24, 24 of 33 frames were clouded, no star was present in every
 frame, and the whole night was left without comparison stars.
 
-This module asks the frame quarantine (`frame_quarantine`) which frames it
+This module asks the set-aside check (`frame_set_aside`) which frames it
 would set aside, using its own judging function, so photometry and stacking
 never disagree about what a bad frame is. It also leaves out frames an earlier
 stack already moved into an `_excluded` folder. It moves no file. Each
@@ -26,7 +26,9 @@ __all__ = ["SkippedFrame", "skip_set_aside_frames"]
 
 logger = logging.getLogger(__name__)
 
-ALREADY_SET_ASIDE_REASON = "already set aside by the frame quarantine (in an _excluded folder)"
+ALREADY_SET_ASIDE_REASON = (
+    "already set aside by the cloud and target alignment check (in an _excluded folder)"
+)
 """The reason given for a frame that is already in an `_excluded` folder."""
 
 SkippedFrame = tuple[Any, str]
@@ -73,15 +75,16 @@ def skip_set_aside_frames(
     Returns
     -------
     kept_frames : `list`
-        The frames the quarantine keeps, in their order.
+        The frames the set-aside check keeps, in their order.
     skipped_frames : `list` [`SkippedFrame`]
         Each skipped frame with its reason: either it is already in
-        `_excluded`, or the quarantine's judgement says it would be set aside.
-        One warning per night lists them, so the photometry job reports them.
+        `_excluded`, or the set-aside check's judgement says it would be set
+        aside. One warning per night lists them, so the photometry job
+        reports them.
     """
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
         find_frames_already_set_aside,
-        find_frames_to_quarantine,
+        find_frames_to_set_aside,
     )
 
     skipped: dict[str, SkippedFrame] = {}
@@ -89,14 +92,14 @@ def skip_set_aside_frames(
         skipped[frame.path] = (frame, ALREADY_SET_ASIDE_REASON)
     to_judge = [frame for frame in frames if frame.path not in skipped]
     if to_judge:
-        report = find_frames_to_quarantine(to_judge, target_id=target_id)
+        report = find_frames_to_set_aside(to_judge, target_id=target_id)
         by_path = {frame.path: frame for frame in to_judge}
         for decision in report.moved:
             frame = by_path.get(decision.path)
             if frame is not None:
                 skipped[frame.path] = (frame, f"{decision.kind}: {decision.reason}")
         for note in report.notes:
-            logger.info("[%s] Frame quarantine check for photometry: %s", target_id, note)
+            logger.info("[%s] Set-aside check check for photometry: %s", target_id, note)
 
     skipped_frames = [skipped[frame.path] for frame in frames if frame.path in skipped]
     kept_frames = [frame for frame in frames if frame.path not in skipped]
@@ -126,7 +129,7 @@ def _log_skipped_frames(target_id: str, skipped_frames: Sequence[SkippedFrame], 
         listing = "; ".join(f"{os.path.basename(frame.path)} ({reason})" for frame, reason in night_frames)
         text = (
             f"[{target_id}] Photometry skipped {len(night_frames)} frame(s) of the night {night} "
-            f"({frame_count} frames checked in all) that the frame quarantine sets aside: {listing}"
+            f"({frame_count} frames checked in all) that the set-aside check sets aside: {listing}"
         )
         # Finished text with no arguments, so the collector keeps each
         # night's warning whole instead of merging the nights into one.

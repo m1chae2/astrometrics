@@ -49,7 +49,7 @@ def make_target(exposures: list[float]) -> Target:
 
 @pytest.fixture
 def stacks_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the stacks path at a temporary folder; turn the quarantine off.
+    """Point the stacks path at a temporary folder; turn set-aside off.
 
     Returns
     -------
@@ -58,7 +58,7 @@ def stacks_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     configuration = get_configuration()
     monkeypatch.setattr(configuration, "get_stacks_path", lambda: tmp_path)
-    monkeypatch.setattr(configuration, "get_quarantine_bad_frames_enabled", lambda: False)
+    monkeypatch.setattr(configuration, "get_set_aside_bad_frames_enabled", lambda: False)
     monkeypatch.setattr(configuration, "get_stack_weight", lambda: None)
     folder = tmp_path / "lights" / "M 52"
     folder.mkdir(parents=True)

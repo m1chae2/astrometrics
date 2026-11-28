@@ -1,10 +1,10 @@
 """Lists the frames in a target's `_excluded` folders, with their reasons.
 
-The quarantine step (`frame_quarantine.py`) moves frames with clouds or
+The set-aside step (`frame_set_aside.py`) moves frames with clouds or
 trailed stars into an `_excluded` folder and writes two records of the move:
 
 - the folder's `excluded_frames.json` file, and
-- the frame's `frame.quarantine_*` quality rows, which carry the action taken.
+- the frame's `frame.set_aside_*` quality rows, which carry the action taken.
 
 Frames moved before the rows carried the action have only the file. Frames
 put into the folder by hand have neither. This module reads the folders and the
@@ -28,11 +28,11 @@ from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     MANIFEST_FILE_NAME,
     parse_set_aside_action,
-    read_quarantine_manifest,
+    read_set_aside_manifest,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -47,7 +47,7 @@ _FRAME_EXTENSIONS = (".fits", ".fit")
 def find_excluded_folders(frames_path: str, target_names: Iterable[str]) -> list[str]:
     """Find every `_excluded` folder under a target's lights folders.
 
-    Unlike `frame_quarantine.find_quarantine_folders`, a folder is listed
+    Unlike `frame_set_aside.find_set_aside_folders`, a folder is listed
     even when it has no `excluded_frames.json` file.
 
     Parameters
@@ -70,7 +70,7 @@ def find_excluded_folders(frames_path: str, target_names: Iterable[str]) -> list
         folders.extend(
             directory
             for directory, _, _ in os.walk(root)
-            if os.path.basename(directory) == QUARANTINE_FOLDER_NAME
+            if os.path.basename(directory) == SET_ASIDE_FOLDER_NAME
         )
     return folders
 
@@ -243,7 +243,7 @@ def _folder_snapshot(folder: str) -> _FolderSnapshot:
             _snapshot_cache.move_to_end(key)
             return kept
     manifest = {
-        entry["file"]: entry for entry in read_quarantine_manifest(os.path.join(folder, MANIFEST_FILE_NAME))
+        entry["file"]: entry for entry in read_set_aside_manifest(os.path.join(folder, MANIFEST_FILE_NAME))
     }
     frames = {
         name: _read_frame_header_facts(os.path.join(folder, name))
@@ -274,7 +274,7 @@ def build_set_aside_records(
     folders : `Sequence` [`str`]
         The `_excluded` folders (see `find_excluded_folders`).
     stored_rows : `Sequence` [`QualityMeasurement`]
-        The target's stored ``frame.quarantine_*`` rows, newest per subject
+        The target's stored ``frame.set_aside_*`` rows, newest per subject
         and metric. Only rows with a set-aside action count.
     capture_exposure_seconds : `dict` [`int`, `float` or `None`]
         The exposure of each capture setting id that the rows point at.

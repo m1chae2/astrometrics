@@ -1,4 +1,4 @@
-"""Tests for the tuners of the quarantine's star-elongation limits.
+"""Tests for the tuners of the set-aside check's star-elongation limits.
 
 The pure functions get sessions with a known spread. The tuners get a library
 service that is missing, so they must skip and never guess.
@@ -10,7 +10,7 @@ import pytest
 
 from astrometricslib.foundation.observatory_setups import SetupConfig
 from astrometricslib.foundation.tuning import Tuner, TuningInputs, TuningSkippedError
-from astrometricslib.pipelines.stacking.pre_processing.quarantine_tuning import (
+from astrometricslib.pipelines.stacking.pre_processing.set_aside_tuning import (
     COLOUR_DROP_TUNER,
     TRAILED_LIMITS_TUNER,
     fixed_elongation_limit,
@@ -34,7 +34,7 @@ def _row(value: float | None, night: str, setting: int = 1) -> SimpleNamespace:
 
 
 def test_sessions_below_the_minimum_batch_are_left_out() -> None:
-    """A session too small for the quarantine to judge is left out."""
+    """A session too small for the set-aside check to judge is left out."""
     big = [_row(1.1, "night-1") for _ in range(8)]
     small = [_row(1.1, "night-2") for _ in range(3)]
     sessions = group_elongation_by_session([*big, *small, _row(None, "night-1")])

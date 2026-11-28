@@ -62,13 +62,13 @@ from astrometricslib.pipelines.stacking.frame_measurement_run import (
     frame_was_cut_short,
     frames_whose_camera_profile_gap_closed,
     measurements_to_store,
-    quarantine_measurements_for_frame,
     record_frame_measurements_for_target,
     record_stage_frame_quality,
+    set_aside_measurements_for_frame,
 )
 from astrometricslib.pipelines.stacking.metrics import (
     FRAME_POINTING_OFFSET_FRACTION,
-    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SET_ASIDE_SKY_MEDIAN,
     FRAME_SKY_UNEVENNESS,
 )
 
@@ -482,7 +482,7 @@ def test_the_capture_setting_describes_the_frame(target: Target) -> None:
     assert setting.filter_name is None
 
 
-def test_quarantine_numbers_become_three_rows_and_a_missing_check_is_not_measured(target: Target) -> None:
+def test_set_aside_numbers_become_three_rows_and_a_missing_check_is_not_measured(target: Target) -> None:
     """Sky unevenness and pointing rows say why a check could not be made."""
     common = {
         "run_id": "run-test",
@@ -490,18 +490,18 @@ def test_quarantine_numbers_become_three_rows_and_a_missing_check_is_not_measure
         "measured_at": datetime(2026, 10, 22, tzinfo=UTC),
         "capture_setting_id": 7,
     }
-    rows = quarantine_measurements_for_frame(
+    rows = set_aside_measurements_for_frame(
         {"sky_median_adu": 512.0, "sky_unevenness": 0.04, "pointing_offset_fraction": 0.01},
         target.frames[0],
         "M 99",
         **common,
     )
     by_metric = {row.metric: row for row in rows}
-    assert by_metric[FRAME_QUARANTINE_SKY_MEDIAN].value == pytest.approx(512.0)
+    assert by_metric[FRAME_SET_ASIDE_SKY_MEDIAN].value == pytest.approx(512.0)
     assert by_metric[FRAME_SKY_UNEVENNESS].value == pytest.approx(0.04)
     assert by_metric[FRAME_POINTING_OFFSET_FRACTION].value == pytest.approx(0.01)
 
-    rows = quarantine_measurements_for_frame(
+    rows = set_aside_measurements_for_frame(
         {"sky_median_adu": 512.0, "sky_unevenness": None, "pointing_offset_fraction": None},
         target.frames[0],
         "M 99",
@@ -514,10 +514,10 @@ def test_quarantine_numbers_become_three_rows_and_a_missing_check_is_not_measure
         assert missing.reason
 
 
-def test_the_stage_records_quarantine_rows_for_kept_frames(
+def test_the_stage_records_set_aside_rows_for_kept_frames(
     target: Target, tmp_path: Path, biases: list[str]
 ) -> None:
-    """Every measured frame gets quarantine rows; new frames are measured."""
+    """Every measured frame gets set-aside rows; new frames are measured."""
     config = SimpleNamespace(get_library_path=lambda: tmp_path)
     recording = FrameQualityRecording(configuration=config, calibration_library=_Library(biases))
     lights = target.frames[:3]
@@ -536,8 +536,8 @@ def test_the_stage_records_quarantine_rows_for_kept_frames(
     )
 
     store = QualityStore.from_configuration(config)
-    quarantine_rows = store.query(metric=FRAME_QUARANTINE_SKY_MEDIAN)
-    assert len(quarantine_rows) == 3
+    set_aside_rows = store.query(metric=FRAME_SET_ASIDE_SKY_MEDIAN)
+    assert len(set_aside_rows) == 3
     assert summary.frames_measured == 2
     assert summary.rows_written > 6
     assert len(store.query(metric=FRAME_BACKGROUND_LEVEL)) == 2

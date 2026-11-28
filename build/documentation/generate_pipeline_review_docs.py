@@ -303,9 +303,10 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "Frames taken at a less common gain setting (the camera's amplifier setting) are set "
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
-    "frame_quarantine": (
-        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
-        "aside. The frames are moved all the same; the detail says how many and why."
+    "frame_set_aside": (
+        "Fails (as a warning) when the cloud and target alignment check set aside more than "
+        "`WARN_SET_ASIDE_FRACTION` of a batch. The frames are moved all the same; "
+        "the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -732,7 +733,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "frames_excluded_for_background": (
         "Number of frames set aside because their sky background differed from the rest."
     ),
-    "frames_quarantined": "Number of frames with clouds or trailed stars moved to the excluded folder.",
+    "frames_set_aside": "Number of frames with clouds or trailed stars moved to the excluded folder.",
     "dark_unique_frame_count": "Number of different frames (copies counted once) in the master dark.",
     "bias_unique_frame_count": "Number of different frames (copies counted once) in the master bias.",
 }
@@ -3179,9 +3180,9 @@ def build_stacking_doc() -> str:
         "min_surviving": require_symbol(
             "astrometricslib.utilities.stack_filter_floor", "DEFAULT_MINIMUM_SURVIVING_FRAMES"
         ),
-        "quarantine": require_symbol(
-            "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine",
-            "WARN_QUARANTINED_FRACTION",
+        "set_aside": require_symbol(
+            "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside",
+            "WARN_SET_ASIDE_FRACTION",
         ),
         "penalty": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
@@ -3308,8 +3309,8 @@ def build_stacking_doc() -> str:
             "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
-            "`WARN_QUARANTINED_FRACTION`",
-            f"`{values['quarantine']}`",
+            "`WARN_SET_ASIDE_FRACTION`",
+            f"`{values['set_aside']}`",
             status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
             "Share of a batch above which setting frames aside draws a warning. It blocks nothing: "
             "every frame that fails a check is moved. About twice the share the step picks from a "
@@ -3483,8 +3484,8 @@ flowchart TD
 Siril is an open-source astronomy image processor that does the pixel work. In code terms the
 run starts at `stage.stack_frames(target)`, splits frames in `stack_runner.run_stack`, and
 stacks through a `StackingDriver` (the interface for a stacking program), whose Siril version
-runs `ImageProcessing` (Section 4). Setting bad frames aside is the frame quarantine, and the
-quality summary is a `StackQualitySummary` (Section 7).
+runs `ImageProcessing` (Section 4). Setting frames aside is the set-aside check, a cloud and
+target alignment check, and the quality summary is a `StackQualitySummary` (Section 7).
 
 <<heading_2>>
 
@@ -3617,7 +3618,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames
    at a less common gain setting set aside, frames set aside by an earlier run dropped, the
-   quarantine (imaging only), and the background test.
+   the set-aside check (imaging only; the cloud and target alignment check), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames,
    settings and stacking code: a short code that changes whenever any of them changes. A match
    with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
@@ -3672,8 +3673,10 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Temperature gap above <<dark_tol>> °C.** The nearest dark is applied with a soft flag;
    `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
-2. **Bad frames.** Frames with too few stars or non-round stars move to `_excluded`. A batch
-   whose share of bad frames is above <<quarantine>> moves nothing and `frame_quarantine` fails.
+2. **Bad frames.** The cloud and target alignment check moves frames with too few stars,
+   non-round stars or a pointing off the target to `_excluded`. It moves every failing frame.
+   A batch whose share of bad frames is above <<set_aside>> only draws a warning, and
+   `frame_set_aside` fails as a warning.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R
    > <<degrade>>$ in `stack_sharpness`.
 4. **Over-subtraction.** `zero_pixel_fraction` and `negative_pixels` catch darks or biases that

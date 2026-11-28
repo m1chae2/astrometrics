@@ -133,6 +133,18 @@ def test_solve_only_with_an_unsolved_field_still_raises(monkeypatch: pytest.Monk
         identifier.process_image(np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True)
 
 
+def test_an_unsolved_field_raises_with_the_solvers_own_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The error carries the reason the solver kept, so the job shows it."""
+    from astrometricslib.utilities.exceptions import PlateSolveFailedError
+
+    _forbid_catalog_work(monkeypatch)
+    identifier = _identifier(None)
+    identifier.solver.last_failure_reason = "Plate solving failed: no match over the search radius"
+
+    with pytest.raises(PlateSolveFailedError, match="no match over the search radius"):
+        identifier.process_image(np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True)
+
+
 def test_the_pipeline_solve_wcs_skips_refit_and_naming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

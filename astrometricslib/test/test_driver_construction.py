@@ -3,7 +3,7 @@
 Description: A test can give the library a plate solver, a stacking program,
 a SIMBAD client, a Gaia XP source and a reddening source through
 `astrometricslib._internal.testing` (see `drivers/driver_set.py`). That only
-works if no pipeline builds `AstrometryNetPlateSolveDriver`,
+works if no pipeline builds `SirilPlateSolveDriver`,
 `SirilStackingDriver`, `AstroquerySimbadDriver`, `AstroqueryGaiaXpDriver` or
 `AstroqueryGaiaReddeningDriver` on its own, because such a pipeline would
 ignore the driver the caller chose. Every pipeline asks `Drivers` for its
@@ -28,7 +28,6 @@ PIPELINES_ROOT = pathlib.Path(__file__).resolve().parent.parent / "pipelines"
 
 # The built-in driver classes that only `drivers/driver_set.py` may build.
 BUILT_IN_DRIVER_CLASSES = frozenset({
-    "AstrometryNetPlateSolveDriver",
     "AstroqueryGaiaReddeningDriver",
     "AstroqueryGaiaXpDriver",
     "AstroquerySimbadDriver",

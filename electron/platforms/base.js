@@ -172,7 +172,7 @@ export class BasePlatform {
   }
 
   /**
-   * Pauses heavy analysis and stacking subprocesses (e.g. Siril, solve-field)
+   * Pauses heavy analysis and stacking subprocesses (e.g. Siril)
    * without closing the application, freeing CPU/RAM for high-priority tasks.
    *
    * @param {Object} [options]
@@ -185,7 +185,6 @@ export class BasePlatform {
     if (!runExec) return false;
     try {
       runExec('pkill -STOP -f siril-cli || true');
-      runExec('pkill -STOP -f solve-field || true');
       return true;
     } catch {
       return false;
@@ -205,7 +204,6 @@ export class BasePlatform {
     if (!runExec) return false;
     try {
       runExec('pkill -CONT -f siril-cli || true');
-      runExec('pkill -CONT -f solve-field || true');
       return true;
     } catch {
       return false;

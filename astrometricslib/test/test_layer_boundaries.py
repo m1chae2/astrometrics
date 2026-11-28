@@ -60,7 +60,7 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "_internal/drivers/calibration_library.py",
     "_internal/drivers/fits_access.py",
     "_internal/drivers/image.py",
-    "_internal/drivers/astrometry_net_driver.py",
+    "_internal/drivers/astrometry_net_client.py",
     # Reads pixels on its own on purpose: it re-measures saved numbers by
     # a path independent of the pipeline's FITS access.
     "scripts/recompute_headline_numbers.py",

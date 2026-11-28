@@ -22,11 +22,14 @@ colour calibration (`preview.color_calibration`) uses it with only a catalog.
    own, started with the private settings file and in offline mode. It never
    waits for the stack's Siril slot (`script_run.run_siril_script` with
    ``wait_for_slot=False``), so a centering solve is not held up by a stack.
-3. If the solve fails, it solves again with a shorter focal length
-   (`FOCAL_LENGTH_RETRY_FACTORS`). Camera programs often write the longest
-   focal length of a zoom lens, and Siril accepts a scale error of only 20%.
+3. If the solve fails, it solves again with a shorter and then a longer focal
+   length (`FOCAL_LENGTH_RETRY_FACTORS`). Camera programs often write the
+   longest focal length of a zoom lens, and some write a value that is too
+   short. Siril accepts a scale error of only about 10% to 20%.
 4. It reads the solution from the file Siril saved and the fit's size from
-   what Siril printed (`parse_fit`), and returns them as a `PlateSolveHeader`.
+   what Siril printed (`parse_fit`), and returns them as a `PlateSolveHeader`
+   in a `PlateSolveOutcome`. A run that fails carries Siril's own reason in
+   the outcome, so the caller can report it (see `SirilPlateSolveDriver`).
 """
 
 import logging
@@ -70,19 +73,32 @@ PLATE_SOLVE_MINIMUM_SIRIL_VERSION = "1.4.0"
 SOLVE_TIMEOUT_SECONDS = 60
 
 # The focal lengths the retries try, each as a fraction of the header's.
-# The header of a zoom lens often holds its longest focal length, and the true
-# one lies lower. In the study a focal length 10% too long solved and 20% too
-# long failed, while 20% too short solved (AST-23), so Siril tolerates a
-# little over 10% on the long side. A step of 0.8 therefore leaves no gap:
-# the attempts at 1.0, 0.8 and 0.64 of the header's value cover true focal
-# lengths from the header's own down to about 0.58 of it. A failed attempt
-# took about 5 s on the M 13 frame, so a frame that never solves costs about
-# 15 s. A header focal length that is too short is not retried.
+# The attempts run in this order, after the header's own value (1.0).
+#
+# The header of a zoom lens often holds its longest focal length, so the true
+# one lies lower; that is the case seen most, so a shorter value goes first.
+# A header that is too short is rarer but real: a header 26% too short failed
+# in the app check (AST-23). Each shorter factor has its longer twin (0.8 and
+# 1.25 are inverses, 0.64 and 1.5625 too), and each twin follows its shorter
+# partner, so the order is 0.8, 1.25, 0.64, 1.5625 and the nearer guesses are
+# tried first.
+#
+# In the study (AST-23) a focal length 10% too long solved and 20% too long
+# failed, and 20% too short solved. An attempt therefore solves a true focal
+# length from about 0.91 times the attempt up to 1.25 times it. The attempts
+# at 0.64, 0.8, 1.0, 1.25 and 1.5625 of the header's value leave no gap and
+# cover true focal lengths from 0.58 to 1.95 times the header's. A failed
+# attempt took about 5 s on the M 13 frame, so a frame that never solves costs
+# about 25 s. The longer factors are a design estimate: they were not run on
+# the frame that failed.
 FOCAL_LENGTH_RETRY_FACTORS = TunedParameter(
     name="internal.siril_solve_focal_length_retry_factors",
-    default=(0.8, 0.64),
+    default=(0.8, 1.25, 0.64, 1.5625),
     unit="× header focal length",
-    description="Fractions of the header's focal length that a failed Siril plate solve retries with.",
+    description=(
+        "Fractions of the header's focal length that a failed Siril plate solve retries with, "
+        "shorter and longer, in the order tried."
+    ),
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -204,6 +220,26 @@ class SolveInputs:
     dec_deg: float
     focal_length_mm: float
     pixel_size_um: float
+
+
+@dataclass(frozen=True)
+class PlateSolveOutcome:
+    """The result of `solve_image`: the solution, or why there is none.
+
+    Attributes
+    ----------
+    header : `PlateSolveHeader` or `None`
+        The solved header with the fit's size, or `None` if no attempt
+        solved the image.
+    failure_reason : `str` or `None`
+        Why there is no solution, in a sentence that carries Siril's own
+        words when it gave any. `None` when `header` is set. It is also `None`
+        for an image that has no start position or pixel size, which is not a
+        failure of Siril but the case the caller sends to the online service.
+    """
+
+    header: PlateSolveHeader | None
+    failure_reason: str | None = None
 
 
 def _positive_number(value: Any) -> float | None:
@@ -364,7 +400,7 @@ def _solve_once(
     siril_executable: str,
     catalog_path: str,
     timeout_seconds: float,
-) -> PlateSolveHeader | None:
+) -> tuple[PlateSolveHeader | None, str]:
     """Run Siril once with one focal length.
 
     Parameters
@@ -387,6 +423,9 @@ def _solve_once(
     solved : `PlateSolveHeader` or `None`
         The solved header with the fit's size, or `None` if Siril found no
         solution or could not be started.
+    failure : `str`
+        Why there is no solution: Siril's own failure line when it printed
+        one. Empty when it solved.
     """
     work_folder = tempfile.mkdtemp(prefix="plate_solve_", dir=scratch_directory())
     try:
@@ -420,29 +459,31 @@ def _solve_once(
             )
         except OSError as start_error:
             logger.warning("Siril could not be started for a plate solve: %s", start_error)
-            return None
+            return None, f"Siril could not be started: {start_error}"
         output = last_siril_output(include_errors=True)
         solved_path = os.path.join(work_folder, f"{_SOLVED_STEM}.fits")
         if _SUCCESS_TEXT not in output or not os.path.isfile(solved_path):
-            failure = _FAILURE_PATTERN.search(output)
+            failure_match = _FAILURE_PATTERN.search(output)
+            failure_text = failure_match.group(0).strip() if failure_match else "no solution"
             logger.info(
                 "Siril did not solve %s with a focal length of %.1f mm: %s",
                 image_path,
                 focal_length_mm,
-                failure.group(0).strip() if failure else "no solution",
+                failure_text,
             )
-            return None
+            return None, failure_text
         try:
             solved_header = read_header(solved_path, first_hdu_only=True)
         except FITS_READ_ERRORS as read_error:
             logger.warning("Could not read Siril's solved image %s: %s", solved_path, read_error)
-            return None
+            return None, f"Siril's solved image could not be read: {read_error}"
         residual_rms_arcsec, matched_star_count = parse_fit(output)
-        return PlateSolveHeader.from_header(
+        solved = PlateSolveHeader.from_header(
             solved_header,
             fit_residual_rms_arcsec=residual_rms_arcsec,
             matched_star_count=matched_star_count,
         )
+        return solved, ""
     finally:
         shutil.rmtree(work_folder, ignore_errors=True)
 
@@ -453,8 +494,8 @@ def solve_image(
     hints: dict[str, Any],
     catalog_path: str | None = None,
     timeout_seconds: float = SOLVE_TIMEOUT_SECONDS,
-) -> PlateSolveHeader | None:
-    """Plate-solve one image with Siril, retrying with a shorter focal length.
+) -> PlateSolveOutcome:
+    """Plate-solve one image with Siril, retrying with other focal lengths.
 
     Parameters
     ----------
@@ -473,31 +514,33 @@ def solve_image(
 
     Returns
     -------
-    solved : `PlateSolveHeader` or `None`
-        The solved header, whose sky map and fit numbers the astrometry
-        pipeline reads. `None` if the image has no start position or pixel
-        size (the caller sends it to the online service), if the Gaia
-        catalog is not installed, or if every attempt failed.
+    outcome : `PlateSolveOutcome`
+        Its header holds the solution, whose sky map and fit numbers the
+        astrometry pipeline reads. The header is `None` if the image has no
+        start position or pixel size (the caller sends it to the online
+        service, and there is no failure reason), if the Gaia catalog is not
+        installed, or if every attempt failed (both give a failure reason).
     """
     try:
         header = read_header(image_path, first_hdu_only=True)
     except FITS_READ_ERRORS as read_error:
         logger.warning("Could not read %s for a Siril plate solve: %s", image_path, read_error)
-        return None
+        return PlateSolveOutcome(None, f"The image could not be read: {read_error}")
     inputs = read_inputs(header, hints)
     if inputs is None:
         logger.info(
             "%s has no start position, focal length or pixel size; Siril cannot solve it.", image_path
         )
-        return None
+        return PlateSolveOutcome(None)
     if catalog_path is None:
         catalog_path = find_local_gaia_catalog()
     if catalog_path is None:
         logger.warning("Siril's Gaia astrometry catalog is not installed; no local plate solve.")
-        return None
+        return PlateSolveOutcome(None, "Siril's Gaia astrometry catalog is not installed")
     factors = (1.0, *(float(factor) for factor in resolve(FOCAL_LENGTH_RETRY_FACTORS).value))
+    first_failure = ""
     for attempt_number, factor in enumerate(factors):
-        solved = _solve_once(
+        solved, failure = _solve_once(
             image_path,
             inputs,
             inputs.focal_length_mm * factor,
@@ -514,5 +557,11 @@ def solve_image(
                     factor * 100,
                     inputs.focal_length_mm,
                 )
-            return solved
-    return None
+            return PlateSolveOutcome(solved)
+        first_failure = first_failure or failure
+    return PlateSolveOutcome(
+        None,
+        f"Siril found no solution from the header position with the header's focal length of "
+        f"{inputs.focal_length_mm:.1f} mm or {len(factors) - 1} other focal lengths "
+        f"(from {min(factors) * 100:.0f}% to {max(factors) * 100:.0f}% of it); Siril said: {first_failure}",
+    )

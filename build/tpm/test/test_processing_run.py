@@ -446,7 +446,7 @@ def test_synthetic_settings_copy_the_program_commands_only(tmp_path: Path) -> No
         "skip_unchanged_stacks_enabled": "false",
         "siril_executable": "flatpak run org.siril.Siril",
     }
-    assert parsed["Processing.Astrometry.Local Solver"] == {"index_path": "/nonexistent-tpm-index"}
+    assert "Processing.Astrometry.Local Solver" not in parsed
     assert "Observatory.Telescope" not in parsed
     assert applied["Processing.Siril.skip_unchanged_stacks_enabled"] == "false"
     config.write_text('["Processing.Siril"]\nskip_unchanged_stacks_enabled = "true"\n')

@@ -332,18 +332,11 @@ clip_ceiling_adu = { value = 65535.0, kind = "assumed", source = "The top of a 1
 saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535." }
 
 ["Processing.Astrometry.Online Solver"]
-# EDIT ME: your astrometry.net API key, from
-# https://nova.astrometry.net/api_help. Plate solving needs either this key
-# or the local solver below; the standard install provides neither, so set
-# one of the two before running astrometry. Leaving this blank falls back to
-# the local solver, which requires installing it first with
-# build/linux/install_ubuntu_deps.sh --with-local-solver.
+# Optional. Your astrometry.net API key, from
+# https://nova.astrometry.net/api_help. Siril solves every image that has a
+# start position. The online service is asked only for an image with none
+# (a frame from a camera program that wrote no pointing), and it needs this key.
 api_key = ""
-
-["Processing.Astrometry.Local Solver"]
-index_path = "/usr/share/astrometry"
-autoindex = "true"
-cpulimit = "300"
 
 ["Processing.GraXpert"]
 # Optional. The command that starts GraXpert (https://graxpert.com), the

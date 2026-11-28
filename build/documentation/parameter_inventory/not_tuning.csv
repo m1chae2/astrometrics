@@ -1,8 +1,6 @@
 file,name,reason
-astrometricslib/_internal/drivers/astrometry_net_driver.py,AstrometryNetPlateSolveDriver.solve.image_height,Fallback image size used only when the caller gives none
-astrometricslib/_internal/drivers/astrometry_net_driver.py,AstrometryNetPlateSolveDriver.solve.image_width,Fallback image size used only when the caller gives none
-astrometricslib/_internal/drivers/astrometry_net_driver.py,ONLINE_SOLVE_ATTEMPT_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
-astrometricslib/_internal/drivers/astrometry_net_driver.py,ONLINE_SOLVE_RETRY_BACKOFF_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astrometry_net_client.py,ONLINE_SOLVE_ATTEMPT_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astrometry_net_client.py,ONLINE_SOLVE_RETRY_BACKOFF_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,A_G_PER_E_B_V,Physical reddening ratio from published literature
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,CONSECUTIVE_FAILURE_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,E_BP_RP_PER_E_B_V,Physical reddening ratio from published literature
@@ -59,13 +57,21 @@ astrometricslib/_internal/drivers/quality_store.py,LATEST_READ_MAXIMUM_ENTRIES,"
 astrometricslib/_internal/drivers/quality_store.py,LATEST_READ_MINIMUM_ROWS,Plumbing: query size
 astrometricslib/_internal/drivers/quality_store.py,MAXIMUM_SUBJECT_IDS_PER_QUERY,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/quality_store.py,SCHEMA_VERSION,software plumbing
-astrometricslib/_internal/drivers/siril_interface/_pipes_windows.py,PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
-astrometricslib/_internal/drivers/siril_interface/_pipes_windows.py,PIPE_RETRY_SECONDS,"Plumbing: timeout, cache size, retention or query size"
-astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
-astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
-astrometricslib/_internal/drivers/siril_interface/session.py,SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
-astrometricslib/_internal/drivers/siril_interface/session.py,_SIRIL_WAIT_ANNOUNCE_SECONDS,"Plumbing: timeout, cache size, retention or query size"
-astrometricslib/_internal/drivers/siril_interface/staging.py,WORK_DIRECTORY_RETENTION_DAYS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/plate_solve.py,SOLVE_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/solve_driver.py,SirilPlateSolveDriver.solve.image_height,Fallback image size used only when the caller gives none
+astrometricslib/_internal/drivers/siril/astrometry/solve_driver.py,SirilPlateSolveDriver.solve.image_width,Fallback image size used only when the caller gives none
+astrometricslib/_internal/drivers/siril/core/_pipes_windows.py,PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/_pipes_windows.py,PIPE_RETRY_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/catalog_setup.py,DOWNLOAD_CHUNK_BYTES,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/catalog_setup.py,DOWNLOAD_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/lock.py,_SIRIL_WAIT_ANNOUNCE_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/script_run.py,DEFAULT_SCRIPT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/session.py,SIRIL_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/session.py,SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/session.py,SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/core/version.py,_VERSION_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/preview/stretch.py,build_bright_object_script.scale,Default multiplier of one (no change) for a Siril command argument
+astrometricslib/_internal/drivers/siril/stacking/staging.py,WORK_DIRECTORY_RETENTION_DAYS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/sky_tiles.py,_FOOTPRINT_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for the footprint outline; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID format constant
 astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
@@ -464,7 +470,6 @@ astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,alig
 astrometricslib/pipelines/stacking/post_processing/preview_cosmic_clarity.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/preview_graxpert.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/preview_graxpert.py,GRAXPERT_UNIT_LIMIT,"GraXpert's own rescale threshold (it leaves an image alone when its brightest pixel is 1.0 or less); not a choice. Measured 2026-11-28."
-astrometricslib/pipelines/stacking/post_processing/preview_siril.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,MAXIMUM_SLOPE_PAIRS,"Sampling, numerics, plumbing or math constant."
@@ -541,6 +546,8 @@ astrometricslib/utilities/parallel_batch.py,run_parallel_batch.max_worker_memory
 astrometricslib/utilities/parallel_batch.py,run_parallel_batch.max_workers,Worker count cap; resource plumbing
 astrometricslib/utilities/parallel_batch.py,run_parallel_batch.niceness,Process priority; resource plumbing
 astrometricslib/utilities/robust_statistics.py,MAD_TO_SIGMA,Mathematical constant: median absolute deviation to standard deviation for a normal distribution
+astrometricslib/utilities/robust_statistics.py,_QUANTIZED_MINIMUM_SHARING,Numerics: how often values must repeat before the data count as lying on a grid
+astrometricslib/utilities/robust_statistics.py,_SAME_VALUE_FRACTION,Numerics: relative tolerance for treating two floating-point values as equal
 astrometricslib/utilities/spectroscopy_models.py,ConfigLoader.load_spectroscopy_config.get_f.default,Fallback of a config reader helper; the caller passes the real default
 astrometricslib/utilities/stack_preview_path.py,PREVIEW_JPEG_QUALITY,Output file quality setting
 astrometricslib/visualization/helpers.py,plot_astrometry.limit,Row or item cap that callers pass; plumbing

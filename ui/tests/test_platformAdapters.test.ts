@@ -302,12 +302,10 @@ describe('Electron Platform Adapters', () => {
       const pauseResult = platform.pauseBackgroundPipelines({ execFn: mockExec });
       expect(pauseResult).toBe(true);
       expect(mockExec).toHaveBeenCalledWith('pkill -STOP -f siril-cli || true', expect.any(Function));
-      expect(mockExec).toHaveBeenCalledWith('pkill -STOP -f solve-field || true', expect.any(Function));
 
       const resumeResult = platform.resumeBackgroundPipelines({ execFn: mockExec });
       expect(resumeResult).toBe(true);
       expect(mockExec).toHaveBeenCalledWith('pkill -CONT -f siril-cli || true', expect.any(Function));
-      expect(mockExec).toHaveBeenCalledWith('pkill -CONT -f solve-field || true', expect.any(Function));
     });
   });
 

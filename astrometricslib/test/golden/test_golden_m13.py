@@ -5,7 +5,7 @@ sample frames in ``documentation/notebooks/astrometrics/sample_data/M 13/``
 and compares the numbers with ``golden_values.json``. A refactor that moves a
 number fails here, and an intended change updates the JSON with
 ``--update-golden`` so the diff shows which measurement moved. Stacking and
-plate solving need Siril and astrometry.net, so they are not covered.
+plate solving need Siril, so they are not covered.
 """
 
 from typing import Any

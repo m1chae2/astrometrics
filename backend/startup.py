@@ -394,7 +394,7 @@ def bind_helper_programs_to_backend_lifetime() -> bool:
     """On Windows, end every helper program when the backend ends.
 
     The backend joins a job object whose limit is "kill on job close". Every
-    program the backend starts afterwards (Siril, GraXpert, ``solve-field``)
+    program the backend starts afterwards (Siril, GraXpert)
     joins the same job, because children inherit it unless started with
     ``CREATE_BREAKAWAY_FROM_JOB``, which the library never uses. The backend's
     children use no creation flags beyond the defaults, so they work in the

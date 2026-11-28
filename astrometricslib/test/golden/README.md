@@ -17,7 +17,7 @@ The suite reads the frames in `documentation/notebooks/astrometrics/sample_data/
 
 In a checkout without `git lfs pull`, each file is a small text pointer that starts with `version https://git-lfs.github.com/spec/v1`. The `sample_frames_present` fixture in `conftest.py` detects this and skips every test with a message that names the file and the fix.
 
-Stacking (aligning and averaging frames) needs Siril and plate solving (working out where in the sky a frame points) needs astrometry.net. Neither program is installed on the machines that run this suite, so nothing that depends on them is pinned.
+Stacking (aligning and averaging frames) needs Siril, and so does plate solving (working out where in the sky a frame points). Siril is not installed on the machines that run this suite, so nothing that depends on them is pinned.
 
 ## Running the suite
 

@@ -137,7 +137,9 @@ def _find_matching_solved_stack(target: Any, spectral_stack_path: str) -> tuple[
     -------
     match : `tuple` [`str`, `astropy.io.fits.Header`] or `None`
         The solved stack's path and header, or `None` when the target has
-        no plate-solved stack from the same camera and telescope.
+        no plate-solved stack from the same camera and telescope. A stack
+        counts as solved only when `header_is_plate_solved` says so: a sky
+        map written from the mount's pointing does not.
     """
     try:
         spectral_header = read_header(spectral_stack_path)
@@ -163,7 +165,10 @@ def _find_matching_solved_stack(target: Any, spectral_stack_path: str) -> tuple[
             and header.get("FOCALLEN") is not None
             and float(header["FOCALLEN"]) == float(spectral_focal_length)  # ruff: ignore[float-equality-comparison] -- a focal length copied from the same setup, not a measurement
         )
-        if not same_setup or "CRVAL1" not in header:
+        # Only a real plate solution counts: a sky map that is only the
+        # mount's pointing (no "plate solved" card and no SIP terms) can sit
+        # a minute of arc or more from the truth.
+        if not same_setup or not header_is_plate_solved(header):
             continue
         return candidate_path, header
     return None
@@ -228,7 +233,8 @@ def resolve_spectral_stack_solution(target: Any, spectral_stack_path: str) -> Sp
 
     1. The solution of the target's solved imaging stack taken with the same
        camera and telescope (`resolve_solved_stack_wcs`). This is the path
-       spectroscopy has always used.
+       spectroscopy has always used. The stack must hold a real plate
+       solution (`header_is_plate_solved`), not only the mount's sky map.
     2. The spectral stack's own solution, when an astrometry run has solved
        that stack. Astrometry writes its solution into the stack's header
        with a "plate solved" card (see `header_is_plate_solved`); a sky map

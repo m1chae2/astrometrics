@@ -977,9 +977,9 @@ def _photometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult
     """Give a photometry gate as the measurement step stores it.
 
     Two gates quote a steady number that comes from the run's own data (the
-    smallest comparison set and the largest drift). The summary does not hold
-    it, so those gates are copied only when they were not checked. The rest
-    go through the record step's own `gate_for_measurement`.
+    smallest comparison set and the worst corner displacement). The summary
+    does not hold it, so those gates are copied only when they were not
+    checked. The rest go through the record step's own `gate_for_measurement`.
 
     Parameters
     ----------

@@ -195,8 +195,7 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error."
     ),
     "registration_drift": (
-        "Fails when the field sits more than `UNSTABLE_TRACKING_DRIFT_PX` from its place in the "
-        "reference frame, when a corner of the frame moves by more than "
+        "Fails when a corner of the frame moves by more than "
         "`MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or "
         "rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
         "(brightness-weighted star centers) were untrustworthy and fell back to the position "
@@ -1799,10 +1798,6 @@ def build_photometry_doc() -> str:
         "ens_scatter": require_symbol(record_quality_module, "MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED"),
         "scatter_pop": require_symbol(record_quality_module, "MINIMUM_STARS_FOR_SCATTER_POPULATION"),
         "fallback": require_symbol(record_quality_module, "MAXIMUM_CENTROID_FALLBACK_FRACTION"),
-        "drift": require_symbol(
-            "astrometricslib.pipelines.photometry.pre_processing.assess_input_quality",
-            "UNSTABLE_TRACKING_DRIFT_PX",
-        ),
         "min_comp": require_symbol(ensemble_module, "MINIMUM_COMPARISON_STARS"),
         "max_comp": require_symbol(ensemble_module, "DEFAULT_MAXIMUM_COMPARISON_STARS"),
         "noise_model_stars": require_symbol(indices_module, "MINIMUM_STARS_FOR_NOISE_MODEL"),
@@ -1954,14 +1949,6 @@ def build_photometry_doc() -> str:
             "If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic "
             "brightness scale) is larger, the run is called blind to most variables. Most "
             "pulsating and rotating variables change by less than this." + see_also("PHO-09"),
-        ],
-        [
-            "`UNSTABLE_TRACKING_DRIFT_PX`",
-            f"`{values['drift']:g}` px",
-            design_estimate_cell("PHO"),
-            "Largest shift of the field from its place in the reference frame before "
-            "`registration_drift` fails. It flags a mount that lost tracking; the plate "
-            "solutions place the stars wherever the field went.",
         ],
         [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",

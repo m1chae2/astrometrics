@@ -168,7 +168,6 @@ photometry.step_minimum_shift_px,PHO-20,exclusion criteria,Partly measured
 photometry.step_minimum_significance,PHO-20,exclusion criteria,Partly measured
 photometry.step_shift_jitter_sigmas,PHO-20,exclusion criteria,Partly measured
 photometry.tie_clip_sigma,PHO-D37,exclusion criteria,Design estimate
-photometry.unstable_tracking_drift_px,PHO-D16,judgment,Design estimate
 photometry.window_peaks_tried,PHO-D19,judgment,Design estimate
 shared.background_block_pixels,STK-D38,exclusion criteria,Design estimate
 shared.block_range_grid_cells,STK-D44,measurement,Design estimate

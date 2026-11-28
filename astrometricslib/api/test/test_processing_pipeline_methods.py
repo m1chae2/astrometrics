@@ -7,8 +7,9 @@ options reach the underlying pipeline dispatch, that photometry measures the
 frames of the analyzed stack's camera and optic (or the frames given, refused
 when they mix cameras), that spectroscopy is skipped gracefully when a target
 has no spectral data, and that ``astrometry.solve`` describes a solution.
-Prerequisite rules are tested in `pipelines/test/test_stage_prerequisites.py`;
-these tests mark every result current, so a run adds no prerequisite.
+Prerequisite and astrometry rules are tested in
+`pipelines/test/test_stage_prerequisites.py`; these tests mark every result
+current and every plate solution present, so a run adds and skips nothing.
 """
 
 from contextlib import nullcontext
@@ -64,7 +65,7 @@ class _RecordingPipelineMatch:
 
 
 def _quiet_runs(monkeypatch: pytest.MonkeyPatch, recorder: _RecordingPipelineMatch) -> None:
-    """Record the dispatch, take no real job slot, and add no prerequisite.
+    """Record the dispatch, take no slot, and add or skip no stage.
 
     Parameters
     ----------
@@ -75,6 +76,7 @@ def _quiet_runs(monkeypatch: pytest.MonkeyPatch, recorder: _RecordingPipelineMat
     """
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", recorder)
     monkeypatch.setattr(tasks, "stage_staleness_reason", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks, "missing_astrometry_reason", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(pipeline_runs, "acquire_resource_slot", lambda *_args, **_kwargs: nullcontext())
 
 

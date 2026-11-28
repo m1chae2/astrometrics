@@ -15,6 +15,11 @@ threshold. The row's reason is the sentence that says what was noticed.
 This module builds the declarations (`notice_spec`) and the rows
 (`notice_measurement`). Each pipeline's ``metrics.py`` declares its own
 notices, and the code that stores a pipeline's rows builds them.
+
+Two notices are shared by several pipelines and built here: "the camera has
+no profile" (every pipeline) and "this stage needs astrometry" (photometry
+and spectroscopy, which read astrometry's plate solution and never run
+astrometry themselves).
 """
 
 from astrometricslib.models.quality.gate_result import GateStatus
@@ -38,6 +43,9 @@ __all__ = [
     "camera_without_profile_metric_name",
     "camera_without_profile_reason",
     "camera_without_profile_spec",
+    "needs_astrometry_measurement",
+    "needs_astrometry_metric_name",
+    "needs_astrometry_spec",
     "notice_limit",
     "notice_measurement",
     "notice_spec",
@@ -281,3 +289,79 @@ def camera_without_profile_reason(camera_name: str) -> str:
         The sentence.
     """
     return f"camera {camera_name!r} has no camera profile; generic assumptions about the sensor were used"
+
+
+def needs_astrometry_metric_name(pipeline: str) -> str:
+    """Give the name of a stage's "skipped: needs astrometry" notice.
+
+    Parameters
+    ----------
+    pipeline : `str`
+        The stage, ``"photometry"`` or ``"spectroscopy"``.
+
+    Returns
+    -------
+    name : `str`
+        ``<pipeline>.notice_needs_astrometry``.
+    """
+    return f"{pipeline}.notice_needs_astrometry"
+
+
+def needs_astrometry_spec(pipeline: str) -> MetricSpec:
+    """Declare a stage's "skipped: needs astrometry" notice.
+
+    Parameters
+    ----------
+    pipeline : `str`
+        The stage, ``"photometry"`` or ``"spectroscopy"``. It must also be the
+        name of a `Checkpoint`.
+
+    Returns
+    -------
+    spec : `MetricSpec`
+        A run-level declaration. Its value is 1 when the stage was skipped.
+    """
+    return notice_spec(
+        needs_astrometry_metric_name(pipeline),
+        Checkpoint(pipeline),
+        SubjectLevel.RUN,
+        "count",
+        "Whether the stage was skipped because astrometry's plate solution was missing or out of date.",
+        "The number of skipped runs: 1 when the stage did not run. The reason says what was missing and "
+        "which astrometry run to start first.",
+        "pipelines.shared.quality.notices.needs_astrometry_measurement",
+        (
+            "Astrometry is the core layer: this stage only reads its plate solution and never runs it, so "
+            "a person must run astrometry before the stage can give a result."
+        ),
+    )
+
+
+def needs_astrometry_measurement(
+    reason: str, context: PipelineRunContext, subject: QualitySubject
+) -> QualityMeasurement:
+    """Build the row that says a stage was skipped because it needs astrometry.
+
+    Parameters
+    ----------
+    reason : `str`
+        The skip sentence, ``needs astrometry: <why>; run ... first``.
+    context : `PipelineRunContext`
+        The run's shared facts. Its pipeline name picks the metric.
+    subject : `QualitySubject`
+        The run the notice is about.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A failed notice whose reason is the skip sentence, with the action
+        "stage skipped".
+    """
+    return notice_measurement(
+        needs_astrometry_spec(context.pipeline_name),
+        1.0,
+        context,
+        subject,
+        reason,
+        action_taken="stage skipped",
+    )

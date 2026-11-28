@@ -10,8 +10,9 @@ matching them against the named stars of the same target's imaging stack
 So astrometry writes its named stars next to the stack it solved
 (``<stack>_solved_stars.json``), and spectroscopy reads them back. Each run
 of astrometry on the stack writes the file again. A restack makes the
-astrometry result out of date, and the stage order then runs astrometry again
-before spectroscopy (see `tasks.STAGE_PREREQUISITES`). The file carries the
+astrometry result out of date; spectroscopy never runs astrometry itself, so
+astrometry must be run again first (see `tasks.missing_astrometry_reason`).
+The file carries the
 stack's stamp (`stack_sidecar`), so a file older than the stack is never
 read. A file written before the stamp was added has none; it is still read
 when it was last changed no earlier than the stack, so the overlays keep

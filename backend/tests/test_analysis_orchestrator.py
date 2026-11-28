@@ -487,8 +487,12 @@ class TestChosenStages:
         pipelines.spectroscopy.run.assert_called_once_with(target, "/lib/spec.fits", max_stars=None)
 
     def test_skipped_stages_are_reported_with_their_reasons(self) -> None:
-        """Verify the job message and result name each skipped stage."""
-        reason = "needs astrometry: the target has no imaging stack to solve and no image was given"
+        """Verify the job message and result name each skipped stage.
+
+        Photometry asked for alone never runs astrometry; the library's skip
+        sentence reaches the result in full and the message in short.
+        """
+        reason = "needs astrometry: its result is missing; run processing.astrometry.run(target) first"
         target = Target(id="SkippedTarget")
         orchestrator, _pipelines = self._make_setup(
             target,

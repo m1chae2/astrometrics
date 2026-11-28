@@ -103,8 +103,8 @@ export type AnalysisStageName = 'astrometry' | 'photometry' | 'spectroscopy' | '
  * @param filterType The filter name to tell the backend, if known.
  * @param type The analysis type, used when no stages are named.
  * @param stages The stages to run, a non-empty subset of astrometry, photometry, spectroscopy and spectral variation.
- *   Leave it out to let the backend choose from the file type. The backend runs astrometry first
- *   when a picked stage needs it and its result is missing or old.
+ *   Leave it out to let the backend choose from the file type. Photometry and spectroscopy never
+ *   run astrometry: without a solved stack the backend skips them and says why.
  * @returns The started job, or null if the request failed.
  */
 export async function analyzeImage(

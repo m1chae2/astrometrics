@@ -11,15 +11,22 @@ session star identification) all want the same fallback for either case:
 pass no hint and let plate solving fall back to a blind solve, rather than
 fail outright, or silently center on RA=0/Dec=0. This keeps that fallback in
 one place instead of four.
+
+It also finds the plate solution a spectral stack is read with
+(`resolve_spectral_stack_solution`). Astrometry is the core layer, so
+spectroscopy never solves a field itself: it borrows the solution of the
+target's solved imaging stack of the same camera and optic, or uses the
+spectral stack's own solution when astrometry has solved that stack.
 """
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from astropy.wcs import WCS
 
-from astrometricslib._internal.drivers.fits_access import read_header
+from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.shared.analysis_context import KnownTarget
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs
@@ -189,6 +196,74 @@ def resolve_solved_stack_wcs(target: Any, spectral_stack_path: str) -> WCS | Non
         return None
     _candidate_path, header = match
     return celestial_wcs(header)
+
+
+@dataclass(frozen=True)
+class SpectralStackSolution:
+    """The plate solution a spectral stack's stars are named with.
+
+    Attributes
+    ----------
+    wcs : `astropy.wcs.WCS`
+        The celestial solution.
+    stack_path : `str`
+        The stack whose header holds the solution.
+    borrowed : `bool`
+        `True` when the solution belongs to the target's solved imaging stack
+        of the same camera and optic, so it must still be shifted onto the
+        spectral stack (see `spectral_star_registration`). `False` when it is
+        the spectral stack's own solution, written by an astrometry run on
+        that stack, so it fits the spectral stack's pixels as it is.
+    """
+
+    wcs: WCS
+    stack_path: str
+    borrowed: bool
+
+
+def resolve_spectral_stack_solution(target: Any, spectral_stack_path: str) -> SpectralStackSolution | None:
+    """Find the plate solution a spectral stack is read with.
+
+    The sources, in order:
+
+    1. The solution of the target's solved imaging stack taken with the same
+       camera and telescope (`resolve_solved_stack_wcs`). This is the path
+       spectroscopy has always used.
+    2. The spectral stack's own solution, when an astrometry run has solved
+       that stack. Astrometry writes its solution into the stack's header
+       with a "plate solved" card (see `header_is_plate_solved`); a sky map
+       that is only the mount's pointing does not count.
+
+    Parameters
+    ----------
+    target : `astrometricslib.models.target.Target`
+        The target whose imaging stacks are searched.
+    spectral_stack_path : `str`
+        The spectral stack, or raw spectral frame, to read.
+
+    Returns
+    -------
+    solution : `SpectralStackSolution` or `None`
+        The solution and where it came from, or `None` when neither source
+        has one. Spectroscopy is then skipped with the reason
+        ``needs astrometry: ...``.
+    """
+    match = _find_matching_solved_stack(target, spectral_stack_path)
+    if match is not None:
+        borrowed_path, borrowed_header = match
+        borrowed_wcs = celestial_wcs(borrowed_header)
+        if borrowed_wcs is not None:
+            return SpectralStackSolution(wcs=borrowed_wcs, stack_path=borrowed_path, borrowed=True)
+    try:
+        header = read_header(spectral_stack_path)
+    except OSError:
+        return None
+    if not header_is_plate_solved(header):
+        return None
+    own_wcs = celestial_wcs(header)
+    if own_wcs is None:
+        return None
+    return SpectralStackSolution(wcs=own_wcs, stack_path=spectral_stack_path, borrowed=False)
 
 
 def resolve_solved_stack_center_hint(

@@ -114,10 +114,14 @@ SPREAD_LOW_PERCENTILE = 5.0
 SPREAD_HIGH_PERCENTILE = 95.0
 
 # At least this share of the 64 by 64 bins must hold finite numbers (a stack
-# with large empty borders has bins of not-a-number values). Below it the
-# fits would describe a corner of the frame, not the frame. The half is a
-# plain majority; it was not tuned (STK-D74).
-MINIMUM_FINITE_BIN_FRACTION = 0.5
+# with large empty borders has bins of not-a-number values, and the sky bins
+# of a stack with a big nebula are only some of them). Below it the fits
+# would describe a corner of the frame, not the frame. 0.3 matches
+# `sky_plane.MINIMUM_SKY_BIN_SHARE`, the least share of the measurable bins
+# the sky selection keeps, so every stack the selection accepts is measured.
+# It was 0.5 until 2026-11-28, which left seven library stacks with 43 to 49%
+# sky bins not measured; not tuned (STK-D74).
+MINIMUM_FINITE_BIN_FRACTION = 0.3
 
 # The distance, in pixels, used to turn a direction in the array into a
 # direction on the sky. Any step well inside the frame gives the same angle;

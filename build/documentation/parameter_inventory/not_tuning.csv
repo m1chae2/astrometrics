@@ -406,7 +406,7 @@ astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.seed,R
 astrometricslib/pipelines/stacking/post_processing/aperture_placement.py,APERTURE_SEED,software plumbing
 astrometricslib/pipelines/stacking/post_processing/aperture_size_noise.py,_BOOTSTRAP_SEED,software plumbing
 astrometricslib/pipelines/stacking/post_processing/background_gradient.py,BACKGROUND_BIN_COUNT,"Grid of the measurement map (64 by 64), not a threshold. Design estimate STK-D74."
-astrometricslib/pipelines/stacking/post_processing/background_gradient.py,MINIMUM_FINITE_BIN_FRACTION,Plain majority of bins needed before a fit means anything. Design estimate STK-D74.
+astrometricslib/pipelines/stacking/post_processing/background_gradient.py,MINIMUM_FINITE_BIN_FRACTION,Share of bins (0.3) needed before a fit means anything; matches the sky selection's own minimum share. Design estimate STK-D74.
 astrometricslib/pipelines/stacking/post_processing/background_gradient.py,SPREAD_HIGH_PERCENTILE,Upper percentile that defines the spread; not a threshold. Design estimate STK-D74.
 astrometricslib/pipelines/stacking/post_processing/background_gradient.py,SPREAD_LOW_PERCENTILE,Lower percentile that defines the spread; not a threshold. Design estimate STK-D74.
 astrometricslib/pipelines/stacking/post_processing/background_gradient.py,_CORNER_RADIUS_SQUARED,Geometry of the fit: the corner sits at r squared of 2.

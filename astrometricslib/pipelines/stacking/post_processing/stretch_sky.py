@@ -20,6 +20,10 @@ and moved the sky of clean fields by up to 0.02 in display units (STK-D78),
 so the guard alone is used.
 
 The numbers are written to the preview settings record (`StretchSky.record`).
+
+`sky_background_for_file` measures a stack's file for the stretch, and
+`choose_sky_stretch` turns the measurement into the stretch the Siril driver
+writes (``siril.preview.stretch.SkyStretch``).
 """
 
 import logging
@@ -28,6 +32,9 @@ from typing import Any
 
 import numpy as np
 
+from astrometricslib._internal.drivers.image import AstrometricsImage
+from astrometricslib._internal.drivers.siril.preview.stretch import SkyStretch
+from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
@@ -38,6 +45,7 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.shared.image_scaling import (
     AUTOSTRETCH_SHADOWS_CLIP_SIGMA,
     measure_sky_background,
+    midtones_balance_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +53,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CLIPPED_SHARE_LIMIT",
     "StretchSky",
+    "choose_sky_stretch",
     "measure_stretch_sky",
+    "sky_background_for_file",
 ]
 
 # The largest share of the picture's pixels the stretch may clip to black.
@@ -208,3 +218,99 @@ def measure_stretch_sky(data: np.ndarray) -> StretchSky | None:
         guard_lowered=lowered,
         whole_frame_level=whole_frame_level,
     )
+
+
+def choose_sky_stretch(
+    sky_level: float, linked: bool = False, sky_background: tuple[float, float] | None = None
+) -> SkyStretch:
+    """Choose the stretch that puts a stack's sky on a brightness.
+
+    Siril's own ``autostretch`` takes the median and spread of every pixel as
+    the sky. When a large galaxy covers much of the frame, those are galaxy
+    light and the sky lands darker than asked. When the empty sky has been
+    measured (`sky_background`), the same stretch is set from that
+    measurement instead: a black point and a midtones balance.
+
+    Parameters
+    ----------
+    sky_level : `float`
+        The brightness, between 0 and 1, the sky should land on.
+    linked : `bool`, optional
+        Whether all colour channels share one stretch. By default Siril
+        stretches each channel on its own, which sets every channel's sky and
+        brightness scale to the same values. That undoes any colour balance
+        made on the linear data, so a picture whose colours were calibrated
+        needs the shared stretch. Default `False`.
+    sky_background : `tuple` [`float`, `float`], optional
+        The empty sky's level and noise in the image's own units, from
+        `sky_background_for_file`. Only for a single-channel image. If `None`
+        (the default), Siril's ``autostretch`` measures the sky itself.
+
+    Returns
+    -------
+    stretch : `SkyStretch`
+        The stretch, with the black point and midtones balance when the
+        measured sky gives a usable curve.
+    """
+    if sky_background is not None:
+        level, noise = sky_background
+        black_point = max(level + AUTOSTRETCH_SHADOWS_CLIP_SIGMA * noise, 0.0)
+        normalized_sky = (level - black_point) / (1.0 - black_point)
+        if 0.0 < normalized_sky < 1.0 and 0.0 < sky_level < 1.0:
+            midtones = midtones_balance_for(normalized_sky, sky_level)
+            return SkyStretch(sky_level, AUTOSTRETCH_SHADOWS_CLIP_SIGMA, linked, black_point, midtones)
+    return SkyStretch(sky_level, AUTOSTRETCH_SHADOWS_CLIP_SIGMA, linked)
+
+
+def sky_background_for_file(
+    path: str,
+    data_edited_first: bool = False,
+    linked: bool = False,
+    record: dict[str, Any] | None = None,
+) -> tuple[float, float] | None:
+    """Measure the empty sky of a stack's linear image for the stretch.
+
+    The measurement is `measure_stretch_sky`: the library's sky level and
+    noise, with a guard that lowers the black point when the stretch would
+    clip more than a small share of the picture to black (a nebula that fills
+    the frame lifts the measured level above the real sky).
+
+    Parameters
+    ----------
+    path : `str`
+        The FITS image the stretch will be applied to.
+    data_edited_first : `bool`, optional
+        Whether a Siril step that changes the pixel values (Remove Green
+        Noise) runs before the stretch, so a measurement made here would not
+        match what the stretch sees. Default `False`.
+    linked : `bool`, optional
+        Whether a colour image gets one stretch shared by its channels. Only
+        then can one sky measurement (of the channels' mean) stand for all of
+        them. Default `False`.
+    record : `dict`, optional
+        If given, it is filled with the black point and the clipped share
+        (see `StretchSky.record`), for the preview settings record.
+
+    Returns
+    -------
+    sky_background : `tuple` [`float`, `float`] or `None`
+        The sky level and noise, or `None` when Siril should measure the sky
+        itself: a colour image whose channels are stretched one by one, a
+        step that edits the data first, a file that cannot be read, or a sky
+        that cannot be measured.
+    """
+    if data_edited_first:
+        return None
+    try:
+        data = np.asarray(AstrometricsImage(path).data)
+    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
+        logger.debug("Could not read '%s' to measure its sky: %s", path, error)
+        return None
+    if np.squeeze(data).ndim == 3 and not linked:
+        return None
+    sky = measure_stretch_sky(data)
+    if sky is None:
+        return None
+    if record is not None:
+        record.update(sky.record())
+    return sky.as_background()

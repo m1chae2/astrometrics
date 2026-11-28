@@ -18,7 +18,6 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
@@ -33,6 +32,7 @@ from astrometricslib._internal.drivers.calibration_library import (
     parse_calibration_setting_key,
     temperature_slot_c,
 )
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
 
 CAMERA = "ZWO ASI 533MM Pro"
 CAMERA_HEADER_NAME = "ZWO CCD ASI533MM Pro"
@@ -551,7 +551,7 @@ def test_a_matching_gain_and_offset_raises_no_flag(tmp_path: Path) -> None:
 
 def stage_batch(
     tmp_path: Path, library: CalibrationLibrary, light_binning: int | None, light_temperature_c: float
-) -> siril_interface.ImageProcessing:
+) -> siril_stacking.ImageProcessing:
     """Stage one light frame against a library, without starting Siril.
 
     Parameters
@@ -572,7 +572,7 @@ def stage_batch(
         ``last_run_diagnostics`` the flags.
     """
     light = write_frame(tmp_path / "light_001.fits", temperature_c=light_temperature_c, binning=light_binning)
-    processor = object.__new__(siril_interface.ImageProcessing)
+    processor = object.__new__(siril_stacking.ImageProcessing)
     processor.workdir = str(tmp_path / "work")
     processor.calibration_library = library
     processor.last_run_diagnostics = {
@@ -598,7 +598,7 @@ def stage_batch(
     return processor
 
 
-def staged(processor: siril_interface.ImageProcessing, folder: str) -> list[str]:
+def staged(processor: siril_stacking.ImageProcessing, folder: str) -> list[str]:
     """List the files staged in one of the run's calibration folders.
 
     Returns

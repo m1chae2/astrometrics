@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib._internal.drivers.siril_interface.run_models import SIRIL_COMMUNICATION_ERROR_KEY
+from astrometricslib._internal.drivers.siril.core.session import SIRIL_COMMUNICATION_ERROR_KEY
 from astrometricslib.pipelines.stacking import stack_runner
 
 

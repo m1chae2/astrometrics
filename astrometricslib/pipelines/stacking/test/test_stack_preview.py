@@ -16,12 +16,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers.siril.core import script_run
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for, preview_settings_path_for
 from astrometricslib.pipelines.stacking.post_processing import (
     preview_color,
     preview_graxpert,
     preview_settings,
-    preview_siril,
     preview_steps,
     stack_preview,
     starnet_stretch,
@@ -210,7 +210,7 @@ class _Programs:
             if self.pcc_result:
                 image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
                 fits.writeto(Path(directory) / "colour.fits", image)
-            preview_siril._last_siril_output.set(self.pcc_output)
+            script_run._last_siril_output.set(self.pcc_output)
             return self.pcc_result
         if self.siril_result:
             if 'save "stretched"' in commands:
@@ -226,7 +226,7 @@ class _Programs:
         monkeypatch.setattr(preview_graxpert, "flatten_background", self.flatten)
         monkeypatch.setattr(stack_preview, "denoise_with_cosmic_clarity", self.denoise)
         for module in (stack_preview, starnet_stretch):
-            monkeypatch.setattr(module, "run_preview_script", self.siril)
+            monkeypatch.setattr(module, "run_siril_script", self.siril)
         monkeypatch.setattr(stack_preview, "tone_stars_in_file", self.tone)
 
 
@@ -665,7 +665,7 @@ def test_siril_not_installed_is_reported_not_raised(
         """
         raise FileNotFoundError("siril-cli")
 
-    monkeypatch.setattr(stack_preview, "run_preview_script", cannot_start)
+    monkeypatch.setattr(stack_preview, "run_siril_script", cannot_start)
 
     assert write_stack_preview(str(stack)) is None
     assert list(scratch_root.iterdir()) == []
@@ -1047,7 +1047,7 @@ def test_pcc_runs_first_and_its_result_feeds_a_shared_stretch(
     assert write_stack_preview(str(stack)) is not None
 
     pcc_commands = programs.siril_calls[0][1]
-    assert "platesolve -catalog=gaia" in pcc_commands
+    assert "platesolve -catalog=gaia -noflip" in pcc_commands
     final_commands = programs.siril_calls[-2][1]
     assert 'load "colour.fits"' in final_commands
     assert any(command.startswith("mtf ") for command in final_commands)
@@ -1067,7 +1067,7 @@ def test_pcc_does_not_solve_a_field_that_is_already_solved(
 
     write_stack_preview(str(stack))
 
-    assert "platesolve -catalog=gaia" not in programs.siril_calls[0][1]
+    assert "platesolve -catalog=gaia -noflip" not in programs.siril_calls[0][1]
     assert "pcc -catalog=gaia" in programs.siril_calls[0][1]
 
 

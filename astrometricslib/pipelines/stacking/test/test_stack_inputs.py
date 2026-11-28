@@ -357,7 +357,7 @@ def test_a_changed_dark_recipe_is_rebuilt_and_the_reason_is_given(
     tmp_path: Path, inputs: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A new way of building the master dark restacks and says so."""
-    from astrometricslib._internal.drivers.siril_interface import staging
+    from astrometricslib._internal.drivers.siril.stacking import staging
 
     stack, _ = make_stack_with_record(tmp_path, inputs)
     monkeypatch.setattr(staging, "DARK_MASTER_RECIPE", "dark-recipe-next")
@@ -458,8 +458,7 @@ def test_every_setting_the_stacking_code_reads_is_accounted_for() -> None:
     root = Path(si.__file__).resolve().parents[3]
     files = [
         *(root / "pipelines" / "stacking").rglob("*.py"),
-        root / "_internal" / "drivers" / "siril_stacking_driver.py",
-        *(root / "_internal" / "drivers" / "siril_interface").rglob("*.py"),
+        *(root / "_internal" / "drivers" / "siril").rglob("*.py"),
     ]
     pattern = re.compile(r"(?:get_configuration\(\)|config|configuration)\.(get_[a-z_]+)\(")
     found: set[str] = set()

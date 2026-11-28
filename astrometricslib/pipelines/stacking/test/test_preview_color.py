@@ -1,8 +1,10 @@
 """Tests for the color steps of the stack preview.
 
-The tests read the photometric color calibration script, the plate-solution
-and catalog checks that decide whether it can run, and the rule that decides
-whether Siril's green removal runs. No program or network service is used.
+The tests read the plate-solution and catalog checks that decide whether
+Siril's photometric color calibration can run, and the rule that decides
+whether Siril's green removal runs. The calibration script itself is tested
+with the Siril driver (``test_siril_preview_scripts.py``). No program or
+network service is used.
 """
 
 from contextlib import nullcontext
@@ -17,25 +19,9 @@ from astrometricslib.pipelines.stacking.post_processing import (
     preview_color,
 )
 from astrometricslib.pipelines.stacking.post_processing.preview_color import (
-    build_pcc_script,
-    find_local_gaia_catalog,
     has_plate_solution,
     online_catalog_reachable,
 )
-
-
-def test_the_pcc_script_solves_the_field_only_when_it_has_no_solution() -> None:
-    """Verify `platesolve` comes before `pcc`, and only when asked for."""
-    unsolved = build_pcc_script("a.fits", "colour", solve=True)
-    solved = build_pcc_script("a.fits", "colour", solve=False)
-
-    assert unsolved[1:5] == [
-        'load "a.fits"',
-        "platesolve -catalog=gaia",
-        "pcc -catalog=gaia",
-        'save "colour"',
-    ]
-    assert solved[1:4] == ['load "a.fits"', "pcc -catalog=gaia", 'save "colour"']
 
 
 def test_a_header_with_a_projection_and_a_reference_position_counts_as_solved(tmp_path: Path) -> None:
@@ -50,31 +36,6 @@ def test_a_header_with_a_projection_and_a_reference_position_counts_as_solved(tm
     assert has_plate_solution(str(solved)) is True
     assert has_plate_solution(str(unsolved)) is False
     assert has_plate_solution(str(broken)) is False
-
-
-def test_the_pcc_script_reads_a_local_catalog_when_given_one() -> None:
-    """Verify the script sets the catalog path and asks for `localgaia`."""
-    commands = build_pcc_script("a.fits", "colour", solve=True, local_catalog="/data/cat.dat")
-
-    assert commands[1:6] == [
-        "set core.catalogue_gaia_astro=/data/cat.dat",
-        'load "a.fits"',
-        "platesolve -catalog=localgaia",
-        "pcc -catalog=localgaia",
-        'save "colour"',
-    ]
-    assert not any("-catalog=gaia" in command for command in commands)
-
-
-def test_the_local_gaia_catalog_is_found_in_the_first_folder_that_has_it(tmp_path: Path) -> None:
-    """Verify the search order and the answer when nothing is installed."""
-    first, second = tmp_path / "first", tmp_path / "second"
-    first.mkdir()
-    second.mkdir()
-    (second / "siril_cat_healpix8_astro.dat").write_bytes(b"x")
-
-    assert find_local_gaia_catalog([str(first), str(second)]) == str(second / "siril_cat_healpix8_astro.dat")
-    assert find_local_gaia_catalog([str(first)]) is None
 
 
 def _fake_connection(monkeypatch: pytest.MonkeyPatch, error: Exception | None) -> list[str]:

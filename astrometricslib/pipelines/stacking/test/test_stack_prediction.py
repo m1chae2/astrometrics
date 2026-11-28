@@ -18,7 +18,6 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib import ProcessingPipelines
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
@@ -27,6 +26,7 @@ from astrometricslib._internal.drivers.calibration_library import (
     FLAT_FRAME_PATHS_KEY,
     CalibrationLibrary,
 )
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
 from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -318,7 +318,7 @@ def test_calibration_choice_is_the_one_siril_staging_makes(tmp_path: Path, bias_
         offset=0,
     )
     target = Target(id="T 1", frames=[record])
-    processor = object.__new__(siril_interface.ImageProcessing)
+    processor = object.__new__(siril_stacking.ImageProcessing)
     processor.workdir = str(tmp_path / "work")
     processor.calibration_library = library
     processor.last_run_diagnostics = {

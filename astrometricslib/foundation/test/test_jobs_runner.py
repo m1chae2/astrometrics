@@ -159,7 +159,7 @@ def test_a_nested_capture_on_the_same_file_writes_each_line_once(isolated_logs: 
     """Verify a Siril run on its job log file writes each line once."""
     from astrometricslib.foundation.jobs.runner import capture_job_logs
 
-    siril_logger = logging.getLogger("astrometricslib._internal.drivers.siril_interface.imaging_stacker")
+    siril_logger = logging.getLogger("astrometricslib._internal.drivers.siril.stacking.imaging_stacker")
     with registered_job(job_type="analysis", target_id="Vega") as job:
         with capture_job_logs(job_id=job.job_id, log_file_path=job.log_file_path):
             siril_logger.info("log: Conversion succeeded")

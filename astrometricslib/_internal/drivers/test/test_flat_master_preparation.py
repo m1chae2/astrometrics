@@ -13,10 +13,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.file_staging import stage_file
-from astrometricslib._internal.drivers.siril_interface import build_flat_master_commands
-from astrometricslib._internal.drivers.siril_interface.staging import (
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
+from astrometricslib._internal.drivers.siril.stacking import build_flat_master_commands
+from astrometricslib._internal.drivers.siril.stacking.staging import (
     _calibration_source_fingerprint,
     master_recipe,
 )
@@ -25,7 +25,7 @@ from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import a
 SIZE = 96
 
 
-def make_processor() -> siril_interface.ImageProcessing:
+def make_processor() -> siril_stacking.ImageProcessing:
     """Build an ImageProcessing without starting Siril.
 
     Returns
@@ -33,7 +33,7 @@ def make_processor() -> siril_interface.ImageProcessing:
     processor : `ImageProcessing`
         An instance with no work directory or Siril process.
     """
-    return object.__new__(siril_interface.ImageProcessing)
+    return object.__new__(siril_stacking.ImageProcessing)
 
 
 def stage_flats(target_folder: Path, count: int, level: float, noise: float) -> None:

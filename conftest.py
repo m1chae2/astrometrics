@@ -67,7 +67,7 @@ test_calibration_path.mkdir(parents=True, exist_ok=True)
 # Tests of parts that exist only on Linux, which Windows does not collect at
 # all. The rules that differ between the systems live in per-system modules
 # (`foundation/_system_posix.py` and `_system_windows.py`, and the Siril
-# pipes in `siril_interface/_pipes_posix.py` and `_pipes_windows.py`); each
+# pipes in `siril/core/_pipes_posix.py` and `_pipes_windows.py`); each
 # is tested on its own system, Windows by the "windows CI" workflow.
 # Path (relative to the project, with "/") -> why.
 LINUX_ONLY_TEST_PATHS = {

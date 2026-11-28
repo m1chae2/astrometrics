@@ -7,9 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib._internal.drivers import frame_prefetch, siril_interface
+from astrometricslib._internal.drivers import frame_prefetch
 from astrometricslib._internal.drivers.file_staging import stage_file
-from astrometricslib._internal.drivers.siril_interface import staging
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
+from astrometricslib._internal.drivers.siril.stacking import staging
 from astrometricslib.foundation.config import AppConfiguration
 
 
@@ -118,7 +119,7 @@ def test_stacking_hook_runs_only_when_enabled(tmp_path: Path, monkeypatch: pytes
         lambda paths, workers: calls.append((paths, workers)) or MagicMock(),
     )
     work = _staged_folder(tmp_path)
-    driver = siril_interface.ImageProcessing.__new__(siril_interface.ImageProcessing)
+    driver = siril_stacking.ImageProcessing.__new__(siril_stacking.ImageProcessing)
     driver.config = MagicMock()
     driver.config.get_prefetch_workers.return_value = 2
 

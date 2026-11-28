@@ -72,6 +72,12 @@ from skimage.color import lab2rgb, rgb2lab
 
 from astrometricslib._internal.drivers.cached_simbad_driver import get_simbad_driver
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.siril.core.script_run import run_siril_script
+from astrometricslib._internal.drivers.siril.preview.starnet import (
+    STARLESS_NAME,
+    build_starnet_script,
+    collect_starnet_outputs,
+)
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.foundation.parameters import resolve
@@ -103,7 +109,6 @@ from astrometricslib.pipelines.stacking.post_processing.preview_color import (
     has_plate_solution,
     is_colour_image,
 )
-from astrometricslib.pipelines.stacking.post_processing.preview_siril import run_preview_script
 from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.post_processing.sky_levelling import sky_weight
 from astrometricslib.pipelines.stacking.post_processing.star_color_measurement import (
@@ -111,10 +116,6 @@ from astrometricslib.pipelines.stacking.post_processing.star_color_measurement i
     StarColors,
     StarFootprints,
     measure_star_colors,
-)
-from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
-    STARLESS_NAME,
-    collect_starnet_outputs,
 )
 from astrometricslib.pipelines.stacking.processing.image_registration import warp
 from astrometricslib.utilities.robust_statistics import robust_sigma
@@ -403,9 +404,6 @@ _SIMBAD_ROW_LIMIT = 5000
 # The lightness offset that keeps the lightness ratio finite on black
 # pixels, in CIE lightness units (0 to 100). Not tuned.
 _LIGHTNESS_OFFSET = 2.0
-
-# The Siril version that has the ``starnet`` command. Not tuned.
-_MINIMUM_SIRIL_VERSION = "1.2.0"
 
 
 @dataclass(frozen=True)
@@ -1034,8 +1032,8 @@ def _run_starnet(scratch: str, name: str, data: np.ndarray, siril_executable: st
     folder = os.path.join(scratch, name)
     os.makedirs(folder, exist_ok=True)
     write_image(os.path.join(folder, "picture.fits"), np.asarray(data, dtype=np.float32))
-    commands = [f"requires {_MINIMUM_SIRIL_VERSION}", 'load "picture.fits"', "starnet", "close"]
-    if not run_preview_script(folder, commands, siril_executable) or not collect_starnet_outputs(folder):
+    commands = build_starnet_script("picture.fits", stretch=False)
+    if not run_siril_script(folder, commands, siril_executable) or not collect_starnet_outputs(folder):
         return None
     starless = read_data(os.path.join(folder, STARLESS_NAME))
     if starless is None or starless.shape != np.shape(data):

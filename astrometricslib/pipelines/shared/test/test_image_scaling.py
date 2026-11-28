@@ -432,9 +432,9 @@ def test_zero_mad_uses_siril_guard_value() -> None:
 
 def test_autostretch_command_uses_measured_sky() -> None:
     """A measured sky gives an mtf command with the black point below it."""
-    from astrometricslib.pipelines.stacking.post_processing.preview_siril import _autostretch_command
+    from astrometricslib.pipelines.stacking.post_processing.stretch_sky import choose_sky_stretch
 
-    command = _autostretch_command(0.2, False, (0.01, 1e-4)).split()
+    command = choose_sky_stretch(0.2, False, (0.01, 1e-4)).command().split()
     assert command[0] == "mtf" and command[3] == "1"
     assert float(command[1]) == pytest.approx(0.01 - 2.8e-4)
-    assert _autostretch_command(0.2).startswith("autostretch")
+    assert choose_sky_stretch(0.2).command().startswith("autostretch")

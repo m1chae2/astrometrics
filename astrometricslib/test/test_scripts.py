@@ -39,7 +39,7 @@ def run_script_as_subprocess(module_name: str, extra_env: dict[str, str] | None 
     # Suppresses SirilInterface.launch_siril_gui(), which otherwise
     # pops an interactive GUI window after a successful stack -- see
     # its "HEADLESS" check in
-    # astrometricslib/_internal/drivers/siril_interface/session.py.
+    # astrometricslib/_internal/drivers/siril/core/session.py.
     env["HEADLESS"] = "1"
     if extra_env:
         env.update(extra_env)

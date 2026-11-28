@@ -523,7 +523,7 @@ class _Programs:
         `test_stack_preview` and `test_sky_plane`).
         """
         monkeypatch.setattr(preview_graxpert, "flatten_background", self.flatten)
-        monkeypatch.setattr(stack_preview, "run_preview_script", self.siril)
+        monkeypatch.setattr(stack_preview, "run_siril_script", self.siril)
         monkeypatch.setattr(
             preview_graxpert,
             "choose_background_method_for_file",

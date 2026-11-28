@@ -11,7 +11,7 @@ It adds two things the engine alone does not do:
    and if that still is not enough, with phase correlation in Python instead
    of star matching at all (see `spectral_frame_alignment`, and
    `_stack_phase_correlation_aligned_spectral_frames` in
-   `siril_interface.spectral_stacker`) -- the better of the three attempts
+   `siril.stacking.spectral_stacker`) -- the better of the three attempts
    is kept. Losing frames used to happen
    silently; now it is retried and, if it still happens, logged as a
    warning.
@@ -39,7 +39,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackingDriver,
     StackSettings,
 )
-from astrometricslib._internal.drivers.siril_interface.run_models import SIRIL_COMMUNICATION_ERROR_KEY
+from astrometricslib._internal.drivers.siril.core.session import SIRIL_COMMUNICATION_ERROR_KEY
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_bases import StarWidthEstimator, record_star_width
 from astrometricslib.models.tuned_parameter import (
@@ -83,7 +83,7 @@ MINIMUM_REGISTERED_FRACTION = TunedParameter(
 )
 
 # The star-detection settings to try for spectral frames, in order (see
-# `siril_interface.script_builders.SPECTRAL_STAR_DETECTION_COMMANDS`).
+# `siril.stacking.script_builders.SPECTRAL_STAR_DETECTION_COMMANDS`).
 # "phase_correlation" is not a detection setting at all -- it tells
 # `process_target` to skip
 # Siril's own star-based registration entirely and align the frames in
@@ -244,7 +244,7 @@ def run_siril_stack(
     diagnostics : `dict`
         What the run reported (see `run_stack`).
     """
-    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
 
     return run_stack(
         SirilStackingDriver(siril_driver),

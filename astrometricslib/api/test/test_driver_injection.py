@@ -215,7 +215,7 @@ def real_drivers_are_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
-        "astrometricslib._internal.drivers.siril_stacking_driver.SirilStackingDriver.stack_batch",
+        "astrometricslib._internal.drivers.siril.stacking.stacking_driver.SirilStackingDriver.stack_batch",
     ):
         monkeypatch.setattr(path, forbidden)
 
@@ -485,7 +485,7 @@ def test_defaults_build_the_real_drivers() -> None:
     """With no drivers given, the built-in drivers are the ones built."""
     from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
     from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
-    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     drivers = Drivers()
@@ -515,7 +515,7 @@ def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
 
 def test_the_public_stacking_driver_is_the_built_in_one() -> None:
     """`drivers.get_stacking_driver` gives Siril, which opens and stops."""
-    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
     from astrometricslib.drivers import get_stacking_driver
 
     engine = get_stacking_driver()

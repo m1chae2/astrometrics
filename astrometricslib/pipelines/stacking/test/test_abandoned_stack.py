@@ -17,10 +17,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.quality_store import QualityStore
-from astrometricslib._internal.drivers.siril_interface import session as siril_session
-from astrometricslib._internal.drivers.siril_interface.imaging_stacker import SirilImagingStacker
+from astrometricslib._internal.drivers.siril.core import lock as siril_lock
+from astrometricslib._internal.drivers.siril.core import session as siril_session
+from astrometricslib._internal.drivers.siril.stacking.imaging_stacker import SirilImagingStacker
 from astrometricslib.foundation.paths import locks_directory
 from astrometricslib.foundation.run_abandonment import (
     RunAbandonedError,
@@ -95,7 +95,7 @@ def test_giving_up_on_a_stack_stops_its_siril_and_frees_the_slot(
         stacked_path : `str`
             A path that must never be recorded.
         """
-        with siril_interface.siril_process_lock(max_concurrent_runs=1, work_name="NGC 1499"):
+        with siril_lock.siril_process_lock(max_concurrent_runs=1, work_name="NGC 1499"):
             process = session.run_siril_headless("unused_command_pipe", "unused_output_pipe")
             process.wait()
         raise_if_abandoned()
@@ -144,7 +144,7 @@ def test_a_run_given_up_on_does_not_queue_for_a_slot() -> None:
             """Ask for the slot as the abandoned run."""
             with bind_abandonment(abandonment):
                 try:
-                    with siril_interface.siril_process_lock(max_concurrent_runs=1):
+                    with siril_lock.siril_process_lock(max_concurrent_runs=1):
                         outcome.append("got the slot")
                 except RunAbandonedError:
                     outcome.append("refused")

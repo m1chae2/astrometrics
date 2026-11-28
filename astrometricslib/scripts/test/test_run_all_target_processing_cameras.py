@@ -295,10 +295,10 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
         The imported script module.
     """
     monkeypatch.setenv("HEADLESS", "0")
-    from astrometricslib._internal.drivers import siril_interface
+    from astrometricslib._internal.drivers.siril import stacking as siril_stacking
     from astrometricslib.scripts import run_all_target_processing
 
-    monkeypatch.setattr(siril_interface, "purge_stale_work_directories", lambda *args, **kwargs: (0, 0))
+    monkeypatch.setattr(siril_stacking, "purge_stale_work_directories", lambda *args, **kwargs: (0, 0))
     # The stand-in targets hold one frame per camera. The tests that are not
     # about the smallest stack let one frame through; the skip tests below
     # put the real limit back.

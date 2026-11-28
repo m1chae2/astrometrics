@@ -100,9 +100,6 @@ from astrometricslib.pipelines.photometry.post_processing.variability_skill impo
     minimum_detectable_amplitude_from_noise_mag,
     minimum_detectable_amplitude_mag,
 )
-from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
-    UNSTABLE_TRACKING_DRIFT_PX,
-)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     CROWDING_NEIGHBOR_PEAK_FRACTION,
     CentroidShiftSummary,
@@ -691,23 +688,23 @@ def _registration_drift_gate(
 ) -> GateResult:
     """Build the ``registration_drift`` gate.
 
-    The gate looks at three things. The first is the largest shift of the
-    whole field from the reference frame, which shows lost tracking. The
-    second is how far a corner of the field moves beyond that shift, which
-    shows a field that turned or changed scale during the session. The
-    third is the share of star measurements whose own centroid was refused,
-    which shows a plate solution that does not fit the stars. The per-star
-    centroid offsets are reported in the detail but not judged: they are
-    dominated by centroid noise on faint and crowded stars, which does not
-    mean the frames are misaligned (on 2026-10-11, M 13 and M 81 failed on
-    them with no rotation, while NGC 2403, which did rotate, was the only one
-    where the rotation mattered).
+    The gate looks at two things. The first is how far a corner of the field
+    moves beyond the shift of the field's middle, which shows a field that
+    turned or changed scale during the session. The second is the share of
+    star measurements whose own centroid was refused, which shows a plate
+    solution that does not fit the stars. How far the field sits from its
+    place in the reference frame is reported in the detail but not judged:
+    each frame's plate solution follows the field wherever it goes. The
+    per-star centroid offsets are reported in the detail but not judged:
+    they are dominated by centroid noise on faint and crowded stars, which
+    does not mean the frames are misaligned (on 2026-10-11, M 13 and M 81
+    failed on them with no rotation, while NGC 2403, which did rotate, was
+    the only one where the rotation mattered).
 
-    The gate fails when the global shift exceeds `UNSTABLE_TRACKING_DRIFT_PX`,
-    when the 95th percentile of the corner displacement over the frames
-    exceeds `MAXIMUM_CORNER_DISPLACEMENT_PX`, or when more than
+    The gate fails when the 95th percentile of the corner displacement over
+    the frames exceeds `MAXIMUM_CORNER_DISPLACEMENT_PX`, or when more than
     `MAXIMUM_CENTROID_FALLBACK_FRACTION` of the star measurements fell back.
-    It is not checked when none of these was recorded.
+    It is not checked when no session has a per-star summary.
 
     Parameters
     ----------
@@ -721,20 +718,16 @@ def _registration_drift_gate(
     gate : `GateResult`
         The gate.
     """
-    unstable_tracking_drift_px = resolve(UNSTABLE_TRACKING_DRIFT_PX).value
     maximum_corner_displacement_px = resolve(MAXIMUM_CORNER_DISPLACEMENT_PX).value
     maximum_centroid_fallback_fraction = resolve(MAXIMUM_CENTROID_FALLBACK_FRACTION).value
     source = (
-        f"offset of the field from the reference frame of at most {unstable_tracking_drift_px:g} px, "
-        f"95th-percentile corner displacement beyond that shift of at most "
+        f"95th-percentile corner displacement beyond the shift of the field of at most "
         f"{maximum_corner_displacement_px:g} px, and at most {100 * maximum_centroid_fallback_fraction:.0f}% "
         "of star measurements falling back (designed limits)"
     )
     recorded_drifts = [drift for drift in registration_drifts_px if drift is not None]
-    if not recorded_drifts and not summaries:
-        return unchecked_gate(
-            REGISTRATION_DRIFT_GATE_NAME, "no star recorded its offset from the reference frame", source
-        )
+    if not summaries:
+        return unchecked_gate(REGISTRATION_DRIFT_GATE_NAME, "no session has a per-star summary", source)
 
     worst_drift = max(recorded_drifts) if recorded_drifts else None
     corner_values = [
@@ -746,12 +739,8 @@ def _registration_drift_gate(
     worst_fallback = max((summary.fallback_fraction for summary in summaries), default=None)
 
     problems: list[str] = []
-    measured, limit = worst_drift, unstable_tracking_drift_px
-    if worst_drift is not None and worst_drift > unstable_tracking_drift_px:
-        problems.append(
-            f"the field moved up to {worst_drift:.0f} px from the reference frame, so tracking was probably "
-            "lost and apparent brightness changes may be from the sky or the mount, not the star"
-        )
+    measured: float | None = None
+    limit = maximum_corner_displacement_px
     if worst_corner is not None and worst_corner > maximum_corner_displacement_px:
         problems.append(
             f"the field rotated or changed scale during the session: a corner moves {worst_corner:.2f} px "
@@ -759,8 +748,7 @@ def _registration_drift_gate(
             "so the apertures follow the stars, but a star lands on different pixels in each frame and the "
             "flat-field error adds scatter"
         )
-        if not problems[:-1]:
-            measured, limit = worst_corner, maximum_corner_displacement_px
+        measured, limit = worst_corner, maximum_corner_displacement_px
     if worst_fallback is not None and worst_fallback > maximum_centroid_fallback_fraction:
         problems.append(
             f"{100.0 * worst_fallback:.1f}% of star measurements kept the solution's position because the "
@@ -780,9 +768,7 @@ def _registration_drift_gate(
         return failed_gate(
             REGISTRATION_DRIFT_GATE_NAME, "; ".join(problems) + suffix, measured, limit, source
         )
-    if worst_drift is not None:
-        passed_limit = unstable_tracking_drift_px
-    elif worst_corner is not None:
+    if worst_corner is not None:
         passed_limit = maximum_corner_displacement_px
     else:
         passed_limit = maximum_centroid_fallback_fraction
@@ -1134,8 +1120,8 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
 
     Two gates quote a different number depending on how they ended. The
     comparison-ensemble gate gives the smallest set size, or the scatter ratio
-    when that test fails; the registration gate gives the global drift in
-    pixels, the corner displacement in pixels or the fallback share. A stored
+    when that test fails; the registration gate gives the corner displacement
+    in pixels or the fallback share. A stored
     metric has one unit and one meaning, so the measurement uses a steady
     number (the other numbers have metrics of their own). The gate itself is
     not changed.
@@ -1156,13 +1142,13 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
     gate : `GateResult`
         A copy for the measurement. The comparison-ensemble gate carries the
         size of the smallest set and the limit on a set's size; the
-        registration gate carries the largest global drift and its limit; the
-        flux-uncertainty gate carries the median error even when it was not
-        checked. Other gates, and any gate that was not checked, are returned
-        as they are.
+        registration gate carries the worst corner displacement and its
+        limit; the flux-uncertainty gate carries the median error even when
+        it was not checked. Other gates, and any gate that was not checked,
+        are returned as they are.
     """
     minimum_comparison_stars = resolve(MINIMUM_COMPARISON_STARS).value
-    unstable_tracking_drift_px = resolve(UNSTABLE_TRACKING_DRIFT_PX).value
+    maximum_corner_displacement_px = resolve(MAXIMUM_CORNER_DISPLACEMENT_PX).value
     if (
         gate.name == COMPARISON_ENSEMBLE_GATE_NAME
         and gate.status is not GateStatus.NOT_CHECKED
@@ -1177,12 +1163,9 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
             }
         )
     if gate.name == REGISTRATION_DRIFT_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED:
-        recorded = [drift for drift in inputs.registration_drifts_px if drift is not None]
+        corner_px, _ = _worst_centroid_values(inputs.centroid_shift_summaries)
         return gate.model_copy(
-            update={
-                "measured_value": float(max(recorded)) if recorded else None,
-                "limit": float(unstable_tracking_drift_px),
-            }
+            update={"measured_value": corner_px, "limit": float(maximum_corner_displacement_px)}
         )
     if (
         gate.name == FLUX_UNCERTAINTY_GATE_NAME
@@ -1198,9 +1181,9 @@ def steady_number_needs_run_data(gate: GateResult) -> bool:
 
     `gate_for_measurement` gives each gate a steady number. The
     comparison-ensemble and registration-drift gates quote a steady number
-    (the smallest comparison set, the largest drift) that comes from the
-    run's own lists. A stored summary does not hold those lists, so the
-    history fill cannot rebuild the number for a gate that ran. A gate that
+    (the smallest comparison set, the worst corner displacement) that comes
+    from the run's own lists. A stored summary does not hold those lists, so
+    the history fill cannot rebuild the number for a gate that ran. A gate that
     was not checked keeps what it recorded.
 
     Parameters

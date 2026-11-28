@@ -481,8 +481,15 @@ def test_group_derotation_passes_the_drivers_to_the_trail_measurement(
     assert seen == [drivers]
 
 
-def test_defaults_build_the_real_drivers() -> None:
-    """With no drivers given, the built-in drivers are the ones built."""
+def test_defaults_build_the_real_drivers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no drivers given, the built-in drivers are the ones built.
+
+    Siril is reported as not installed, so the plate solver is the
+    solve-field one on every computer.
+    """
+    from astrometricslib._internal.drivers.siril.astrometry import solve_driver
+
+    monkeypatch.setattr(solve_driver, "siril_is_ready", lambda config=None: False)
     from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
     from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
     from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver

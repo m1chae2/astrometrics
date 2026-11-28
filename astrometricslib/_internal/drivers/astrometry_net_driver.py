@@ -373,9 +373,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         # failure. Sources are only skipped when the count is known
         # (`sources` provided) and clearly too low; when the caller has
         # not pre-detected sources at all, local solving still runs.
-        source_count_too_low = (
-            sources is not None and len(sources) < resolve(MINIMUM_SOURCES_FOR_LOCAL_SOLVE).value
-        )
+        source_count_too_low = not self._local_solve_is_worth_trying(sources)
         if source_count_too_low:
             logger.info(
                 "Only %s source(s) detected (fewer than %s); skipping the local solver and going "
@@ -399,6 +397,24 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
             return self._solve_online_image(image_path, **hints)
 
         return None
+
+    def _local_solve_is_worth_trying(self, sources: list[dict[str, Any]] | None) -> bool:
+        """Say whether the stars found so far could let the local solver solve.
+
+        Parameters
+        ----------
+        sources : `list` [`dict`] or `None`
+            The stars the caller already found, or `None` when it found
+            none.
+
+        Returns
+        -------
+        worth_trying : `bool`
+            `False` when the count is known and below
+            `MINIMUM_SOURCES_FOR_LOCAL_SOLVE`, which would make solve-field
+            spend its whole timeout on a near-certain failure.
+        """
+        return sources is None or len(sources) >= resolve(MINIMUM_SOURCES_FOR_LOCAL_SOLVE).value
 
     def _solve_locally(self, image_path: str, **kwargs: Any) -> fits.Header | None:
         """Try to solve the image using the program installed on this computer.

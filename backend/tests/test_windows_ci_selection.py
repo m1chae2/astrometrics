@@ -25,7 +25,7 @@ PLATFORM_MODULE_TESTS = [
     "astrometricslib/foundation/test/test_system_posix.py",
     "astrometricslib/foundation/test/test_scratch_paths.py",
     "astrometricslib/foundation/storage/test/test_process_locks.py",
-    "astrometricslib/_internal/drivers/test/test_siril_windows.py",
+    "astrometricslib/_internal/drivers/siril/test/test_siril_windows.py",
     "astrometricslib/_internal/drivers/test/test_program_setup.py",
     "astrometricslib/_internal/drivers/test/test_file_staging.py",
     "backend/tests/test_startup_lifecycle.py",

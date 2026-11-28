@@ -293,7 +293,7 @@ def test_the_stack_report_names_each_width_estimator(tmp_path: Path, monkeypatch
     (tmp_path / "stack_Registration.seq").write_text("")
     monkeypatch.setattr(sc, "measure_stack_fwhm", lambda path: 3.0)
     monkeypatch.setattr(
-        "astrometricslib._internal.drivers.siril_output_parsing.parse_seq_file", lambda path: [row]
+        "astrometricslib._internal.drivers.siril.core.output_parsing.parse_seq_file", lambda path: [row]
     )
 
     report = stack_quality_report(str(stack), None, ["fwhm", "registration"], None, False)

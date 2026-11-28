@@ -94,7 +94,7 @@ class Drivers:
         """
         if self.stacking is not None:
             return self.stacking
-        from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+        from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
 
         return SirilStackingDriver()
 

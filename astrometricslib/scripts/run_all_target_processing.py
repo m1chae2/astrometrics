@@ -1463,7 +1463,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # this one starts staging its own files. A successful stack removes its own
     # work directory, so anything old enough to be swept here belongs to
     # a run that crashed or was cancelled.
-    from astrometricslib._internal.drivers.siril_interface import purge_stale_work_directories
+    from astrometricslib._internal.drivers.siril.stacking import purge_stale_work_directories
 
     siril_work_directory = siril_work_directory_path()
     purged_count, reclaimed_bytes = purge_stale_work_directories(siril_work_directory)

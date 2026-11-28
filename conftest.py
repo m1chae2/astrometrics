@@ -80,17 +80,17 @@ test_calibration_path.mkdir(parents=True, exist_ok=True)
 # Tests of parts that exist only on Linux, which Windows does not collect at
 # all. The rules that differ between the systems live in per-system modules
 # (`foundation/_system_posix.py` and `_system_windows.py`, and the Siril
-# pipes in `siril_interface/_pipes_posix.py` and `_pipes_windows.py`); each
+# pipes in `siril/core/_pipes_posix.py` and `_pipes_windows.py`); each
 # is tested on its own system, Windows by the "windows CI" workflow.
 # Path (relative to the project, with "/") -> why.
 LINUX_ONLY_TEST_PATHS = {
     "simulator/": "the simulator runs INDI, which is not available on Windows",
     "build/tpm/": "the TPM harness runs the simulator and Linux shell tools",
     "build/linux/": "the Linux setup steps (Flatpak, Siril GPU libraries) exist only on Linux",
-    "astrometricslib/_internal/drivers/test/test_siril_command_synchronisation.py": (
+    "astrometricslib/_internal/drivers/siril/test/test_siril_command_synchronisation.py": (
         "Siril's Linux pipes are FIFOs; the Windows named pipes are tested in test_siril_windows.py"
     ),
-    "astrometricslib/_internal/drivers/test/test_siril_process_cleanup.py": (
+    "astrometricslib/_internal/drivers/siril/test/test_siril_process_cleanup.py": (
         "the cleanup uses fuser, pgrep and process groups; Windows uses taskkill (test_system_windows.py)"
     ),
     "backend/tests/test_copy_path_guard.py": "it tests the Linux-only real-data runs of build/agent_tools",
@@ -111,7 +111,7 @@ LINUX_ONLY_TEST_PATHS = {
 WINDOWS_SENSITIVE_PATTERNS = {
     "it tests a per-system module or the Windows set-up": (
         r"_system_windows|_system_posix|foundation\.system\b|foundation import system\b"
-        r"|_pipes_windows|_pipes_posix|siril_interface\.pipes|siril_interface import pipes"
+        r"|_pipes_windows|_pipes_posix|siril\.core\.pipes|siril\.core import pipes"
         r"|program_setup|set_up_programs|build/windows|setup_windows"
     ),
     "it checks which system runs": (

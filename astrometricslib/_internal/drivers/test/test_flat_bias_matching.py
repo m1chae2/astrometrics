@@ -17,19 +17,19 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
     FLAT_BIAS_FRAME_PATHS_KEY,
     CalibrationLibrary,
 )
-from astrometricslib._internal.drivers.siril_interface import build_flat_master_commands
-from astrometricslib._internal.drivers.siril_interface.script_builders import (
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
+from astrometricslib._internal.drivers.siril.stacking import build_flat_master_commands
+from astrometricslib._internal.drivers.siril.stacking.script_builders import (
     StagedFrameCounts,
     build_master_calibration_commands,
 )
-from astrometricslib._internal.drivers.siril_interface.staging import FLAT_MASTER_RECIPE, master_recipe
+from astrometricslib._internal.drivers.siril.stacking.staging import FLAT_MASTER_RECIPE, master_recipe
 
 CAMERA = "ZWO ASI 533MM Pro"
 LIGHT_OFFSET = 0
@@ -100,7 +100,7 @@ def add_frames(
 
 def stage(
     tmp_path: Path, library: CalibrationLibrary, light_filter: str = "Luminance"
-) -> siril_interface.ImageProcessing:
+) -> siril_stacking.ImageProcessing:
     """Stage one light at offset 0 against a library, without Siril.
 
     Returns
@@ -109,7 +109,7 @@ def stage(
         The processor after staging.
     """
     light = write_frame(tmp_path / "light_001.fits", LIGHT_OFFSET, exposure=30.0)
-    processor = object.__new__(siril_interface.ImageProcessing)
+    processor = object.__new__(siril_stacking.ImageProcessing)
     processor.workdir = str(tmp_path / "work")
     processor.calibration_library = library
     processor.last_run_diagnostics = {
@@ -134,7 +134,7 @@ def stage(
     return processor
 
 
-def staged_targets(processor: siril_interface.ImageProcessing, folder: str) -> list[str]:
+def staged_targets(processor: siril_stacking.ImageProcessing, folder: str) -> list[str]:
     """Give the real files that the links in one staged folder point to.
 
     Returns
@@ -157,7 +157,7 @@ def staged_targets(processor: siril_interface.ImageProcessing, folder: str) -> l
     )
 
 
-def flat_bias_flags(processor: siril_interface.ImageProcessing) -> list[str]:
+def flat_bias_flags(processor: siril_stacking.ImageProcessing) -> list[str]:
     """Pick the soft flags that are about the flats' bias.
 
     Returns

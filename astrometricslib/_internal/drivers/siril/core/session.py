@@ -1,0 +1,729 @@
+"""Purpose: The long-lived Siril pipe session that a stack runs in.
+
+Description: A stack sends Siril many commands, one at a time, and reads its
+answer to each. Siril takes the commands from one named pipe and writes its
+answers to another (`pipes`). This module starts that Siril (with the private
+settings file, see `settings`), writes the commands, reads the answers, and
+stops Siril and everything it started at the end. It also parses what Siril
+prints into the run's diagnostics (with `output_parsing`). The slot lock the
+session holds lives in `lock`. `SirilSession` is the base of the stacking
+driver class `ImageProcessing` (`siril.stacking.image_processing`).
+"""
+
+import atexit
+import logging
+import os
+import queue
+import shutil
+import subprocess
+import threading
+import time
+import weakref
+from typing import Any
+
+from astrometricslib._internal.drivers.siril.core import pipes
+from astrometricslib._internal.drivers.siril.core.output_parsing import (
+    parse_negative_pixel_percentage,
+    parse_registration_totals,
+    parse_stacked_image_count,
+)
+from astrometricslib._internal.drivers.siril.core.program import gui_arguments, pipe_session_arguments
+from astrometricslib._internal.drivers.siril.core.settings import prepare_private_settings
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.foundation.run_abandonment import launch_registered, stop_process_group
+from astrometricslib.foundation.system import child_process_options
+
+logger = logging.getLogger(__name__)
+
+
+_active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
+
+
+# The key in the run diagnostics that holds the message when Siril did not
+# answer a command in time. The stacking pipeline reads it to tell a Siril
+# that stopped answering from a run where no stars could be matched.
+SIRIL_COMMUNICATION_ERROR_KEY = "siril_communication_error"
+
+
+class SirilStatusQueue(queue.Queue[str]):
+    """The status lines of one Siril run, plus a flag for Siril's "ready" line.
+
+    `read_output` puts each "status:" line in the queue and sets `ready`
+    when Siril prints its "ready" line. `send_commands` waits for `ready`
+    before it writes the first command, because a command sent before Siril
+    has opened its output pipe reports its status to nobody.
+
+    Attributes
+    ----------
+    ready : `threading.Event`
+        Set once Siril has printed "ready".
+    """
+
+    def __init__(self) -> None:
+        """Make an empty queue whose `ready` flag is not set."""
+        super().__init__()
+        self.ready = threading.Event()
+
+
+# How long send_commands waits for one Siril command to report its own
+# completion before giving up on the whole script. This is a deadlock
+# guard, not a per-command budget: it has to exceed the slowest single
+# command a real run issues, and `stack` over a few hundred frames is
+# comfortably minutes. Five minutes is far above that while still
+# bounding a Siril that has died without closing the output pipe.
+SIRIL_COMMAND_TIMEOUT_SECONDS = 300
+
+
+# How long to wait for a quick setup command (see `QUICK_COMMAND_WORDS`)
+# to report its status. These commands only set a Siril option or change
+# its working folder, so a healthy Siril answers in milliseconds. 30 s is
+# the same budget as the connect handshake above: far above any healthy
+# answer, yet 10 times shorter than the 300 s a long command gets, so a
+# lost status line costs half a minute and not five minutes. The command
+# is sent once more after this wait, because each one is safe to repeat.
+SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS = 30
+
+
+# The first word of each setup command that is quick and safe to send twice
+# (setting an option twice, or changing to the same folder twice, changes
+# nothing). Every other command gets the full timeout and is never resent:
+# sending `convert` or `stack` again could run it twice.
+QUICK_COMMAND_WORDS = frozenset({"setext", "set32bits", "cd", "setfindstar", "setcompress", "set16bits"})
+
+
+# How long to wait for Siril to open its end of a command/output FIFO
+# before giving up. open() on a FIFO blocks until the other end is
+# opened too, and Siril opens both of ours (-r command_pipe -w
+# output_pipe) moments after launch -- but if it dies before reaching
+# that point (a crash inside a flatpak sandbox, a version that doesn't
+# understand -p/-r/-w, ...), nothing will ever open the other end and
+# that open() blocks forever. This bounds only that initial handshake,
+# not the run itself: SIRIL_COMMAND_TIMEOUT_SECONDS above covers a
+# Siril that connects but then hangs mid-command.
+SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS = 30
+
+
+def _open_pipe_or_die(
+    path: str,
+    mode: str,
+    process: subprocess.Popen,
+    timeout: float = SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS,
+) -> Any:
+    """Open a named pipe, bailing out if Siril never connects to it.
+
+    A plain `open()` on a FIFO blocks the calling thread until a peer
+    opens the other end -- which is exactly what we want while Siril is
+    alive and simply hasn't gotten to it yet, but not if Siril has
+    already died and nothing ever will. Doing the open in a background
+    thread lets this function bound the wait against `process` and give
+    up instead of hanging forever.
+
+    Parameters
+    ----------
+    path : `str`
+        Path to the FIFO to open.
+    mode : `str`
+        Mode to open it with, e.g. ``"r"`` or ``"w"``.
+    process : `subprocess.Popen`
+        The Siril process expected to open the other end. Polled while
+        waiting so a Siril that has already exited is reported instead
+        of waited on forever.
+    timeout : `float`, optional
+        Seconds to wait for the open to complete after `process` is
+        confirmed still running. Default is
+        `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS`.
+
+    Returns
+    -------
+    pipe : file object
+        The opened pipe, as returned by the built-in `open`.
+
+    Raises
+    ------
+    ExternalServiceError
+        If `process` exits before the open completes, or if it is still
+        running but the open does not complete within `timeout` seconds.
+    """
+    outcome: dict[str, Any] = {}
+    give_up = threading.Event()
+
+    def attempt_open() -> None:
+        try:
+            outcome["pipe"] = pipes.open_pipe(path, mode, keep_trying=lambda: not give_up.is_set())
+        except OSError as os_error:
+            outcome["error"] = os_error
+
+    opener = threading.Thread(target=attempt_open, daemon=True)
+    opener.start()
+
+    try:
+        deadline = time.monotonic() + timeout
+        while opener.is_alive():
+            if process.poll() is not None:
+                # Give the thread one last short grace window in case Siril's
+                # exit and its pipe connection landed at nearly the same
+                # moment, then treat it as a lost cause: nothing else is
+                # going to open the other end of `path`.
+                opener.join(timeout=0.5)
+                if opener.is_alive():
+                    raise ExternalServiceError(
+                        f"Siril exited (return code {process.returncode}) before opening {path!r}."
+                    )
+                break
+            if time.monotonic() > deadline:
+                raise ExternalServiceError(f"Timed out waiting for Siril to open {path!r}.")
+            opener.join(timeout=0.2)
+
+    finally:
+        give_up.set()
+
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["pipe"]
+
+
+def stop_all_siril_processes() -> None:
+    """Stop every Siril process that any session in this program started.
+
+    The backend calls this when it stops (through the stacking driver), so
+    no Siril outlives it: Siril runs in a session of its own, and the
+    backend's exit does not run `atexit` handlers. It is also the `atexit`
+    safety net for a script. Safe to call more than once.
+    """
+    for instance in list(_active_image_processing_instances):
+        try:
+            instance.cleanup_subprocesses()
+        except Exception:
+            logger.debug("Failed to clean up ImageProcessing subprocesses", exc_info=True)
+
+
+atexit.register(stop_all_siril_processes)
+
+
+def launch_siril_gui(siril_executable: str, file_path: str) -> None:
+    """Open a file in the Siril program's window.
+
+    Siril starts in its own session, so it keeps running after the caller
+    exits. A failure to start it is logged, not raised. The window is the
+    user's own interactive Siril, so it keeps the user's own Siril settings
+    and is not given the private settings file.
+
+    Parameters
+    ----------
+    siril_executable : `str`
+        The command that starts Siril (it may have several words).
+    file_path : `str`
+        Path to the stacked FITS file to open in Siril.
+    """
+    args = gui_arguments(siril_executable, file_path)
+    try:
+        # Explicitly redirected, not inherited: an unredirected
+        # stdout/stderr would hand this GUI process a copy of the
+        # caller's pipe write-end, so any caller reading this
+        # process's own output via subprocess.run(capture_output=
+        # True) (e.g. the script test harness) would block until
+        # this GUI window is closed, since the pipe never reports
+        # EOF while any process still holds it open.
+        subprocess.Popen(
+            args,
+            cwd=os.path.dirname(file_path),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except (OSError, ValueError) as exc:
+        logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)
+
+
+class SirilSession:
+    """Run Siril over named pipes and read what it reports.
+
+    Base of `ImageProcessing`. It declares the settings and state the layers
+    above share, and holds the process, pipe and output handling.
+    """
+
+    config: AppConfiguration
+    calibration_library: Any
+    siril_executable: str
+    workdir: str
+    subprocesses: list[Any]
+    gui_launched: bool
+    job_repository: Any
+    last_run_diagnostics: dict[str, Any]
+
+    def reset_gui_flag(self) -> None:
+        """Clear the flag tracking whether the Siril GUI was launched."""
+        self.gui_launched = False
+
+    def cleanup_subprocesses(self) -> None:
+        """Terminate every Siril subprocess this instance has started."""
+        for process in self.subprocesses:
+            if process.poll() is None:
+                self._kill_process_tree(process)
+
+    def _kill_process_tree(
+        self, process: subprocess.Popen, job_logger: logging.Logger | None = None, workdir: str | None = None
+    ) -> None:
+        """Terminate a Siril subprocess and everything it started.
+
+        Siril is launched via flatpak/bwrap, which sandboxes the
+        actual `siril` binary as a descendant process. Stopping
+        process.pid alone can miss that descendant entirely, leaving it
+        running indefinitely as an orphan, so `stop_process_group` stops the
+        whole tree. Then any helper still tied to the work directory pipes
+        is cleaned up (`pipes.stop_pipe_holders`).
+
+        Parameters
+        ----------
+        process : `subprocess.Popen`
+            The Siril process.
+        job_logger : `logging.Logger`, optional
+            Not used; kept so callers need not change.
+        workdir : `str`, optional
+            The work folder holding the pipes. If given, helpers still tied
+            to it are stopped too.
+        """
+        del job_logger
+        stop_process_group(process)
+        if workdir:
+            pipes.stop_pipe_holders(workdir)
+
+    def create_named_pipes(self, base_path: str) -> tuple[str, str]:
+        """Create the pipes that carry commands to and output from Siril.
+
+        Parameters
+        ----------
+        base_path : `str`
+            Directory in which to create the named pipes.
+
+        Returns
+        -------
+        command_pipe : `str`
+            Path to the pipe Siril reads commands from.
+        output_pipe : `str`
+            Path to the pipe Siril writes status output to.
+        """
+        return pipes.create_pipes(base_path)
+
+    def run_siril_headless(
+        self,
+        command_pipe: str,
+        output_pipe: str,
+        stdout=subprocess.DEVNULL,  # ruff: ignore[missing-type-function-argument]
+        stderr=subprocess.DEVNULL,  # ruff: ignore[missing-type-function-argument]
+        job_logger: logging.Logger | None = None,
+    ) -> subprocess.Popen:
+        """Launch Siril in headless mode, reading/writing over named pipes.
+
+        Parameters
+        ----------
+        command_pipe : `str`
+            Path to the FIFO Siril should read commands from.
+        output_pipe : `str`
+            Path to the FIFO Siril should write status output to.
+        stdout : optional
+            Destination for the subprocess's stdout stream.
+        stderr : optional
+            Destination for the subprocess's stderr stream.
+        job_logger : `logging.Logger`, optional
+            Logger to record the launch command to. If `None`
+            (default), nothing is logged.
+
+        Returns
+        -------
+        process : `subprocess.Popen`
+            The running Siril subprocess, also appended to
+            ``self.subprocesses`` for later cleanup.
+        """
+        settings_file = prepare_private_settings(self.siril_executable)
+        args = pipe_session_arguments(self.siril_executable, command_pipe, output_pipe, settings_file)
+
+        if job_logger:
+            job_logger.info("Executing: %s", " ".join(args))
+        # start_new_session=True makes this process the leader of its
+        # own process group, so the whole sandboxed tree
+        # (flatpak/bwrap/siril) can be killed together via os.killpg
+        # later -- signaling process.pid alone can miss the actual
+        # siril binary running as a descendant inside the sandbox.
+        # Registered with the run this thread belongs to, if any, so giving up
+        # on the run stops this process (and refuses a start after that).
+        process = launch_registered(
+            lambda: subprocess.Popen(args, stdout=stdout, stderr=stderr, **child_process_options())
+        )
+        self.subprocesses.append(process)
+        time.sleep(2)
+        return process
+
+    def send_commands(
+        self,
+        command_pipe: str,
+        commands: list[str],
+        job_logger: logging.Logger | None = None,
+        status_queue: queue.Queue[str] | None = None,
+        process: subprocess.Popen | None = None,
+    ) -> None:
+        """Write a sequence of commands to the Siril command pipe.
+
+        Siril's pipe protocol runs one command at a time: sending the
+        next command while it's still executing the current one aborts
+        it ("status: error command interrupted"), rather than queuing.
+        A fixed delay between writes (this function's old behavior)
+        only happened to work on trivially small/fast commands -- any
+        real FITS frame's `convert`/`register`/`stack` step routinely
+        takes longer than that, so every real stacking run raced and
+        lost. Pass `status_queue` (fed by `read_output` on the other,
+        output pipe as it observes each command's own "status:
+        success"/"status: error" line) to make each command wait for
+        that signal before the next is sent.
+
+        Parameters
+        ----------
+        command_pipe : `str`
+            Path to the FIFO to write commands to.
+        commands : `list` [`str`]
+            Siril script commands to send, in order. An ``"exit"``
+            command is always appended after them.
+        job_logger : `logging.Logger`, optional
+            Logger to record write errors to. If `None` (default),
+            errors are silently swallowed.
+        status_queue : `queue.Queue` [`str`], optional
+            Queue that the paired `read_output` call publishes each
+            command's Siril status line to. A `SirilStatusQueue` also
+            makes the first command wait for Siril's "ready" line (at
+            most `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS`). Quick setup
+            commands wait `SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS` and are
+            sent once more if no status comes; other commands wait
+            `SIRIL_COMMAND_TIMEOUT_SECONDS`. A command that gets no answer
+            is recorded in ``last_run_diagnostics`` under
+            `SIRIL_COMMUNICATION_ERROR_KEY`. If `None` (default), falls
+            back to a blind fixed delay between commands, which is only
+            safe when every command is known to complete faster than
+            it -- pass a queue for any real frame.
+        process : `subprocess.Popen`, optional
+            The Siril process expected to open the other end of
+            `command_pipe`. If given, opening the pipe is bounded by
+            `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS` and fails loudly instead
+            of hanging forever should Siril die before connecting. If
+            `None` (default), opening falls back to a plain blocking
+            `open()`.
+        """
+        try:
+            if process is None:
+                pipe_context = pipes.open_pipe(command_pipe, "w")
+            else:
+                pipe_context = _open_pipe_or_die(command_pipe, "w", process)
+            with pipe_context as pipe:
+                if not self._wait_until_siril_is_ready(status_queue, process, job_logger):
+                    pipe.write("exit\n")
+                    pipe.flush()
+                    return
+                for cmd in commands:
+                    pipe.write(cmd + "\n")
+                    pipe.flush()
+
+                    if status_queue is None:
+                        time.sleep(0.05)
+                        continue
+
+                    is_quick = cmd.split(None, 1)[0].lower() in QUICK_COMMAND_WORDS if cmd.strip() else False
+                    timeout = (
+                        SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS if is_quick else SIRIL_COMMAND_TIMEOUT_SECONDS
+                    )
+                    result_line = self._wait_for_status(status_queue, timeout)
+                    if result_line is None and is_quick:
+                        # The status line may have been lost; the command is
+                        # safe to repeat, so send it once more.
+                        if job_logger:
+                            job_logger.warning(
+                                "No status for Siril command %r within %s s; sending it again.", cmd, timeout
+                            )
+                        pipe.write(cmd + "\n")
+                        pipe.flush()
+                        result_line = self._wait_for_status(status_queue, timeout)
+                    if result_line is None:
+                        message = f"Siril did not answer the command {cmd!r} within {timeout} s."
+                        self._record_communication_error(message, job_logger)
+                        break
+
+                    if "status: error" in result_line:
+                        if job_logger:
+                            job_logger.error(
+                                "Siril reported an error after command %r: %s", cmd, result_line.strip()
+                            )
+                        break
+                pipe.write("exit\n")
+                pipe.flush()
+        except ExternalServiceError, OSError:
+            if job_logger:
+                job_logger.exception("Pipe write error")
+
+    @staticmethod
+    def _wait_for_status(status_queue: queue.Queue[str], timeout: float) -> str | None:
+        """Wait for the next status line.
+
+        Parameters
+        ----------
+        status_queue : `queue.Queue` [`str`]
+            Queue that `read_output` fills with status lines.
+        timeout : `float`
+            Seconds to wait.
+
+        Returns
+        -------
+        line : `str` or `None`
+            The status line, or `None` if none came in time.
+        """
+        try:
+            return status_queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def _wait_until_siril_is_ready(
+        self,
+        status_queue: queue.Queue[str] | None,
+        process: subprocess.Popen | None,
+        job_logger: logging.Logger | None,
+    ) -> bool:
+        """Wait for Siril's "ready" line before the first command is written.
+
+        Parameters
+        ----------
+        status_queue : `queue.Queue` [`str`] or `None`
+            The run's status queue. Only a `SirilStatusQueue` carries the
+            ready flag; with any other queue, or none, there is nothing to
+            wait for and the call returns at once.
+        process : `subprocess.Popen` or `None`
+            The Siril process; if it exits while we wait, the wait ends.
+        job_logger : `logging.Logger` or `None`
+            Logger for the failure.
+
+        Returns
+        -------
+        ready : `bool`
+            `True` if Siril is ready (or there is no flag to wait for).
+        """
+        ready = getattr(status_queue, "ready", None)
+        if ready is None:
+            return True
+        deadline = time.monotonic() + SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS
+        while not ready.wait(timeout=min(0.5, max(0.0, deadline - time.monotonic()))):
+            if time.monotonic() >= deadline or (process is not None and process.poll() is not None):
+                message = (
+                    f"Siril did not report that it was ready within {SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS} s "
+                    "of opening its command pipe."
+                )
+                self._record_communication_error(message, job_logger)
+                return False
+        return True
+
+    def _record_communication_error(self, message: str, job_logger: logging.Logger | None) -> None:
+        """Log a lack of answer from Siril and keep it in the run diagnostics.
+
+        Parameters
+        ----------
+        message : `str`
+            What Siril did not answer.
+        job_logger : `logging.Logger` or `None`
+            Logger for the error.
+        """
+        if job_logger:
+            job_logger.error(message)
+        self.last_run_diagnostics[SIRIL_COMMUNICATION_ERROR_KEY] = message
+
+    def read_output(
+        self,
+        output_pipe: str,
+        target_folder: str,
+        target_name: str,
+        output_file: str | None = None,
+        library_dest: str | None = None,
+        job_logger: logging.Logger | None = None,
+        generate_rejmap: bool = False,
+        registered_seq_name: str | None = None,
+        status_queue: queue.Queue[str] | None = None,
+        process: subprocess.Popen | None = None,
+    ) -> str | None:
+        """Read Siril's status output and copy out the finished stack.
+
+        Blocks reading ``output_pipe`` line by line until Siril
+        reports success or error, then copies the resulting stacked
+        file (and, if requested, the rejection map and registration
+        sequence) to its final destination.
+
+        Parameters
+        ----------
+        output_pipe : `str`
+            Path to the FIFO Siril writes status output to.
+        target_folder : `str`
+            Working directory containing the ``process`` scratch
+            subdirectory Siril wrote its output into.
+        target_name : `str`
+            Target name used to build the output filename.
+        output_file : `str`, optional
+            Explicit output filename to use when ``library_dest`` is
+            not given. If `None` (default), a name derived from
+            ``target_name`` is used.
+        library_dest : `str`, optional
+            Directory to copy the final stacked file into. If `None`
+            (default), the file is written inside ``target_folder``.
+        job_logger : `logging.Logger`, optional
+            Logger to record progress and errors to. If `None`
+            (default), the module logger is used.
+        generate_rejmap : `bool`, optional
+            Whether to also copy out the ``-rejmap`` output.
+            Default is `False`.
+        registered_seq_name : `str`, optional
+            Base name of the registered ``.seq`` file to copy out.
+            If `None` (default), no registration sequence is copied.
+        status_queue : `queue.Queue` [`str`], optional
+            Queue to publish each Siril status line to, so that the
+            paired `send_commands` call can send one command at a time.
+            If `None` (default), status lines are only logged.
+        process : `subprocess.Popen`, optional
+            The Siril process expected to open the other end of
+            `output_pipe`. If given, opening the pipe is bounded by
+            `SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS` and fails loudly instead
+            of hanging forever should Siril die before connecting. If
+            `None` (default), opening falls back to a plain blocking
+            `open()`.
+
+        Returns
+        -------
+        final_file_path : `str` or `None`
+            Path to the copied stacked file, or `None` if Siril
+            reported an error or no result was found.
+        """
+        log = job_logger.info if job_logger else logger.info
+        try:
+            if process is None:
+                pipe_context = pipes.open_pipe(output_pipe, "r")
+            else:
+                pipe_context = _open_pipe_or_die(output_pipe, "r", process)
+            with pipe_context as pipe:
+                for line in pipe:
+                    log(line.strip())
+                    ready = getattr(status_queue, "ready", None)
+                    if ready is not None and line.strip().lower().startswith("ready"):
+                        ready.set()
+                    registration_totals = parse_registration_totals(line)
+                    if registration_totals is not None:
+                        self.last_run_diagnostics["registration_failed_frames"] = registration_totals[0]
+                        self.last_run_diagnostics["registered_frames"] = registration_totals[1]
+                    stacked_count = parse_stacked_image_count(line)
+                    if stacked_count is not None:
+                        self.last_run_diagnostics["images_stacked"] = stacked_count
+                    negative_percentage = parse_negative_pixel_percentage(line)
+                    if negative_percentage is not None:
+                        # One warning per frame: keep how many frames were
+                        # warned about and the worst share of negative pixels.
+                        diagnostics = self.last_run_diagnostics
+                        diagnostics["negative_pixel_frames"] = diagnostics.get("negative_pixel_frames", 0) + 1
+                        diagnostics["negative_pixel_max_pct"] = max(
+                            diagnostics.get("negative_pixel_max_pct", 0), negative_percentage
+                        )
+                    if status_queue is not None and ("status: success" in line or "status: error" in line):
+                        status_queue.put(line)
+                    if "status: success stack" in line:
+                        stacked_file = os.path.join(target_folder, "process", "result_stacked.fits")
+                        if not os.path.exists(stacked_file):
+                            stacked_file = os.path.join(target_folder, "process", "result_stacked.fit")
+
+                        if not os.path.exists(stacked_file):
+                            continue
+
+                        safe_name = target_name.replace(" ", "_")
+                        final_filename = output_file if output_file else f"{safe_name}_Stacked.fits"
+
+                        if library_dest:
+                            os.makedirs(library_dest, exist_ok=True)
+                            final_file_path = os.path.join(library_dest, final_filename)
+                        else:
+                            final_file_path = os.path.join(target_folder, final_filename)
+
+                        shutil.copy(stacked_file, final_file_path)
+
+                        # The -rejmap option writes its output next to
+                        # result_stacked in the same scratch "process"
+                        # directory, which is removed once
+                        # process_target returns. Copy it out
+                        # alongside the stacked result (derivable
+                        # from the returned path by appending
+                        # "_RejMap" to its stem) so callers can still
+                        # inspect it after the scratch directory is
+                        # gone.
+                        if generate_rejmap:
+                            stacked_stem = os.path.splitext(os.path.basename(stacked_file))[0]
+                            rejmap_src = None
+                            for ext in (".fits", ".fit"):
+                                candidate = os.path.join(
+                                    target_folder, "process", f"{stacked_stem}_low+high_rejmap{ext}"
+                                )
+                                if os.path.exists(candidate):
+                                    rejmap_src = candidate
+                                    break
+                            if rejmap_src:
+                                rejmap_dest = os.path.splitext(final_file_path)[0] + "_RejMap.fits"
+                                shutil.copy(rejmap_src, rejmap_dest)
+                            else:
+                                log("Rejection map was requested but no rejmap output was found.")
+
+                        # The .seq file's R<n> lines hold each input
+                        # frame's own FWHM as measured by Siril's
+                        # findstar pass during registration -- exactly
+                        # the "median input FWHM" a post-stack
+                        # FWHM-degradation check needs, computed at no
+                        # extra cost. Same preservation pattern as the
+                        # rejmap above: copy it out before the scratch
+                        # directory is removed.
+                        #
+                        # The *input* sequence is preserved, not the
+                        # registered "r_" output. Both carry identical
+                        # findstar columns, but registration writes its
+                        # computed transforms back into the input
+                        # sequence, while the r_ frames are already
+                        # physically aligned and so record an identity
+                        # matrix for every frame. Preserving r_ therefore
+                        # silently discarded every frame's dx/dy shift:
+                        # all 238 frames measured before this fix stored
+                        # dx=0, dy=0, which is precisely the per-frame
+                        # drift series needed to see tracking error,
+                        # polar misalignment, or a mount's periodic
+                        # error. Confirmed on a real M 106 run, same
+                        # frames in both files:
+                        #   pp_light_source.seq  -> H ... 6.31985 ... 5.55176
+                        #   r_pp_light_source.seq -> H 1 0 0 0 1 0 0 0 1
+                        if registered_seq_name:
+                            seq_src = os.path.join(target_folder, "process", f"{registered_seq_name}.seq")
+                            if os.path.exists(seq_src):
+                                seq_dest = os.path.splitext(final_file_path)[0] + "_Registration.seq"
+                                shutil.copy(seq_src, seq_dest)
+                            else:
+                                log("Registration sequence file was expected but not found.")
+
+                        should_open_gui = (
+                            not self.gui_launched
+                            and os.environ.get("HEADLESS") != "1"
+                            and self.config.get_auto_open_siril_gui()
+                        )
+                        if should_open_gui:
+                            self.launch_siril_gui(final_file_path)
+                            self.gui_launched = True
+                        return final_file_path
+                    elif "status: error" in line:
+                        return None
+                return None
+        except ExternalServiceError, OSError, ValueError:
+            if job_logger:
+                job_logger.exception("Pipe read error")
+            return None
+
+    def launch_siril_gui(self, file_path: str) -> None:
+        """Open the stacked result in the Siril GUI, if available.
+
+        Parameters
+        ----------
+        file_path : `str`
+            Path to the stacked FITS file to open in Siril.
+        """
+        launch_siril_gui(self.siril_executable, file_path)

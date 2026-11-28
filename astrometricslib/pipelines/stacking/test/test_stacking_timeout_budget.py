@@ -15,8 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib._internal.drivers import siril_interface
-from astrometricslib._internal.drivers.siril_interface import session
+from astrometricslib._internal.drivers.siril.core import lock as siril_lock
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.tasks import (
@@ -62,12 +61,12 @@ def test_a_wait_is_added_to_the_bound_tally_only() -> None:
     """Runs in one process keep separate totals; an unbound wait is dropped."""
     first, second = RunTally(), RunTally()
 
-    session._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
-    with siril_interface.bind_lock_wait(first):
-        session._record_siril_lock_wait(2.0)
-        with siril_interface.bind_lock_wait(second):
-            session._record_siril_lock_wait(3.0)
-        session._record_siril_lock_wait(1.0)
+    siril_lock._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
+    with siril_lock.bind_lock_wait(first):
+        siril_lock._record_siril_lock_wait(2.0)
+        with siril_lock.bind_lock_wait(second):
+            siril_lock._record_siril_lock_wait(3.0)
+        siril_lock._record_siril_lock_wait(1.0)
 
     assert first.total == pytest.approx(3.0)
     assert second.total == pytest.approx(3.0)
@@ -83,7 +82,7 @@ def test_an_uncontended_slot_records_a_negligible_wait() -> None:
     """
     tally = RunTally()
 
-    with siril_interface.bind_lock_wait(tally), siril_interface.siril_process_lock(max_concurrent_runs=1):
+    with siril_lock.bind_lock_wait(tally), siril_lock.siril_process_lock(max_concurrent_runs=1):
         pass
 
     assert tally.total < 0.5
@@ -110,7 +109,7 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
     holder_source = (
         "import time, sys;"
         f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib._internal.drivers.siril_interface import siril_process_lock;"
+        "from astrometricslib._internal.drivers.siril.core.lock import siril_process_lock;"
         "ctx = siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "print('holding', flush=True);"
@@ -120,14 +119,14 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
     waiter_source = (
         "import sys;"
         f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib._internal.drivers import siril_interface;"
+        "from astrometricslib._internal.drivers.siril.core import lock as siril_lock;"
         "from astrometricslib.foundation.run_tally import RunTally;"
         "tally = RunTally();"
-        "scope = siril_interface.bind_lock_wait(tally);"
+        "scope = siril_lock.bind_lock_wait(tally);"
         "scope.__enter__();"
         "sys.stdin.readline();"
         "print('waiting', flush=True);"
-        "ctx = siril_interface.siril_process_lock(max_concurrent_runs=1);"
+        "ctx = siril_lock.siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "ctx.__exit__(None, None, None);"
         "scope.__exit__(None, None, None);"
@@ -194,7 +193,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
         """
         # The stack waited in the queue; the wait goes to this run's tally,
         # as `siril_process_lock` would add it.
-        session._record_siril_lock_wait(reported_lock_wait)
+        siril_lock._record_siril_lock_wait(reported_lock_wait)
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
@@ -248,7 +247,7 @@ def test_a_stack_still_waiting_for_a_slot_is_not_abandoned(monkeypatch: pytest.M
         stacked_path : `str`
             A made-up output path.
         """
-        with session.siril_process_lock(max_concurrent_runs=1):
+        with siril_lock.siril_process_lock(max_concurrent_runs=1):
             return "/stacked/output.fits"
 
     monkeypatch.setattr(

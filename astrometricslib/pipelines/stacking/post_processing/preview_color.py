@@ -4,9 +4,11 @@ These steps of the preview (see `stack_preview`) work on a color stack:
 
 1. `match_star_widths` sharpens a channel whose stars are wider than
    green's (see `star_width_match`).
-2. `build_pcc_script` writes Siril's photometric color calibration, which
-   needs a plate solution (`has_plate_solution`) and a Gaia catalog, local
-   (`find_local_gaia_catalog`) or online (`online_catalog_reachable`).
+2. Siril's photometric color calibration (the Siril driver's
+   ``siril.preview.color_calibration``) needs a plate solution
+   (`has_plate_solution`, or Siril solves the field first) and a Gaia
+   catalog, local (``siril.core.program.find_local_gaia_catalog``) or online
+   (`online_catalog_reachable`).
 3. `check_white_balance` checks Siril's result on stars like the Sun, and
    `calibrate_from_sun_like_stars` calibrates from those stars when Siril's
    calibration was not asked for or failed (see `sun_like_balance`).
@@ -60,11 +62,6 @@ def is_colour_image(path: str) -> bool:
     return header.get("NAXIS", 0) == 3 and header.get("NAXIS3", 0) == 3
 
 
-# Siril's photometric colour calibration needs the 1.4 release for the
-# ``-catalog=gaia`` option used here.
-_PCC_MINIMUM_SIRIL_VERSION = "1.4.0"
-
-
 def has_plate_solution(path: str) -> bool:
     """Say whether a FITS file already carries a plate solution.
 
@@ -87,40 +84,6 @@ def has_plate_solution(path: str) -> bool:
     except OSError, ValueError:
         return False
     return "CTYPE1" in header and "CRVAL1" in header
-
-
-# Siril's local Gaia catalog file, as its Catalog_Installer script names it.
-_LOCAL_GAIA_CATALOG_NAME = "siril_cat_healpix8_astro.dat"
-
-
-def find_local_gaia_catalog(search_folders: list[str] | None = None) -> str | None:
-    """Find the Gaia star catalog that Siril can read from the disk.
-
-    Siril's own Catalog_Installer script puts it in Siril's data folder. A
-    Flatpak Siril keeps that folder under ``~/.var/app``, a normal install
-    under ``~/.local/share``. Reading the catalog from the disk takes about
-    10 seconds for a whole PCC run and needs no network.
-
-    Parameters
-    ----------
-    search_folders : `list` [`str`], optional
-        Folders to look in, in order. By default, the two places above.
-
-    Returns
-    -------
-    path : `str` or `None`
-        Path of the catalog file, or `None` if it is not installed.
-    """
-    if search_folders is None:
-        search_folders = [
-            os.path.expanduser("~/.local/share/siril"),
-            os.path.expanduser("~/.var/app/org.siril.Siril/data/siril"),
-        ]
-    for folder in search_folders:
-        candidate = os.path.join(folder, _LOCAL_GAIA_CATALOG_NAME)
-        if os.path.isfile(candidate):
-            return candidate
-    return None
 
 
 def decide_remove_green(is_colour: bool, switch_on: bool, colours_calibrated: bool) -> tuple[bool, str]:
@@ -185,50 +148,6 @@ def online_catalog_reachable() -> bool:
         logger.info("The Gaia catalog server for Siril cannot be used now: %s", error)
         return False
     return True
-
-
-def build_pcc_script(
-    source_file_name: str, output_stem: str, solve: bool, local_catalog: str | None = None
-) -> list[str]:
-    """Write the Siril commands that calibrate an image's colours with PCC.
-
-    Siril's photometric colour calibration matches the stars of a plate-solved
-    image to the Gaia catalog and scales the channels, after removing each
-    channel's background.
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the linear colour image, relative to the folder Siril is
-        started in.
-    output_stem : `str`
-        File name for the calibrated copy, relative to that folder and without
-        the ``.fits`` extension (Siril adds it).
-    solve : `bool`
-        Whether Siril must first solve the field. It needs the pointing,
-        focal length and pixel size in the file's header. Pass `False` for an
-        image that already holds a plate solution.
-    local_catalog : `str`, optional
-        Path of Siril's Gaia catalog file on the disk. If given, Siril is
-        told where it is and reads the stars from it. By default Siril asks
-        a server over the network. The path is set in the script because the
-        path saved in Siril's settings may not point to the file.
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    catalog_name = "localgaia" if local_catalog else "gaia"
-    return [
-        f"requires {_PCC_MINIMUM_SIRIL_VERSION}",
-        *([f"set core.catalogue_gaia_astro={local_catalog}"] if local_catalog else []),
-        f'load "{source_file_name}"',
-        *([f"platesolve -catalog={catalog_name}"] if solve else []),
-        f"pcc -catalog={catalog_name}",
-        f'save "{output_stem}"',
-        "close",
-    ]
 
 
 def check_white_balance(

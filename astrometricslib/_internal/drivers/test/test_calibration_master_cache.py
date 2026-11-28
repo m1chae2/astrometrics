@@ -8,10 +8,10 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.file_staging import stage_file
-from astrometricslib._internal.drivers.siril_interface import CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
-from astrometricslib._internal.drivers.siril_interface.staging import _calibration_source_fingerprint
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
+from astrometricslib._internal.drivers.siril.stacking import CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
+from astrometricslib._internal.drivers.siril.stacking.staging import _calibration_source_fingerprint
 
 
 def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
@@ -23,7 +23,7 @@ def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private
         Instance whose `workdir` (and therefore master cache) is
         sandboxed inside the test's temporary directory.
     """
-    processor = object.__new__(siril_interface.ImageProcessing)
+    processor = object.__new__(siril_stacking.ImageProcessing)
     processor.workdir = str(tmp_path / "Work")
     os.makedirs(processor.workdir, exist_ok=True)
     return processor
@@ -246,7 +246,7 @@ def test_cache_hit_is_reported_to_the_job_log(tmp_path: Path) -> None:
 
 def test_dark_cache_key_holds_the_combine_method_but_the_bias_key_does_not(tmp_path: Path) -> None:
     """A mean-combined master dark is never reused: darks use the median."""
-    from astrometricslib._internal.drivers.siril_interface.staging import DARK_MASTER_RECIPE, master_recipe
+    from astrometricslib._internal.drivers.siril.stacking.staging import DARK_MASTER_RECIPE, master_recipe
 
     darks = _stage_frames(str(tmp_path / "run"), "darks", str(tmp_path / "library_darks"), 3)
 

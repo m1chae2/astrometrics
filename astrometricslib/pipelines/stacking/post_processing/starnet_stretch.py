@@ -9,7 +9,8 @@ instead:
 
 1. StarNet, a neural network trained on stars, splits the linear picture into
    a starless image and a stars-only image. Siril runs it (its ``starnet``
-   command), so StarNet must be set up in Siril.
+   command, written by the Siril driver's ``siril.preview.starnet``), so
+   StarNet must be set up in Siril.
 2. The starless image is stretched the usual way, with the sky level that
    `sky_level` chooses for it.
 3. The stars-only image is stretched on its own with an arcsinh curve, which
@@ -27,15 +28,21 @@ run changes nothing: the preview is made the normal way instead.
 All of this works on the preview's scratch copy. The stack is never changed.
 """
 
-import glob
 import logging
 import os
-import shutil
 import subprocess
 
 import numpy as np
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.siril.core.script_run import run_siril_script
+from astrometricslib._internal.drivers.siril.preview.starnet import (
+    STARLESS_NAME,
+    STARS_NAME,
+    build_starnet_script,
+    collect_starnet_outputs,
+)
+from astrometricslib._internal.drivers.siril.preview.stretch import build_stretch_script
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.run_abandonment import raise_if_abandoned
 from astrometricslib.models.tuned_parameter import (
@@ -45,13 +52,12 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.stacking.post_processing.preview_settings import PreviewSettings
-from astrometricslib.pipelines.stacking.post_processing.preview_siril import (
-    build_stretch_script,
-    run_preview_script,
-    sky_background_for_file,
-)
 from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.stretch_sky import (
+    choose_sky_stretch,
+    sky_background_for_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,56 +105,6 @@ _STAR_SCALE_PERCENTILE = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="STK-D56",
 )
-
-# The names the StarNet step and the blend give the files in the scratch
-# folder. Siril names its two outputs after the file it loaded.
-STARLESS_NAME = "starless.fits"
-STARS_NAME = "stars.fits"
-
-
-def build_starnet_script(source_file_name: str) -> list[str]:
-    """Write the Siril commands that split an image into starless and stars.
-
-    Siril saves the two parts beside the source as ``starless_<name>.fit``
-    and ``starmask_<name>.fit`` (the stars alone, as the original minus the
-    starless image). ``-stretch`` makes StarNet see a stretched copy, as it
-    expects, and returns the results to linear.
-
-    Parameters
-    ----------
-    source_file_name : `str`
-        File name of the linear image, relative to the folder Siril is
-        started in.
-
-    Returns
-    -------
-    commands : `list` [`str`]
-        The script, one command per entry.
-    """
-    return ["requires 1.2.0", f'load "{source_file_name}"', "starnet -stretch", "close"]
-
-
-def collect_starnet_outputs(folder: str) -> bool:
-    """Give Siril's two StarNet outputs fixed names.
-
-    Parameters
-    ----------
-    folder : `str`
-        The folder Siril ran in.
-
-    Returns
-    -------
-    found : `bool`
-        `True` if both outputs exist and were copied to `STARLESS_NAME` and
-        `STARS_NAME` in the folder.
-    """
-    starless = sorted(glob.glob(os.path.join(folder, "starless_*")))
-    stars = sorted(glob.glob(os.path.join(folder, "starmask_*")))
-    if not starless or not stars:
-        return False
-    shutil.copy(starless[0], os.path.join(folder, STARLESS_NAME))
-    shutil.copy(stars[0], os.path.join(folder, STARS_NAME))
-    return True
 
 
 def stretch_stars(stars: np.ndarray, stretch: float) -> np.ndarray:
@@ -297,7 +253,7 @@ def stretch_with_starnet(
 
     raise_if_abandoned()
     try:
-        ran = run_preview_script(scratch, build_starnet_script(name), siril_executable)
+        ran = run_siril_script(scratch, build_starnet_script(name), siril_executable)
     except (OSError, subprocess.SubprocessError) as error:
         fall_back(f"StarNet could not run ({error})")
         return None
@@ -307,15 +263,17 @@ def stretch_with_starnet(
     level = choose_sky_level_for_file(os.path.join(scratch, STARLESS_NAME)).sky_level
     logger.info("StarNet: the starless image is stretched to sky level %.2f.", level)
     try:
-        stretched = run_preview_script(
+        stretched = run_siril_script(
             scratch,
             build_stretch_script(
                 STARLESS_NAME,
                 "starless_stretched",
-                level,
+                choose_sky_stretch(
+                    level,
+                    linked,
+                    sky_background_for_file(os.path.join(scratch, STARLESS_NAME), remove_green, linked),
+                ),
                 remove_green,
-                linked,
-                sky_background_for_file(os.path.join(scratch, STARLESS_NAME), remove_green, linked),
             ),
             siril_executable,
         )

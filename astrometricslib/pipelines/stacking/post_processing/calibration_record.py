@@ -35,7 +35,7 @@ from astrometricslib._internal.drivers.calibration_library import (
     FLAT_FRAME_PATHS_KEY,
 )
 from astrometricslib._internal.drivers.quality_store import QualityStore
-from astrometricslib._internal.drivers.siril_stacking_driver import cached_siril_version
+from astrometricslib._internal.drivers.siril.core.version import cached_siril_version
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,

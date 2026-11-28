@@ -110,7 +110,8 @@ if GraXpert, Cosmic Clarity or the star toning fails, the picture is made from
 the result of the step before it, and if Siril fails, there is no picture.
 
 This module runs the steps in order and saves the result. The steps live in
-their own modules: `preview_siril` (the Siril scripts), `preview_graxpert`
+their own modules: the Siril driver's preview part (``siril.preview``, the
+Siril scripts, run with ``siril.core.script_run``), `preview_graxpert`
 (the gradient removal), `preview_cosmic_clarity` (the denoise),
 `starnet_stretch` (the StarNet stretch) and `preview_color` (the color
 steps). `preview_steps` runs one optional step, and `preview_settings` holds
@@ -126,6 +127,19 @@ import time
 from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.siril.core.program import find_local_gaia_catalog
+from astrometricslib._internal.drivers.siril.core.script_run import last_siril_output, run_siril_script
+from astrometricslib._internal.drivers.siril.preview.color_calibration import (
+    build_pcc_script,
+    reports_imprecise_solution,
+)
+from astrometricslib._internal.drivers.siril.preview.stretch import (
+    PROCESSED_STEM,
+    build_bright_object_script,
+    build_picture_script,
+    build_preview_script,
+    build_stretch_script,
+)
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.foundation.run_abandonment import RunAbandonedError
@@ -157,11 +171,9 @@ from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
     plan_masked_stretch_for_file,
 )
 from astrometricslib.pipelines.stacking.post_processing.preview_color import (
-    build_pcc_script,
     calibrate_from_sun_like_stars,
     check_white_balance,
     decide_remove_green,
-    find_local_gaia_catalog,
     has_plate_solution,
     is_colour_image,
     level_stretched_sky,
@@ -176,29 +188,19 @@ from astrometricslib.pipelines.stacking.post_processing.preview_settings import 
     PreviewSettings,
     write_preview_settings,
 )
-from astrometricslib.pipelines.stacking.post_processing.preview_siril import (
-    PROCESSED_STEM,
-    build_bright_object_script,
-    build_picture_script,
-    build_preview_script,
-    build_stretch_script,
-    last_siril_output,
-    run_preview_script,
-    sky_background_for_file,
-)
 from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep, next_source
 from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
 from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
 from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import stretch_with_starnet
+from astrometricslib.pipelines.stacking.post_processing.stretch_sky import (
+    choose_sky_stretch,
+    sky_background_for_file,
+)
 
 logger = logging.getLogger(__name__)
 
-
-# The sentence Siril logs when its photometric color calibration fits the stars
-# poorly. The text follows Siril 1.4.
-_SIRIL_IMPRECISE_PCC_TEXT = "imprecise solution"
 
 # The scratch folder lives on the local disk (~/.cache/astrometrics/siril), not
 # system temp folder: that is often held in RAM, and a Flatpak Siril is
@@ -328,7 +330,14 @@ def _picture_script(
                     used=False, reason="the bright-object stretch was used", category=object_category
                 ).record(),
             )
-        return build_bright_object_script(name, "preview", bright_object)
+        return build_bright_object_script(
+            name,
+            "preview",
+            bright_object.black_point,
+            bright_object.midtones,
+            bright_object.white_point,
+            bright_object.scale,
+        )
     steps: list[str] = []
     graxpert_executable = configuration.get_graxpert_executable()
     if graxpert_executable:
@@ -381,8 +390,8 @@ def _picture_script(
                     solve,
                     local_catalog,
                 )
-                succeeded = run_preview_script(scratch, commands, siril_executable)
-                if succeeded and _SIRIL_IMPRECISE_PCC_TEXT in last_siril_output():
+                succeeded = run_siril_script(scratch, commands, siril_executable)
+                if succeeded and reports_imprecise_solution(last_siril_output()):
                     pcc_imprecise.append(True)
                 return succeeded
 
@@ -518,21 +527,24 @@ def _picture_script(
         return build_preview_script(
             name,
             "preview",
-            choice.sky_level,
+            choose_sky_stretch(
+                choice.sky_level,
+                linked,
+                sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
+            ),
             remove_green,
-            linked,
-            sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
         )
     if not stretched_by_starnet:
-        stretched = run_preview_script(
+        sky_background = sky_background_for_file(
+            os.path.join(scratch, name), remove_green, linked, stretch_record
+        )
+        stretched = run_siril_script(
             scratch,
             build_stretch_script(
                 name,
                 "stretched",
-                choice.sky_level,
+                choose_sky_stretch(choice.sky_level, linked, sky_background),
                 remove_green,
-                linked,
-                sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
             ),
             siril_executable,
         )
@@ -803,7 +815,7 @@ def write_stack_preview(
         )
         if steps_log is not None:
             steps_log.extend(steps_taken)
-        succeeded = commands is not None and run_preview_script(scratch, commands, siril_executable)
+        succeeded = commands is not None and run_siril_script(scratch, commands, siril_executable)
         picture = os.path.join(scratch, "preview.jpg")
         if not succeeded or not os.path.isfile(picture):
             logger.warning("No preview made for '%s': Siril did not save the picture.", stacked_path)

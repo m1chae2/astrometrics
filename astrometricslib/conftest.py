@@ -264,7 +264,7 @@ def no_siril_stack_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for module in ("stack_preview", "starnet_stretch"):
         monkeypatch.setattr(
-            f"astrometricslib.pipelines.stacking.post_processing.{module}.run_preview_script",
+            f"astrometricslib.pipelines.stacking.post_processing.{module}.run_siril_script",
             lambda directory, commands, siril_executable: False,
         )
     monkeypatch.setattr(

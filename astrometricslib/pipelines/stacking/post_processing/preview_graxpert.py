@@ -10,7 +10,7 @@ GraXpert program itself, holding the shared Siril slot.
 import os
 from typing import Any
 
-from astrometricslib._internal.drivers.siril_interface import siril_process_lock
+from astrometricslib._internal.drivers.siril.core.lock import siril_process_lock
 from astrometricslib.foundation.run_abandonment import run_registered
 from astrometricslib.foundation.system import split_program_command
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
@@ -52,7 +52,7 @@ def graxpert_background_model_path(output_stem: str) -> str:
 def flatten_background(graxpert_executable: str, input_path: str, output_stem: str) -> bool:
     """Remove the sky gradient from an image with GraXpert's AI model.
 
-    Waits for a free slot first, as `run_preview_script` does. GraXpert uses
+    Waits for a free Siril slot first, as every Siril run does. GraXpert uses
     the graphics card when it can and the processor otherwise, so a machine
     without CUDA still works. The ``-bg`` option makes it also save the
     background model it subtracted, at `graxpert_background_model_path`. It

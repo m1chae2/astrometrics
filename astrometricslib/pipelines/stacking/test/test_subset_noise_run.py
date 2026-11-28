@@ -824,7 +824,7 @@ def test_an_output_folder_outside_the_subsets_folder_is_refused(tmp_path: Path) 
 
 def test_the_work_folder_name_holds_the_subsets_label(tmp_path: Path) -> None:
     """Siril's work folder name holds the label."""
-    from astrometricslib._internal.drivers.siril_interface import work_directory_name
+    from astrometricslib._internal.drivers.siril.stacking import work_directory_name
 
     library = _Library(tmp_path, nights=3)
     result = stack_chosen_subset(

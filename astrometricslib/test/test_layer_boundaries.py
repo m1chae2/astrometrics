@@ -594,11 +594,11 @@ def test_the_upward_import_scan_recognizes_each_rule() -> None:
     """Verify the scan flags each upward import and allows downward ones."""
     upward = [
         (
-            "_internal/drivers/siril_interface/imaging_stacker.py",
+            "_internal/drivers/siril/stacking/imaging_stacker.py",
             "astrometricslib.pipelines.stacking.stack_runner",
         ),
-        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib.api.processing"),
-        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib"),
+        ("_internal/drivers/siril/stacking/imaging_stacker.py", "astrometricslib.api.processing"),
+        ("_internal/drivers/siril/stacking/imaging_stacker.py", "astrometricslib"),
         ("pipelines/stacking/stage.py", "astrometricslib.api"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib"),
@@ -615,10 +615,10 @@ def test_the_upward_import_scan_recognizes_each_rule() -> None:
     ]
     downward = [
         (
-            "_internal/drivers/siril_interface/imaging_stacker.py",
+            "_internal/drivers/siril/stacking/imaging_stacker.py",
             "astrometricslib._internal.drivers.fits_access",
         ),
-        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib.foundation.errors"),
+        ("_internal/drivers/siril/stacking/imaging_stacker.py", "astrometricslib.foundation.errors"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.spectroscopy.runner"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.stacking.stage"),
         ("pipelines/stacking/stage.py", "astrometricslib.pipelines.shared.frame_scanning"),

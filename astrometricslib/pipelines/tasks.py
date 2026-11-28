@@ -333,7 +333,7 @@ def stack_frames_with_timeout(
     """  # ruff: ignore[docstring-extraneous-exception] -- `raise
     # outcome["error"]` re-raises a captured exception object,
     # which pydoclint cannot resolve to a declared type statically.
-    from astrometricslib._internal.drivers import siril_interface
+    from astrometricslib._internal.drivers.siril.core import lock as siril_lock
 
     if timeout_seconds is None:
         timeout_seconds = compute_stacking_timeout_seconds(len(frames_to_stack))
@@ -353,7 +353,7 @@ def stack_frames_with_timeout(
             # The thread does not inherit the caller's parameter context, so
             # it sets the one of the frames' setup and filter itself.
             with (
-                siril_interface.bind_lock_wait(lock_wait),
+                siril_lock.bind_lock_wait(lock_wait),
                 bind_abandonment(abandonment),
                 report_started_jobs(lambda handle: stacking_job_ids.append(handle.job_id)),
                 frames_parameter_context(frames_to_stack),
@@ -1463,7 +1463,7 @@ def _stack_camera_frames(
     """
     stack_outputs: dict[str, str] = {}
 
-    # We do not lock the Siril process here because the `siril_interface`
+    # We do not lock the Siril process here because the Siril driver
     # already does it during the actual Siril launch. If we lock it here too,
     # two workers could grab the outer locks and then wait forever for each
     # other to release the inner locks, causing a deadlock.

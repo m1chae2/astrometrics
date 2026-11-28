@@ -282,7 +282,7 @@ def _master_recipes() -> dict[str, str]:
         fingerprint, because the bias frames are listed with the calibration
         frames.
     """
-    from astrometricslib._internal.drivers.siril_interface.staging import master_recipe
+    from astrometricslib._internal.drivers.siril.stacking.staging import master_recipe
 
     return {"dark": master_recipe("dark"), "flat": master_recipe("flat")}
 

@@ -23,6 +23,7 @@ It adds two things the engine alone does not do:
 import logging
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -749,10 +750,8 @@ def _stack_exposure_groups(
         ``"exposure_group_weights"`` list with one entry for each group that
         was combined (see `_exposure_group_weight_entries`), an
         ``"exposure_group_alignments"`` list (each combined group's frame
-        count, its shift, rotation and scale onto the reference group, or
-        `None` for the reference, and a ``"distortion"`` record of the
-        smooth lens-distortion correction when the move has one, `None`
-        otherwise), and a
+        count and its position map onto the reference group's grid, see
+        `GroupPositionMap.to_record`), and a
         ``"covered_in_every_group"`` mask of the pixels every combined group
         has data at.
     """
@@ -761,8 +760,8 @@ def _stack_exposure_groups(
     )
     if not results:
         return None, {}
-    measurements = _measure_group_stacks(engine, results, target_id, is_spectral, drivers)
-    _align_and_screen_groups(results, measurements, target_id, is_spectral)
+    measurements = _measure_group_stacks(engine, results, target_id, is_spectral)
+    _align_and_screen_groups(results, measurements, target_id, is_spectral, drivers)
     final_path, combination, stacked_fwhm = _write_combined_stack(
         results, measurements, output_file, is_spectral
     )
@@ -867,18 +866,14 @@ def _stack_each_group(
 
 
 def _measure_group_stacks(
-    engine: StackingDriver,
-    results: list[GroupResult],
-    target_id: str,
-    is_spectral: bool,
-    drivers: Drivers | None = None,
+    engine: StackingDriver, results: list[GroupResult], target_id: str, is_spectral: bool
 ) -> _GroupStackMeasurements:
     """Read the group stacks and measure the raw frames behind them.
 
-    Reads each group's registration facts and pixels, lines spectral groups
-    up onto one trail tilt, and measures each group's frame noise and zero
-    clipping. Fills in ``artifacts``, ``image``, ``frame_noise`` and
-    ``frame_zero_fraction`` of every `GroupResult`.
+    Reads each group's registration facts and pixels and measures each
+    group's frame noise and zero clipping. Fills in ``artifacts``,
+    ``image``, ``frame_noise`` and ``frame_zero_fraction`` of every
+    `GroupResult`.
 
     Parameters
     ----------
@@ -890,8 +885,6 @@ def _measure_group_stacks(
         The target's name, for the log.
     is_spectral : `bool`
         Whether the frames are spectral.
-    drivers : `Drivers`, optional
-        The outside services the caller chose, for the trail measurements.
 
     Returns
     -------
@@ -906,7 +899,6 @@ def _measure_group_stacks(
         CLIPPING_FLOOR_SIGMAS,
         measure_group_frames,
     )
-    from astrometricslib.pipelines.stacking.processing.group_derotation import derotate_groups_to_common_tilt
     from astrometricslib.pipelines.stacking.processing.group_gains import describe_group_clipping
 
     clipping_floor_sigmas = resolve(CLIPPING_FLOOR_SIGMAS).value
@@ -921,38 +913,7 @@ def _measure_group_stacks(
         result.image = np.asarray(read_data(result.path), dtype=np.float32)
     kept_groups = [result.group for result in results]
 
-    # A slitless spectrum's trail tilt is not fixed from one session to the
-    # next (see `group_derotation`); mixing tilts smears the merged trail
-    # and biases every line depth along it. Groups are lined up onto one
-    # common tilt before they are shifted onto each other. Only worth doing
-    # with more than one group, and a camera name is needed to measure a
-    # trail at all.
-    camera_name = next(
-        (
-            getattr(frame, "camera", None)
-            for group in kept_groups
-            for frame in group.frames
-            if getattr(frame, "camera", None)
-        ),
-        None,
-    )
-    if is_spectral and len(results) > 1 and camera_name:
-        derotated, trail_angles = derotate_groups_to_common_tilt(
-            [result.image for result in results],
-            [result.path for result in results],
-            camera_name,
-            drivers=drivers,
-        )
-        for result, image in zip(results, derotated, strict=True):
-            result.image = image
-        for group, angle in zip(kept_groups, trail_angles, strict=True):
-            if angle is None:
-                logger.warning(
-                    "The %g s exposure group of '%s' had no trustworthy trail tilt to line up; "
-                    "it is combined without derotation.",
-                    group.exposure_s,
-                    target_id,
-                )
+    camera_name = _first_camera_name(kept_groups)
 
     # The camera's clip ceiling sets the saturation level of a group stack
     # that shows no plateau (a 14-bit Nikon never reaches 0.95 of full scale).
@@ -1014,9 +975,9 @@ def _measure_group_stacks(
 def alignment_left_out_reason(reference_exposure: float, alignment: Any) -> str:
     """Say why a group could not be lined up with the reference group.
 
-    A star-pattern search that failed says why, with its numbers. The
-    correlation of the shift-only measurement is then not the cause, so it is
-    given only when no pattern search ran (a spectral stack).
+    The reason is the one the method that failed gave: Siril's own account of
+    a stack it could not solve, or the correlation of a shift-only
+    measurement.
 
     Parameters
     ----------
@@ -1035,8 +996,329 @@ def alignment_left_out_reason(reference_exposure: float, alignment: Any) -> str:
     return f"could not be lined up with the {reference_exposure:g} s group ({cause})"
 
 
+def _first_camera_name(groups: list[Any]) -> str | None:
+    """Give the camera that took the first frame that names one.
+
+    Parameters
+    ----------
+    groups : `list` [`ExposureGroup`]
+        The exposure groups.
+
+    Returns
+    -------
+    camera_name : `str` or `None`
+        The camera's name, or `None` if no frame names one.
+    """
+    return next(
+        (
+            getattr(frame, "camera", None)
+            for group in groups
+            for frame in group.frames
+            if getattr(frame, "camera", None)
+        ),
+        None,
+    )
+
+
+def _shift_alignment(
+    images: list[Any], reference_index: int, crop_fraction: float | None, prefer_star_position: bool
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Line the images up with the reference by a shift, and name the move.
+
+    Parameters
+    ----------
+    images : `list` [`numpy.ndarray`]
+        The group stacks.
+    reference_index : `int`
+        The place of the image the others are lined up with.
+    crop_fraction : `float` or `None`
+        The share of each side used to measure a spectral offset.
+    prefer_star_position : `bool`
+        Whether to measure the offset on the zero-order star.
+
+    Returns
+    -------
+    aligned, covered, alignments : `list`
+        As `align_images_to_reference` gives them, except that the reference
+        has an `AlignmentResult` (no shift, ``method="none"``, marked as the
+        reference) instead of `None`.
+    """
+    from astrometricslib.pipelines.stacking.processing.group_alignment import (
+        AlignmentResult,
+        align_images_to_reference,
+    )
+
+    aligned, covered, alignments = align_images_to_reference(
+        images, reference_index, crop_fraction=crop_fraction, prefer_star_position=prefer_star_position
+    )
+    alignments[reference_index] = AlignmentResult(0.0, 0.0, 1.0, method="none", is_reference=True)
+    return aligned, covered, alignments
+
+
+def _siril_alignment(
+    results: list[GroupResult], reference_index: int, target_id: str
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Line the group stacks up with Siril's plate-solve registration.
+
+    Parameters
+    ----------
+    results : `list` [`GroupResult`]
+        The stacked groups. Their stack files are read by Siril.
+    reference_index : `int`
+        The place of the group the others are lined up with.
+    target_id : `str`
+        The target's name, for the log.
+
+    Returns
+    -------
+    aligned, covered, alignments : `list`
+        The lined-up stacks, their data masks and the moves, from
+        `align_group_stacks_with_siril`. An entry is `None` (and its move
+        carries Siril's reason) for a stack Siril could not solve.
+    """
+    from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.stacking.processing.siril_group_alignment import (
+        align_group_stacks_with_siril,
+    )
+
+    siril_executable = get_configuration().get_siril_executable()
+    aligned, covered, alignments = align_group_stacks_with_siril(
+        [result.path for result in results], reference_index, siril_executable
+    )
+    for result, alignment in zip(results, alignments, strict=True):
+        if alignment.failure_reason is None:
+            logger.info(
+                "Siril lined the %g s exposure group of '%s' up with %d of %s stars matched to Gaia "
+                "(%.2f px left, fit order %s): shift (%.2f, %.2f) px, rotation %.4f degrees, scale %.5f.",
+                result.exposure_s,
+                target_id,
+                alignment.matched_stars or 0,
+                alignment.stars_found,
+                alignment.fit_residual_pixels or float("nan"),
+                alignment.fit_order,
+                alignment.shift_rows_pixels,
+                alignment.shift_columns_pixels,
+                alignment.rotation_degrees,
+                alignment.scale,
+            )
+    return aligned, covered, alignments
+
+
+def _keep_reference_unmoved(
+    results: list[GroupResult],
+    reference_index: int,
+    aligned: list[Any],
+    covered: list[Any],
+    alignments: list[Any],
+) -> None:
+    """Keep a reference group that Siril could not solve as it is.
+
+    Every other stack is lined up with the reference, so when Siril cannot
+    solve the reference no stack is lined up and the others are left out. The
+    reference itself still stands, unmoved, so the combined stack is the
+    reference group alone instead of nothing. The reference's alignment keeps
+    Siril's reason and the group's own image becomes its lined-up image.
+
+    Parameters
+    ----------
+    results : `list` [`GroupResult`]
+        The stacked groups.
+    reference_index : `int`
+        The place of the reference group.
+    aligned, covered, alignments : `list`
+        Siril's lists, changed in place at the reference's place.
+    """
+    import numpy as np
+
+    from astrometricslib.pipelines.stacking.processing.group_alignment import AlignmentResult
+
+    reason = alignments[reference_index].failure_reason
+    aligned[reference_index] = np.asarray(results[reference_index].image, dtype=np.float32)
+    covered[reference_index] = np.ones(aligned[reference_index].shape[-2:], dtype=bool)
+    alignments[reference_index] = AlignmentResult(0.0, 0.0, 1.0, method="none", is_reference=True)
+    logger.warning(
+        "Siril could not solve the reference group (%s), so no group could be lined up with it.", reason
+    )
+
+
+def _line_up_spectral_groups(
+    results: list[GroupResult],
+    reference_index: int,
+    target_id: str,
+    crop_fraction: float,
+    drivers: Drivers | None,
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Line spectral group stacks up by Siril, or by the zero order.
+
+    1. Siril solves every group stack and moves the solved ones onto the
+       reference's grid (see `siril_group_alignment`).
+    2. The stacks are turned about their zero-order stars onto one trail tilt
+       (see `group_derotation`). The tilt is measured on the lined-up stacks,
+       so a turn Siril made is not counted twice.
+    3. A group that Siril could not solve is shifted so its zero-order star
+       lands on the reference's (`group_alignment.measure_alignment`). That is
+       the case for the shortest exposures, where the stack holds too few
+       stars to match. Which groups go this way is decided by Siril's own
+       answer for each group, not by a star count of ours, and each such group
+       is logged with Siril's reason.
+
+    When the reference itself is not solved, Siril lines nothing up and every
+    group takes the zero-order path.
+
+    Parameters
+    ----------
+    results : `list` [`GroupResult`]
+        The stacked groups, with ``image`` set.
+    reference_index : `int`
+        The place of the reference group.
+    target_id : `str`
+        The target's name, for the log.
+    crop_fraction : `float`
+        The share of each side used to measure a zero-order offset.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for the trail measurements.
+
+    Returns
+    -------
+    aligned, covered, alignments : `list`
+        One entry for each group, like `align_images_to_reference`'s lists.
+    """
+    import numpy as np
+
+    from astrometricslib._internal.drivers.fits_access import read_header, write_image
+    from astrometricslib.foundation.paths import scratch_directory
+    from astrometricslib.pipelines.stacking.processing.group_derotation import derotate_groups_to_common_tilt
+
+    count = len(results)
+    aligned, covered, alignments = _siril_alignment(results, reference_index, target_id)
+    solved = [image is not None for image in aligned]
+    images = [aligned[index] if solved[index] else results[index].image for index in range(count)]
+
+    camera_name = _first_camera_name([result.group for result in results])
+    if camera_name:
+        with tempfile.TemporaryDirectory(prefix="group_tilt_", dir=scratch_directory()) as folder:
+            # The trail is measured in a file, so a stack Siril moved is
+            # written out under its group's header.
+            paths = []
+            for index, result in enumerate(results):
+                if solved[index]:
+                    path = os.path.join(folder, f"group_{index}.fits")
+                    write_image(path, images[index], read_header(result.path))
+                    paths.append(path)
+                else:
+                    paths.append(result.path)
+            derotated, trail_angles = derotate_groups_to_common_tilt(
+                images, paths, camera_name, drivers=drivers
+            )
+        for result, angle in zip(results, trail_angles, strict=True):
+            if angle is None:
+                logger.warning(
+                    "The %g s exposure group of '%s' had no trustworthy trail tilt to line up; "
+                    "it is combined without derotation.",
+                    result.exposure_s,
+                    target_id,
+                )
+        images = derotated
+
+    if solved[reference_index]:
+        shifted = [index for index in range(count) if not solved[index]]
+    else:
+        shifted = [index for index in range(count) if index != reference_index]
+        alignments[reference_index] = None
+    if shifted:
+        sub_images = [images[reference_index], *(images[index] for index in shifted)]
+        sub_aligned, sub_covered, sub_alignments = _shift_alignment(
+            sub_images, 0, crop_fraction=crop_fraction, prefer_star_position=True
+        )
+        for position, index in enumerate(shifted, start=1):
+            siril_reason = alignments[index].failure_reason if alignments[index] is not None else None
+            aligned[index], covered[index], alignments[index] = (
+                sub_aligned[position],
+                sub_covered[position],
+                sub_alignments[position],
+            )
+            alignments[index].siril_reason = siril_reason or "Siril did not line it up"
+            if alignments[index].trusted:
+                logger.warning(
+                    "The %g s exposure group of '%s' was lined up by its zero-order star, not by Siril: %s.",
+                    results[index].exposure_s,
+                    target_id,
+                    siril_reason or "Siril did not line it up",
+                )
+        if not solved[reference_index]:
+            aligned[reference_index] = sub_aligned[0]
+            covered[reference_index] = sub_covered[0]
+            alignments[reference_index] = sub_alignments[0]
+    for index in range(count):
+        if solved[index]:
+            aligned[index] = np.asarray(images[index], dtype=np.float32)
+    alignments[reference_index].is_reference = True
+    return aligned, covered, alignments
+
+
+def _line_up_groups(
+    results: list[GroupResult],
+    reference_index: int,
+    target_id: str,
+    is_spectral: bool,
+    drivers: Drivers | None = None,
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Line the group stacks up with the reference by the method that fits.
+
+    Parameters
+    ----------
+    results : `list` [`GroupResult`]
+        The stacked groups, with ``image`` set.
+    reference_index : `int`
+        The place of the group the others are lined up with.
+    target_id : `str`
+        The target's name, for the log and to tell a body of the solar system.
+    is_spectral : `bool`
+        Whether the frames are spectral.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for the spectral trail
+        measurements.
+
+    Returns
+    -------
+    aligned, covered, alignments : `list`
+        One entry for each group: the lined-up stack (`None` for a group that
+        could not be lined up), its data mask and its `AlignmentResult`.
+    """
+    from astrometricslib.pipelines.stacking.processing.group_alignment import (
+        SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
+    )
+    from astrometricslib.utilities.solar_system_targets import is_solar_system_target
+
+    if len(results) == 1:
+        return _shift_alignment([results[0].image], 0, crop_fraction=None, prefer_star_position=False)
+    if is_spectral:
+        return _line_up_spectral_groups(
+            results,
+            reference_index,
+            target_id,
+            resolve(SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION).value,
+            drivers,
+        )
+    if is_solar_system_target(target_id):
+        return _shift_alignment(
+            [result.image for result in results],
+            reference_index,
+            crop_fraction=None,
+            prefer_star_position=False,
+        )
+    aligned, covered, alignments = _siril_alignment(results, reference_index, target_id)
+    if aligned[reference_index] is None:
+        _keep_reference_unmoved(results, reference_index, aligned, covered, alignments)
+    return aligned, covered, alignments
+
+
 def _align_and_screen_groups(
-    results: list[GroupResult], measurements: _GroupStackMeasurements, target_id: str, is_spectral: bool
+    results: list[GroupResult],
+    measurements: _GroupStackMeasurements,
+    target_id: str,
+    is_spectral: bool,
+    drivers: Drivers | None = None,
 ) -> None:
     """Line the group stacks up and leave out the groups that do not fit.
 
@@ -1044,6 +1326,20 @@ def _align_and_screen_groups(
     every group, then ``left_out_reason`` and ``gain_measurement`` of the
     groups that cannot be lined up or whose brightness is not one scale
     factor of the reference group's.
+
+    Every group is lined up with the group that carries the most weight (the
+    one `combine_exposure_group_images` also uses as its brightness
+    reference), so the combined image is not smeared by the offsets Siril
+    leaves between groups. The method depends on the stack:
+
+    - Imaging stacks are lined up by Siril, which plate-solves each group
+      stack against the Gaia catalog and moves it onto the reference's grid.
+      A group Siril cannot solve is left out, with Siril's reason; there is
+      no other method for it.
+    - Stacks of a body of the solar system (the Moon) have no stars to solve,
+      so they are shifted by the offset phase correlation finds.
+    - Spectral stacks use Siril for the groups it solves and the zero-order
+      star for the others (`_line_up_spectral_groups`).
 
     Parameters
     ----------
@@ -1055,15 +1351,14 @@ def _align_and_screen_groups(
         The target's name, for the log.
     is_spectral : `bool`
         Whether the frames are spectral.
+    drivers : `Drivers`, optional
+        The outside services the caller chose, for the spectral trail
+        measurements.
     """
     import numpy as np
 
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.processing.exposure_groups import exposure_group_iso
-    from astrometricslib.pipelines.stacking.processing.group_alignment import (
-        SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
-        align_images_to_reference,
-    )
     from astrometricslib.pipelines.stacking.processing.group_combination import (
         group_weight,
         measure_exposure_group_gains,
@@ -1075,24 +1370,12 @@ def _align_and_screen_groups(
         normalize_sky_ratios_by_iso,
     )
 
-    # Line the group stacks up with the group that carries the most weight
-    # (the one `combine_exposure_group_images` also uses as its brightness
-    # reference), so the combined image is not smeared by the offsets Siril
-    # leaves between groups. Imaging stacks are lined up by their stars,
-    # which also finds the small rotation and scale between nights (see
-    # `group_alignment.refine_alignment_with_stars`); spectral stacks keep
-    # the plain shift.
     for result in results:
         result.weight = group_weight(result.count, result.exposure_s, result.frame_noise)
     reference_index = int(np.argmax([result.weight for result in results]))
     reference = results[reference_index]
-    crop_fraction = resolve(SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION).value if is_spectral else None
-    aligned_images, covered_masks, alignments = align_images_to_reference(
-        [result.image for result in results],
-        reference_index,
-        crop_fraction=crop_fraction,
-        prefer_star_position=is_spectral,
-        refine_with_stars=not is_spectral,
+    aligned_images, covered_masks, alignments = _line_up_groups(
+        results, reference_index, target_id, is_spectral, drivers
     )
     for result, aligned_image, covered_mask, alignment in zip(
         results, aligned_images, covered_masks, alignments, strict=True
@@ -1100,26 +1383,6 @@ def _align_and_screen_groups(
         result.aligned_image = aligned_image
         result.covered_mask = covered_mask
         result.alignment = alignment
-    for result in results:
-        alignment = result.alignment
-        if alignment is not None and alignment.star_pairs:
-            logger.info(
-                "The %g s exposure group of '%s' was lined up with %d stars: shift (%.2f, %.2f) px, "
-                "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners "
-                "(%s model%s).",
-                result.exposure_s,
-                target_id,
-                alignment.star_pairs,
-                alignment.shift_rows_pixels,
-                alignment.shift_columns_pixels,
-                alignment.rotation_degrees,
-                alignment.scale,
-                alignment.residual_pixels,
-                alignment.model,
-                f", {alignment.similarity_residual_pixels:.2f} px with a similarity alone"
-                if alignment.distortion is not None
-                else "",
-            )
     for result in results:
         if result.aligned_image is None:
             reason = alignment_left_out_reason(reference.exposure_s, result.alignment)
@@ -1279,6 +1542,55 @@ def _write_combined_stack(
     return final_path, combination, stacked_fwhm
 
 
+def _alignment_details(alignment: Any) -> dict[str, Any]:
+    """Describe how one group was lined up, for the group manifest.
+
+    Every field says what it measures. ``alignment_fit_residual_pixels`` and
+    ``alignment_matched_stars`` come from Siril's plate solve of the group
+    stack, so they count the stars matched to the Gaia catalog and say how far
+    those stars lie from their catalog positions; they are not pairs between
+    two stacks. A group that was lined up another way (``zero_order`` or
+    ``correlation``) has none of these.
+
+    Parameters
+    ----------
+    alignment : `AlignmentResult` or `None`
+        The group's alignment, or `None` if it has none.
+
+    Returns
+    -------
+    details : `dict`
+        The ``alignment_*`` fields. All are `None` without an alignment.
+    """
+    if alignment is None:
+        return {
+            "alignment_method": None,
+            "alignment_correlation": None,
+            "alignment_rotation_degrees": None,
+            "alignment_scale": None,
+            "alignment_stars_found": None,
+            "alignment_matched_stars": None,
+            "alignment_fit_residual_pixels": None,
+            "alignment_fit_residual_arcsec": None,
+            "alignment_fit_order": None,
+            "alignment_failure_reason": None,
+            "alignment_siril_reason": None,
+        }
+    return {
+        "alignment_method": alignment.method,
+        "alignment_correlation": alignment.correlation if alignment.method == "correlation" else None,
+        "alignment_rotation_degrees": alignment.rotation_degrees if alignment.method == "siril" else None,
+        "alignment_scale": alignment.scale if alignment.method == "siril" else None,
+        "alignment_stars_found": alignment.stars_found,
+        "alignment_matched_stars": alignment.matched_stars,
+        "alignment_fit_residual_pixels": alignment.fit_residual_pixels,
+        "alignment_fit_residual_arcsec": alignment.fit_residual_arcsec,
+        "alignment_fit_order": alignment.fit_order,
+        "alignment_failure_reason": alignment.failure_reason,
+        "alignment_siril_reason": alignment.siril_reason,
+    }
+
+
 def _describe_groups(
     results: list[GroupResult],
     failed_groups: list[tuple[Any, dict[str, Any]]],
@@ -1324,6 +1636,7 @@ def _describe_groups(
             logger.warning("Could not measure saturation for '%s': %s", target_id, measurement_error)
             saturation = []
         alignment = result.alignment
+        moved = alignment is not None and not alignment.is_reference and alignment.failure_reason is None
         summaries.append(
             build_group_summary(
                 result.exposure_s,
@@ -1332,9 +1645,12 @@ def _describe_groups(
                 saturation,
                 stack_path=result.kept_path,
                 clipped_at_zero=result.frame_zero_fraction > clipped_frame_zero_fraction,
-                alignment_shift_pixels=None
-                if alignment is None
-                else [round(alignment.shift_rows_pixels, 3), round(alignment.shift_columns_pixels, 3)],
+                alignment_shift_pixels=[
+                    round(alignment.shift_rows_pixels, 3),
+                    round(alignment.shift_columns_pixels, 3),
+                ]
+                if moved
+                else None,
                 left_out_reason=result.left_out_reason,
                 gain_measurement=result.gain_measurement,
                 gain_applied=result.gain_applied,
@@ -1344,18 +1660,7 @@ def _describe_groups(
             "weight": result.weight,
             "frame_noise_counts": result.frame_noise,
             "frame_zero_fraction": result.frame_zero_fraction,
-            "alignment_correlation": None if alignment is None else alignment.correlation,
-            "alignment_rotation_degrees": None if alignment is None else alignment.rotation_degrees,
-            "alignment_scale": None if alignment is None else alignment.scale,
-            "alignment_star_pairs": None if alignment is None else alignment.star_pairs,
-            "alignment_residual_pixels": None if alignment is None else alignment.residual_pixels,
-            "alignment_model": None if alignment is None else alignment.model,
-            "alignment_similarity_residual_pixels": None
-            if alignment is None
-            else alignment.similarity_residual_pixels,
-            "alignment_distortion": None
-            if alignment is None or alignment.distortion is None
-            else alignment.distortion.to_record(),
+            **_alignment_details(alignment),
         })
     for group, diagnostics in failed_groups:
         summaries.append(
@@ -1432,16 +1737,8 @@ def _join_group_diagnostics(
         {
             "frame_count": len(result.artifacts.get("registration_frames") or []),
             "alignment": None
-            if result.alignment is None
-            else [
-                result.alignment.shift_rows_pixels,
-                result.alignment.shift_columns_pixels,
-                result.alignment.rotation_degrees,
-                result.alignment.scale,
-            ],
-            "distortion": None
-            if result.alignment is None or result.alignment.distortion is None
-            else result.alignment.distortion.to_record(),
+            if result.alignment is None or result.aligned_image is None or result.alignment.method == "none"
+            else result.alignment.position_map_for(result.aligned_image.shape).to_record(),
         }
         for result in used
     ]

@@ -3632,7 +3632,11 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    `ImageProcessing` in the `siril/stacking/` package: masters, calibration, registration (alignment) and
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
-   single stars).
+   single stars). A stack of several exposure groups is lined up by Siril's plate solutions
+   (`siril_group_alignment.py`): Siril matches each group stack's stars to the Gaia catalog and moves
+   it onto the reference group's grid, lens distortion included. A group Siril cannot solve is left
+   out; a spectral group it cannot solve is shifted onto the reference's zero-order star, and a Moon
+   stack is shifted by phase correlation.
 5. **After the stack.** Thinly covered edges are trimmed (`stack_crop.py`). Frames never line up exactly,
    so the edges of a stack are covered by fewer frames than the middle and are noisier. For a
    stack of exposure groups, the count of covering frames takes each group's alignment with the

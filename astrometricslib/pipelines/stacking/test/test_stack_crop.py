@@ -523,6 +523,35 @@ def test_the_picture_crop_composes_with_a_quarter_turn(tmp_path: Path, degrees: 
     assert np.array_equal(picture, turn_image(registered[5:45, 10:70], degrees))
 
 
+def similarity_record(move: list[float]) -> dict:
+    """Write the position map of a move given as shift, turn and scale.
+
+    The move sends a group position ``z`` to ``a * (z - c) + c + t`` (``c`` is
+    the image center and ``z = column + 1j * row``), so the map reads the group
+    at the inverse.
+
+    Parameters
+    ----------
+    move : `list` [`float`]
+        The shift along the rows, shift along the columns, rotation in degrees
+        and scale.
+
+    Returns
+    -------
+    record : `dict`
+        The record `GroupPositionMap.to_record` writes.
+    """
+    from astrometricslib.pipelines.stacking.processing.group_position_map import GroupPositionMap
+
+    nodes = np.linspace(0.0, SIZE - 1.0, 126)
+    rows, columns = np.meshgrid(nodes, nodes, indexing="ij")
+    center = complex((SIZE - 1) / 2.0, (SIZE - 1) / 2.0)
+    turn = move[3] * np.exp(1j * np.radians(move[2]))
+    source = center + (columns + 1j * rows - center - complex(move[1], move[0])) / turn
+    position_map = GroupPositionMap((SIZE, SIZE), node_rows=source.imag, node_columns=source.real)
+    return position_map.to_record()
+
+
 def aligned_groups_diagnostics(first: int, second: int, move: list[float]) -> dict:
     """Build the registration facts of two exposure groups, the second moved.
 
@@ -546,7 +575,7 @@ def aligned_groups_diagnostics(first: int, second: int, move: list[float]) -> di
     diagnostics = shifted_group_diagnostics(first + second, 0, 0.0, 0.0)
     diagnostics["exposure_group_alignments"] = [
         {"frame_count": first, "alignment": None},
-        {"frame_count": second, "alignment": move},
+        {"frame_count": second, "alignment": similarity_record(move)},
     ]
     return diagnostics
 
@@ -598,16 +627,17 @@ def test_the_count_without_the_group_alignments_thinks_every_frame_covers_everyt
 def test_the_coverage_matches_the_pixels_the_alignment_moves_in(move: list[float]) -> None:
     """The cells counted as covered are those `apply_alignment` fills."""
     from astrometricslib.pipelines.stacking.processing.group_alignment import AlignmentResult, apply_alignment
+    from astrometricslib.pipelines.stacking.processing.group_position_map import GroupPositionMap
 
     diagnostics = aligned_groups_diagnostics(1, 1, move)
     counts = sc._coverage_from_diagnostics(diagnostics, SIZE, SIZE)
     assert counts is not None
     result = AlignmentResult(
-        shift_rows_pixels=move[0],
-        shift_columns_pixels=move[1],
-        correlation=1.0,
-        rotation_degrees=move[2],
-        scale=move[3],
+        move[0],
+        move[1],
+        1.0,
+        method="siril",
+        position_map=GroupPositionMap.from_record(similarity_record(move)),
     )
     _, filled = apply_alignment(np.ones((SIZE, SIZE), dtype=np.float32), result, order=1)
 

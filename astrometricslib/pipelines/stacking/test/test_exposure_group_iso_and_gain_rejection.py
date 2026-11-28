@@ -9,10 +9,12 @@ so the stack leaves it out with a reason and keeps the measured value.
 """
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
+from astrometricslib.pipelines.stacking import stack_runner
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     plan_exposure_folding,
     split_frames_by_exposure,
@@ -147,7 +149,22 @@ def test_a_group_with_an_implausible_gain_is_left_out_with_its_measured_value() 
     measurements = _GroupStackMeasurements(
         clip_ceiling_adu=None, clipped_groups=[], measured_zero_fractions=[], frame_noises_read=False
     )
-    _align_and_screen_groups(results, measurements, "synthetic", is_spectral=False)
+
+    def fake_siril_alignment(
+        stacked: list[object], reference_index: int, _target_id: str
+    ) -> tuple[list[np.ndarray], list[np.ndarray], list[None]]:
+        """Stand in for Siril's alignment: leave the images where they are.
+
+        Returns
+        -------
+        result : `tuple`
+            The images, their covered masks and no alignment records.
+        """
+        images = [item.image for item in stacked]
+        return images, [np.ones(image.shape, dtype=bool) for image in images], [None] * len(images)
+
+    with patch.object(stack_runner, "_siril_alignment", fake_siril_alignment):
+        _align_and_screen_groups(results, measurements, "synthetic", is_spectral=False)
     assert reference.left_out_reason is None
     assert dim.left_out_reason is not None
     assert "believable range 0.25 to 4" in dim.left_out_reason

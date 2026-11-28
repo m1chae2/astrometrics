@@ -602,20 +602,10 @@ stacking.odd_even_difference_minimum_frames_per_half,STK-D25,judgment,Design est
 stacking.odd_even_difference_noise_bias,STK-D31,measurement,Design estimate
 stacking.off_field_pointing_fraction,STK-D73,exclusion criteria,Design estimate
 stacking.paired_bootstrap_count,STK-D31,measurement,Design estimate
-stacking.pattern_max_residual_pixels,STK-15,judgment,Partly measured
-stacking.pattern_maximum_scale_deviation,STK-D14,measurement,Design estimate
-stacking.pattern_minimum_longest_side_pixels,STK-D14,measurement,Design estimate
-stacking.pattern_neighbour_count,STK-D14,measurement,Design estimate
-stacking.pattern_ratio_tolerance,STK-D14,measurement,Design estimate
-stacking.pattern_refit_passes,STK-D14,measurement,Design estimate
-stacking.pattern_star_count,STK-D14,measurement,Design estimate
-stacking.pattern_star_count_growth,STK-D14,measurement,Design estimate
-stacking.pattern_star_count_maximum,STK-D14,measurement,Design estimate
 stacking.plausible_gain_range,STK-21,judgment,Partly measured
 stacking.point_source_sigma,STK-D34,judgment,Design estimate
 stacking.pointing_field_minimum_frames,STK-D73,exclusion criteria,Design estimate
 stacking.pointing_field_minimum_share,STK-D73,exclusion criteria,Design estimate
-stacking.polynomial_minimum_pairs_per_quadrant,STK-D85,judgment,Design estimate
 stacking.poor_alignment_rms_px,STK-D30,judgment,Design estimate
 stacking.position_misfit_radius_factor,STK-D34,judgment,Design estimate
 stacking.preview_color_denoise_strength,STK-D81,measurement,Partly measured
@@ -625,17 +615,10 @@ stacking.reference_aperture_minimum_radius_px,STK-D23,measurement,Design estimat
 stacking.reference_star_count,STK-36,measurement,Partly measured
 stacking.refinement_centroid_floor_fraction,STK-D65,measurement,Design estimate
 stacking.refinement_centroid_half_window_pixels,STK-D65,measurement,Design estimate
-stacking.refinement_clip_passes,STK-D65,measurement,Design estimate
-stacking.refinement_clip_sigmas,STK-D65,measurement,Design estimate
 stacking.refinement_detection_sigmas,STK-D65,measurement,Design estimate
 stacking.refinement_edge_margin_pixels,STK-D65,measurement,Design estimate
-stacking.refinement_match_radius_pixels,STK-D65,measurement,Design estimate
-stacking.refinement_max_residual_pixels,STK-14,judgment,Partly measured
-stacking.refinement_max_rotation_degrees,STK-14,judgment,Partly measured
-stacking.refinement_max_scale_deviation,STK-14,judgment,Partly measured
-stacking.refinement_minimum_pairs,STK-14,judgment,Partly measured
 stacking.refinement_saturation_fraction,STK-D65,measurement,Design estimate
-stacking.refinement_star_count,STK-14,measurement,Partly measured
+stacking.refinement_star_count,STK-D65,measurement,Design estimate
 stacking.rejection_sigma_high,STK-09,measurement,Partly measured
 stacking.rejection_sigma_low,STK-09,measurement,Partly measured
 stacking.replacement_depth_factor,STK-36,measurement,Partly measured

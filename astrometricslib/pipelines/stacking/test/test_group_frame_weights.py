@@ -729,6 +729,18 @@ def _run_two_group_stack(tmp_path: Path, read_noise_fails: bool = False) -> tupl
         covered[1][:2, :] = False
         return list(images), covered, [None] * len(images)
 
+    def fake_siril_alignment(
+        results: list[object], reference_index: int, _target_id: str
+    ) -> tuple[list[np.ndarray], list[np.ndarray], list[None]]:
+        """Stand in for Siril's alignment: leave the images where they are.
+
+        Returns
+        -------
+        result : `tuple`
+            What `fake_align` gives for the groups' images.
+        """
+        return fake_align([result.image for result in results], reference_index)
+
     measure = (
         patch(
             "astrometricslib.pipelines.stacking.processing.group_combination.measure_group_frames",
@@ -743,6 +755,7 @@ def _run_two_group_stack(tmp_path: Path, read_noise_fails: bool = False) -> tupl
     engine = SimpleNamespace(read_stack_artifacts=fake_read_artifacts)
     with (
         patch.object(stack_runner, "_stack_one_batch", fake_stack_one_batch),
+        patch.object(stack_runner, "_siril_alignment", fake_siril_alignment),
         measure,
         patch(
             "astrometricslib.pipelines.stacking.processing.group_alignment.align_images_to_reference",

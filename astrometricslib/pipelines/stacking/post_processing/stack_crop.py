@@ -15,7 +15,7 @@ The rule is a count of coverage. From each frame's registration transform, the
 module counts how many included frames cover each pixel. When the stack was
 built from exposure groups, each frame's transform reaches only its own group's
 grid, so the count first moves the pixel back by the inverse of the group's
-alignment with the reference group (shift, rotation and scale). The rim of a
+alignment with the reference group (its position map). The rim of a
 resampled group, where the spline mixes in the empty border, does not count as
 covered. Without this step, a group moved by hundreds of pixels would look as
 if it covered the whole stack. It makes two crops
@@ -60,6 +60,7 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data, read_header, write_image
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
@@ -67,10 +68,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.stacking.processing.image_registration import (
-    PolynomialDistortion,
-    RegistrationTransform,
-)
+from astrometricslib.pipelines.stacking.processing.group_position_map import GroupPositionMap
 from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 
 logger = logging.getLogger(__name__)
@@ -445,8 +443,7 @@ def frame_coverage_counts(
     width: int,
     height: int,
     step: int | None = None,
-    alignments: Sequence[Sequence[float] | None] | None = None,
-    distortions: Sequence[Mapping[str, Any] | None] | None = None,
+    alignments: Sequence[Mapping[str, Any] | None] | None = None,
 ) -> np.ndarray:
     """Count how many included frames cover each pixel of the stack.
 
@@ -457,11 +454,12 @@ def frame_coverage_counts(
     When the stack was built from exposure groups, each group was registered
     to its own reference frame, and the group stacks were then lined up with
     each other. A frame's transform only reaches its own group's grid, so the
-    stack pixel is first moved back onto that grid by the inverse of the
-    group's alignment, including its lens-distortion correction when it has
-    one. A stack pixel that falls outside the group's grid, or
-    within `_ALIGNED_EDGE_MARGIN_PX` of its border, is not covered by any frame
-    of the group.
+    stack pixel is first moved back onto that grid by the group's position
+    map (see `GroupPositionMap`): the shift of a zero-order or correlation
+    alignment, or the sky-based move Siril made, lens distortion included. A
+    stack pixel that falls outside the group's grid, or within
+    `_ALIGNED_EDGE_MARGIN_PX` of its border, is not covered by any frame of
+    the group.
 
     Parameters
     ----------
@@ -475,18 +473,10 @@ def frame_coverage_counts(
         The size in pixels of the frames and of the uncropped stack.
     step : `int`, optional
         Spacing of the counted pixels. Defaults to the tuned grid step.
-    alignments : `Sequence` of (`Sequence` of `float` or `None`), optional
+    alignments : `Sequence` of (`Mapping` or `None`), optional
         For each frame, how its group's stack was moved onto the reference
-        group's grid: the shift along the rows, the shift along the columns,
-        the rotation in degrees and the scale, as in `AlignmentResult` (the
-        rotation and scale are about the image centre, and the shifts are
-        those of the centre). `None` for a frame of the reference group. Left
-        out, no frame's group was moved.
-    distortions : `Sequence` of (`Mapping` or `None`), optional
-        For each frame, the stored lens-distortion correction of its group's
-        alignment (see `PolynomialDistortion.to_record`), or `None` when the
-        alignment has none. Left out, no alignment has one (the case for a
-        record made before the correction existed).
+        group's grid, as `GroupPositionMap.to_record` writes it. `None` for a
+        frame of a group that was not moved. Left out, no group was moved.
 
     Returns
     -------
@@ -494,36 +484,35 @@ def frame_coverage_counts(
         An integer array of shape (ceil(height / step), ceil(width / step)).
         The entry at (i, j) is the count at pixel row i * step, column
         j * step.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a group's alignment record holds no position map.
     """
     spacing = int(step if step is not None else resolve(_COVERAGE_GRID_STEP).value)
     margin = float(resolve(_ALIGNED_EDGE_MARGIN_PX).value)
     columns = np.arange(0, width, spacing, dtype=np.float64)
     rows = np.arange(0, height, spacing, dtype=np.float64)
     stack_columns, stack_rows = np.meshgrid(columns, rows)
-    centre = complex((width - 1) / 2.0, (height - 1) / 2.0)
+    position_maps: dict[int, GroupPositionMap | None] = {}
     counts = np.zeros(stack_columns.shape, dtype=np.int32)
     moves = [None] * len(homographies) if alignments is None else alignments
-    corrections = [None] * len(homographies) if distortions is None else distortions
-    for values, is_included, move, distortion in zip(homographies, included, moves, corrections, strict=True):
+    for values, is_included, move in zip(homographies, included, moves, strict=True):
         if not is_included:
             continue
         group_columns, group_rows = stack_columns, stack_rows
         inside_group = True
         if move is not None:
-            # The alignment sent a group position to a * (z - c) + c + t plus
-            # any distortion correction (z = column + 1j * row); the shared
-            # engine finds where a stack position came from.
-            shift_rows, shift_columns, rotation_degrees, scale = move
-            transform = RegistrationTransform(
-                shift_rows_pixels=shift_rows,
-                shift_columns_pixels=shift_columns,
-                rotation_degrees=rotation_degrees,
-                scale=scale,
-                origin_row_pixels=centre.imag,
-                origin_column_pixels=centre.real,
-                distortion=PolynomialDistortion.from_record(distortion),
-            )
-            group_rows, group_columns = transform.moving_positions(stack_rows, stack_columns)
+            # The position map says where each stack position is read in the
+            # group's own stack.
+            # The frames of one group share one record, read once.
+            if id(move) not in position_maps:
+                position_maps[id(move)] = GroupPositionMap.from_record(move)
+            position_map = position_maps[id(move)]
+            if position_map is None:
+                raise InvalidArgumentError("A group's alignment record holds no position map.")
+            group_rows, group_columns = position_map.source_positions(stack_rows, stack_columns)
             inside_group = (
                 (group_columns >= margin)
                 & (group_columns <= width - 1 - margin)
@@ -790,12 +779,9 @@ def _coverage_from_diagnostics(
         [bool(flag) for flag in flags] if len(flags) == len(homographies) else [True] * len(homographies)
     )
     groups = (diagnostics or {}).get("exposure_group_alignments") or []
-    alignments: list[Sequence[float] | None] | None = None
-    distortions: list[Mapping[str, Any] | None] | None = None
+    alignments: list[Mapping[str, Any] | None] | None = None
     if any(group.get("alignment") is not None for group in groups):
         alignments = [group.get("alignment") for group in groups for _ in range(int(group["frame_count"]))]
-        # Records made before the correction existed have no "distortion" key.
-        distortions = [group.get("distortion") for group in groups for _ in range(int(group["frame_count"]))]
         if len(alignments) != len(homographies):
             logger.warning(
                 "The exposure groups' frame counts (%d) do not match the registered frames (%d); "
@@ -804,9 +790,7 @@ def _coverage_from_diagnostics(
                 len(homographies),
             )
             return None
-    return frame_coverage_counts(
-        homographies, included, width, height, alignments=alignments, distortions=distortions
-    )
+    return frame_coverage_counts(homographies, included, width, height, alignments=alignments)
 
 
 # Header cards that record where a processed picture sits on its stack. The

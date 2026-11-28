@@ -1,10 +1,14 @@
 r"""Compare Siril with our own steps for lining up and combining group stacks.
 
 Stacking by exposure length makes one stack per group, then lines the group
-stacks up (`stacking/processing/group_alignment.py`) and combines them
-(`combine_exposure_group_images` in `group_combination.py`). Siril has commands
-that could do similar work. Before replacing one of our steps with Siril's,
-this script measures whether the replacement would lose quality. It reads the
+stacks up and combines them (`combine_exposure_group_images` in
+`group_combination.py`). Imaging stacks are lined up by Siril's plate
+solutions (`siril_group_alignment.py`, register entry STK-64). This script
+still compares Siril's star-matching registration (`register -transf=shift`)
+with the shift alignment the library keeps for spectral groups Siril cannot
+solve and for the Moon (`group_alignment.py`), and Siril's stacking with the
+library's combination. It measures whether replacing one of those steps with
+Siril's would lose quality. It reads the
 group stacks the pipeline already saved (the ``groups`` folder of each target)
 and changes nothing in the library.
 

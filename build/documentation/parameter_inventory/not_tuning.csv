@@ -74,6 +74,9 @@ astrometricslib/_internal/drivers/siril/core/session.py,SIRIL_PIPE_CONNECT_TIMEO
 astrometricslib/_internal/drivers/siril/core/session.py,SIRIL_QUICK_COMMAND_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril/core/version.py,_VERSION_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril/preview/stretch.py,build_bright_object_script.scale,Default multiplier of one (no change) for a Siril command argument
+astrometricslib/_internal/drivers/siril/stacking/group_registration.py,SIP_ORDER,Order of Siril's distortion fit; chosen and checked in STK-64.
+astrometricslib/_internal/drivers/siril/stacking/group_registration.py,_BASE_TIMEOUT_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/siril/stacking/group_registration.py,_TIMEOUT_SECONDS_PER_GROUP,"Network retry, timeout or physical ratio; affects only failure handling"
 astrometricslib/_internal/drivers/siril/stacking/staging.py,WORK_DIRECTORY_RETENTION_DAYS,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/sky_tiles.py,_FOOTPRINT_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for the footprint outline; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID format constant
@@ -514,12 +517,14 @@ astrometricslib/pipelines/stacking/pre_processing/set_aside_listing.py,_SNAPSHOT
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing
 astrometricslib/pipelines/stacking/processing/group_alignment.py,EXTENDED_TARGET_RIVAL_WINDOW_FACTOR,Fixed multiple of the zero-order search window; relative
+astrometricslib/pipelines/stacking/processing/group_position_map.py,NODE_SPACING_PIXELS,Spacing of the coarse position grid; far finer than the lens distortion changes (sampling).
+astrometricslib/pipelines/stacking/processing/group_position_map.py,_JACOBIAN_STEP_PIXELS,Step of the finite difference that reports the turn and the scale; numerics.
+astrometricslib/pipelines/stacking/processing/group_position_map.py,_ROWS_PER_BLOCK,Memory block size of the covered mask; plumbing.
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_ATTEMPTS,Attempt cap for placing apertures; plumbing.
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_SEED,software plumbing
 astrometricslib/pipelines/stacking/processing/image_registration.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/processing/image_registration.py,_INVERSE_ROUNDS,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/processing/image_registration.py,_TERM_COUNT,Number of terms of a quadratic in two variables; math constant.
 astrometricslib/pipelines/stacking/processing/image_registration.py,_WARP_ROWS_PER_BLOCK,Memory block size of the resampling; plumbing.
+astrometricslib/pipelines/stacking/processing/siril_group_alignment.py,RESAMPLING_EDGE_PIXELS,Reach of Siril's Lanczos kernel (4 pixels); a property of the kernel.
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_FRAMES,software plumbing
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_SECONDS,software plumbing
 astrometricslib/pipelines/tasks.py,STACKING_TIMEOUT_BASE_SECONDS,Plumbing: timeout

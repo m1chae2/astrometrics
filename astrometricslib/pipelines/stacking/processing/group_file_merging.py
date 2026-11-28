@@ -50,11 +50,12 @@ def merge_rejection_maps(
     header : `astropy.io.fits.Header`, optional
         A FITS header to give the combined map.
     alignments : `list` [`AlignmentResult` or `None`], optional
-        For each group, the move (shift, rotation and scale) that lined its
-        stack up with the reference group. The group's map gets the same
-        move, so the maps line up with the combined image. A group turned by
-        a half turn (a meridian flip between sessions) has its map turned
-        too. `None` for a group that was not moved. The map is resampled
+        For each group, the move that lined its stack up with the reference
+        group: a shift, or Siril's sky-based move with its rotation, scale
+        and lens distortion (see `GroupPositionMap`). The group's map gets
+        the same move, so the maps line up with the combined image. A group
+        turned by a half turn (a meridian flip between sessions) has its map
+        turned too. `None` for a group that was not moved. The map is resampled
         linearly (spline order 1): a cubic spline would overshoot beside a
         sharp edge and give fractions below 0 or above 1, and a nearest-pixel
         copy would make the map's edges jagged. Where the move brings in no

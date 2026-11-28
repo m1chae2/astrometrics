@@ -13,9 +13,6 @@ from astrometricslib.foundation.parameter_context import parameter_context, reco
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import RunBasis, TunedParameter
 from astrometricslib.pipelines.stacking.processing import group_alignment, group_star_gains
-from astrometricslib.pipelines.stacking.processing.star_pattern_candidates import (
-    PATTERN_MINIMUM_LONGEST_SIDE_PIXELS,
-)
 
 STAR_WIDTH_VALUES: list[tuple[TunedParameter, float]] = [
     (group_alignment.ALIGNMENT_HIGH_PASS_SIGMA_PIXELS, 8.0),
@@ -23,12 +20,8 @@ STAR_WIDTH_VALUES: list[tuple[TunedParameter, float]] = [
     (group_alignment.ZERO_ORDER_CENTROID_HALF_WINDOW_PIXELS, 25),
     (group_alignment.ZERO_ORDER_RIVAL_SEPARATION_PIXELS, 40),
     (group_alignment.REFINEMENT_CENTROID_HALF_WINDOW_PIXELS, 4),
-    (group_alignment.REFINEMENT_MATCH_RADIUS_PIXELS, 3.0),
-    (group_alignment.REFINEMENT_MAX_RESIDUAL_PIXELS, 0.5),
-    (group_alignment.PATTERN_MAX_RESIDUAL_PIXELS, 1.5),
     (group_star_gains.STAR_GAIN_SKY_INNER_PIXELS, 19.0),
     (group_star_gains.STAR_GAIN_SKY_OUTER_PIXELS, 25.0),
-    (PATTERN_MINIMUM_LONGEST_SIDE_PIXELS, 20.0),
 ]
 
 PLATE_SCALE_VALUES: list[tuple[TunedParameter, float]] = [

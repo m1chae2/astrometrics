@@ -1572,6 +1572,7 @@ _PHOTOMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(PHOTOMET
 # the summary does not keep.
 _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     "photometry.notice_camera_without_profile",
+    "photometry.notice_needs_astrometry",
     "photometry.notice_session_without_comparison_stars",
     "photometry.notice_logged_warnings",
     "photometry.stars_with_light_curve_scatter_count",
@@ -1807,6 +1808,7 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         extras=_spectroscopy_extras,
         not_held=(
             "spectroscopy.notice_camera_without_profile",
+            "spectroscopy.notice_needs_astrometry",
             "spectroscopy.skipped_no_trail_star_count",
             "spectroscopy.skipped_unidentified_star_count",
             "spectroscopy.notice_stars_below_feature_limit",

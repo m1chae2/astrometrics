@@ -8,10 +8,13 @@ Each one runs its stage through `tasks.run_target_stages`, so the stage
 order, the prerequisite rule and the skip reasons are the same as for any
 other caller:
 
-* Photometry and spectroscopy need astrometry. Astrometry runs first when
-  its saved result is missing or older than the stack. When it cannot run,
-  the stage is skipped, with the reason ``needs astrometry: ...``.
-* Spectral variation needs spectroscopy first, in the same way.
+* Astrometry is the core layer. Photometry and spectroscopy only read its
+  plate solution and never run astrometry. When the solution they need is
+  missing or out of date, the stage is skipped, with the reason
+  ``needs astrometry: <why>; run processing.astrometry.run(target) first``,
+  one job warning and one INFO log line.
+* Spectral variation needs spectroscopy first. Spectroscopy runs first when
+  its saved result is missing or older than the spectral stack.
 
 Each run records one ``analysis`` job and holds one of the shared job slots
 while it works (stacking and analysis share the pool). A run inside a job
@@ -143,7 +146,7 @@ def _run_stage(
     frame_selection: ProcessingFrameSelection | None = None,
     measured_at: datetime | None = None,
 ) -> ProcessTargetResult:
-    """Run one stage, and its prerequisites, as one job holding a job slot.
+    """Run one stage, and any prerequisite it adds, as one job with a slot.
 
     Parameters
     ----------
@@ -250,11 +253,13 @@ def run_photometry(
 ) -> ProcessTargetResult:
     """Measure the brightness of a target's stars across its frames.
 
-    Astrometry runs first when its result is missing or older than the
-    stack. With ``stack`` naming another camera's or optic's stack, that
-    stack is solved and the frames of its camera and optic are measured.
-    A path that is not one of the target's stacks is the image astrometry
-    solves when the target has no stack.
+    Photometry reads astrometry's plate solution and never runs
+    astrometry. Without a current solution of the main stack, or of the
+    image ``stack`` names, the stage is skipped with the reason
+    ``needs astrometry: ...``. With ``stack`` naming another camera's or
+    optic's stack, that stack's solution is read and the frames of its
+    camera and optic are measured. A path that is not one of the target's
+    stacks is the solved image read when the target has no stack.
 
     Parameters
     ----------
@@ -264,7 +269,8 @@ def run_photometry(
         The frames to measure. Left out, the frames of the analyzed stack's
         camera and optic.
     stack : `StackChoice`, optional
-        The stack whose solution names the stars. Left out, the main stack.
+        The solved stack whose solution names the stars. Left out, the main
+        stack.
     storage : `AbstractCatalogAccess`
         The star catalog.
     config : `AppConfiguration`
@@ -277,13 +283,15 @@ def run_photometry(
     Returns
     -------
     result : `ProcessTargetResult`
-        The photometry result under ``results["photometry"]``, and
-        astrometry's when it ran first.
+        The photometry result under ``results["photometry"]``, or a
+        ``"skipped"`` entry and the reason in ``stages_skipped``.
     """
     path = stack_choice_path(stack)
     other_stack = _other_imaging_stack(target, path)
     options: dict[str, dict[str, Any]] = {}
     if path and not _same_file(path, target.stacking.stacked_image):
+        # Not a stage to run: the image whose solution photometry reads (see
+        # `tasks.missing_astrometry_reason`).
         options["astrometry"] = {"path": path}
     chosen = _chosen_frames(frames, target)
     if chosen is not None:
@@ -313,9 +321,12 @@ def run_spectroscopy(
 ) -> ProcessTargetResult:
     """Extract and classify the spectra of a target's spectral stack.
 
-    Astrometry runs first when its result is missing or older than the
-    imaging stack. A target with no spectral data is skipped, with a
-    ``{"status": "skipped", ...}`` entry, not an error.
+    Spectroscopy reads a plate solution and never runs astrometry: the
+    solved imaging stack's of the same camera and optic, else the spectral
+    stack's own when astrometry has solved it. Without either the stage is
+    skipped with the reason ``needs astrometry: ...``. A target with no
+    spectral data is skipped, with a ``{"status": "skipped", ...}`` entry,
+    not an error.
 
     Parameters
     ----------
@@ -338,7 +349,8 @@ def run_spectroscopy(
     Returns
     -------
     result : `ProcessTargetResult`
-        The spectroscopy result under ``results["spectroscopy"]``.
+        The spectroscopy result under ``results["spectroscopy"]``, or a
+        ``"skipped"`` entry and the reason in ``stages_skipped``.
     """
     from astrometricslib.foundation.arguments import check_limit
 
@@ -375,9 +387,10 @@ def record_spectral_variation(
 
     One observing night at a time; a night with fewer than two frames is
     skipped, with the reason in the result. Spectroscopy runs first when its
-    result is missing or older than the spectral stack. The summary is kept
-    in ``quality.spectroscopy_variation``; the stack's spectra stay as they
-    are.
+    result is missing or older than the spectral stack; it is skipped, and
+    so is this stage, when it has no plate solution to read. The summary is
+    kept in ``quality.spectroscopy_variation``; the stack's spectra stay as
+    they are.
 
     Parameters
     ----------

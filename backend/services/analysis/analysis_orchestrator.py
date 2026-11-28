@@ -1114,9 +1114,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
     ) -> dict[str, Any]:
         """Run the stages a client chose, one library pipeline call each.
 
-        The stages run in `SELECTABLE_STAGES` order, inside this one job. The
-        library runs astrometry first when a stage needs it and its result is
-        missing or older than the stack. Astrometry and spectroscopy use the
+        The stages run in `SELECTABLE_STAGES` order, inside this one job, so
+        a checked astrometry runs before the stages that read its result.
+        Photometry and spectroscopy never run astrometry: asked for alone
+        without a current plate solution, the library skips them with the
+        reason ``needs astrometry: ...``, which lands in ``stagesSkipped``,
+        the job's recorded steps (the Recent Jobs subtitle) and the job's
+        warnings. Astrometry and spectroscopy use the
         target's stack. A sent file takes the stack's place only for a stage
         whose stack the target lacks.
 

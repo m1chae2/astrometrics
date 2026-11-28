@@ -269,11 +269,13 @@ ANALYSIS_TOOLS = {
     ),
     "processing_photometry_run": (
         "photometry",
-        "Measure the brightness of a target's stars across its frames (astrometry runs first when needed)",
+        "Measure the brightness of a target's stars across its frames (reads astrometry's plate solution; "
+        "skipped with the reason when there is none, so run processing_astrometry_run first)",
     ),
     "processing_spectroscopy_run": (
         "spectroscopy",
-        "Extract and classify the spectra of a target's spectral stack (astrometry runs first when needed)",
+        "Extract and classify the spectra of a target's spectral stack (reads astrometry's plate solution; "
+        "skipped with the reason when there is none, so run processing_astrometry_run first)",
     ),
     "processing_spectroscopy_record_variation": (
         "spectral_variation",

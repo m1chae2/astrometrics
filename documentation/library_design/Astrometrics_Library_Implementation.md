@@ -31,7 +31,7 @@ Each layer imports only from layers below (Appendix A ratchet).
 
 Outside services: Siril (stacking), Astrometry.net [3], Gaia through VizieR [4] or the ESA archive via astroquery [5], and SIMBAD [6] (plate solving, star identification), Gaia XP and DR3 (spectroscopy), and IMCCE SkyBoT (asteroid detection).
 
-Each `processing.<pipeline>.run` (`pipelines/pipeline_runs.py`) runs its stage through `pipelines.tasks.run_target_stages`, adding prerequisites per `STAGE_PREREQUISITES`; scripts batch targets with `pipelines.target_batch.process_targets_in_parallel`.
+Each `processing.<pipeline>.run` (`pipelines/pipeline_runs.py`) runs its stage through `pipelines.tasks.run_target_stages`, adding prerequisites per `STAGE_PREREQUISITES` (never astrometry; see `missing_astrometry_reason`); scripts batch targets with `pipelines.target_batch.process_targets_in_parallel`. <!-- impl: astrometricslib.pipelines.tasks.missing_astrometry_reason -->
 
 ## 3. Data models
 
@@ -123,7 +123,7 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 *Code:* `astrometricslib/pipelines/spectroscopy/`
 
 - **Interfaces (§6.1).** `pipeline.py`, `runner.py` (adapter), `record_and_flag_spectroscopy_stars.py`, `frame_analysis.py`, `batch.py`.
-- **Star identification (§6.2).** `pre_processing/spectral_star_registration.py`.
+- **Star identification (§6.2).** `pre_processing/spectral_star_registration.py`, `shared/target_center_hint.py`.
 - **Extraction (§6.2).** `pre_processing/spectrum_extractor.py`, `_extractor_c.c`, `neighbor_trail_deblending.py`, `neighbor_wing_correction.py`.
 - **Wavelength calibration (§6.2).** `pre_processing/spectrum_calibrator.py`, `optics_physics.py`, `differential_refraction.py`, `wavelength_zero_point.py`.
 - **Flux and resolution (§6.2).** `pre_processing/quantum_efficiency_correction.py`, `instrument_response.py`, `atmospheric_extinction.py`, `measured_line_spread.py`, `spectral_resolution.py`; `record_measured_spectral_bases` runs in `_process_target_stars` after extraction ([SPE-05](validation/spectroscopy.md#spe-05)). <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution.record_measured_spectral_bases -->

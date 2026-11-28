@@ -51,7 +51,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
+from astrometricslib.pipelines.shared.quality.notices import (
+    camera_without_profile_spec,
+    needs_astrometry_spec,
+    notice_spec,
+)
 
 PHOTOMETRY_STARS_PROCESSED = "photometry.stars_processed_count"
 PHOTOMETRY_STARS_FOUND = "photometry.stars_found_count"
@@ -1261,6 +1265,7 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
     *_WINDOW_METRICS,
     *_AMPLITUDE_METRICS,
     camera_without_profile_spec("photometry"),
+    needs_astrometry_spec("photometry"),
     notice_spec(
         PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS,
         Checkpoint.PHOTOMETRY,

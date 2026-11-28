@@ -5,7 +5,7 @@ Description: Storage and file helpers that the backend, the MCP servers and
 `DatasetSpec`, `connect_db`), the library's write counters
 (`get_library_data_version`, `get_target_data_version`,
 `get_camera_data_versions`, `get_frame_metric_signs`,
-`get_frame_metric_data_versions`, `get_stack_quality_data_version`,
+`get_stack_quality_data_version`,
 `get_target_camera_names`, `get_target_document_signs`, and
 `bump_data_version` and `read_data_versions` for a database that keeps its
 own counters) and the cache that uses them
@@ -67,7 +67,6 @@ from astrometricslib.foundation.storage.butler import AbstractButler, Butler, Da
 from astrometricslib.foundation.storage.data_versions import (
     bump_data_version,
     get_camera_data_versions,
-    get_frame_metric_data_versions,
     get_frame_metric_signs,
     get_library_data_version,
     get_stack_quality_data_version,
@@ -94,7 +93,6 @@ __all__ = [
     "existing_stack_path",
     "file_lock",
     "get_camera_data_versions",
-    "get_frame_metric_data_versions",
     "get_frame_metric_signs",
     "get_gaia_archive",
     "get_library_data_version",

@@ -317,6 +317,13 @@
       "interim_block": "",
       "note": "Built 2026-10-24. Reads the camera, telescope, filter, exposure, gain setting, offset and binning that stored quality measurements point at, by capture setting id. Writes nothing and creates no table."
     },
+    "quality_records_get_data_version": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#182). Gives an opaque text that changes when the stored quality rows of a metric, level or target change, so a cache knows when to read them again. Of no use to an AI client, which reads the rows with quality_records_query."
+    },
     "quality_records_get_metric": {
       "tool_class": "observe",
       "category": "image-processing",

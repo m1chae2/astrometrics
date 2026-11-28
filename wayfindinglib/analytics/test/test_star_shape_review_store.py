@@ -9,10 +9,11 @@ a frame the quarantine set aside, and rows of other targets. The expected
 numbers were taken from the reader as it was before it read the stored rows
 once per level instead of once per metric, so these tests show the faster
 reader gives the same answer. A further test checks that the kept rows are
-used again until the target's data change. The last tests add rows to the
-store and check that bringing kept rows up to date
-(`update_stored_shape_rows`) gives exactly what a new full read gives, and
-that a removed row or a row it cannot find makes it give up.
+used again until the science library's data version of the target's rows
+changes. The last tests add rows to the store the way a live night does
+and check that a read through the science library's kept reads gives
+exactly what a fresh read with nothing kept gives, also after a deleted
+frame and a row measured before the newest one.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -22,18 +23,17 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import CaptureSetting
+from astrometricslib import CaptureSetting, Target
+from astrometricslib._internal.drivers import quality_store
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.api.quality import QualityMeasurements
-from astrometricslib.drivers import get_target_data_version
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.star_shape_review import (
     StoredShapeRows,
     read_stack_roundness_low_limit,
     read_star_shape_rows,
     read_stored_shape_rows,
-    update_stored_shape_rows,
 )
 from wayfindinglib.models.session.star_shape_review import FrameStarShape, StandoutFrame
 
@@ -333,10 +333,24 @@ def test_the_stack_baseline_is_the_same_as_before(tmp_path: Path) -> None:
     assert limit == pytest.approx(EXPECTED_STACK_LIMIT)
 
 
+def _target_version(astrometrics: Any) -> str:
+    """Read the science library's data version of the target's rows.
+
+    Returns
+    -------
+    version : `str`
+        The opaque version.
+    """
+    return astrometrics.quality.records.get_data_version(target=Target(id=TARGET_ID))
+
+
 def test_kept_rows_give_the_same_answer_and_change_with_the_target(tmp_path: Path) -> None:
-    """Rows read once give the same answer; a new row changes the version."""
-    astrometrics, target, config = _library(tmp_path)
-    version = get_target_data_version(config, TARGET_ID)
+    """Rows read once give the same answer; a new row changes the version.
+
+    A row of another target leaves the target's version as it is.
+    """
+    astrometrics, target, _ = _library(tmp_path)
+    version = _target_version(astrometrics)
     stored = read_stored_shape_rows(astrometrics, TARGET_ID)
 
     assert read_star_shape_rows(astrometrics, target, stored=stored) == (
@@ -345,56 +359,65 @@ def test_kept_rows_give_the_same_answer_and_change_with_the_target(tmp_path: Pat
         EXPECTED_SET_ASIDE,
     )
     store = QualityStore(str(tmp_path / "library" / "astrometrics.db"))
+    store.write_measurements([
+        _measurement("frame.star_elongation", "Other/x.fits", 1.5, 40, target_id="Other")
+    ])
+    assert _target_version(astrometrics) == version
     store.write_measurements([_measurement("frame.star_elongation", f"{TARGET_ID}/a.fits", 1.1, 50)])
-    assert get_target_data_version(config, TARGET_ID) != version
+    assert _target_version(astrometrics) != version
     assert read_stored_shape_rows(astrometrics, TARGET_ID).frames[f"{TARGET_ID}/a.fits"][
         "frame.star_elongation"
     ][0] == pytest.approx(1.1)
 
 
-def _kept_and_store(tmp_path: Path) -> tuple[Any, Any, Any, StoredShapeRows, QualityStore]:
-    """Write the made-up library and read its rows once, with their version.
+@pytest.fixture
+def kept_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let the science library keep reads of any size, starting with none."""
+    monkeypatch.setattr(quality_store, "LATEST_READ_MINIMUM_ROWS", 1)
+    quality_store._LATEST_READS.clear()
+
+
+def _fresh(astrometrics: Any) -> StoredShapeRows:
+    """Read the target's numbers with nothing kept by the science library.
 
     Returns
     -------
-    astrometrics, target, read_version, kept, store
-        The stand-in library, the target, a function that reads the target's
-        data version, the kept rows, and the store to add rows to.
+    stored : `StoredShapeRows`
+        A full read.
     """
-    astrometrics, target, config = _library(tmp_path)
+    quality_store._LATEST_READS.clear()
+    return read_stored_shape_rows(astrometrics, TARGET_ID)
 
-    def read_version() -> Any:
-        """Read the made-up target's data version.
 
-        Returns
-        -------
-        version : `Any`
-            See `get_target_data_version`.
-        """
-        return get_target_data_version(config, TARGET_ID)
+def _read_and_store(tmp_path: Path) -> tuple[Any, Any, StoredShapeRows, QualityStore]:
+    """Write the made-up library and read its rows once.
 
-    kept = read_stored_shape_rows(astrometrics, TARGET_ID, read_version=read_version)
+    Returns
+    -------
+    astrometrics, target, first, store
+        The stand-in library, the target, the first read, and the store to
+        add rows to.
+    """
+    astrometrics, target, _ = _library(tmp_path)
+    first = read_stored_shape_rows(astrometrics, TARGET_ID)
     store = QualityStore(str(tmp_path / "library" / "astrometrics.db"))
-    return astrometrics, target, read_version, kept, store
+    return astrometrics, target, first, store
 
 
-def test_updating_kept_rows_with_added_rows_equals_a_full_read(tmp_path: Path) -> None:
-    """Added rows merged into kept rows give exactly what a full read gives.
+@pytest.mark.usefixtures("kept_reads")
+def test_a_read_after_added_rows_equals_a_fresh_read(tmp_path: Path) -> None:
+    """Rows of a live night, read through the kept reads, equal a fresh read.
 
     The added rows cover a new frame, a newer measurement that replaces an
     older one, a newer unusable row that hides a usable one, a newer row at
     another definition version, a color-channel row, another target's row
     and a new stack row.
     """
-    astrometrics, target, read_version, kept, store = _kept_and_store(tmp_path)
-    assert kept.version == read_version()
-    kept_copy = StoredShapeRows(
-        frames={subject: dict(values) for subject, values in kept.frames.items()},
-        stack=kept.stack,
-        recency={subject: dict(values) for subject, values in kept.recency.items()},
-        version=kept.version,
-        mark=kept.mark,
+    astrometrics, target, first, store = _read_and_store(tmp_path)
+    first_copy = StoredShapeRows(
+        frames={subject: dict(values) for subject, values in first.frames.items()}, stack=first.stack
     )
+    version = _target_version(astrometrics)
     a_subject, b_subject, e_subject = (f"{TARGET_ID}/{name}.fits" for name in ("a", "b", "e"))
     setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="CamA"))
     added = [
@@ -419,11 +442,10 @@ def test_updating_kept_rows_with_added_rows_equals_a_full_read(tmp_path: Path) -
         SimpleNamespace(path="e.fits", role="LIGHT", timestamp=(START + timedelta(minutes=60)).timestamp())
     )
 
-    updated = update_stored_shape_rows(astrometrics, TARGET_ID, kept, read_version())
-    fresh = read_stored_shape_rows(astrometrics, TARGET_ID, read_version=read_version)
+    assert _target_version(astrometrics) != version
+    updated = read_stored_shape_rows(astrometrics, TARGET_ID)
 
-    assert updated is not None
-    assert updated == fresh
+    assert updated == _fresh(astrometrics)
     assert read_star_shape_rows(astrometrics, target, stored=updated) == read_star_shape_rows(
         astrometrics, target
     )
@@ -431,79 +453,32 @@ def test_updating_kept_rows_with_added_rows_equals_a_full_read(tmp_path: Path) -
     assert "frame.star_elongation_coherence" not in updated.frames[b_subject]
     assert "frame.star_elongation_angle_deg" not in updated.frames[a_subject]
     assert updated.stack is not None and updated.stack.elongation == pytest.approx(1.04)
-    assert kept == kept_copy
+    assert first == first_copy
 
 
-def test_updating_again_after_an_update_still_equals_a_full_read(tmp_path: Path) -> None:
-    """An updated answer can be brought up to date again, frame by frame."""
-    astrometrics, _, read_version, kept, store = _kept_and_store(tmp_path)
+@pytest.mark.usefixtures("kept_reads")
+def test_frame_by_frame_reads_equal_a_fresh_read(tmp_path: Path) -> None:
+    """Each read during a night equals a fresh read, frame by frame."""
+    astrometrics, _, _, store = _read_and_store(tmp_path)
 
     for frame_number in range(3):
         subject = f"{TARGET_ID}/n{frame_number}.fits"
         store.write_measurements([_measurement("frame.star_elongation", subject, 1.1, 70 + frame_number)])
-        updated = update_stored_shape_rows(astrometrics, TARGET_ID, kept, read_version())
-        assert updated is not None
-        assert updated == read_stored_shape_rows(astrometrics, TARGET_ID, read_version=read_version)
-        kept = updated
+        assert read_stored_shape_rows(astrometrics, TARGET_ID) == _fresh(astrometrics)
 
 
-def test_no_new_rows_keeps_the_numbers(tmp_path: Path) -> None:
-    """With no row added, the update gives the same numbers without reading."""
-    astrometrics, _, read_version, kept, _ = _kept_and_store(tmp_path)
+@pytest.mark.usefixtures("kept_reads")
+def test_a_removed_frame_and_a_late_row_still_equal_a_fresh_read(tmp_path: Path) -> None:
+    """A deleted frame, a reused row number and an old time are all exact."""
+    astrometrics, _, _, store = _read_and_store(tmp_path)
 
-    assert update_stored_shape_rows(astrometrics, TARGET_ID, kept, read_version()) == kept
-
-
-def test_a_removed_frame_makes_the_update_give_up(tmp_path: Path) -> None:
-    """Rows removed (a deleted frame) as rows were added need a full read."""
-    astrometrics, _, read_version, kept, store = _kept_and_store(tmp_path)
-
-    store.delete_frame_measurements([f"{TARGET_ID}/d.fits"])
-    store.write_measurements([
-        _measurement("frame.star_elongation", f"{TARGET_ID}/e.fits", 1.3, 60),
-        _measurement("frame.star_elongation_coherence", f"{TARGET_ID}/e.fits", 0.3, 60),
-    ])
-
-    assert update_stored_shape_rows(astrometrics, TARGET_ID, kept, read_version()) is None
-
-
-def test_a_removed_newest_row_makes_the_update_give_up(tmp_path: Path) -> None:
-    """When the kept newest row is gone, its row id may be used again."""
-    astrometrics, _, read_version, _, store = _kept_and_store(tmp_path)
     store.write_measurements([_measurement("frame.star_elongation", f"{TARGET_ID}/e.fits", 1.3, 60)])
-    kept = read_stored_shape_rows(astrometrics, TARGET_ID, read_version=read_version)
-
-    store.delete_frame_measurements([f"{TARGET_ID}/e.fits"])
+    read_stored_shape_rows(astrometrics, TARGET_ID)
+    store.delete_frame_measurements([f"{TARGET_ID}/e.fits", f"{TARGET_ID}/d.fits"])
     store.write_measurements([_measurement("frame.star_elongation", f"{TARGET_ID}/f.fits", 1.2, 61)])
-
-    assert update_stored_shape_rows(astrometrics, TARGET_ID, kept, read_version()) is None
-
-
-def test_a_row_measured_before_the_kept_newest_time_makes_the_update_give_up(tmp_path: Path) -> None:
-    """A row added late with an old time is missed, so the update gives up."""
-    astrometrics, _, read_version, kept, store = _kept_and_store(tmp_path)
+    after_delete = read_stored_shape_rows(astrometrics, TARGET_ID)
+    assert after_delete == _fresh(astrometrics)
+    assert f"{TARGET_ID}/e.fits" not in after_delete.frames
 
     store.write_measurements([_measurement("frame.star_elongation", f"{TARGET_ID}/a.fits", 1.6, 0)])
-
-    assert update_stored_shape_rows(astrometrics, TARGET_ID, kept, read_version()) is None
-
-
-def test_rows_read_while_the_data_changed_cannot_be_updated(tmp_path: Path) -> None:
-    """When the version changed during the read, the rows record no version."""
-    astrometrics, _, _, _, _ = _kept_and_store(tmp_path)
-    versions = iter([("a",), ("b",)])
-
-    def changing_version() -> Any:
-        """Give a different version on each call.
-
-        Returns
-        -------
-        version : `Any`
-            A stand-in version.
-        """
-        return next(versions)
-
-    kept = read_stored_shape_rows(astrometrics, TARGET_ID, read_version=changing_version)
-
-    assert kept.version is None
-    assert update_stored_shape_rows(astrometrics, TARGET_ID, kept, ("b",)) is None
+    assert read_stored_shape_rows(astrometrics, TARGET_ID) == _fresh(astrometrics)

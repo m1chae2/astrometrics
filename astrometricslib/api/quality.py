@@ -4,7 +4,8 @@
 reached by name:
 
 * ``records`` (`QualityMeasurements`, here): the measurements earlier runs
-  stored (`query`, `get`), the picture behind each row (`get_paths`), the
+  stored (`query`, `get`), a text that changes when they do
+  (`get_data_version`), the picture behind each row (`get_paths`), the
   declared metrics (`get_metrics`, `get_metric`), and the capture settings
   and calibration identities the rows point at.
 * ``frames`` (`QualityFrames`, in `_quality_frames.py`): measure raw frames,
@@ -185,6 +186,43 @@ class QualityMeasurements(MovedNames):
         if row is None and required:
             raise NotFoundError(f"No stored quality row has the id {row_id}.")
         return row
+
+    def get_data_version(
+        self, *, metric: str | None = None, level: str | None = None, target: Target | None = None
+    ) -> str:
+        """Give a short text that changes whenever the matching rows change.
+
+        Owner:
+            astrometricslib.pipelines.shared.quality.stored_measurements.get_data_version
+
+        A script or a cache that works something out from the rows `query`
+        gives can keep its answer while this text stays the same. Asking
+        reads no rows. The text is opaque: compare it with an earlier one.
+
+        Parameters
+        ----------
+        metric : `str`, optional
+            Only this metric. `get_metrics` lists the names.
+        level : `str`, optional
+            Only subjects of this level, as in `query`.
+        target : `Target`, optional
+            Only this target.
+
+        Returns
+        -------
+        version : `str`
+            The text. It changes when a row of the metric, level and target
+            is added, removed or replaced (or a frame of the target moves to
+            another target), and stays the same otherwise.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if ``metric`` is not registered or
+        ``level`` is unknown.
+        """
+        from astrometricslib.pipelines.shared.quality.stored_measurements import get_data_version
+
+        return get_data_version(self._config, metric=metric, level=level, target=target)
 
     def get_paths(self, row_ids: Sequence[int]) -> QualityRowResolution:
         """Find the picture behind each stored quality row.

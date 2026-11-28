@@ -88,7 +88,9 @@ class FakeAstrometrics:
             frame_subject_id=lambda frame: frame_subject_id(frame.path, target_id),
         )
         self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=(target,)))
-        self.quality = SimpleNamespace(records=SimpleNamespace(query=self._query))
+        self.quality = SimpleNamespace(
+            records=SimpleNamespace(query=self._query, get_data_version=self._data_version)
+        )
         self.calibration = (
             camera_profile_calibration(camera_config)
             if camera_config is not None
@@ -105,3 +107,14 @@ class FakeAstrometrics:
             The rows of the asked metric (all rows when none is asked).
         """
         return Page.of([row for row in self.rows if metric is None or row.metric == metric])
+
+    def _data_version(self, metric: str | None = None, **_: Any) -> str:
+        """Answer `astrometrics.quality.records.get_data_version`.
+
+        Returns
+        -------
+        version : `str`
+            A text made from the made-up rows of the asked metric, so it
+            changes exactly when they do.
+        """
+        return repr([(row.row_id, row.value) for row in self.rows if metric is None or row.metric == metric])

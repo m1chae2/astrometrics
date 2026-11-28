@@ -25,7 +25,6 @@ from astrometricslib.foundation.storage.data_versions import (
     TARGETS_KIND,
     bump_data_version,
     get_camera_data_versions,
-    get_frame_metric_data_versions,
     get_frame_metric_signs,
     get_library_data_version,
     get_stack_quality_data_version,
@@ -493,60 +492,3 @@ def test_the_frame_metric_signs_follow_the_rows_of_each_group(config: AppConfigu
     ])
     assert get_frame_metric_signs(config, metric, groups) == after_b
     assert get_frame_metric_signs(config, "frame.other_metric", groups) == ((0, 0, 0), (0, 0, 0))
-
-
-def test_the_frame_metric_versions_follow_each_metrics_frame_rows(config: AppConfiguration) -> None:
-    """Each metric's version sees its own frame rows only, of any target.
-
-    A row of another metric and a stack row leave it as it is. The parts
-    grow by the added row's count and row number, and a removed row lowers
-    the count and the sum.
-    """
-    store = QualityStore.from_configuration(config)
-    width, other = "frame.star_width_moffat_arcsec", "frame.star_elongation"
-    assert get_frame_metric_data_versions(config, [width, other]) == {
-        width: (0, 0, 0, ""),
-        other: (0, 0, 0, ""),
-    }
-
-    first = _camera_measurement(store, "CamA", "M 31", "run-1")
-    store.write_measurements([first])
-    after_first = get_frame_metric_data_versions(config, [width, other])
-    assert after_first is not None
-    assert after_first[other] == (0, 0, 0, "")
-    assert after_first[width].measurement_count == 1
-    assert after_first[width].measurement_row_id_sum == after_first[width].newest_row_id
-    assert after_first[width].newest_measured_at.startswith("2026-10-01T03:00:00")
-
-    second = _camera_measurement(store, "CamB", "M 13", "run-2")
-    stack_row = second.model_copy(
-        update={
-            "run_id": "run-3",
-            "metric": "stacking.star_elongation",
-            "subject": second.subject.model_copy(update={"level": SubjectLevel.STACK}),
-        }
-    )
-    store.write_measurements([second, stack_row])
-    after_second = get_frame_metric_data_versions(config, [width])
-    assert after_second is not None
-    assert after_second[width].measurement_count == 2
-    assert after_second[width].newest_row_id > after_first[width].newest_row_id
-
-    store.delete_frame_measurements([first.subject.subject_id])
-    after_delete = get_frame_metric_data_versions(config, [width])
-    assert after_delete is not None
-    assert after_delete[width].measurement_count == 1
-    assert after_delete[width].measurement_row_id_sum == after_second[width].newest_row_id
-
-
-def test_the_frame_metric_versions_of_a_missing_or_unreadable_library(tmp_path: Path) -> None:
-    """No database gives zeros; a file that is not a database gives `None`."""
-    library = tmp_path / "library"
-    library.mkdir()
-    config = SimpleNamespace(get_library_path=lambda: str(library))
-    assert get_frame_metric_data_versions(config, ["frame.star_elongation"]) == {
-        "frame.star_elongation": (0, 0, 0, "")
-    }
-
-    (library / "astrometrics.db").write_text("not a database", encoding="utf-8")
-    assert get_frame_metric_data_versions(config, ["frame.star_elongation"]) is None

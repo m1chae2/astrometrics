@@ -15,9 +15,9 @@ library's frame records are read once and shared through a
 Three slow reads are kept in the context's `review_cache` between calls,
 each until its own data change, and each answer equals a fresh read:
 
-* the stored measurements of every frame (`kept_frame_measurements`). When
-  rows were only added (a new frame was measured), only the added rows are
-  read and merged in;
+* the stored measurements of every frame (`kept_frame_measurements`), until
+  the science library's data version of those rows changes. The science
+  library then reads only the rows written since;
 * the Ekos session records and guiding runs (`recorded_sessions`), until a
   write to either table;
 * each night's guiding baseline (`_night_baseline_provider`), which reads
@@ -29,9 +29,10 @@ each until its own data change, and each answer equals a fresh read:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.drivers import get_frame_metric_data_versions
+from astrometricslib.exceptions import AstrometricsError
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.analytics.data_versions import (
     guiding_baseline_data_version,
@@ -61,6 +62,8 @@ if TYPE_CHECKING:
     from wayfindinglib.models.session.recurring_issue import RecurringIssue
     from wayfindinglib.models.session.session_quality import GuidingSessionAnalysis
     from wayfindinglib.models.session.sky_quality import SkyAnalysis
+
+logger = logging.getLogger(__name__)
 
 LibraryCache = dict[tuple[str, str, str], Any]
 """Frame records read once and shared by every night of one call."""
@@ -102,98 +105,78 @@ def capture_library(
             telescope_name,
             camera_name,
             targets,
-            read_measurements=lambda: kept_frame_measurements(context).values,
+            read_measurements=lambda: kept_frame_measurements(context),
         )
     return library_cache[key]
 
 
-def frame_measurement_version(context: ControlContext) -> dict[str, Any] | None:
+def frame_measurement_version(context: ControlContext) -> tuple[str, ...] | None:
     """Read the data version of the stored frame measurements.
 
-    This is one short query per pinned metric
-    (`capture_history.PINNED_FRAME_METRICS`), with no frame rows read. It
-    changes whenever a frame row of one of those metrics is added or
-    removed, so equal versions mean `kept_frame_measurements` gives the same
-    numbers.
+    This is the science library's opaque data version of each pinned
+    metric's frame rows (`capture_history.frame_measurement_version`), a
+    few short queries with no frame rows read. Equal versions mean
+    `kept_frame_measurements` gives the same numbers.
 
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the configuration.
+        Supplies the science library.
 
     Returns
     -------
-    version : `dict` or `None`
-        See ``get_frame_metric_data_versions``. `None` when the database
-        could not be read.
+    version : `tuple` [`str`, ...] or `None`
+        The version, or `None` when the library could not be read; the
+        caller must not keep an answer then.
     """
-    return get_frame_metric_data_versions(context.config, tuple(capture_history.PINNED_FRAME_METRICS))
+    try:
+        return capture_history.frame_measurement_version(context.astrometrics)
+    except AstrometricsError as error:
+        logger.warning("Could not read the data version of the frame measurements: %s", error)
+        return None
 
 
 def kept_frame_measurements(
-    context: ControlContext, version: Mapping[str, Any] | None = None
-) -> capture_history.FrameMeasurements:
+    context: ControlContext, version: tuple[str, ...] | None = None
+) -> Mapping[str, Mapping[str, capture_history.StoredValue]]:
     """Give the stored measurements of every frame, read again only on change.
 
     The capture history reads four metrics of every frame in the library
-    (`capture_history.PINNED_FRAME_METRICS`), about half a second of reading.
-    They are kept in the context's review cache with the data version of
-    those metrics (``get_frame_metric_data_versions``). When the version
-    changed only because rows were added, the kept numbers are brought up to
-    date by reading the added rows alone
-    (`capture_history.update_frame_measurements`). Anything else, such as a
-    deleted frame, reads every row again. The answer is the same as a full
-    read (`capture_history.read_frame_measurements`).
+    (`capture_history.PINNED_FRAME_METRICS`). The numbers are kept in the
+    context's review cache with the science library's data version of those
+    metrics (`frame_measurement_version`), so while no frame row of them
+    changes, no row is read. When the version changed, the numbers are read
+    again (`capture_history.read_frame_measurements`); the science library
+    then reads only the rows written since its last read, so the answer is
+    the same as a full read and quick to get.
 
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the science library, the configuration and the cache.
-    version : `~collections.abc.Mapping`, optional
+        Supplies the science library and the cache.
+    version : `tuple` [`str`, ...], optional
         The data version the caller has just read
         (`frame_measurement_version`), so it is not read again. It is read
         here when omitted.
 
     Returns
     -------
-    measurements : `capture_history.FrameMeasurements`
-        The numbers. Every caller gets the same object while the rows stay
-        the same; it is not changed by anyone.
+    measurements : `~collections.abc.Mapping`
+        The numbers, by frame subject id and then by metric, as
+        `capture_history.read_frame_measurements` gives them. Every caller
+        gets the same object while the rows stay the same; treat it as
+        read-only.
 
     Notes
     -----
     A library that cannot be read raises the library's error, as a full
     read does.
     """
-
-    def read_version() -> Any:
-        """Read the data version of the pinned frame metrics.
-
-        Returns
-        -------
-        version : `Any`
-            See ``get_frame_metric_data_versions``.
-        """
-        return frame_measurement_version(context)
-
-    def update(
-        _kept_version: Any, kept: capture_history.FrameMeasurements, version: Any
-    ) -> capture_history.FrameMeasurements | None:
-        """Read only the rows added since the kept numbers were read.
-
-        Returns
-        -------
-        measurements : `capture_history.FrameMeasurements` or `None`
-            The numbers for `version`, or `None` to read them all again.
-        """
-        return capture_history.update_frame_measurements(context.astrometrics, kept, version)
-
     return context.review_cache.get_or_build(
         ("frame_measurements",),
-        read_version if version is None else version,
-        lambda: capture_history.read_frame_measurement_table(context.astrometrics, read_version),
+        (lambda: frame_measurement_version(context)) if version is None else version,
+        lambda: capture_history.read_frame_measurements(context.astrometrics),
         copy_result=False,
-        update=update,
     )
 
 

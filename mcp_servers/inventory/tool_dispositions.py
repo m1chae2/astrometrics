@@ -697,6 +697,12 @@ DECISIONS = {
         "it, so a cited row can be read back. Writes nothing and creates no table.",
         tool_class="observe",
     ),
+    "quality_records_get_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes when the stored quality rows of a "
+        "metric, level or target change, so a cache knows when to read them again. Of no use to an AI "
+        "client, which reads the rows with quality_records_query.",
+    ),
     "quality_records_get_metric": ToolDecision(
         "keep",
         "Built 2026-11-27 (#206). Reads the whole declaration of one quality metric by name. Fixed text, "

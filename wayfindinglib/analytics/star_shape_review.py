@@ -35,25 +35,19 @@ stored rows.
 Reading is the slow part. `read_stored_shape_rows` reads a target's stored
 numbers once (one query per frame metric, one query for all the stack's
 rows) into a `StoredShapeRows` of plain numbers, which does not depend on
-the night or the frames asked about. A caller can keep it until the target's
-data change and pass it to `read_star_shape_rows`. The set-aside listing is
-read once per call.
-
-During a night a new frame adds rows about once a minute. Reading every row
-of the target again each time grows with the target's history. So
-`update_stored_shape_rows` brings kept numbers up to date by reading only the
-rows added since they were read, and merging them in with the same rule the
-full read uses (`_merge_frame_row`). It does this only when the target's
-data version shows that rows were only added: the count and the sum of the
-row numbers grew by exactly the rows it found, and the newest row it started
-from is still there unchanged. Anything else (a deleted frame, a row it
-could not find) makes it give up, and the caller reads everything again.
+the night or the frames asked about. A caller can keep it until the science
+library's data version of the target's quality rows changes
+(``quality.records.get_data_version``) and pass it to
+`read_star_shape_rows`. The science library keeps its own reads of the
+newest rows and brings them up to date with only the rows written since, so
+reading again after a new frame is quick. The set-aside listing is read
+once per call.
 """
 
 import math
 import statistics
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -67,17 +61,8 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import MeasurementStatus, SubjectLevel
-from wayfindinglib.analytics.capture_history import (
-    ROW_READ_MARGIN,
-    RecencyKey,
-    RowMark,
-    StoredValue,
-    merge_newest_frame_row,
-    read_row_mark,
-    row_mark,
-    row_recency,
-)
+from astrometricslib.reports import MeasurementStatus
+from wayfindinglib.analytics.capture_history import StoredValue, merge_frame_row
 from wayfindinglib.analytics.performance_envelope import (
     BASELINE_SPREAD_MULTIPLIER,
     MINIMUM_BASELINE_SESSIONS,
@@ -97,7 +82,6 @@ __all__ = [
     "read_star_shape_rows",
     "read_stored_shape_rows",
     "stack_roundness_low_limit",
-    "update_stored_shape_rows",
 ]
 
 FRAME_ELONGATION_METRIC = "frame.star_elongation"
@@ -195,40 +179,20 @@ class StoredShapeRows:
     stack : `FrameStarShape` or `None`
         The shape of the target's newest library stack, when it has stored
         star-shape rows and the stack was read.
-    recency : `~collections.abc.Mapping` [`str`, `~collections.abc.Mapping`]
-        By frame subject id, then by frame metric: the `RecencyKey` of the
-        newest whole-frame row (no color channel), usable or not. A newer
-        row that is not usable hides an older usable one, so this is what
-        `update_stored_shape_rows` compares a new row against.
-    version : `Any`
-        The target's data version (``get_target_data_version``) that these
-        numbers match exactly, or `None` when that is not known (the data
-        changed while they were read, or no version was asked for). Only
-        numbers with a version can be brought up to date.
-    mark : `RowMark` or `None`
-        The target's newest row at `version`. If it is gone or changed
-        later, a row was removed and the numbers must be read again.
     """
 
     frames: Mapping[str, Mapping[str, StoredValue]]
     stack: FrameStarShape | None
-    recency: Mapping[str, Mapping[str, RecencyKey]] = field(default_factory=dict)
-    version: Any = None
-    mark: RowMark | None = None
 
 
-def read_stored_shape_rows(
-    astrometrics: Any,
-    target_id: str,
-    include_stack: bool = True,
-    read_version: Callable[[], Any] | None = None,
-) -> StoredShapeRows:
+def read_stored_shape_rows(astrometrics: Any, target_id: str, include_stack: bool = True) -> StoredShapeRows:
     """Read the stored star-shape numbers of a target's frames and stack.
 
     This is the slow part of `read_star_shape_rows`. It does not depend on
     the night or the frame list asked about, so a caller may keep its answer
-    until the target's data change (``get_target_data_version``) and pass it
-    back as ``stored``.
+    until the target's quality rows change (the science library's data
+    version, ``quality.records.get_data_version``) and pass it back as
+    ``stored``.
 
     Parameters
     ----------
@@ -238,157 +202,18 @@ def read_stored_shape_rows(
         The target's id.
     include_stack : `bool`, optional
         Also read the target's stack rows. Defaults to true.
-    read_version : `~collections.abc.Callable`, optional
-        Gives the target's data version (``get_target_data_version``). When
-        given, the version is read before and after the rows. If it did not
-        change, the answer records it, so `update_stored_shape_rows` can
-        later read only newer rows. Only a read that includes the stack
-        records it.
 
     Returns
     -------
     stored : `StoredShapeRows`
         The numbers, by frame subject and metric, and the stack's shape.
     """
-    before = read_version() if read_version is not None and include_stack else None
     frames: dict[str, dict[str, StoredValue]] = {}
-    recency: dict[str, dict[str, RecencyKey]] = {}
     for metric in PINNED_FRAME_SHAPE_METRICS:
         for row in _query_metric_rows(astrometrics, metric, "frame", target_id):
-            _merge_frame_row(frames, recency, row)
+            merge_frame_row(frames, row, PINNED_FRAME_SHAPE_METRICS, _usable)
     stack = _read_stack(astrometrics, target_id) if include_stack else None
-    version, mark = None, None
-    if before is not None and _version_parts(before) is not None and before.measurement_count > 0:
-        mark = read_row_mark(astrometrics, before.newest_row_id)
-        if mark is not None and read_version is not None and read_version() == before:
-            version = before
-    return StoredShapeRows(
-        frames=frames, stack=stack, recency=recency, version=version, mark=None if version is None else mark
-    )
-
-
-def update_stored_shape_rows(
-    astrometrics: Any, target_id: str, kept: StoredShapeRows, version: Any
-) -> StoredShapeRows | None:
-    """Bring kept star-shape numbers up to date by reading only new rows.
-
-    The quality store only adds rows; the one exception is a deleted frame,
-    whose rows are removed. So when the rows of the target were only added
-    since the kept numbers were read, reading the added rows and merging
-    them in gives the same answer as reading everything again. This checks
-    that, in order:
-
-    1. The kept newest row (`StoredShapeRows.mark`) is still there and
-       unchanged. Then no row at or below it was used again, and every
-       added row has a larger row id.
-    2. The rows of the target with a larger row id, up to the newest one in
-       `version`, are read (by measurement time from just before the kept
-       newest time, then by row id). Their count and the sum of their row
-       ids must equal the growth of the count and the sum in `version`. A
-       removed row lowers both, and an added row measured earlier than the
-       kept newest time is not found, so either shows as a mismatch.
-
-    The new frame rows are merged with the full read's rule
-    (`_merge_frame_row`). When a stack row was added, the stack's shape is
-    read again with the full read's code. The target's document and
-    calibration records are not read by the numbers, so a change to them
-    alone needs no new read.
-
-    Parameters
-    ----------
-    astrometrics : `Any`
-        The science library's high-level interface (``Astrometrics``).
-    target_id : `str`
-        The target's id.
-    kept : `StoredShapeRows`
-        The numbers kept from an earlier read. They are not changed.
-    version : `Any`
-        The target's data version now (``get_target_data_version``).
-
-    Returns
-    -------
-    stored : `StoredShapeRows` or `None`
-        The numbers for `version`, or `None` when they cannot be brought up
-        to date this way and must be read again.
-    """
-    base, now = _version_parts(kept.version), _version_parts(version)
-    if base is None or now is None or kept.mark is None or not base.newest_measured_at:
-        return None
-    added_count = now.measurement_count - base.measurement_count
-    added_sum = now.measurement_row_id_sum - base.measurement_row_id_sum
-    if added_count < 0 or now.newest_row_id < base.newest_row_id:
-        return None
-    if read_row_mark(astrometrics, base.newest_row_id) != kept.mark:
-        return None
-    since = datetime.fromisoformat(base.newest_measured_at) - ROW_READ_MARGIN
-    added = [
-        row
-        for row in astrometrics.quality.records.query(
-            target=Target(id=target_id), since=since, latest_only=False
-        )
-        if row.row_id is not None and base.newest_row_id < row.row_id <= now.newest_row_id
-    ]
-    if len(added) != added_count or sum(row.row_id for row in added) != added_sum:
-        return None
-    newest = max(added, key=lambda row: row.row_id, default=None)
-    if (newest.row_id if newest is not None else base.newest_row_id) != now.newest_row_id:
-        return None
-    frames = dict(kept.frames)
-    recency = dict(kept.recency)
-    for subject in {row.subject.subject_id for row in added}:
-        # Copy only the subjects that may change, so the kept numbers, which
-        # other callers may still hold, stay as they were.
-        if subject in frames:
-            frames[subject] = dict(frames[subject])
-        if subject in recency:
-            recency[subject] = dict(recency[subject])
-    for row in sorted(added, key=row_recency):
-        _merge_frame_row(frames, recency, row)
-    stack_changed = any(row.subject.level == SubjectLevel.STACK for row in added)
-    return StoredShapeRows(
-        frames=frames,
-        stack=_read_stack(astrometrics, target_id) if stack_changed else kept.stack,
-        recency=recency,
-        version=version,
-        mark=kept.mark if newest is None else row_mark(newest),
-    )
-
-
-def _merge_frame_row(frames: dict[str, Any], recency: dict[str, Any], row: Any) -> None:
-    """Add one stored row to the numbers, as the store's latest view would.
-
-    Both the full read and `update_stored_shape_rows` use this, so they keep
-    the same rule. It is the capture history's rule
-    (`capture_history.merge_newest_frame_row`) for the pinned shape metrics
-    (`PINNED_FRAME_SHAPE_METRICS`) and the rows this module can use
-    (`_usable`).
-
-    Parameters
-    ----------
-    frames : `dict`
-        The numbers by subject and metric (`StoredShapeRows.frames`). A
-        subject left with no number is removed.
-    recency : `dict`
-        The newest row of each subject and metric
-        (`StoredShapeRows.recency`).
-    row : `Any`
-        A stored row (`QualityMeasurement`).
-    """
-    merge_newest_frame_row(frames, recency, row, PINNED_FRAME_SHAPE_METRICS, _usable)
-
-
-def _version_parts(version: Any) -> Any:
-    """Check that a data version has the named parts this module reads.
-
-    Returns
-    -------
-    version : `Any`
-        The version itself when it has the count, newest row id, newest time
-        and row-id sum of the target's measurements, else `None` (an older or
-        stand-in version, which only allows a full read).
-    """
-    names = ("measurement_count", "newest_row_id", "newest_measured_at", "measurement_row_id_sum")
-    return version if version is not None and all(hasattr(version, name) for name in names) else None
+    return StoredShapeRows(frames=frames, stack=stack)
 
 
 def read_star_shape_rows(
@@ -641,7 +466,7 @@ def _query_metric_rows(astrometrics: Any, metric: str, level: str, target_id: st
     -------
     rows : `list`
         Newest row of each subject and channel, usable or not, oldest first.
-        The caller picks the usable ones (`_merge_frame_row`), because an
+        The caller picks the usable ones (`merge_frame_row`), because an
         unusable newest row still hides an older usable one. Empty when the
         metric is not registered (yet).
     """

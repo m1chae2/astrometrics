@@ -33,6 +33,7 @@ __all__ = [
     "fingerprint_library_copy",
     "fitted_controller_settings",
     "fitted_device_settings",
+    "fitted_go_to_scatter",
     "fitted_guide_rate_fraction",
     "read_results",
     "write_results",
@@ -110,6 +111,7 @@ def write_results(
         "inputs": inputs or {},
         "controller_settings": result.controller_settings,
         "guide_rate_fraction": result.guide_rate_fraction,
+        "go_to_scatter": result.go_to_scatter,
         "notes": result.notes,
         "values": [asdict(entry) for entry in result.values],
     }
@@ -222,3 +224,21 @@ def fitted_guide_rate_fraction(path: Path) -> dict[str, float] | None:
     """
     document = read_results(path)
     return None if document is None else document.get("guide_rate_fraction")
+
+
+def fitted_go_to_scatter(path: Path) -> dict[str, Any] | None:
+    """Give the go-to scatter entry the results file holds.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        The results file.
+
+    Returns
+    -------
+    entry : `dict` or `None`
+        The ``go_to_scatter`` entry (see `simulator.goto_scatter`), or `None`
+        when the file is missing or has none (too few first attempts).
+    """
+    document = read_results(path)
+    return None if document is None else document.get("go_to_scatter")

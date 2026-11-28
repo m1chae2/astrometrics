@@ -14,9 +14,9 @@ from wayfindinglib.models.session.telemetry import MountPointingModel
 from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
 
 _ATTEMPTS = [
-    {"ra": 10.0, "dec": 20.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
-    {"ra": 11.0, "dec": 21.0, "delta_ra_arcsec": 4.5, "delta_dec_arcsec": -2.5},
-    {"ra": 12.0, "dec": 22.0, "delta_ra_arcsec": 5.5, "delta_dec_arcsec": -3.5},
+    {"ra": 10.0, "dec": 20.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
+    {"ra": 11.0, "dec": 21.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 4.5, "delta_dec_arcsec": -2.5},
+    {"ra": 12.0, "dec": 22.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 5.5, "delta_dec_arcsec": -3.5},
 ]
 
 
@@ -75,6 +75,16 @@ class _FakeObservatory:
             The latitude passed at construction, or 45.
         """
         return self._observer_location["latitude"] if self._observer_location else 45.0
+
+    def observer_longitude_deg(self) -> float:
+        """Return the fixed longitude, or -105 degrees when none is known.
+
+        Returns
+        -------
+        longitude_deg : `float`
+            The longitude passed at construction, or -105.
+        """
+        return self._observer_location["longitude"] if self._observer_location else -105.0
 
 
 def test_compute_pointing_model_uses_all_history_without_session_id() -> None:

@@ -24,6 +24,7 @@ from simulator import device_settings
 from simulator.device_settings import DeviceSetting, matches, merge_device_settings
 from simulator.fit import driver_model
 from simulator.fit.fitting import (
+    GO_TO_SCATTER_SEED,
     MOUNT_MODEL_SIGNS,
     MOUNT_MODEL_ZERO_TERMS,
     FitResult,
@@ -42,6 +43,7 @@ from simulator.fit.results import (
     fingerprint_library_copy,
     fitted_controller_settings,
     fitted_device_settings,
+    fitted_go_to_scatter,
     fitted_guide_rate_fraction,
     read_results,
     write_results,
@@ -910,6 +912,39 @@ def test_goto_offset_becomes_arcminutes_with_the_named_signs() -> None:
         assert _written(result, MOUNT, MOUNT_MODEL, element) == pytest.approx(0.0)
     entry = next(v for v in result.values if v.element == "MM_IH")
     assert entry.unit == "arcmin"
+
+
+def test_goto_scatter_comes_from_the_median_absolute_deviation() -> None:
+    """The scatter is 1.4826 times the MAD of the first attempts, per axis."""
+    candidate = collect_measurements(_fake_wayfinder(), 0.0, 0.0).candidates["mount_model"][0]
+    result = fit_values(_measurements(mount_model=candidate), _setup())
+    scatter = result.go_to_scatter
+    assert scatter is not None
+    assert scatter["mean_ra_arcsec"] == pytest.approx(candidate.values["ra_angle_median_arcsec"])
+    assert scatter["mean_dec_arcsec"] == pytest.approx(candidate.values["dec_median_arcsec"])
+    assert scatter["sigma_ra_arcsec"] == pytest.approx(1.4826 * candidate.values["ra_angle_mad_arcsec"])
+    assert scatter["sigma_dec_arcsec"] == pytest.approx(1.4826 * candidate.values["dec_mad_arcsec"])
+    assert scatter["count"] == 6
+    assert scatter["seed"] == GO_TO_SCATTER_SEED
+
+
+def test_no_scatter_without_first_attempts(tmp_path: Path) -> None:
+    """Too few first attempts give no scatter entry, and the file says none."""
+    wayfinder = _fake_wayfinder(records=SimpleNamespace(attempts=_goto_attempts()[:4]))
+    result = fit_values(collect_measurements(wayfinder, 0.0, 0.0), _setup())
+    assert result.go_to_scatter is None
+    path = tmp_path / RESULTS_FILE_NAME
+    write_results(path, result, fingerprint_library_copy(tmp_path))
+    assert fitted_go_to_scatter(path) is None
+
+
+def test_the_scatter_survives_the_results_file(tmp_path: Path) -> None:
+    """The results file carries the scatter to the exposure driver."""
+    candidate = collect_measurements(_fake_wayfinder(), 0.0, 0.0).candidates["mount_model"][0]
+    result = fit_values(_measurements(mount_model=candidate), _setup())
+    path = tmp_path / RESULTS_FILE_NAME
+    write_results(path, result, fingerprint_library_copy(tmp_path))
+    assert fitted_go_to_scatter(path) == result.go_to_scatter
 
 
 def test_a_scattered_set_says_the_systematic_part_is_small() -> None:

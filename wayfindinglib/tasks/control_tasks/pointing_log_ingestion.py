@@ -43,8 +43,8 @@ def compute_pointing_model(
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the observer latitude for the fit (45 degrees when no
-        location is known).
+        Supplies the observer latitude and longitude for the fit (the
+        stand-in site's when no location is known).
     records : `ControlRecordStore`
         Source of recorded alignment attempts.
     session_id : `str` | `None`, optional
@@ -65,4 +65,8 @@ def compute_pointing_model(
     else:
         attempts = records.get_alignment_attempts(limit=limit)
 
-    return fit_pointing_model(attempts, latitude_deg=context.observer_latitude_deg())
+    return fit_pointing_model(
+        attempts,
+        latitude_deg=context.observer_latitude_deg(),
+        longitude_deg=context.observer_longitude_deg(),
+    )

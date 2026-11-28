@@ -742,6 +742,11 @@ wayfinding.maximum_frames_used,WAY-D122,measurement,Design estimate
 wayfinding.minimum_frames_used,WAY-D122,measurement,Design estimate
 wayfinding.phd2_settle_pixels,WAY-D147,judgment,Design estimate
 wayfinding.phd2_settle_seconds,WAY-D147,judgment,Design estimate
+wayfinding.pointing_high_noise_gain,WAY-D149,judgment,Design estimate
+wayfinding.pointing_high_point_count,WAY-D149,judgment,Design estimate
+wayfinding.pointing_low_noise_gain,WAY-D149,judgment,Design estimate
+wayfinding.pointing_low_point_count,WAY-D149,judgment,Design estimate
+wayfinding.pointing_refuse_noise_gain,WAY-D149,judgment,Design estimate
 wayfinding.pulse_merge_window_seconds,WAY-D128,measurement,Design estimate
 wayfinding.session_time_margin_seconds,WAY-D141,exclusion criteria,Design estimate
 wayfinding.spurious_alignment_error_arcsec,WAY-D124,exclusion criteria,Design estimate

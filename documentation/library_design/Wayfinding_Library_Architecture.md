@@ -476,7 +476,7 @@ The library maps raw device signals to a state but does not yet gather the signa
 
 ### 6.4 Correction computation
 
-Pointing, guiding and focus corrections are computed here, not in the science library. Solving a field's position, measuring a star's centroid and measuring a star's size can be done with archived data and no telescope, so they belong to the science library. Turning a solved position into a mount correction, a drift into a mount pulse, and a size curve into a focuser position needs the mount's orientation, the guider's calibration, or the focuser's backlash and thermal behavior. Control takes the science library's measurements and computes only the telescope-dependent remainder.
+Pointing, guiding and focus corrections are computed here, not in the science library. Solving a field's position or measuring a star's centroid or size needs only archived data, so it belongs to the science library. Turning those into a mount correction, a mount pulse or a focuser position needs the mount's orientation, the guider's calibration or the focuser's behavior. Control computes only that telescope-dependent remainder.
 
 Each correction is a pure function of its inputs. Issuing it is a separate, delegation-gated step, so one computation serves both the shadowed and the authoritative states.
 
@@ -487,7 +487,7 @@ r = \sqrt{(\Delta\alpha - \Delta\alpha_{\text{model}})^2 + (\Delta\delta - \Delt
 \tag{5}
 $$
 
-An error the model fully explains is a known, steady bias, not a failure. A model with too little data is ignored.
+An error the model fully explains is a known, steady bias, not a failure. A model with too little data, or with unseparated terms, is ignored.
 
 **Guiding.** The guide-star drift is rotated onto the mount's axes by the calibrated camera angle and converted to arcseconds with the guider's pixel scale. For one axis with drift $d$ in arcseconds, guide rate $v$ in arcseconds per second, aggressiveness $g$ between zero and one, deadband $\epsilon_{\text{dead}}$ and longest pulse $p_{\max}$, the signed pulse duration in seconds is
 
@@ -596,9 +596,9 @@ The standing mount-mechanical model feeds a stored periodic-error and backlash m
 
 Adding the running total of the guider's pulses back to each measured error rebuilds the mount's unguided error. A fitted sine and line give its periodic error and drift.
 
-The pointing correction takes a session-scoped fitted model instead. The classic geometric pointing model splits plate-solve offsets across the sky into physical mount terms, such as index errors, polar axis misalignment, cone error and tube flexure. Evaluating the fit forward predicts the systematic error at a position (Equation (5)). The polar-misalignment terms describe tonight's setup, not the mount, so they are never fed forward to a later session.
+The pointing correction takes a session-scoped fitted model instead. The classic geometric pointing model splits plate-solve offsets across the sky into physical mount terms, such as index errors, polar axis misalignment, cone error and tube flexure. Each solve enters the fit with its true hour angle (local sidereal time minus right ascension). Solves close together on the sky give large terms that cancel, so a fit that cannot separate its terms is refused or marked low confidence (WAY-D149), as a status, not an error. Evaluating a trusted fit forward predicts the systematic error at a position (Equation (5)). The polar-misalignment terms describe tonight's setup, not the mount, so they are never fed forward to a later session.
 
-Three routines build these models from deliberate runs: a guider calibration that sends a known pulse on each axis, a backlash calibration that reverses declination in small steps, and a polar-alignment assistant that fits tonight's model from the plate solves so far. The caller supplies each routine's hardware step.
+Three routines build these models from deliberate runs: a guider calibration that sends a known pulse on each axis, a backlash calibration that reverses declination in small steps, and a polar-alignment assistant that fits tonight's model from the plate solves so far.
 
 <!-- impl: wayfindinglib.analytics.guiding_spectrum.analyze_guiding_telemetry -->
 <!-- impl: wayfindinglib.analytics.pointing_model.fit_pointing_model -->
@@ -608,7 +608,7 @@ Three routines build these models from deliberate runs: a guider calibration tha
 <!-- impl: wayfindinglib.tasks.control_tasks.guiding_log_ingestion.ingest_guide_log_file -->
 <!-- impl: wayfindinglib.tasks.control_tasks.pointing_log_ingestion -->
 
-An operator often wants to move all six delegation states together. The bulk operation replays the single-capability path for each capability, in dependency order, and reports any capability that cannot legally reach the requested state. It never skips or forces one. Moving every capability toward delegated (*monitoring mode*) always succeeds. Moving toward authoritative (*controller mode*) succeeds only for capabilities already positioned for the jump: safety and mount control have no precondition, the three corrections must already be shadowed, and capture must wait until all three are authoritative. A bulk request from a fresh policy therefore usually returns a partial result, which the caller shows. A flag blind to which capability is commanded would be a second authority competing with the per-capability one.
+An operator often wants to move all six delegation states together. The bulk operation replays the single-capability path for each capability, in dependency order, and reports any capability that cannot legally reach the requested state. It never skips or forces one. Moving every capability toward delegated (*monitoring mode*) always succeeds. Moving toward authoritative (*controller mode*) succeeds only for capabilities already positioned for the jump: safety and mount control have no precondition, the three corrections must already be shadowed, and capture must wait until all three are authoritative. A bulk request from a fresh policy therefore usually returns a partial result, which the caller shows.
 
 <!-- impl: wayfindinglib.tasks.control_tasks.capability_promotion.set_all_capabilities -->
 <!-- impl: wayfindinglib.tasks.control_tasks.capability_promotion.BulkDelegationOutcome -->

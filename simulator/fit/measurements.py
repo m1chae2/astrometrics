@@ -474,8 +474,8 @@ def _mount_model(wayfinder: Wayfinder, measurements: Measurements) -> None:
         f"Median signed offset of {len(first)} first attempts (solved minus commanded): "
         f"{median_ra:.0f} arcsec in right ascension (MAD {_median_absolute_deviation(ra_angle):.0f}), "
         f"{median_dec:.0f} arcsec in declination (MAD {_median_absolute_deviation(dec_offset):.0f}); "
-        f"the typical error is {typical:.0f} arcsec. Only this constant offset is simulated; "
-        "the scatter around it is not."
+        f"the typical error is {typical:.0f} arcsec. The median is the middle of the simulated go-to "
+        "offset, and the median absolute deviation sets its scatter (see simulator.goto_scatter)."
     )
     if systematic < GOTO_SYSTEMATIC_FRACTION * typical:
         note += " The systematic part is small next to the typical error: the errors scatter in direction."

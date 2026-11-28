@@ -43,7 +43,7 @@ class ProcessingConfig(BaseModel):
     background_homogeneity_check_enabled : `bool`
         Whether to run the background homogeneity check, by default
         `True`.
-    quarantine_bad_frames_enabled : `bool`
+    set_aside_bad_frames_enabled : `bool`
         Whether stacking moves frames with clouds or trailed stars into an
         ``_excluded`` folder before it runs, by default `True`.
     trim_noisy_stack_edges_enabled : `bool`
@@ -94,7 +94,7 @@ class ProcessingConfig(BaseModel):
     stack_weight: str | None = None
     generate_rejmap: bool = True
     background_homogeneity_check_enabled: bool = True
-    quarantine_bad_frames_enabled: bool = True
+    set_aside_bad_frames_enabled: bool = True
     preview_star_tone_enabled: bool = True
     preview_remove_green_noise_enabled: bool = True
     preview_color_from_other_stack_enabled: bool = True

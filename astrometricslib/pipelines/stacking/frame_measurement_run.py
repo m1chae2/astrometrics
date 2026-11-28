@@ -64,11 +64,11 @@ of one core. With four worker processes a batch of those frames takes about
 about 650 s with threads). A sync that
 adds frames waits that long per added frame before it returns.
 
-The same module records the quarantine step's own numbers for every frame it
-checked (`quarantine_measurements_for_frame`), so the stacking stage can keep
+The same module records the set-aside step's own numbers for every frame it
+checked (`set_aside_measurements_for_frame`), so the stacking stage can keep
 what it measured about the frames it did not move. That stacking hook runs
-only for imaging stacks with the quarantine step turned on (spectral stacks
-and stacks with `quarantine_bad_frames_enabled` off store none of these
+only for imaging stacks with the set-aside step turned on (spectral stacks
+and stacks with `set_aside_bad_frames_enabled` off store none of these
 rows); the explicit run and the sync do not depend on it.
 """
 
@@ -133,7 +133,7 @@ from astrometricslib.pipelines.shared.quality.time_budget import TIME_BUDGET_REA
 from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
 from astrometricslib.pipelines.stacking.metrics import (
     FRAME_POINTING_OFFSET_FRACTION,
-    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SET_ASIDE_SKY_MEDIAN,
     FRAME_SKY_UNEVENNESS,
 )
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
@@ -165,11 +165,11 @@ __all__ = [
     "frame_was_cut_short",
     "frames_whose_camera_profile_gap_closed",
     "measurements_to_store",
-    "quarantine_measurements_for_frame",
     "record_frame_measurements_for_target",
     "record_stage_frame_quality",
     "record_target_frame_measurements",
     "run_measurement_task",
+    "set_aside_measurements_for_frame",
 ]
 
 # How many frames are measured at the same time, each in a worker process of
@@ -187,7 +187,7 @@ __all__ = [
 # CPU time of each frame rises from 13 to 25 s as the threads fight for the
 # lock. Four processes gain 2.4 times over one thread (each frame's CPU time
 # rises to 20 to 23 s, the cores share memory bandwidth). Four is also the
-# count the quarantine step uses for its reads (`MEASUREMENT_THREADS`) and
+# count the set-aside step uses for its reads (`MEASUREMENT_THREADS`) and
 # leaves most of the cores to the app and the backend, so the interface stays
 # responsive during a sync. It is a courtesy limit, not a tuned optimum. Each
 # worker holds one frame at a time (an 18 MB float32 frame and a few copies),
@@ -941,7 +941,7 @@ class FrameMeasurementSession:
         return record_measurements(self.store, measurements)
 
 
-def quarantine_measurements_for_frame(
+def set_aside_measurements_for_frame(
     measurement: dict[str, Any],
     frame: FrameRecord,
     target_id: str,
@@ -952,12 +952,12 @@ def quarantine_measurements_for_frame(
     capture_setting_id: int | None,
     action_taken: str | None = None,
 ) -> list[QualityMeasurement]:
-    """Turn one frame's quarantine measurement into quality rows.
+    """Turn one frame's set-aside check measurement into quality rows.
 
     Parameters
     ----------
     measurement : `dict`
-        One frame's entry from `QuarantineReport.measurements`:
+        One frame's entry from `SetAsideReport.measurements`:
         ``sky_median_adu``, and ``sky_unevenness`` and
         ``pointing_offset_fraction`` (each `None` when the check could not
         be made). When the step fitted the frame's stars itself, the entry
@@ -972,7 +972,7 @@ def quarantine_measurements_for_frame(
     job_id : `str` or `None`
         The job, if any.
     measured_at : `datetime`
-        When the quarantine step measured (with a time zone).
+        When the set-aside step measured (with a time zone).
     capture_setting_id : `int` or `None`
         The frame's capture setting row.
     action_taken : `str` or `None`, optional
@@ -1005,7 +1005,7 @@ def quarantine_measurements_for_frame(
     }
     rows = []
     for metric, value, missing_reason in (
-        (FRAME_QUARANTINE_SKY_MEDIAN, measurement.get("sky_median_adu"), "the median could not be computed"),
+        (FRAME_SET_ASIDE_SKY_MEDIAN, measurement.get("sky_median_adu"), "the median could not be computed"),
         (
             FRAME_SKY_UNEVENNESS,
             measurement.get("sky_unevenness"),
@@ -1315,7 +1315,7 @@ def _measure_target_frames(
 def record_stage_frame_quality(
     target: Target,
     kept_frames: Sequence[FrameRecord],
-    quarantine_measurements: Sequence[dict[str, Any]],
+    set_aside_measurements: Sequence[dict[str, Any]],
     all_checked_frames: Sequence[FrameRecord],
     recording: FrameQualityRecording,
     measured_at: datetime,
@@ -1324,15 +1324,16 @@ def record_stage_frame_quality(
 ) -> FrameMeasurementSummary:
     """Store what the stacking stage measured about a target's frames.
 
-    The stacking stage calls this after the quarantine step, which runs only
-    for imaging stacks with the quarantine turned on. It records two things:
+    The stacking stage calls this after the set-aside step, which runs only
+    for imaging stacks with the set-aside check turned on. It records two
+    things:
 
-    1. The quarantine step's own numbers (median pixel value, sky
+    1. The set-aside step's own numbers (median pixel value, sky
        unevenness and pointing offset) for every frame it measured, kept
        or moved. Today only the moved frames' numbers reach a file.
        When the step fitted a frame's stars itself, the star width,
        elongation and angle rows are stored with them
-       (`quarantine_measurements_for_frame`).
+       (`set_aside_measurements_for_frame`).
     2. The full frame measurement for every kept frame whose file has not been
        measured yet, through `record_frame_measurements_for_target` (the same
        path as every other caller). There is no limit on the number of
@@ -1343,7 +1344,7 @@ def record_stage_frame_quality(
        this step is skipped, because that run measures the frames, and a note
        in the summary says so.
 
-    The quarantine step reads each file into its own arrays and returns only
+    The set-aside step reads each file into its own arrays and returns only
     numbers, so there are no loaded pixels to reuse. The full measurement
     therefore reads the frame again. Sharing the pixels would mean changing
     both readers, for a read that the file system cache usually still holds.
@@ -1354,10 +1355,10 @@ def record_stage_frame_quality(
         The target being stacked. Its kept frames are stamped in memory.
     kept_frames : `Sequence` [`FrameRecord`]
         The frames that stay in the stack.
-    quarantine_measurements : `Sequence` [`dict`]
-        `QuarantineReport.measurements`.
+    set_aside_measurements : `Sequence` [`dict`]
+        `SetAsideReport.measurements`.
     all_checked_frames : `Sequence` [`FrameRecord`]
-        Every frame the quarantine step looked at, moved ones included, to
+        Every frame the set-aside step looked at, moved ones included, to
         match the numbers to a frame by path.
     recording : `FrameQualityRecording`
         The configuration and the shared calibration library, given by the
@@ -1369,15 +1370,15 @@ def record_stage_frame_quality(
         When it is not given, `recording.save_target` is used. The stage saves
         the whole target itself later when neither is given.
     actions_by_path : `Mapping` [`str`, `str`], optional
-        For each frame the quarantine step moved (by its original path), the
-        ``action_taken`` text stored with its quarantine rows
-        (`QuarantineReport.actions_by_path`). Frames not listed get none.
+        For each frame the set-aside step moved (by its original path), the
+        ``action_taken`` text stored with its set-aside rows
+        (`SetAsideReport.actions_by_path`). Frames not listed get none.
 
     Returns
     -------
     summary : `FrameMeasurementSummary`
         The counts of the full frame measurements. ``rows_written`` also
-        counts the quarantine rows.
+        counts the set-aside rows.
     """
     frames_by_path = {frame.path: frame for frame in all_checked_frames}
     needing = []
@@ -1396,19 +1397,19 @@ def record_stage_frame_quality(
         ):
             needing.append(frame)
     summary = FrameMeasurementSummary(target_id=target.id)
-    if not quarantine_measurements and not needing:
+    if not set_aside_measurements and not needing:
         return summary
     session = FrameMeasurementSession(
         QualityStore.from_configuration(recording.configuration),
         recording.calibration_library,
         measured_at=measured_at,
     )
-    for measurement in quarantine_measurements:
+    for measurement in set_aside_measurements:
         frame = frames_by_path.get(measurement.get("path"))
         if frame is None:
             continue
         try:
-            rows = quarantine_measurements_for_frame(
+            rows = set_aside_measurements_for_frame(
                 measurement,
                 frame,
                 target.id,
@@ -1420,7 +1421,7 @@ def record_stage_frame_quality(
             )
             summary.rows_written += session.record(rows)
         except AstrometricsError as error:
-            logger.warning("Could not store the quarantine measurements of %s: %s", frame.path, error)
+            logger.warning("Could not store the set-aside check measurements of %s: %s", frame.path, error)
     if needing:
         full_summary = record_frame_measurements_for_target(
             target,

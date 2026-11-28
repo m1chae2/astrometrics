@@ -94,9 +94,9 @@ class FrameStarShape(BaseModel):
 
 
 class StandoutFrame(BaseModel):
-    """A frame the stacker's quarantine set aside for stretched stars.
+    """A frame the stacker's set-aside check set aside for stretched stars.
 
-    The review lists it as the quarantine decided; it does not judge the
+    The review lists it as the set-aside check decided; it does not judge the
     frame again.
 
     Parameters
@@ -109,7 +109,7 @@ class StandoutFrame(BaseModel):
     elongation : `float` or `None`
         The frame's stored elongation, when there is one.
     reason : `str`
-        The quarantine's sentence saying what it measured.
+        The set-aside check's sentence saying what it measured.
     """
 
     model_config = ConfigDict(populate_by_name=True)

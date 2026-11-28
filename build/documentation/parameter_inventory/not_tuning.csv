@@ -58,6 +58,9 @@ astrometricslib/_internal/drivers/quality_store.py,LATEST_READ_MINIMUM_ROWS,Plum
 astrometricslib/_internal/drivers/quality_store.py,MAXIMUM_SUBJECT_IDS_PER_QUERY,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/quality_store.py,SCHEMA_VERSION,software plumbing
 astrometricslib/_internal/drivers/siril/astrometry/plate_solve.py,SOLVE_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/sequence_solve.py,FRAMES_PER_GROUP,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/sequence_solve.py,SEQUENCE_BASE_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/sequence_solve.py,SEQUENCE_TIMEOUT_SECONDS_PER_FRAME,"Plumbing: timeout, cache size, retention or query size"
 astrometricslib/_internal/drivers/siril/astrometry/solve_driver.py,SirilPlateSolveDriver.solve.image_height,Fallback image size used only when the caller gives none
 astrometricslib/_internal/drivers/siril/astrometry/solve_driver.py,SirilPlateSolveDriver.solve.image_width,Fallback image size used only when the caller gives none
 astrometricslib/_internal/drivers/siril/core/_pipes_windows.py,PIPE_CONNECT_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
@@ -197,14 +200,13 @@ astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_T
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,_LOGGED_WARNING_TEXT_LENGTH,Display cap on the text kept for one logged warning
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,logged_warnings_notice_measurement.dropped_count,Count the caller passes; zero means none were dropped
 astrometricslib/pipelines/photometry/post_processing/variability_skill.py,_MAGNITUDES_PER_FRACTION,unit or physical constant
-astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,CENTROID_SEARCH_HALF_WIDTH_PX,Default search half width of the centroid locator; the drift limit is half of it (PHO-D16); method choice
+astrometricslib/pipelines/photometry/pre_processing/frame_mapping.py,_PIXEL_ORIGIN,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_MAXIMUM_UTC_OFFSET_HOURS,"Time zone range, not a choice"
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_CLIP_MAXIMUM_PASSES,Round cap of an iterative clip that settles in fewer rounds
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_CLIP_SIGMA,Repeats the clip level of the star-ring analysis (shared.sky_clip_sigma) for the photometry sky ring
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_MINIMUM_PIXELS,Fewest ring pixels that can describe the sky; a data-sufficiency floor
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,aperture_flux_error_adu.dark_current_e_per_pixel,0 means none; the caller passes the camera value
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,measure_aperture_photometry.dark_current_e_per_pixel,0 means none; the caller passes the camera value
-astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,summarize_centroid_shifts.anchor_count,0 means no anchors; the caller passes the count
 astrometricslib/pipelines/photometry/processing/catalog_zero_point.py,STANDARD_ERROR_OF_MEDIAN_FACTOR,Statistical constant sqrt(pi/2)
 astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,MINIMUM_FRACTIONAL_NOISE,Divide-by-zero guard
 astrometricslib/pipelines/photometry/processing/comparison_ensemble.py,_CONSISTENT_CHI_SQUARE,Statistical definition of consistent star
@@ -399,7 +401,7 @@ astrometricslib/pipelines/stacking/frame_measurement_run.py,STAMP_SAVE_INTERVAL_
 astrometricslib/pipelines/stacking/frame_queries.py,query_frames.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/frame_screening.py,BACKGROUND_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUALITY_ROWS_WINDOW,Progress-bar windows; display only.
-astrometricslib/pipelines/stacking/frame_screening.py,QUARANTINE_WINDOW,Progress-bar windows; display only.
+astrometricslib/pipelines/stacking/frame_screening.py,SET_ASIDE_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/metrics.py,_context_metric.definition_version,Version number of a metric definition
 astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.repeats,Repeat count; 1 means a single pass
 astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.seed,Random seed; reproducibility only
@@ -506,8 +508,8 @@ astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,EDGE_MARGIN_PX,D
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_MINIMUM_FLUX_FRACTION,"Display choice of a reference star, picked by eye; does not act on data"
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_STAR_COUNT,Number of candidate stars offered to the caller for a display; not a detection limit
 astrometricslib/pipelines/stacking/pre_processing/calibration_assessment.py,MAXIMUM_FRAMES_OF_CONCERN,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,MEASUREMENT_THREADS,software plumbing
-astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,WARN_QUARANTINED_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
+astrometricslib/pipelines/stacking/pre_processing/frame_set_aside.py,MEASUREMENT_THREADS,software plumbing
+astrometricslib/pipelines/stacking/pre_processing/frame_set_aside.py,WARN_SET_ASIDE_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
 astrometricslib/pipelines/stacking/pre_processing/set_aside_listing.py,_SNAPSHOT_CACHE_SIZE,"Memory cap of the set-aside folder cache; speed only, the listing is the same"
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing

@@ -43,7 +43,7 @@ def restore_excluded_frames(
     By default nothing moves: the call only lists the frames. With
     ``apply=True`` it moves them back and reindexes the target, which
     saves it. The next stack may set the same frames aside again. To
-    keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
+    keep them in the stack, turn off ``set_aside_bad_frames_enabled`` in
     the configuration first. To only read the list, use
     ``Astrometrics.targets.frames.get_set_aside``.
 
@@ -61,10 +61,10 @@ def restore_excluded_frames(
     report : `RestoreReport`
         The frames that were set aside, and how many were moved back.
     """
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-        find_quarantine_folders,
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
+        find_set_aside_folders,
         list_set_aside_frames,
-        restore_quarantined_frames,
+        restore_set_aside_frames,
     )
 
     resolved = pipelines._resolve(target)
@@ -72,8 +72,8 @@ def restore_excluded_frames(
     frames = list_set_aside_frames(frames_path, resolved.id)
     restored_count = 0
     if apply:
-        for folder in find_quarantine_folders(frames_path, resolved.id):
-            restored_count += len(restore_quarantined_frames(folder))
+        for folder in find_set_aside_folders(frames_path, resolved.id):
+            restored_count += len(restore_set_aside_frames(folder))
         if restored_count:
             from astrometricslib.pipelines.shared.target_frames import scan_frames
 
@@ -100,7 +100,7 @@ def stack_subset(
     and no other subset job of the target can run; a second one is
     refused with `ConflictError`, not queued. Nothing is
     assigned on the target and the target is not saved. The frame
-    quarantine step is not run, so give frames the library stack already
+    set-aside step is not run, so give frames the library stack already
     kept. The stack's noise in the target's stored sky apertures, its
     effective frame count and its effective time are stored in the quality
     database at level ``stack``. Delete the ``_subsets`` folder whenever

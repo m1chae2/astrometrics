@@ -13,20 +13,19 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import CENTROID_SEARCH_HALF_WIDTH_PX
 
-# `locate_star_centroid` only searches a box around a star's expected
-# position (`CENTROID_SEARCH_HALF_WIDTH_PX`, its `search_half_width`
-# default). Once frame-to-frame drift approaches half that radius, a star with
-# even a little of its own positional jitter risks landing outside the search
-# box and silently returning no centroid. The limit is therefore half the
-# search half-width (20 px at the default 40 px), which catches instability
-# well before that failure mode.
+# A frame whose middle sits this far from the reference frame's has moved a
+# long way for a mount that is tracking: the field drifted out of place or the
+# mount slipped. The plate solutions place every star wherever the field went,
+# so the measuring does not need the limit, but a drift this large is still a
+# mount problem the user should see. The value is the limit the earlier
+# frame-to-frame tracking used, half of its 40 px search box; the register
+# entry PHO-D16 holds it as a design estimate.
 UNSTABLE_TRACKING_DRIFT_PX = TunedParameter(
     name="photometry.unstable_tracking_drift_px",
-    default=0.5 * CENTROID_SEARCH_HALF_WIDTH_PX,
+    default=20.0,
     unit="px",
-    description="Frame-to-frame shift above which tracking counts as unstable.",
+    description="Shift of the middle of a frame from the reference frame above which tracking is unstable.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.RELATIVE,

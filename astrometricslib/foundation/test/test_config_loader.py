@@ -215,17 +215,17 @@ def test_a_blank_stacks_path_counts_as_unset(config_in_tmp_path: AppConfiguratio
     assert config.get_stacks_path() == config.get_frames_path()
 
 
-def test_quarantine_of_bad_frames_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
+def test_set_aside_of_bad_frames_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """Stacking moves clouded and trailed frames aside unless told not to."""
     config = config_in_tmp_path
-    assert config.get_quarantine_bad_frames_enabled() is True
+    assert config.get_set_aside_bad_frames_enabled() is True
 
 
-def test_quarantine_of_bad_frames_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
-    """The ``quarantine_bad_frames_enabled`` setting switches the step off."""
+def test_set_aside_of_bad_frames_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
+    """The ``set_aside_bad_frames_enabled`` setting switches the step off."""
     config = config_in_tmp_path
-    config.app_config.set("Processing.Siril", "quarantine_bad_frames_enabled", "false")
-    assert config.get_quarantine_bad_frames_enabled() is False
+    config.app_config.set("Processing.Siril", "set_aside_bad_frames_enabled", "false")
+    assert config.get_set_aside_bad_frames_enabled() is False
 
 
 def test_star_toning_of_the_preview_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:

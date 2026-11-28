@@ -19,7 +19,7 @@ from astrometricslib.pipelines import target_batch, tasks
 from astrometricslib.pipelines.stacking import frame_screening
 from astrometricslib.pipelines.stacking import stage as stacking_stage
 from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import QuarantineReport
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import SetAsideReport
 from astrometricslib.scripts import rebuild_stacks
 
 MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
@@ -89,7 +89,7 @@ def _stack_that_records_quality(
             A made-up stack path.
         """
         received.append(measured_at)
-        report = QuarantineReport(
+        report = SetAsideReport(
             measurements=[{"path": f.path, "sky_median_adu": 500.0} for f in target.frames]
         )
         frame_screening.record_frame_quality(
@@ -110,7 +110,7 @@ def test_the_full_pipeline_path_stores_frame_quality(tmp_path: Path, monkeypatch
     )
 
     assert received == [MEASURED_AT]
-    assert len(store.query(metric="frame.quarantine_sky_median_adu")) == 1
+    assert len(store.query(metric="frame.set_aside_sky_median_adu")) == 1
 
 
 def test_the_rebuild_script_path_stores_frame_quality(
@@ -131,7 +131,7 @@ def test_the_rebuild_script_path_stores_frame_quality(
     rebuild_stacks.rebuild_target(astrometrics, "M 99", str(tmp_path / "backup"))
 
     assert len(received) == 1 and received[0] is not None and received[0].tzinfo is not None
-    assert len(store.query(metric="frame.quarantine_sky_median_adu")) == 1
+    assert len(store.query(metric="frame.set_aside_sky_median_adu")) == 1
 
 
 def test_the_batch_worker_passes_the_time_to_the_full_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:

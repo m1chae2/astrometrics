@@ -36,6 +36,7 @@ from astrometricslib.test.synthetic import (
 | `make_photometry_fits(path, stars, *, date_obs, exptime_s, extra_header, **frame_kwargs)` | The same frame written to a FITS file with `DATE-OBS`, `EXPTIME`, and any extra cards. Returns the array it wrote. |
 | `make_drifted_sequence(stars, n_frames, drift_px_per_frame, rotation_deg_per_frame, flux_scale, **frame_kwargs)` | A list of frames in which the field drifts, rotates, and changes brightness. |
 | `drifted_stars(stars, frame_index, ...)` | The true star positions in one frame of that sequence. |
+| `drifted_frame_solves(paths, shape, drift_px_per_frame, rotation_deg_per_frame, scale_change_per_frame)` | The exact plate solution (a solved header) of every frame of such a sequence, for `VariabilityAnalyzer.process`. |
 | `star_flux_multipliers(n_stars, frame_index, flux_scale)` | The flux multiplier of each star in one frame. |
 
 ### Sequence convention

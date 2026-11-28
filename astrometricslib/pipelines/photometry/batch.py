@@ -138,6 +138,7 @@ def _run_variability_analysis_for_session(
     use_astrometry_seed: bool = True,
     aperture_diameter_mm: float | None = None,
     aperture_reason: str | None = None,
+    drivers: Drivers | None = None,
 ) -> tuple[Any, list[Any], Any | None]:
     """Track star brightness over a single observing session.
 
@@ -151,6 +152,11 @@ def _run_variability_analysis_for_session(
     the configuration (`get_observatory_site`); without a site the times
     are taken from Earth's center, and without a position they are left
     out.
+
+    Each frame's stars are placed through the frame's own plate solution,
+    which the plate-solve driver makes for every frame of the session
+    (`PlateSolveDriver.solve_frames`). A frame it cannot solve is left out of
+    the session, with the reason.
 
     The scintillation term of the flux errors needs the telescope's
     aperture (`aperture_diameter_mm`, or `aperture_reason` when it is not
@@ -211,8 +217,10 @@ def _run_variability_analysis_for_session(
     analyzer.aperture_reason = aperture_reason
     site = get_configuration().get_observatory_site()
     analyzer.site_elevation_m = float(site.elevation_m) if site is not None else 0.0
+    frame_solves = (drivers or Drivers()).plate_solve_or_default().solve_frames(session.frame_paths)
     analyzer.process(
         session.frame_paths,
+        frame_solves,
         max_workers=max_workers,
         id_prefix=id_prefix,
         seed_stars=seed_stars,

@@ -628,7 +628,7 @@ class AppConfiguration:
                 "exposure_group_gain_tolerance": str(EXPOSURE_GROUP_GAIN_TOLERANCE.default),
                 "minimum_calibration_frames": str(MINIMUM_CALIBRATION_FRAMES.default),
                 "background_homogeneity_check_enabled": "true",
-                "quarantine_bad_frames_enabled": "true",
+                "set_aside_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
                 "preview_remove_green_noise_enabled": "true",
                 "preview_color_from_other_stack_enabled": "true",
@@ -1057,21 +1057,21 @@ class AppConfiguration:
         val = self.get_value("Processing.Siril", "background_homogeneity_check_enabled", fallback="true")
         return str(val).lower() == "true"
 
-    def get_quarantine_bad_frames_enabled(self) -> bool:
+    def get_set_aside_bad_frames_enabled(self) -> bool:
         """Return whether stacking moves cloudy or trailed frames aside.
 
         When on, each stack measures its light frames and moves the ones with
         clouds or trailed stars into an ``_excluded`` folder beside them (see
-        `pipelines/stacking/pre_processing/frame_quarantine.py`). The frames
+        `pipelines/stacking/pre_processing/frame_set_aside.py`). The frames
         are never deleted and `restore_excluded_frames.py` moves them back.
         Measuring takes about a second per frame.
 
         Returns
         -------
         enabled : `bool`
-            `True` if the quarantine step should run.
+            `True` if the set-aside step should run.
         """
-        val = self.get_value("Processing.Siril", "quarantine_bad_frames_enabled", fallback="true")
+        val = self.get_value("Processing.Siril", "set_aside_bad_frames_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_trim_noisy_stack_edges_enabled(self) -> bool:
@@ -2164,7 +2164,7 @@ class AppConfiguration:
             stack_weight=self.get_stack_weight(),
             generate_rejmap=self.get_stack_generate_rejmap(),
             background_homogeneity_check_enabled=self.get_background_homogeneity_check_enabled(),
-            quarantine_bad_frames_enabled=self.get_quarantine_bad_frames_enabled(),
+            set_aside_bad_frames_enabled=self.get_set_aside_bad_frames_enabled(),
         )
 
         # Build parallelism config

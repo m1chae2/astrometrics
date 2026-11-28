@@ -500,7 +500,7 @@ class TargetService:
         The library decides each state and finds the newest stack file
         (`targets.frames.get_statuses`): ``included``, ``flagged`` (in the
         stack, but its stars are stretched: at least the warning level and
-        kept by the quarantine, with a ``reason`` giving the numbers),
+        kept by the set-aside check, with a ``reason`` giving the numbers),
         ``not_stacked`` (taken after the latest stack file was written, or
         the target has no stack) or ``set_aside`` (moved into an `_excluded`
         folder).

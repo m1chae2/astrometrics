@@ -17,6 +17,7 @@ import type { StackSummary } from '../../common/types/backendTypes';
 import { StackComparisonControl } from './StackComparisonControl';
 import { SetAsideFramesList } from './SetAsideFramesList';
 import { formatExposureSeconds } from '../utils/stackFormatting';
+import { SET_ASIDE_PURPOSE } from '../utils/stackCheck';
 import {
     fetchStackJobWarnings,
     fetchStackSummary,
@@ -161,6 +162,7 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                                 onToggle={(event) => setShowSetAside(event.currentTarget.open)}
                             >
                                 <summary>Why they were set aside</summary>
+                                <div className="stack-summary--muted">{SET_ASIDE_PURPOSE}</div>
                                 {showSetAside && (
                                     <SetAsideFramesList
                                         targetId={targetId}

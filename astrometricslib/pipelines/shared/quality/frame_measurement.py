@@ -293,7 +293,7 @@ def frame_subject(
     """Describe one frame as the subject of a measurement.
 
     Every row about a frame is built here: the frame job's rows, the
-    quarantine rows, the stacking run's frame weight and rotation rows and the
+    set-aside rows, the stacking run's frame weight and rotation rows and the
     astrometry run's target-clipping rows. One builder means they all share
     one subject id, so a reader can join them.
 
@@ -865,7 +865,7 @@ def star_profile_measurements(
 ) -> list[QualityMeasurement]:
     """Turn star profiles measured outside `measure_frame` into quality rows.
 
-    The frame quarantine step measures each frame's star shape itself, with
+    The set-aside check step measures each frame's star shape itself, with
     `measure_image_star_profiles`. This function writes that result with the
     code `measure_frame` uses (`_emit_star_profile_measurements`), so the rows
     have the same metrics, units, definitions and reasons as the rows of a full

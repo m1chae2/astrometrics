@@ -3,7 +3,7 @@
 Four things are checked, each with small synthetic frames and stand-ins for the
 slow star fits:
 
-1. The quarantine step stores the star elongation it fitted, so the next
+1. The set-aside step stores the star elongation it fitted, so the next
    stack reads it and does not fit the frame again.
 2. The stacking stage measures every kept frame that has no stored numbers (no
    limit of 40) and waits for the library's turn instead of skipping.
@@ -54,7 +54,7 @@ from astrometricslib.pipelines.stacking.frame_measurement_run import (
     record_frame_measurements_for_target,
     record_stage_frame_quality,
 )
-from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
+from astrometricslib.pipelines.stacking.pre_processing import frame_set_aside
 
 GAIN_SETTING = "100"
 FRAME_SIZE = 96
@@ -189,15 +189,15 @@ def _planes(elongation: float) -> list[tuple[str | None, StarProfileResult, str]
     return [(None, result, "")]
 
 
-def test_the_elongation_the_quarantine_step_fitted_is_stored_and_not_fitted_again(
+def test_the_elongation_the_set_aside_step_fitted_is_stored_and_not_fitted_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The next stack reads the stored elongation and fits no star."""
     target = _make_target(tmp_path, 3)
     config = SimpleNamespace(get_library_path=lambda: tmp_path)
-    monkeypatch.setattr(frame_quarantine, "get_configuration", lambda: config)
+    monkeypatch.setattr(frame_set_aside, "get_configuration", lambda: config)
     monkeypatch.setattr(
-        frame_quarantine.raw_frame_check,
+        frame_set_aside.raw_frame_check,
         "measure_raw_frame",
         lambda path: {"camera": "Test Camera", "sky_median_adu": 500.0},
     )
@@ -215,10 +215,10 @@ def test_the_elongation_the_quarantine_step_fitted_is_stored_and_not_fitted_agai
         fits_made.append(path)
         return _planes(elongations[path])
 
-    monkeypatch.setattr(frame_quarantine, "measure_star_profile_planes", fake_fit)
+    monkeypatch.setattr(frame_set_aside, "measure_star_profile_planes", fake_fit)
 
     # First stack: nothing stored, so every frame is fitted.
-    first = [frame_quarantine.make_quarantine_measurer("M 99")(frame.path) for frame in target.frames]
+    first = [frame_set_aside.make_set_aside_measurer("M 99")(frame.path) for frame in target.frames]
     assert len(fits_made) == 3
     assert {measurement["elongation_source"] for measurement in first} == {"measured"}
     for measurement, frame in zip(first, target.frames, strict=True):
@@ -235,7 +235,7 @@ def test_the_elongation_the_quarantine_step_fitted_is_stored_and_not_fitted_agai
 
     # Second stack: the stored values are read, and no star is fitted.
     fits_made.clear()
-    measure = frame_quarantine.make_quarantine_measurer("M 99")
+    measure = frame_set_aside.make_set_aside_measurer("M 99")
     second = [measure(frame.path) for frame in target.frames]
     assert fits_made == []
     assert {measurement["elongation_source"] for measurement in second} == {"stored"}
@@ -252,8 +252,8 @@ def test_a_frame_with_no_stored_elongation_gives_the_same_median_as_before() -> 
         ("G", StarProfileResult(elongation=1.4), ""),
         ("B", StarProfileResult(elongation=None), ""),
     ]
-    assert frame_quarantine.median_star_elongation(planes) == pytest.approx(1.3)
-    assert frame_quarantine.median_star_elongation([("R", StarProfileResult(), "")]) is None
+    assert frame_set_aside.median_star_elongation(planes) == pytest.approx(1.3)
+    assert frame_set_aside.median_star_elongation([("R", StarProfileResult(), "")]) is None
 
 
 def test_the_stage_measures_every_frame_with_no_limit_of_forty(tmp_path: Path) -> None:

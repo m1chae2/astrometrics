@@ -202,7 +202,7 @@ def test_a_stored_summary_with_the_removed_flag_fields_loads() -> None:
             "framesSubmitted": 40,
             "framesAccepted": 38,
             "framesExcludedForGain": 1,
-            "framesQuarantined": 2,
+            "framesSetAside": 2,
             "darkUniqueFrameCount": 12,
             "isFlagged": True,
             "flagReasons": ["2 frame(s) with clouds or trailed stars moved to the _excluded folder"],
@@ -214,7 +214,7 @@ def test_a_stored_summary_with_the_removed_flag_fields_loads() -> None:
     assert not hasattr(summary, "flag_reasons")
     assert summary.stacking_metrics.frames_accepted == 38
     assert summary.stacking_metrics.frames_excluded_for_gain == 1
-    assert summary.stacking_metrics.frames_quarantined == 2
+    assert summary.stacking_metrics.frames_set_aside == 2
     assert summary.stacking_metrics.dark_unique_frame_count == 12
     assert "flagged" not in summary.model_dump(by_alias=True)
     assert "flagReasons" not in summary.model_dump(by_alias=True)

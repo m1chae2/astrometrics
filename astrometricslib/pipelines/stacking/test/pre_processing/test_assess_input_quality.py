@@ -67,12 +67,12 @@ def test_a_clean_input_fails_no_gate_and_sets_aside_no_frame() -> None:
     record_input_counts(metrics, 10, [], {})
     assert failed_details({}) == []
     assert metrics.frames_accepted == 10
-    assert metrics.frames_quarantined == 0
+    assert metrics.frames_set_aside == 0
     assert metrics.flat_frame_count is None
 
 
 def test_excluded_frames_are_counted_by_reason() -> None:
-    """Gain, background and quarantine exclusions are counted separately."""
+    """Gain, background and set-aside exclusions are counted separately."""
     excluded = [
         ExcludedFrame(path="a.fits", reason=GAIN_EXCLUSION_REASON),
         ExcludedFrame(path="b.fits", reason=BACKGROUND_EXCLUSION_REASON),
@@ -83,7 +83,7 @@ def test_excluded_frames_are_counted_by_reason() -> None:
     record_input_counts(metrics, 6, excluded, {CALIBRATION_UNIQUE_COUNTS_KEY: {"dark": 12, "bias": 40}})
     assert metrics.frames_excluded_for_gain == 1
     assert metrics.frames_excluded_for_background == 2
-    assert metrics.frames_quarantined == 1
+    assert metrics.frames_set_aside == 1
     assert metrics.frames_accepted == 6
     assert metrics.dark_unique_frame_count == 12
     assert metrics.bias_unique_frame_count == 40

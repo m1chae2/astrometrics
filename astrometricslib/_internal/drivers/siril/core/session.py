@@ -205,7 +205,9 @@ def launch_siril_gui(siril_executable: str, file_path: str) -> None:
     """Open a file in the Siril program's window.
 
     Siril starts in its own session, so it keeps running after the caller
-    exits. A failure to start it is logged, not raised.
+    exits. A failure to start it is logged, not raised. The window is the
+    user's own interactive Siril, so it keeps the user's own Siril settings
+    and is not given the private settings file.
 
     Parameters
     ----------

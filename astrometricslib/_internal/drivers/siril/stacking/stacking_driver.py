@@ -60,7 +60,9 @@ class SirilStackingDriver(StackingDriver):
         """Open a file in the Siril program's window.
 
         The Siril command comes from the session. Nothing is stacked. Siril
-        keeps running after the caller exits.
+        keeps running after the caller exits. This window is the user's own
+        interactive Siril, so it keeps the user's own Siril settings: unlike
+        every other Siril run, it is not given the private settings file.
 
         Parameters
         ----------

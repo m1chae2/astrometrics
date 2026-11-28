@@ -22,6 +22,10 @@ from astrometricslib._internal.drivers.siril.core.settings import (
     write_setting,
 )
 
+# The user's real home folder. The tests replace only the settings code's
+# view of it, so this still names the real one.
+REAL_HOME = Path(os.path.expanduser("~")).resolve()
+
 USER_SETTINGS = """[core]
 wd=
 swap_dir=/tmp
@@ -144,7 +148,7 @@ def test_the_newest_versioned_settings_file_is_chosen(user_folder: Path, tmp_pat
 
 def test_a_flatpak_siril_reads_its_settings_from_its_own_folder(monkeypatch: pytest.MonkeyPatch) -> None:
     """The Flatpak's settings folder is under ``~/.var/app``."""
-    monkeypatch.setenv("HOME", "/home/user")
+    monkeypatch.setattr(settings, "user_home_folder", lambda: "/home/user")
     monkeypatch.setenv("XDG_CONFIG_HOME", "/home/user/.config")
     monkeypatch.setattr(settings.sys, "platform", "linux")
 
@@ -191,3 +195,27 @@ def test_the_pipe_session_reads_the_private_settings() -> None:
         "-c",
         "siril -i /data/siril_settings.ini -p -r /w/in -w /w/out",
     ]
+
+
+def test_no_test_reads_the_users_real_siril_settings(temporary_siril_settings_home: Path) -> None:
+    """Every settings folder a test reaches is the made-up one."""
+    for siril_executable in ("siril-cli", "flatpak run org.siril.Siril"):
+        folder = user_settings_folder(siril_executable)
+        assert not Path(folder).resolve().is_relative_to(REAL_HOME), folder
+        assert Path(folder).is_relative_to(temporary_siril_settings_home)
+        assert find_user_settings_file(folder) == os.path.join(folder, "config.1.4.ini")
+
+
+def test_reading_the_real_settings_stops_the_test() -> None:
+    """The guard refuses a read under the user's real Siril settings folder."""
+    real_file = str(REAL_HOME / ".var" / "app" / "org.siril.Siril" / "config" / "siril" / "config.1.4.ini")
+    with pytest.raises(AssertionError, match="user's own Siril settings"):
+        settings._read_lines(real_file)
+
+
+def test_the_made_up_settings_are_copied_into_the_private_file(tmp_path: Path) -> None:
+    """With no folders given, the copy is made from the made-up user file."""
+    lines = Path(prepare_private_settings("siril-cli", tmp_path / "private")).read_text().splitlines()
+
+    assert read_setting(lines, "core", "starnet_exe") == "/fake/starnet"
+    assert read_setting(lines, "astrometry", "update_default_scale") == "false"

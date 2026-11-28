@@ -75,6 +75,18 @@ def private_settings_folder() -> str:
     return folder
 
 
+def user_home_folder() -> str:
+    """Give the user's home folder, where Siril keeps its settings.
+
+    Returns
+    -------
+    home : `str`
+        The home folder (``~``). The tests replace this function, so a test
+        never reads the user's real Siril settings.
+    """
+    return os.path.expanduser("~")
+
+
 def user_settings_folder(siril_executable: str) -> str:
     """Give the folder where the user's own Siril keeps its settings.
 
@@ -90,11 +102,12 @@ def user_settings_folder(siril_executable: str) -> str:
         Siril's settings folder (see the module description). It may not
         exist.
     """
+    home = user_home_folder()
     if is_flatpak(siril_executable):
-        return os.path.expanduser(f"~/.var/app/{flatpak_app_id(siril_executable)}/config/siril")
+        return os.path.join(home, ".var", "app", flatpak_app_id(siril_executable), "config", "siril")
     if sys.platform == "win32":
-        return os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "siril")
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+        return os.path.join(os.environ.get("LOCALAPPDATA", home), "siril")
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
     return os.path.join(config_home, "siril")
 
 

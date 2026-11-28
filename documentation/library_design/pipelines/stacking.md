@@ -46,7 +46,7 @@ flowchart TD
     N --> O["Preview image and inputs record"]
 ```
 
-Siril is an open-source astronomy image processor that does the pixel work. In code terms the run starts at `stage.stack_frames(target)`, splits frames in `stack_runner.run_stack`, and stacks through a `StackingDriver` (the interface for a stacking program), whose Siril version runs `ImageProcessing` (Section 4). Setting bad frames aside is the frame quarantine, and the quality summary is a `StackQualitySummary` (Section 7).
+Siril is an open-source astronomy image processor that does the pixel work. In code terms the run starts at `stage.stack_frames(target)`, splits frames in `stack_runner.run_stack`, and stacks through a `StackingDriver` (the interface for a stacking program), whose Siril version runs `ImageProcessing` (Section 4). Setting frames aside is the frame quarantine, a cloud and target alignment check, and the quality summary is a `StackQualitySummary` (Section 7).
 
 ## 2. Input requirements and FITS header specification
 
@@ -128,7 +128,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_frames`:
 
-1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames at a less common gain setting set aside, frames set aside by an earlier run dropped, the quarantine (imaging only), and the background test.
+1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames at a less common gain setting set aside, frames set aside by an earlier run dropped, the quarantine (imaging only; the cloud and target alignment check), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames, settings and stacking code: a short code that changes whenever any of them changes. A match with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new preview image when its image is missing or the preview settings changed since it was made (`preview_settings.preview_is_out_of_date`).
 3. **Previous-stack staging.** The current stack moves to a staging folder. On success it becomes the single `_previous` version (`previous_stack.py`), which a person can swap back or discard.
 4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length (and by night for spectra) and calls the `StackingDriver`. The Siril driver (`siril/stacking/stacking_driver.py`) runs `ImageProcessing` in the `siril/stacking/` package: masters, calibration, registration (alignment) and stacking. Spectral registration that loses too many frames is retried with relaxed detection, then with phase correlation (aligning whole images by their overall pattern rather than by single stars).
@@ -163,7 +163,7 @@ A quality gate is an automatic test on a run. It passes, fails, or is "not check
 | `bias_noise` | run gate | `pre_processing/calibration_assessment.py` | Fails when the noise of the bias frames is outside `NOISE_RATIO_LOW` to `NOISE_RATIO_HIGH` times the read noise in the camera profile. Not checked when the profile has no read noise for the setting. |
 | `dark_light_leak` | run gate | `pre_processing/calibration_assessment.py` | Fails when a dark frame's large-scale pattern exceeds that of the bias frames at the same setting by more than `VALUE_STEP_ALLOWANCE` value steps (light reached the sensor). Not checked when no bias frame at the setting is measured. |
 | `gain_homogeneity` | run gate | `pre_processing/frame_homogeneity.py` | Frames taken at a less common gain setting (the camera's amplifier setting) are set aside, which corrects the stack. Not checked when no frame records its gain setting. |
-| `frame_quarantine` | run gate | `pre_processing/frame_quarantine.py` | Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set aside. The frames are moved all the same; the detail says how many and why. |
+| `frame_quarantine` | run gate | `pre_processing/frame_quarantine.py` | Fails (as a warning) when the cloud and target alignment check set aside more than `WARN_QUARANTINED_FRACTION` of a batch. The frames are moved all the same; the detail says how many and why. |
 | `dark_missing` | run gate | `pre_processing/stack_calibration_health.py` | Fails when light frames of an exposure have no dark within `DARK_EXPOSURE_MATCH_SECONDS` of it. Not checked when the stacking run did not say which calibration it applied. |
 | `light_temperature_spread` | run gate | `pre_processing/stack_calibration_health.py` | Fails when the sensor temperature of the lights of one exposure spans more than `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`, which the batch mean would hide. Not checked when the stack used no dark or the lights record no temperature. |
 
@@ -201,7 +201,7 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 ## 6. Degraded states and fallback pathways
 
 1. **Temperature gap above 3 °C.** The nearest dark is applied with a soft flag; `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
-2. **Bad frames.** Frames with too few stars or non-round stars move to `_excluded`. A batch whose share of bad frames is above 0.25 moves nothing and `frame_quarantine` fails.
+2. **Bad frames.** The cloud and target alignment check moves frames with too few stars, non-round stars or a pointing off the target to `_excluded`. A batch whose share of bad frames is above 0.25 moves nothing and `frame_quarantine` fails.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R > 1.2$ in `stack_sharpness`.
 4. **Over-subtraction.** `zero_pixel_fraction` and `negative_pixels` catch darks or biases that remove more than the sky, which pushes pixels to zero or below.
 5. **A dropped exposure group.** The combined stack is still written, and `exposure_groups_combined` fails.

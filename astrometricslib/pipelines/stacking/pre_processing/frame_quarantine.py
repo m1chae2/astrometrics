@@ -1,4 +1,11 @@
-"""Moves frames with clouds, trails or a bad pointing out of the stack.
+"""Checks frames for clouds and for alignment on the target.
+
+This is a cloud and target alignment check. The cloud check looks for few
+stars and an uneven sky. The target alignment check looks for a pointing off
+the session's field (or at another field) and for stars smeared by drift, which
+means the mount did not hold the target. Siril's stack filters have no
+uneven-sky or off-field check, give no reason for each frame and do not move
+frames where the user can see and restore them, so the project keeps this step.
 
 A frame shot through cloud has few stars or an uneven sky, a frame shot while
 the mount drifted has stars smeared into streaks, and a frame that points far
@@ -973,9 +980,11 @@ def set_aside_elongation_limit(elongations: Sequence[float], colour_camera: bool
 def judge_batch_with_notes(
     measurements: Sequence[dict[str, Any]],
 ) -> tuple[list[QuarantineDecision], list[str]]:
-    """Pick the frames of one batch that are clouded, trailed or off the field.
+    """Pick the batch frames that fail the cloud and alignment check.
 
-    See `judge_batch_in_full`; the frames kept with a warning are left out.
+    The check is for clouded frames and for frames not aligned on the target
+    (trailed or off the field). See `judge_batch_in_full`; the frames kept
+    with a warning are left out.
 
     Returns
     -------
@@ -991,10 +1000,12 @@ def judge_batch_with_notes(
 def judge_batch_in_full(
     measurements: Sequence[dict[str, Any]],
 ) -> tuple[list[QuarantineDecision], list[QuarantineDecision], list[str]]:
-    """Pick the frames of one batch that are clouded, trailed or off the field.
+    """Pick the batch frames that fail the cloud and alignment check.
 
-    Four rules are tried on every frame, and a frame that breaks several is
-    reported for each (see `RuleFinding`):
+    The cloud rules are few stars and an uneven sky. The target alignment
+    rules are a center off the session's field and trailed stars (the mount
+    did not hold the target). Four rules are tried on every frame, and a
+    frame that breaks several is reported for each (see `RuleFinding`):
 
     - Trailed stars: the frame's stored star elongation is above both
       `TRAILED_ELONGATION_LIMIT` and the batch median plus the rise
@@ -1171,7 +1182,7 @@ def _decision_from_findings(
 
 
 def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecision]:
-    """Pick the frames of one batch that are clouded, trailed or off the field.
+    """Pick the batch frames that fail the cloud and alignment check.
 
     Parameters
     ----------
@@ -1486,7 +1497,7 @@ def find_frames_to_quarantine(
     measure: Callable[[str], dict[str, Any]] | None = None,
     target_id: str | None = None,
 ) -> QuarantineReport:
-    """Decide which frames to move, without moving any.
+    """Decide which frames fail the cloud and alignment check, moving none.
 
     Parameters
     ----------
@@ -1693,7 +1704,7 @@ def quarantine_bad_frames(
     frames: Sequence[Any],
     measure: Callable[[str], dict[str, Any]] | None = None,
 ) -> tuple[list[Any], QuarantineReport]:
-    """Move the frames with clouds or trailed stars out of the target's folder.
+    """Move frames that fail the cloud and alignment check out of the target.
 
     Only light frames are judged. The moved frames are removed from
     ``target.frames`` too, so the target no longer lists them, and its total

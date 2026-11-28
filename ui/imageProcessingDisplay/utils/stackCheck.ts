@@ -7,6 +7,13 @@
 import type { PredictedCalibration, PredictedFrame, PredictedGroup } from '../../common/types/backendTypes';
 import { formatExposureSeconds } from './stackFormatting';
 
+/**
+ * Says what the check that sets frames aside is for, so the lists that show its result can open
+ * with it. The same frame checks also set aside frames of a different gain or sky level.
+ */
+export const SET_ASIDE_PURPOSE =
+    'Frames are set aside by a cloud and target alignment check: clouds, stars smeared into streaks, or a frame not pointed at the target. Nothing is deleted.';
+
 /** The library folder names that start the part of a calibration path worth showing. */
 const CALIBRATION_ROOT_FOLDERS = ['darks', 'biases', 'flats'];
 

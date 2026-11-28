@@ -303,8 +303,9 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
     "frame_quarantine": (
-        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
-        "aside. The frames are moved all the same; the detail says how many and why."
+        "Fails (as a warning) when the cloud and target alignment check set aside more than "
+        "`WARN_QUARANTINED_FRACTION` of a batch. The frames are moved all the same; "
+        "the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -3471,8 +3472,8 @@ flowchart TD
 Siril is an open-source astronomy image processor that does the pixel work. In code terms the
 run starts at `stage.stack_frames(target)`, splits frames in `stack_runner.run_stack`, and
 stacks through a `StackingDriver` (the interface for a stacking program), whose Siril version
-runs `ImageProcessing` (Section 4). Setting bad frames aside is the frame quarantine, and the
-quality summary is a `StackQualitySummary` (Section 7).
+runs `ImageProcessing` (Section 4). Setting frames aside is the frame quarantine, a cloud and
+target alignment check, and the quality summary is a `StackQualitySummary` (Section 7).
 
 <<heading_2>>
 
@@ -3605,7 +3606,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames
    at a less common gain setting set aside, frames set aside by an earlier run dropped, the
-   quarantine (imaging only), and the background test.
+   quarantine (imaging only; the cloud and target alignment check), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames,
    settings and stacking code: a short code that changes whenever any of them changes. A match
    with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
@@ -3660,7 +3661,8 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Temperature gap above <<dark_tol>> °C.** The nearest dark is applied with a soft flag;
    `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
-2. **Bad frames.** Frames with too few stars or non-round stars move to `_excluded`. A batch
+2. **Bad frames.** The cloud and target alignment check moves frames with too few stars,
+   non-round stars or a pointing off the target to `_excluded`. A batch
    whose share of bad frames is above <<quarantine>> moves nothing and `frame_quarantine` fails.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R
    > <<degrade>>$ in `stack_sharpness`.

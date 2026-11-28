@@ -36,7 +36,7 @@ Terms are defined in the [glossary](../../../documentation/Glossary.md). This do
 Three checks run before stacking:
 
 - `frame_homogeneity.py` checks that the gain settings match across the frames.
-- `frame_quarantine.py` measures each light frame's stars and moves a frame with clouds or trailed stars into an `_excluded` folder beside it. It skips spectral frames, because their spectrum trails are the spectra. [Frame quarantine](#frame-quarantine) describes the step.
+- `frame_quarantine.py` measures each light frame's stars and is the cloud and target alignment check. It moves a frame with clouds, trailed stars or a pointing off the target into an `_excluded` folder beside it. It skips spectral frames, because their spectrum trails are the spectra. [Frame quarantine](#frame-quarantine) describes the step.
 - `background_homogeneity.py` compares each frame's background brightness with the other frames of the same exposure length to catch a frame taken through cloud or twilight. It finds one sudden jump in sky level, so a gradual build-up of cloud can pass it (partly measured; see [STK-04](../../../documentation/library_design/validation/stacking.md#stk-04)). The sky level of a frame is measured by `shared/quality/background_measurement.py`, in four worker threads at once, and is stored on the frame with the version of the method (`BACKGROUND_LEVEL_METHOD`). For a raw color frame it is taken on 2 x 2 super-pixels, so the color filters do not mix. A level stored with no version, or an older one, is measured again before any frames are compared, so two methods are never mixed.
 
 A frame that disagrees with the others is excluded rather than stacked. The pipeline records each check as a gate (see [quality outputs](#quality-outputs)).
@@ -47,12 +47,19 @@ A frame that disagrees with the others is excluded rather than stacked. The pipe
 
 ### Frame quarantine
 
-**What it does.** It compares each frame with the other frames of its own session. It moves a frame when:
+**What it is for.** It is a cloud and target alignment check. It finds frames shot through cloud and frames that are not aligned on the target (off the field, another field, or smeared because the mount drifted during the exposure), and moves them out of the stack. It compares each frame with the other frames of its own session. It moves a frame when it fails one of these rules.
+
+*Cloud check:*
 
 - it has fewer stars than half the session median (cloud, fog or heavy trailing);
-- its stars are more elongated than the session's. Elongation is a star's long width divided by its short width, 1.0 for a circle, taken from the stored `frame.star_elongation`. The step moves the frame when elongation is above 1.32 and at least 0.12 above the session median (0.22 for a color camera);
-- its sky is uneven across the frame and its stars suffer too (cloud): the sky in a 4 by 4 grid differs from the session's usual pattern by 5 robust spreads and at least 0.01, and the star transparency (the geometric mean of the star count and the bright-star flux, each as a share of the session median) is below 0.83. An uneven sky with normal stars (a gradient, a glow or a tree in a corner) is kept and flagged "uneven sky (gradient or obstruction)"; or
-- its center lies more than 0.10 of the frame width from the session's main pointing (the median center). A frame turned half a revolution by a meridian flip that points at the same field is not off the field. A deliberate second field (at least 2 frames and 15% of the session at another pointing) is set aside too, with the reason "Other field (n frames): not in this stack", so you can see it and put it back if you want it.
+- its sky is uneven across the frame and its stars suffer too (cloud): the sky in a 4 by 4 grid differs from the session's usual pattern by 5 robust spreads and at least 0.01, and the star transparency (the geometric mean of the star count and the bright-star flux, each as a share of the session median) is below 0.83. An uneven sky with normal stars (a gradient, a glow or a tree in a corner) is kept and flagged "uneven sky (gradient or obstruction)".
+
+*Target alignment check:*
+
+- its center lies more than 0.10 of the frame width from the session's main pointing (the median center). A frame turned half a revolution by a meridian flip that points at the same field is not off the field. A deliberate second field (at least 2 frames and 15% of the session at another pointing) is set aside too, with the reason "Other field (n frames): not in this stack", so you can see it and put it back if you want it;
+- its stars are more elongated than the session's, which means the target moved on the sensor during the exposure. Elongation is a star's long width divided by its short width, 1.0 for a circle, taken from the stored `frame.star_elongation`. The step moves the frame when elongation is above 1.32 and at least 0.12 above the session median (0.22 for a color camera). This rule sits here because trailing is a pointing failure (the mount did not hold the target), not a sky failure. The register separates it as "trailed from round", beside "clouded from clear" (partly measured; see [STK-01](../../../documentation/library_design/validation/stacking.md#stk-01)).
+
+**Why Siril does not do it.** Siril's stack filters (star count, roundness, FWHM and background) have no check like the uneven-sky grid or the off-field test. They give no reason for each frame and do not move a frame to `_excluded`, where you can see it and put it back. So the project keeps its own step.
 
 A session is the frames of one capture setting (camera, optic, filter, exposure and gain), so every gain is judged against its own frames.
 

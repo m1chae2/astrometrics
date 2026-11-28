@@ -10,7 +10,7 @@ backup. This script makes the Drive copy match the local one with
   After each good run, recycle folders older than ``--keep-deleted-days``
   (default 90) are removed, so the recycle area does not grow forever.
 * A file renamed or moved locally, for example a frame the stacking step
-  quarantines into ``_excluded``, is moved on Drive too, not uploaded again
+  sets aside into ``_excluded``, is moved on Drive too, not uploaded again
   (``--track-renames``, which matches files by their MD5 checksum).
 * One run deletes at most ``--max-delete`` files (default 100). A larger
   deletion stops the run with an error and a desktop notification.
@@ -56,8 +56,8 @@ from astrometricslib.foundation.storage.process_locks import file_lock
 logger = logging.getLogger(__name__)
 
 # The most files one run may delete (or replace) on Drive. A night of frame
-# quarantine moves files, it does not delete them, so normal work stays far
-# below this. Chosen as a round number, not measured; raise it with
+# set-aside check moves files, it does not delete them, so normal work stays
+# far below this. Chosen as a round number, not measured; raise it with
 # --max-delete for a deliberate large clean-up.
 DEFAULT_MAX_DELETE = 100
 

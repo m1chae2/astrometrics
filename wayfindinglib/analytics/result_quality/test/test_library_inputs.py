@@ -116,12 +116,12 @@ def test_the_target_direction_leaves_out_unverified_and_placeholder_positions() 
 
 
 def test_only_a_row_that_says_excluded_marks_a_frame_set_aside() -> None:
-    """Quarantine measurements alone do not set a frame aside."""
+    """Set-aside measurements alone do not set a frame aside."""
     target = make_target(STAR, 1, frames_per_night=2)
     moved, kept = target.frames
     rows = [
-        make_row("frame.quarantine_roundness", 1, 0.9, target, moved, "frame moved to _excluded/"),
-        make_row("frame.quarantine_roundness", 1, 0.9, target, kept),
+        make_row("frame.set_aside_roundness", 1, 0.9, target, moved, "frame moved to _excluded/"),
+        make_row("frame.set_aside_roundness", 1, 0.9, target, kept),
     ]
 
     reasons = set_aside_reasons(rows)

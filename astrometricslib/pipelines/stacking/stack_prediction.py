@@ -42,7 +42,7 @@ from astrometricslib.pipelines.shared.camera_selection import split_frames_by_ca
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.frame_screening import (
     BACKGROUND_SPLIT_REASON,
-    EARLIER_QUARANTINE_REASON,
+    EARLIER_SET_ASIDE_REASON,
     EXPOSURE_NOT_FOLDABLE_REASON_PREFIX,
     MINORITY_GAIN_REASON,
     FrameScreening,
@@ -54,7 +54,7 @@ __all__ = ["predict_stack", "predict_target_stack"]
 
 _KIND_BY_REASON = {
     MINORITY_GAIN_REASON: "minority_gain",
-    EARLIER_QUARANTINE_REASON: "already_set_aside",
+    EARLIER_SET_ASIDE_REASON: "already_set_aside",
     BACKGROUND_SPLIT_REASON: "background_split",
 }
 
@@ -161,8 +161,8 @@ def _predicted_frames(screening: FrameScreening) -> tuple[list[PredictedFrame], 
         The frames kept with a warning.
     """
     decisions = {}
-    if screening.quarantine_report is not None:
-        decisions = {decision.path: decision for decision in screening.quarantine_report.moved}
+    if screening.set_aside_report is not None:
+        decisions = {decision.path: decision for decision in screening.set_aside_report.moved}
     set_aside = []
     for excluded in screening.excluded_frames:
         decision = decisions.get(excluded.path)
@@ -251,7 +251,7 @@ def predict_stack(
     has_spectral = any(frame_is_spectral(frame) for frame in chosen)
     screening = screen_frames(target, chosen, has_spectral, None, None, dry_run=True)
     set_aside, flagged = _predicted_frames(screening)
-    report = screening.quarantine_report
+    report = screening.set_aside_report
     warnings = []
     for gate in screening.gate_results:
         if gate.status in (GateStatus.FAILED, GateStatus.NOT_CHECKED) and gate.detail:

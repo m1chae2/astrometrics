@@ -399,7 +399,7 @@ astrometricslib/pipelines/stacking/frame_measurement_run.py,STAMP_SAVE_INTERVAL_
 astrometricslib/pipelines/stacking/frame_queries.py,query_frames.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/frame_screening.py,BACKGROUND_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUALITY_ROWS_WINDOW,Progress-bar windows; display only.
-astrometricslib/pipelines/stacking/frame_screening.py,QUARANTINE_WINDOW,Progress-bar windows; display only.
+astrometricslib/pipelines/stacking/frame_screening.py,SET_ASIDE_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/metrics.py,_context_metric.definition_version,Version number of a metric definition
 astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.repeats,Repeat count; 1 means a single pass
 astrometricslib/pipelines/stacking/odd_even_bias.py,measure_odd_even_bias.seed,Random seed; reproducibility only
@@ -515,8 +515,8 @@ astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,EDGE_MARGIN_PX,D
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_MINIMUM_FLUX_FRACTION,"Display choice of a reference star, picked by eye; does not act on data"
 astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_STAR_COUNT,Number of candidate stars offered to the caller for a display; not a detection limit
 astrometricslib/pipelines/stacking/pre_processing/calibration_assessment.py,MAXIMUM_FRAMES_OF_CONCERN,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,MEASUREMENT_THREADS,software plumbing
-astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,WARN_QUARANTINED_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
+astrometricslib/pipelines/stacking/pre_processing/frame_set_aside.py,MEASUREMENT_THREADS,software plumbing
+astrometricslib/pipelines/stacking/pre_processing/frame_set_aside.py,WARN_SET_ASIDE_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
 astrometricslib/pipelines/stacking/pre_processing/set_aside_listing.py,_SNAPSHOT_CACHE_SIZE,"Memory cap of the set-aside folder cache; speed only, the listing is the same"
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing

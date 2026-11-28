@@ -2,7 +2,7 @@
 
 Two things are checked:
 
-1. The quarantine rows of a moved frame carry the action taken (a processing
+1. The set-aside rows of a moved frame carry the action taken (a processing
    decision is stored as its measurement plus the action taken).
 2. `TargetFrames.get_set_aside` lists the frames in `_excluded` folders
    with a reason and says whether it came from a stored row, from the
@@ -29,17 +29,17 @@ from astrometricslib.models.quality.measurement import (
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
-from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME
+from astrometricslib.pipelines.stacking.frame_measurement_run import set_aside_measurements_for_frame
 from astrometricslib.pipelines.stacking.metrics import (
     FRAME_POINTING_OFFSET_FRACTION,
-    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SET_ASIDE_SKY_MEDIAN,
     FRAME_SKY_UNEVENNESS,
 )
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     MANIFEST_FILE_NAME,
-    QuarantineDecision,
-    QuarantineReport,
+    SetAsideDecision,
+    SetAsideReport,
     parse_set_aside_action,
     set_aside_action_text,
 )
@@ -83,13 +83,13 @@ def _excluded_folder(folder: Path, names: list[str], manifest_names: list[str]) 
 
     Returns
     -------
-    quarantine : `pathlib.Path`
+    set_aside_folder : `pathlib.Path`
         The folder.
     """
-    quarantine = folder / QUARANTINE_FOLDER_NAME
-    quarantine.mkdir()
+    set_aside_folder = folder / SET_ASIDE_FOLDER_NAME
+    set_aside_folder.mkdir()
     for name in names:
-        (quarantine / name).write_bytes(b"x")
+        (set_aside_folder / name).write_bytes(b"x")
     entries = [
         {
             "file": name,
@@ -105,8 +105,8 @@ def _excluded_folder(folder: Path, names: list[str], manifest_names: list[str]) 
         for name in manifest_names
     ]
     if entries:
-        (quarantine / MANIFEST_FILE_NAME).write_text(json.dumps(entries))
-    return quarantine
+        (set_aside_folder / MANIFEST_FILE_NAME).write_text(json.dumps(entries))
+    return set_aside_folder
 
 
 def test_action_text_round_trips_through_the_parser() -> None:
@@ -120,31 +120,31 @@ def test_action_text_round_trips_through_the_parser() -> None:
 
 def test_report_gives_an_action_for_each_moved_frame_only() -> None:
     """`actions_by_path` has one entry per moved frame."""
-    decision = QuarantineDecision("/a/f.fits", "clouded", REASON, 203, 3348.0, 0.9, 7000.0)
-    report = QuarantineReport(moved=[decision])
+    decision = SetAsideDecision("/a/f.fits", "clouded", REASON, 203, 3348.0, 0.9, 7000.0)
+    report = SetAsideReport(moved=[decision])
     assert report.actions_by_path() == {"/a/f.fits": set_aside_action_text("clouded", REASON)}
 
 
-def test_both_quarantine_rows_of_a_moved_frame_carry_the_action(tmp_path: Path) -> None:
-    """A moved frame's quarantine rows all store the action taken."""
+def test_both_set_aside_rows_of_a_moved_frame_carry_the_action(tmp_path: Path) -> None:
+    """A moved frame's set-aside rows all store the action taken."""
     frame = FrameRecord(path=str(tmp_path / "lights" / "M 1" / "S" / "C" / "f.fits"), timestamp=1.0e9)
     action = set_aside_action_text("clouded", REASON)
     kwargs = {"run_id": "r", "job_id": None, "measured_at": MEASURED_AT, "capture_setting_id": None}
-    moved = quarantine_measurements_for_frame(
+    moved = set_aside_measurements_for_frame(
         {"sky_unevenness": None, "pointing_offset_fraction": 0.3, "sky_median_adu": 7000.0},
         frame,
         "M 1",
         action_taken=action,
         **kwargs,
     )
-    kept = quarantine_measurements_for_frame(
+    kept = set_aside_measurements_for_frame(
         {"sky_unevenness": 0.001, "pointing_offset_fraction": 0.01, "sky_median_adu": 5000.0},
         frame,
         "M 1",
         **kwargs,
     )
     assert {row.metric for row in moved} == {
-        FRAME_QUARANTINE_SKY_MEDIAN,
+        FRAME_SET_ASIDE_SKY_MEDIAN,
         FRAME_SKY_UNEVENNESS,
         FRAME_POINTING_OFFSET_FRACTION,
     }
@@ -175,10 +175,10 @@ def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
     """Restore moves manifest frames only; the listing flags the rest."""
     from astrometricslib._internal.processing_scripts import restore_excluded_frames
     from astrometricslib.api.processing import ProcessingPipelines
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import restore_quarantined_frames
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import restore_set_aside_frames
 
     folder = _camera_folder(tmp_path)
-    quarantine = _excluded_folder(folder, ["a.fits", "b.fits"], ["a.fits"])
+    set_aside_folder = _excluded_folder(folder, ["a.fits", "b.fits"], ["a.fits"])
     other = _camera_folder_sibling(folder, "Camera2")
     loose = _excluded_folder(other, ["c.fits"], [])
 
@@ -196,9 +196,9 @@ def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
 
     assert report.restored_count == 1
     assert (folder / "a.fits").exists()
-    assert (quarantine / "b.fits").exists()
+    assert (set_aside_folder / "b.fits").exists()
     assert (loose / "c.fits").exists()
-    assert restore_quarantined_frames(str(other)) == []
+    assert restore_set_aside_frames(str(other)) == []
     assert (loose / "c.fits").exists()
 
 
@@ -224,7 +224,7 @@ def test_a_stored_row_gives_the_reason_exposure_and_setting(frames: TargetFrames
     action = set_aside_action_text("trailed", "stars stretched")
     store.write_measurements([
         QualityMeasurement(
-            metric=FRAME_QUARANTINE_SKY_MEDIAN,
+            metric=FRAME_SET_ASIDE_SKY_MEDIAN,
             definition_version=1,
             subject=QualitySubject(
                 level=SubjectLevel.FRAME,
@@ -272,8 +272,8 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
         (folder / name).write_bytes(b"x")
         frames.append(FrameRecord(path=str(folder / name), camera="Cam", timestamp=1_792_000_000.0))
     target = Target(id="M 99", frames=frames)
-    report = QuarantineReport(
-        moved=[QuarantineDecision(frames[0].path, "clouded", REASON, 203, 3348.0, 0.9, 7000.0)],
+    report = SetAsideReport(
+        moved=[SetAsideDecision(frames[0].path, "clouded", REASON, 203, 3348.0, 0.9, 7000.0)],
         measurements=[{"path": f.path, "sky_median_adu": 500.0} for f in frames],
     )
     library = SimpleNamespace(
@@ -283,7 +283,7 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
 
     frame_screening.record_frame_quality(target, [frames[1]], report, frames, MEASURED_AT, recording)
 
-    rows = QualityStore(str(tmp_path / "astrometrics.db")).query(metric=FRAME_QUARANTINE_SKY_MEDIAN)
+    rows = QualityStore(str(tmp_path / "astrometrics.db")).query(metric=FRAME_SET_ASIDE_SKY_MEDIAN)
     actions = {row.subject.subject_id.split("/")[-1]: row.action_taken for row in rows}
     assert actions["moved.fits"] == set_aside_action_text("clouded", REASON)
     assert actions["kept.fits"] is None
@@ -302,7 +302,7 @@ def test_get_statuses_list_the_targets_frames_with_the_flags(
         lambda resolved, config: [],
     )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
+        "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside.stored_star_elongations",
         lambda target_id: {"M 1/a.fits": 1.6, "M 1/b.fits": 1.7},
     )
     monkeypatch.setattr(
@@ -316,7 +316,7 @@ def test_get_statuses_list_the_targets_frames_with_the_flags(
         ("b.fits", "not_stacked"),
     ]
     assert report.frames[0].elongation == pytest.approx(1.6)
-    assert "too small for the quarantine" in report.frames[0].reason
+    assert "too small for the set-aside check" in report.frames[0].reason
 
 
 def test_get_statuses_find_the_stack_time_themselves(
@@ -339,7 +339,7 @@ def test_get_statuses_find_the_stack_time_themselves(
         lambda resolved, config: [],
     )
     monkeypatch.setattr(
-        "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
+        "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside.stored_star_elongations",
         lambda target_id: {},
     )
 

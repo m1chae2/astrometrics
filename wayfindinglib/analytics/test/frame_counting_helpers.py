@@ -126,7 +126,7 @@ def judgment_row(
         The row.
     """
     return QualityMeasurement(
-        metric="frame.quarantine_roundness",
+        metric="frame.set_aside_roundness",
         definition_version=1,
         subject=QualitySubject(
             level=SubjectLevel.FRAME,

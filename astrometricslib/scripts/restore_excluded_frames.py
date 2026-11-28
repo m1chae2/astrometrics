@@ -2,7 +2,7 @@ r"""Move frames the stacking pipeline set aside back into their targets.
 
 Before each stack, the pipeline moves frames with clouds or trailed stars
 into a folder named `_excluded` next to them (see
-`stacking/pre_processing/frame_quarantine.py`). Each such folder holds
+`stacking/pre_processing/frame_set_aside.py`). Each such folder holds
 `excluded_frames.json`, which says where every frame came from and what was
 measured. This script lists those frames and, with ``--apply``, moves them
 back and re-scans the target so it lists them again. It calls
@@ -11,7 +11,7 @@ back and re-scans the target so it lists them again. It calls
 
 A restored frame joins the next stack, and the next stack may move it aside
 again. To keep frames in the stack for good, set
-``quarantine_bad_frames_enabled = "false"`` in the configuration first.
+``set_aside_bad_frames_enabled = "false"`` in the configuration first.
 
 Check first, then apply::
 

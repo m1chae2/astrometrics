@@ -162,8 +162,8 @@ def test_a_processed_fits_never_looks_for_a_jpeg(tmp_path: Path, caplog: pytest.
     assert not caplog.records
 
 
-def test_a_frame_set_aside_is_drawn_from_its_quarantine_folder(tmp_path: Path) -> None:
-    """Verify the old path of a quarantined frame still draws the frame."""
+def test_a_frame_set_aside_is_drawn_from_its_set_aside_folder(tmp_path: Path) -> None:
+    """Verify the old path of a set-asided frame still draws the frame."""
     excluded = tmp_path / "_excluded"
     excluded.mkdir()
     moved = excluded / "M_13_Light_001.fits"

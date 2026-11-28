@@ -10,16 +10,16 @@ it", so every caller agrees.
 
 import os
 
-__all__ = ["QUARANTINE_FOLDER_NAME", "is_quarantined_path"]
+__all__ = ["SET_ASIDE_FOLDER_NAME", "is_set_aside_path"]
 
 # Starts with an underscore so it sorts first and is easy to spot in a file
 # manager. The name is a convention, not a setting: the manifest and the
 # restore script both find the folder by this name.
-QUARANTINE_FOLDER_NAME = "_excluded"
+SET_ASIDE_FOLDER_NAME = "_excluded"
 
 
-def is_quarantined_path(path: str) -> bool:
-    """Say whether a path lies inside a quarantine folder.
+def is_set_aside_path(path: str) -> bool:
+    """Say whether a path lies inside a set-aside folder.
 
     Parameters
     ----------
@@ -28,7 +28,7 @@ def is_quarantined_path(path: str) -> bool:
 
     Returns
     -------
-    is_quarantined : `bool`
+    is_set_aside : `bool`
         `True` if any folder in the path is named `_excluded`.
     """
-    return QUARANTINE_FOLDER_NAME in os.path.normpath(path).split(os.sep)
+    return SET_ASIDE_FOLDER_NAME in os.path.normpath(path).split(os.sep)

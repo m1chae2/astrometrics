@@ -23,7 +23,8 @@
 # Parallel runs (needs pytest-xdist, which setup_venv.sh installs): set
 # PYTEST_WORKERS to a worker count, or to "auto" for one per core, e.g.
 #   PYTEST_WORKERS=8 ./build/linux/run_tests.sh astrometricslib
-# Unset, the tests run one at a time, as CI does.
+# The Linux CI jobs set PYTEST_WORKERS=auto. Unset, the tests run one at a
+# time.
 # =============================================================================
 
 set -euo pipefail
@@ -40,6 +41,15 @@ fi
 export PYTHONPATH="${PYTHONPATH:-.}"
 export ASTROMETRICS_TESTING="${ASTROMETRICS_TESTING:-1}"
 export ASTROMETRICS_FAST_TEST="${ASTROMETRICS_FAST_TEST:-1}"
+
+# Matplotlib keeps its list of fonts in a cache folder. The root conftest.py
+# moves the cache folder into a new temporary folder for every test process,
+# so without this each pytest worker, and each child process a test starts,
+# would rebuild the font list first (several seconds each time). This folder
+# holds only Matplotlib's own font list, never test data, so it is kept
+# between runs and shared by all workers.
+export MPLCONFIGDIR="${MPLCONFIGDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/astrometrics-tests/matplotlib}"
+mkdir -p "$MPLCONFIGDIR"
 
 SUITE="${1:-all}"
 [ $# -gt 0 ] && shift

@@ -7,7 +7,9 @@ limit the number of Siril tasks running at once to prevent timeouts.
 import contextlib
 import logging
 import multiprocessing
+import multiprocessing.synchronize
 import os
+import queue
 import time
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager
@@ -35,18 +37,37 @@ def test_lock_file_path_is_shared_and_absolute() -> None:
     assert SIRIL_PROCESS_LOCK_PATH.endswith("astrometricslib-siril.lock")
 
 
-def _hold_slot_briefly(ready_queue, hold_seconds: float) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Take a slot, announce it, and hold it for `hold_seconds`."""
+def _hold_slot_until_released(
+    ready_queue: multiprocessing.Queue, release_event: multiprocessing.synchronize.Event
+) -> None:
+    """Take a slot, announce it, and hold it until `release_event` is set.
+
+    The test decides when the slot is given back, so it never waits out a
+    fixed hold time that was sized for the slowest machine.
+    """
     with siril_process_lock(max_concurrent_runs=1):
         ready_queue.put("holding")
-        time.sleep(hold_seconds)
+        release_event.wait(timeout=60)
 
 
-def _measure_acquisition_wait(result_queue, slot_count: int) -> None:  # ruff: ignore[missing-type-function-argument]
-    """Acquire a slot and report how long the acquisition blocked."""
+def _measure_acquisition_wait(
+    go_event: multiprocessing.synchronize.Event,
+    started_queue: multiprocessing.Queue,
+    result_queue: multiprocessing.Queue,
+    slot_count: int,
+) -> None:
+    """On the go signal, acquire a slot and report how long it blocked."""
+    go_event.wait(timeout=60)
+    started_queue.put("waiting")
     started_at = time.monotonic()
     with siril_process_lock(max_concurrent_runs=slot_count):
         result_queue.put(time.monotonic() - started_at)
+
+
+# How long the test keeps the holder's slot after the waiter has started to
+# wait. It is longer than the 1 s the tests compare with, so a waiter that
+# really blocks shows a wait of more than 1 s.
+_HOLD_AFTER_WAITER_STARTS_SECONDS = 1.5
 
 
 def _run_holder_and_waiter(slot_count: int) -> float:
@@ -57,6 +78,11 @@ def _run_holder_and_waiter(slot_count: int) -> float:
     the configured library path, and under pytest this process resolves
     a temporary configuration that a child would not share -- so the
     waiter cannot simply be the test itself.
+
+    The holder keeps its slot until the waiter has reported, or until the
+    waiter has been waiting for `_HOLD_AFTER_WAITER_STARTS_SECONDS`.
+    A waiter that gets a free slot reports at once; a waiter that must
+    block reports only after the holder lets go.
 
     Parameters
     ----------
@@ -70,18 +96,34 @@ def _run_holder_and_waiter(slot_count: int) -> float:
     """
     context = multiprocessing.get_context("spawn")
     ready_queue = context.Queue()
+    started_queue = context.Queue()
     result_queue = context.Queue()
-    holder = context.Process(target=_hold_slot_briefly, args=(ready_queue, 8.0))
+    release_event = context.Event()
+    go_event = context.Event()
+    holder = context.Process(target=_hold_slot_until_released, args=(ready_queue, release_event))
+    # Both start at once, so their slow imports overlap. The waiter asks for
+    # the slot only when told to, after the holder has it.
+    waiter = context.Process(
+        target=_measure_acquisition_wait, args=(go_event, started_queue, result_queue, slot_count)
+    )
     holder.start()
     try:
-        assert ready_queue.get(timeout=60) == "holding"
-        waiter = context.Process(target=_measure_acquisition_wait, args=(result_queue, slot_count))
         waiter.start()
         try:
-            return float(result_queue.get(timeout=60))
+            assert ready_queue.get(timeout=60) == "holding"
+            go_event.set()
+            assert started_queue.get(timeout=60) == "waiting"
+            try:
+                return float(result_queue.get(timeout=_HOLD_AFTER_WAITER_STARTS_SECONDS))
+            except queue.Empty:
+                release_event.set()
+                return float(result_queue.get(timeout=60))
         finally:
+            release_event.set()
+            go_event.set()
             waiter.join(timeout=30)
     finally:
+        release_event.set()
         holder.join(timeout=30)
 
 

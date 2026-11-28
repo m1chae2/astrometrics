@@ -85,6 +85,7 @@ from astrometricslib.pipelines.stacking.subset_stack import (
     stack_frame_subset,
     subset_stack_path,
 )
+from astrometricslib.test.synthetic.point_stars import add_gaussian_star
 from astrometricslib.utilities.observing_night import observing_night_id
 
 SIZE = 900
@@ -128,11 +129,10 @@ def _write_stack(path: str, noise_sigma: float, seed: int) -> None:
         Seed of the noise.
     """
     generator = np.random.default_rng(seed)
-    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
     image = SKY_LEVEL + generator.normal(0.0, noise_sigma, (SIZE, SIZE))
     amplitudes = np.linspace(0.3, 1.0, len(STAR_POSITIONS)) * 2000.0
     for (x, y), amplitude in zip(STAR_POSITIONS, amplitudes, strict=True):
-        image += amplitude * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * 2.0**2))
+        add_gaussian_star(image, x, y, amplitude, 2.0)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fits.PrimaryHDU(image.astype(np.float32), header=_sky_header()).writeto(path, overwrite=True)
 

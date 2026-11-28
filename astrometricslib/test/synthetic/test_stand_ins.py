@@ -1,15 +1,18 @@
-"""Purpose: Tests of the shared test stand-ins, the sky map and fake SIMBAD.
+"""Purpose: Tests of the shared test stand-ins: sky map, fake SIMBAD, stars.
 
 Description: Checks that `tan_sky_map` puts its reference pixel at the given
-sky position with the given pixel size, and that `FakeSimbad` gives its set
-answers, records each question and fails when told to.
+sky position with the given pixel size, that `FakeSimbad` gives its set
+answers, records each question and fails when told to, and that
+`add_gaussian_star` draws the same star as a drawing over every pixel.
 """
 
+import numpy as np
 import pytest
 from astropy.table import Table
 
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.test.synthetic.fake_simbad import FakeSimbad
+from astrometricslib.test.synthetic.point_stars import add_gaussian_star
 from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 
@@ -61,3 +64,23 @@ def test_a_set_failure_is_raised_after_the_question_is_recorded() -> None:
         simbad.query_object("Vega")
 
     assert simbad.call_count == 1
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "sigma_px"),
+    [(150.3, 200.7, 2.0), (2.2, 3.6, 1.5), (397.8, 0.4, 4.0), (-5.0, 120.0, 2.5)],
+)
+def test_a_windowed_star_matches_a_star_drawn_over_every_pixel(x: float, y: float, sigma_px: float) -> None:
+    """The square drawing gives the same float32 image, also at the edges.
+
+    The last case has its center off the image, so only part of the star
+    lands on it.
+    """
+    rows, columns = np.mgrid[0:300, 0:400]
+    sky = np.random.default_rng(1).normal(100.0, 3.0, (300, 400))
+    expected = sky + 2000.0 * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * sigma_px**2))
+    drawn = sky.copy()
+
+    add_gaussian_star(drawn, x, y, 2000.0, sigma_px)
+
+    np.testing.assert_array_equal(drawn.astype(np.float32), expected.astype(np.float32))

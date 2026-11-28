@@ -29,7 +29,18 @@ import pytest
 # 1. Set testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
 
-# 2. Configure Matplotlib to use the headless Agg backend
+# 2. Configure Matplotlib to use the headless Agg backend.
+# Keep Matplotlib's font list in one lasting folder. Step 3 moves
+# XDG_CACHE_HOME into a new temporary folder, so without this every test
+# process (and every child process) rebuilds the font list first.
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(
+        os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+        "astrometrics-tests",
+        "matplotlib",
+    ),
+)
 import matplotlib
 
 matplotlib.use("Agg")

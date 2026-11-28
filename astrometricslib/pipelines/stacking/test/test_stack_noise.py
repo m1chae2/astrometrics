@@ -74,6 +74,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     _move_guess_onto_reference_stars,
     measure_stack_noise,
 )
+from astrometricslib.test.synthetic.point_stars import add_gaussian_star
 from astrometricslib.test.synthetic.sky_map import tan_sky_map
 
 SIZE = 900
@@ -137,13 +138,12 @@ def _sky_image(
     """
     positions = STAR_POSITIONS if star_positions is None else star_positions
     generator = np.random.default_rng(seed)
-    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
     image = SKY_LEVEL + generator.normal(0.0, noise_sigma, (SIZE, SIZE))
     # The amplitudes differ, because the star finder skips stars as bright as
     # the brightest pixels (it takes those for saturated).
     amplitudes = np.linspace(0.3, 1.0, len(positions)) * star_amplitude * (2.0 / star_sigma) ** 2
     for (x, y), amplitude in zip(positions, amplitudes, strict=True):
-        image += amplitude * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * star_sigma**2))
+        add_gaussian_star(image, x, y, amplitude, star_sigma)
     return image.astype(np.float32)
 
 

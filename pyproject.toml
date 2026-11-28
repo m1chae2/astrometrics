@@ -11,7 +11,7 @@ name = "astrometrics"
 version = "0.2.0"
 description = "Integrated image processing, photometry, spectroscopy, and telescope control for amateur astronomy and citizen science."
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Michael Coelho", email = "macoelho25@gmail.com" }]
 keywords = [
@@ -153,7 +153,8 @@ addopts = "-v -m 'not trio'"
 markers = [
     "anyio: mark test to run with anyio",
     "trio: mark test as trio-only (skip if trio not installed)",
-    "golden: compare real M 13 frame measurements with pinned values (needs the Git LFS sample frames)"
+    "golden: compare real M 13 frame measurements with pinned values (needs the Git LFS sample frames)",
+    "windows_sensitive: the test touches behavior that differs on Windows; added by the root conftest.py, and the only tests a pull request runs on Windows"
 ]
 log_cli = true
 log_cli_level = "INFO"

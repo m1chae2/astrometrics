@@ -12,6 +12,10 @@ to this file alone:
 - the Python packages for Siril's own Python environment;
 - the two wrapper scripts and the settings that point at them.
 
+Each wheel also names its license. The NVIDIA wheels are under NVIDIA's own
+license agreements, which are not open source, so the setup asks the user to
+accept them before it downloads one (see `License.needs_acceptance`).
+
 Each file checksum is the one the wheel's own ``RECORD`` lists for that file,
 so a downloaded wheel that differs in any byte is refused. Some files on the
 machine these pins were taken from were copied by hand from other sources
@@ -29,6 +33,61 @@ from dataclasses import dataclass
 
 SIRIL_APP_ID = "org.siril.Siril"
 """The Flathub application ID of Siril."""
+
+
+@dataclass(frozen=True)
+class License:
+    """The license a pinned wheel is under.
+
+    Attributes
+    ----------
+    name : `str`
+        The license's name.
+    url : `str`
+        Where its full text is published.
+    open_source : `bool`
+        Whether it is an open-source license. A license that is not must be
+        accepted by the user before the setup downloads a wheel under it.
+    """
+
+    name: str
+    url: str
+    open_source: bool
+
+    @property
+    def needs_acceptance(self) -> bool:
+        """Whether the user must accept this license before a download.
+
+        Returns
+        -------
+        needs_acceptance : `bool`
+            `True` for a license that is not open source.
+        """
+        return not self.open_source
+
+
+CUDA_EULA = License(
+    name="NVIDIA CUDA Toolkit End User License Agreement",
+    url="https://docs.nvidia.com/cuda/eula/index.html",
+    open_source=False,
+)
+"""The license of the CUDA runtime, cuBLAS, cuFFT, cuRAND and NVRTC wheels.
+Their PyPI metadata says ``LicenseRef-NVIDIA-Proprietary``."""
+
+CUDNN_LICENSE = License(
+    name="NVIDIA cuDNN Software License Agreement",
+    url="https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html",
+    open_source=False,
+)
+"""The license of the cuDNN wheels (the NVIDIA SDK license agreement with its
+cuDNN supplement). Their PyPI metadata leaves the license field empty."""
+
+ONNXRUNTIME_LICENSE = License(
+    name="MIT License",
+    url="https://github.com/microsoft/onnxruntime/blob/main/LICENSE",
+    open_source=True,
+)
+"""The license of ONNX Runtime."""
 
 
 @dataclass(frozen=True)
@@ -75,6 +134,9 @@ class PinnedWheel:
         such as ``"3.13"``; `None` for a wheel that fits any Python.
     platform : `str` or `None`
         The wheel's platform tag when ``python_version`` is set.
+    license : `License` or `None`
+        The license the wheel is under; `None` only for stand-in wheels in
+        the tests.
     """
 
     project: str
@@ -82,6 +144,18 @@ class PinnedWheel:
     files: tuple[PinnedFile, ...]
     python_version: str | None = None
     platform: str | None = None
+    license: License | None = None
+
+    @property
+    def needs_license_acceptance(self) -> bool:
+        """Whether the user must accept the wheel's license before a download.
+
+        Returns
+        -------
+        needs_acceptance : `bool`
+            `True` when the wheel's license is not open source.
+        """
+        return self.license is not None and self.license.needs_acceptance
 
 
 @dataclass(frozen=True)
@@ -136,6 +210,7 @@ def _cudnn_files(lib_folder: str, checksums: dict[str, tuple[str, int]]) -> tupl
 
 CUBLAS_CU12 = PinnedWheel(
     project="nvidia-cublas-cu12",
+    license=CUDA_EULA,
     version="12.9.2.10",
     files=(
         PinnedFile(
@@ -159,6 +234,7 @@ CUBLAS_CU12 = PinnedWheel(
 
 CUDA_RUNTIME_CU12 = PinnedWheel(
     project="nvidia-cuda-runtime-cu12",
+    license=CUDA_EULA,
     version="12.9.79",
     files=(
         PinnedFile(
@@ -172,6 +248,7 @@ CUDA_RUNTIME_CU12 = PinnedWheel(
 
 CUDA_NVRTC_CU12 = PinnedWheel(
     project="nvidia-cuda-nvrtc-cu12",
+    license=CUDA_EULA,
     version="12.9.86",
     files=(
         PinnedFile(
@@ -185,6 +262,7 @@ CUDA_NVRTC_CU12 = PinnedWheel(
 
 CUFFT_CU12 = PinnedWheel(
     project="nvidia-cufft-cu12",
+    license=CUDA_EULA,
     version="11.4.1.4",
     files=(
         PinnedFile(
@@ -198,6 +276,7 @@ CUFFT_CU12 = PinnedWheel(
 
 CURAND_CU12 = PinnedWheel(
     project="nvidia-curand-cu12",
+    license=CUDA_EULA,
     version="10.3.7.77",
     files=(
         PinnedFile(
@@ -213,6 +292,7 @@ CURAND_CU12 = PinnedWheel(
 
 CUDNN_CU12 = PinnedWheel(
     project="nvidia-cudnn-cu12",
+    license=CUDNN_LICENSE,
     version="9.24.0.43",
     files=_cudnn_files(
         "nvidia/cudnn/lib",
@@ -278,6 +358,7 @@ StarNet2 wrapper uses the same folder on the host.
 
 ONNXRUNTIME_GPU = PinnedWheel(
     project="onnxruntime-gpu",
+    license=ONNXRUNTIME_LICENSE,
     version="1.26.0",
     python_version="3.13",
     platform="manylinux_2_28_x86_64",
@@ -337,6 +418,7 @@ STARNET_ORT = LibraryFolder(
 
 CUDNN_CU13 = PinnedWheel(
     project="nvidia-cudnn-cu13",
+    license=CUDNN_LICENSE,
     version="9.28.1.4",
     files=_cudnn_files(
         "nvidia/cudnn/lib",
@@ -407,6 +489,17 @@ which needs administrator rights, so the setup only checks for them.
 """
 
 LIBRARY_FOLDERS = (CUDA_LIBS, STARNET_ORT, GRAXPERT_CUDNN)
+
+PINNED_WHEELS = tuple(dict.fromkeys(wheel for folder in LIBRARY_FOLDERS for wheel in folder.wheels))
+"""Every pinned wheel, each once, in the order the folders list them."""
+
+LICENSES_TO_ACCEPT = tuple(
+    dict.fromkeys(
+        wheel.license for wheel in PINNED_WHEELS if wheel.license and wheel.needs_license_acceptance
+    )
+)
+"""The licenses that are not open source, which the user must accept before
+the setup downloads a wheel under them: NVIDIA's CUDA and cuDNN agreements."""
 
 
 # ---------------------------------------------------------------------------

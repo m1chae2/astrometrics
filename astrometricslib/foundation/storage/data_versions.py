@@ -481,6 +481,99 @@ def get_frame_metric_signs(
             connection.close()
 
 
+class FrameMetricDataVersion(NamedTuple):
+    """The parts of one frame metric's data version.
+
+    `get_frame_metric_data_versions` gives one of these for each metric.
+
+    It is a plain tuple, so it can be compared and kept as a cache version.
+    A cache that keeps a result built from the frame rows of a metric can
+    bring it up to date when rows were only added: the count and the sum of
+    the row numbers grow by exactly the added rows, and every added row has a
+    row number above the kept newest one.
+
+    Attributes
+    ----------
+    measurement_count : `int`
+        How many frame-level rows the metric has.
+    newest_row_id : `int`
+        The largest row number among them, 0 when there are none.
+    measurement_row_id_sum : `int`
+        The sum of their row numbers. A row removed while another is added
+        leaves the count the same but changes the sum.
+    newest_measured_at : `str`
+        The latest measurement time among them, as stored (ISO 8601 in UTC).
+        Empty when there are none.
+    """
+
+    measurement_count: int
+    newest_row_id: int
+    measurement_row_id_sum: int
+    newest_measured_at: str
+
+
+def get_frame_metric_data_versions(
+    config: AppConfiguration, metrics: Collection[str]
+) -> dict[str, FrameMetricDataVersion] | None:
+    """Give a value for each frame metric that changes whenever its rows do.
+
+    A result that reads a few metrics of every frame in the library (the
+    capture history of the equipment) changes when a frame-level row of one
+    of those metrics is added or removed, whatever its target. The library
+    counters (`get_library_data_version`) also change for every other write,
+    such as a stack row, so this looks at the frame rows of the given
+    metrics only. One query reads all of them.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings. They give the library folder.
+    metrics : `~collections.abc.Collection` [`str`]
+        The metric names, for example ``"frame.star_elongation"``.
+
+    Returns
+    -------
+    versions : `dict` [`str`, `FrameMetricDataVersion`] or `None`
+        For each metric: the count, newest row number and row-number sum of
+        its frame-level rows, and their newest measurement time. A metric
+        with no rows gets zeros. `None` when the database could not be read;
+        the caller must not keep an answer then.
+    """
+    wanted = sorted(set(metrics))
+    empty = FrameMetricDataVersion(0, 0, 0, "")
+    path = _library_database_path(config)
+    if path is None:
+        return None
+    if not os.path.isfile(path) or not wanted:
+        return dict.fromkeys(wanted, empty)
+    connection = None
+    try:
+        connection = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True, timeout=5.0)
+        # One short query per metric, so each uses the index that starts
+        # with the metric name, all in one read transaction.
+        connection.execute("BEGIN")
+        versions = {}
+        for metric in wanted:
+            count, newest_row_id, row_id_sum, newest_measured_at = _read_or_default(
+                connection,
+                "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(SUM(row_id), 0), "
+                "COALESCE(MAX(measured_at), '') FROM quality_measurements "
+                "WHERE metric = ? AND subject_level = 'frame'",
+                (metric,),
+                tuple(empty),
+            )
+            versions[metric] = FrameMetricDataVersion(
+                int(count), int(newest_row_id), int(row_id_sum), str(newest_measured_at)
+            )
+        return versions
+    except sqlite3.Error, OSError:
+        logger.warning("Could not read the frame metric versions from %s.", path, exc_info=True)
+        return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 def get_target_document_signs(config: AppConfiguration) -> dict[str, tuple[int, str]] | None:
     """Give a value for each target that changes whenever its document does.
 

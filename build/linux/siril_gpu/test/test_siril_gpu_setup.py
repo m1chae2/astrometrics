@@ -5,7 +5,9 @@ Flatpak key files and planning the overrides (only missing settings are
 added, nothing is removed, a different value is a conflict), checking files
 against their SHA-256 pins (a mismatch is refused and the old file kept),
 filling in the wrapper templates, comparing package versions, and setting a
-value in the app's and Siril's settings only where it is empty. Then it runs
+value in the app's and Siril's settings only where it is empty, and asking
+for NVIDIA's license agreements before any NVIDIA wheel is downloaded. Then it
+runs
 the whole program in a temporary home folder with stand-in ``flatpak`` and
 ``nvidia-smi`` commands, so nothing on the real machine is read or changed.
 
@@ -291,6 +293,174 @@ def test_every_pin_is_a_sha256_with_a_size() -> None:
 
 
 # ---------------------------------------------------------------------------
+# NVIDIA's licenses
+# ---------------------------------------------------------------------------
+
+
+class Asker:
+    """A stand-in for `input` that gives one answer and counts questions.
+
+    Parameters
+    ----------
+    answer : `str`
+        The answer to give.
+    """
+
+    def __init__(self, answer: str) -> None:
+        """Remember the answer."""
+        self.answer = answer
+        self.questions: list[str] = []
+
+    def __call__(self, question: str) -> str:
+        """Record the question and give the answer.
+
+        Parameters
+        ----------
+        question : `str`
+            The question asked.
+
+        Returns
+        -------
+        answer : `str`
+            The fixed answer.
+        """
+        self.questions.append(question)
+        return self.answer
+
+
+def test_every_nvidia_wheel_needs_its_license_accepted() -> None:
+    """Each NVIDIA wheel needs its license accepted; ONNX Runtime does not."""
+    for wheel in pins.PINNED_WHEELS:
+        assert wheel.license is not None, f"{wheel.project} names no license"
+        assert wheel.needs_license_acceptance == wheel.project.startswith("nvidia-"), wheel.project
+    urls = {license_.url for license_ in pins.LICENSES_TO_ACCEPT}
+    assert urls == {pins.CUDA_EULA.url, pins.CUDNN_LICENSE.url}
+    assert all(url.startswith("https://docs.nvidia.com/") for url in urls)
+
+
+def test_license_gate_accepted_on_the_command_line_never_asks() -> None:
+    """``--accept-nvidia-license`` lets the downloads go ahead unasked."""
+    asker = Asker("n")
+    gate = setup.LicenseGate(accepted=True, interactive=True, ask=asker)
+    gate.require()
+    assert asker.questions == []
+
+
+def test_license_gate_asks_once_and_remembers_a_yes(capsys: pytest.CaptureFixture[str]) -> None:
+    """A yes is asked for once per run, after the license addresses are shown.
+
+    Parameters
+    ----------
+    capsys : `pytest.CaptureFixture`
+        Captures what the gate prints.
+    """
+    asker = Asker("y")
+    gate = setup.LicenseGate(accepted=False, interactive=True, ask=asker)
+    gate.require()
+    gate.require()
+    assert len(asker.questions) == 1
+    printed = capsys.readouterr().out
+    assert pins.CUDA_EULA.url in printed
+    assert pins.CUDNN_LICENSE.url in printed
+
+
+@pytest.mark.parametrize("answer", ["", "n", "no", "maybe"])
+def test_license_gate_refuses_anything_but_yes(answer: str) -> None:
+    """Any answer but yes refuses, and a refusal is not asked again.
+
+    Parameters
+    ----------
+    answer : `str`
+        The user's answer.
+    """
+    asker = Asker(answer)
+    gate = setup.LicenseGate(accepted=False, interactive=True, ask=asker)
+    with pytest.raises(setup.LicenseNotAcceptedError):
+        gate.require()
+    with pytest.raises(setup.LicenseNotAcceptedError):
+        gate.require()
+    assert len(asker.questions) == 1
+
+
+def test_license_gate_without_a_terminal_needs_the_flag() -> None:
+    """With no terminal, the gate refuses without asking and names the flag."""
+    asker = Asker("y")
+    gate = setup.LicenseGate(accepted=False, interactive=False, ask=asker)
+    with pytest.raises(setup.LicenseNotAcceptedError, match="--accept-nvidia-license"):
+        gate.require()
+    assert asker.questions == []
+
+
+def test_wheel_cache_asks_before_an_nvidia_download(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A refused license stops the download before pip runs.
+
+    Parameters
+    ----------
+    tmp_path : `Path`
+        The test's temporary folder.
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the command runner.
+    """
+
+    def no_command(*arguments: object, **options: object) -> None:
+        """Fail the test if any command runs.
+
+        Raises
+        ------
+        AssertionError
+            Always.
+        """
+        raise AssertionError("pip must not run without the license accepted")
+
+    monkeypatch.setattr(setup, "run_command", no_command)
+    cache = setup.WheelCache(tmp_path / "work", setup.LicenseGate(accepted=False, interactive=False))
+    with pytest.raises(setup.LicenseNotAcceptedError):
+        cache.get(pins.CUBLAS_CU12)
+    with pytest.raises(setup.LicenseNotAcceptedError):
+        setup.WheelCache(tmp_path / "work").get(pins.CUDNN_CU13)
+
+
+def test_wheel_cache_downloads_an_open_source_wheel_without_asking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ONNX Runtime (MIT) is downloaded without a license question.
+
+    Parameters
+    ----------
+    tmp_path : `Path`
+        The test's temporary folder.
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the command runner.
+    """
+    folder = tmp_path / "work"
+
+    def fake_pip(command: list[str], **options: object) -> subprocess.CompletedProcess:
+        """Save an empty wheel where pip would.
+
+        Parameters
+        ----------
+        command : `list` [`str`]
+            The pip command.
+        **options : `object`
+            Ignored.
+
+        Returns
+        -------
+        result : `subprocess.CompletedProcess`
+            A successful result.
+        """
+        name = setup.wheel_file_name_prefix(pins.ONNXRUNTIME_GPU) + "cp313-cp313-manylinux_2_28_x86_64.whl"
+        (folder / name).write_bytes(b"")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(setup, "run_command", fake_pip)
+    asker = Asker("n")
+    cache = setup.WheelCache(folder, setup.LicenseGate(accepted=False, interactive=True, ask=asker))
+    assert cache.get(pins.ONNXRUNTIME_GPU).parent == folder
+    assert asker.questions == []
+
+
+# ---------------------------------------------------------------------------
 # Python packages
 # ---------------------------------------------------------------------------
 
@@ -508,6 +678,8 @@ def run_setup(environment: dict[str, str], *arguments: str) -> subprocess.Comple
     return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- list form, stand-in commands
         [sys.executable, str(SETUP_DIR / "siril_gpu_setup.py"), *arguments],
         env=environment,
+        # No terminal: the program can never stop to ask a question.
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         check=False,
@@ -578,6 +750,40 @@ def test_run_adds_overrides_wrappers_and_empty_settings(fake_machine: dict[str, 
     assert f"starnet_exe={home / pins.STARNET_WRAPPER.relative_path}" in siril_config
     assert f"graxpert_path={wrapper}" in siril_config
     assert list(app_config.parent.glob("*.bak-*")), "the old settings file is kept"
+
+
+def test_dry_run_says_a_run_would_ask_for_nvidias_licenses(fake_machine: dict[str, str]) -> None:
+    """``--dry-run`` names the NVIDIA licenses a run would ask for.
+
+    Parameters
+    ----------
+    fake_machine : `dict` [`str`, `str`]
+        The stand-in environment.
+    """
+    result = run_setup(fake_machine, "--dry-run", "--parts", "cuda-libs,starnet-ort")
+    assert result.returncode == 0, result.stderr
+    assert f"would     ask you to accept {pins.CUDA_EULA.name} ({pins.CUDA_EULA.url})" in result.stdout
+    assert pins.CUDNN_LICENSE.url in result.stdout
+    starnet = result.stdout.split("[starnet-ort]", 1)[1]
+    assert "ask you to accept" not in starnet, "ONNX Runtime is open source and needs no acceptance"
+
+
+def test_run_without_a_terminal_or_the_flag_downloads_nothing(fake_machine: dict[str, str]) -> None:
+    """With no terminal and no ``--accept-nvidia-license``, NVIDIA is refused.
+
+    Parameters
+    ----------
+    fake_machine : `dict` [`str`, `str`]
+        The stand-in environment.
+    """
+    # Point pip at nowhere, so a mistake cannot download the real wheels.
+    environment = {**fake_machine, "PIP_NO_INDEX": "1", "PIP_INDEX_URL": "http://127.0.0.1:9/"}
+    result = run_setup(environment, "--parts", "cuda-libs")
+    assert result.returncode == 1
+    assert "--accept-nvidia-license" in result.stderr
+    assert pins.CUDA_EULA.url in result.stdout
+    assert "downloading" not in result.stdout
+    assert not (Path(fake_machine["HOME"]) / pins.CUDA_LIBS.relative_path).exists()
 
 
 def test_no_gpu_skips_everything(fake_machine: dict[str, str], tmp_path: Path) -> None:

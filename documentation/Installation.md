@@ -1,6 +1,6 @@
 # Installation
 
-*Version 2.2 · 2026-11-27 · Status: current*
+*Version 2.3 · 2026-11-27 · Status: current*
 
 This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
@@ -26,6 +26,8 @@ Keep the frames on the same drive as `%LOCALAPPDATA%`, usually `C:`. Siril reads
 **Hardware.** A computer is enough to open and process frames that are already on disk. To capture new frames or move a telescope, you also need a motorized mount and a camera that work with INDI. INDI is the open standard that telescope software uses to talk to mounts, cameras and focusers. The installer adds the INDI packages.
 
 **Software.** The steps below install or set up each item.
+
+Each item is the work of others, under its own license, and you accept that license when you install it. Some are not open source. [Third-party notices](https://github.com/m1chae2/astrometrics/blob/main/THIRD_PARTY_NOTICES.md) lists each license and the acknowledgements to include when you publish results.
 
 | Software | Why the app needs it | How you get it |
 | --- | --- | --- |
@@ -144,7 +146,7 @@ Siril's AI tools can run on an NVIDIA graphics card, which is usually faster tha
    ./build/linux/setup_siril_gpu.sh
    ```
 
-   Run it as your own user, not with `sudo`. It downloads 2 to 3 GB of libraries from PyPI. It checks each file against a pinned checksum and refuses any file that does not match. If GraXpert or StarNet2 is somewhere else, add `--graxpert=<path>` or `--starnet=<path>`.
+   Run it as your own user, not with `sudo`. It downloads 2 to 3 GB of libraries from PyPI. It checks each file against a pinned checksum and refuses any file that does not match. NVIDIA's CUDA and cuDNN libraries are under NVIDIA's own license agreements, which are not open source. Before the first download, the script shows the address of each agreement and asks you to accept it. Answer `y` to go on. Without a terminal, add `--accept-nvidia-license` instead. If GraXpert or StarNet2 is somewhere else, add `--graxpert=<path>` or `--starnet=<path>`.
 
 5. Check the result. Every part should show `ready`.
 

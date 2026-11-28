@@ -1,8 +1,16 @@
 """Extracts a light spectrum for each star found in a spectral image.
 
-Runs `AstrometryPipeline` first, in blind-detection-only mode, purely to
-find where the stars are in the frame -- a spectral stack has no WCS of
-its own, so this is the only way to locate them at all. Then runs
+Astrometry is the core layer: spectroscopy reads a plate solution and never
+starts an astrometry run. The solution is, in order, the one of the
+target's solved imaging stack of the same camera and optic (shifted onto
+the spectral stack), else the spectral stack's own when an astrometry run
+has solved it (see `resolve_spectral_stack_solution`). The stage runner
+skips spectroscopy when there is neither (`tasks.missing_astrometry_reason`).
+
+The adapter still calls `AstrometryPipeline.process` in its
+blind-detection-only mode (no plate solve, nothing stored), to find where the
+stars are in the frame and to name the star at the frame centre from the
+position hint. Then it names the stars with the solution, runs
 `SpectroscopyPipeline` to pull a spectrum out of each one, records the
 result as a `SpectroscopyQualitySummary`, and saves the stars.
 """
@@ -36,9 +44,11 @@ from astrometricslib.pipelines.pipeline_base import (
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.solved_star_list import read_solved_stars
 from astrometricslib.pipelines.shared.target_center_hint import (
+    SpectralStackSolution,
     resolve_known_target,
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
+    resolve_spectral_stack_solution,
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     gaia_xp_gate,
@@ -176,6 +186,35 @@ def _recover_extended_source_hint(
     )
 
 
+def _own_solution_center_hint(solution: SpectralStackSolution) -> tuple[float | None, float | None]:
+    """Find a spectral stack's centre on the sky from its own solution.
+
+    Parameters
+    ----------
+    solution : `SpectralStackSolution`
+        The spectral stack's own plate solution.
+
+    Returns
+    -------
+    center_ra : `float` or `None`
+        The centre's right ascension in decimal degrees, or `None` when the
+        stack's size cannot be read.
+    center_dec : `float` or `None`
+        The declination in decimal degrees, or `None` under the same
+        condition.
+    """
+    from astrometricslib._internal.drivers.fits_access import read_header
+
+    try:
+        header = read_header(solution.stack_path)
+    except OSError:
+        return None, None
+    center_ra, center_dec = solution.wcs.pixel_to_world_values(
+        header.get("NAXIS1", 0) / 2.0, header.get("NAXIS2", 0) / 2.0
+    )
+    return float(center_ra), float(center_dec)
+
+
 def _field_center_for_registration(
     stack_path: str, hint_ra: float | None, hint_dec: float | None
 ) -> tuple[float, float] | None:
@@ -296,7 +335,7 @@ def _named_star_ids(star_ids: list[str]) -> list[str]:
     return [star_id for star_id in star_ids if not str(star_id).startswith(_ANONYMOUS_ID_PREFIXES)]
 
 
-def _solved_stack_stars(target: Target) -> list:
+def _solved_stack_stars(target: Target, extra_stack_paths: tuple[str, ...] = ()) -> list:
     """Read the stars astrometry named on the target's imaging stacks.
 
     Astrometry keeps them in a file next to each stack it solved (see
@@ -306,6 +345,9 @@ def _solved_stack_stars(target: Target) -> list:
     ----------
     target : `Target`
         The target whose stacks are read.
+    extra_stack_paths : `tuple` [`str`, ...], optional
+        Other solved stacks to read first, such as a spectral stack that
+        astrometry solved itself.
 
     Returns
     -------
@@ -315,8 +357,10 @@ def _solved_stack_stars(target: Target) -> list:
     stacking = getattr(target, "stacking", None)
     if stacking is None:
         return []
-    stack_paths = [stacking.stacked_image] + [
-        configuration.stacked_image for configuration in stacking.stacks_by_configuration.values()
+    stack_paths = [
+        *extra_stack_paths,
+        stacking.stacked_image,
+        *(configuration.stacked_image for configuration in stacking.stacks_by_configuration.values()),
     ]
     stars: dict[str, Any] = {}
     for stack_path in dict.fromkeys(path for path in stack_paths if isinstance(path, str) and path):
@@ -326,7 +370,10 @@ def _solved_stack_stars(target: Target) -> list:
 
 
 def _registration_reference_candidates(
-    target: Target, catalog_access: Any, field_center: tuple[float, float] | None = None
+    target: Target,
+    catalog_access: Any,
+    field_center: tuple[float, float] | None = None,
+    extra_stack_paths: tuple[str, ...] = (),
 ) -> list:
     """Collect the stars a spectral field can register its identity against.
 
@@ -345,6 +392,9 @@ def _registration_reference_candidates(
         Where the spectral frame points, `(ra, dec)` in decimal degrees.
         Only stars within `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG` of it
         are kept.
+    extra_stack_paths : `tuple` [`str`, ...], optional
+        Other solved stacks whose named stars come first (see
+        `_solved_stack_stars`).
 
     Returns
     -------
@@ -353,7 +403,7 @@ def _registration_reference_candidates(
     """
     solved = [
         star
-        for star in _solved_stack_stars(target)
+        for star in _solved_stack_stars(target, extra_stack_paths)
         if _can_be_a_reference_star(star) and _within_field(star, field_center)
     ]
     saved = _saved_reference_candidates(target, catalog_access, field_center)
@@ -511,11 +561,22 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         target = request.target
         catalog_access = request.catalog_access
 
+        # The plate solution the stars are named with: the solved imaging
+        # stack's of the same camera and optic, else the spectral stack's
+        # own (see `resolve_spectral_stack_solution`). The stage runner skips
+        # spectroscopy when there is neither, and never runs astrometry.
+        solution = resolve_spectral_stack_solution(target, request.path)
+        own_solution = solution if solution is not None and not solution.borrowed else None
+
         # Use the AstrometryPipeline to identify the stars in the field
         # The stack's own FITS position is only the mount's report and can be
         # far off (see `resolve_solved_stack_center_hint`), so prefer the
-        # centre of this target's plate-solved stack when there is one.
-        hint_ra, hint_dec = resolve_solved_stack_center_hint(target, request.path)
+        # centre of this target's plate-solved stack when there is one, or of
+        # the spectral stack's own solution.
+        if own_solution is not None:
+            hint_ra, hint_dec = _own_solution_center_hint(own_solution)
+        else:
+            hint_ra, hint_dec = resolve_solved_stack_center_hint(target, request.path)
         astrometry = AstrometryPipeline(drivers=request.options.get("drivers"))
         # The target's name picks the star at the frame centre when the
         # mount's position is minutes of arc off, and keeps a planet from
@@ -529,7 +590,8 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             known_target=resolve_known_target(target),
         )
 
-        # The spectral stack has no WCS of its own (see the module
+        # Unless astrometry solved the spectral stack itself (handled
+        # first below), it has no WCS of its own (see the module
         # docstring on spectral_star_registration), so these stars
         # would otherwise stay permanently unidentified. If a
         # plate-solved, catalog-identified star field is available
@@ -549,8 +611,32 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # doesn't matter that most of them won't end up with a
         # spectrum extracted.
         field_center = _field_center_for_registration(request.path, hint_ra, hint_dec)
-        reference_stellar_objects = _registration_reference_candidates(target, catalog_access, field_center)
-        if reference_stellar_objects:
+        reference_stellar_objects = _registration_reference_candidates(
+            target,
+            catalog_access,
+            field_center,
+            (request.path,) if own_solution is not None else (),
+        )
+        if reference_stellar_objects and own_solution is not None:
+            from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
+                identify_spectral_stars_via_solution,
+                set_sky_positions_of_unnamed_detections,
+            )
+
+            # The spectral stack's own solution fits its pixels as it is, so
+            # no shift is measured.
+            identify_spectral_stars_via_solution(
+                context.stellar_objects,
+                reference_stellar_objects,
+                own_solution.wcs,
+                solution_fits_this_image=True,
+            )
+            set_sky_positions_of_unnamed_detections(context.stellar_objects, own_solution.wcs)
+            if context.extended_source_hint is None:
+                context.extended_source_hint = astrometry.build_extended_source_hint(
+                    context.image, own_solution.wcs, hint_ra, hint_dec, resolve_known_target(target)
+                )
+        elif reference_stellar_objects:
             from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_star_registration import (
                 identify_spectral_stars_via_registered_sky_map,
                 identify_spectral_stars_via_solution,
@@ -723,7 +809,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
 
 def run_spectroscopy_analysis(
     target: Target,
-    frames: Any,  # unused; spectroscopy always solves `path`
+    frames: Any,  # unused; spectroscopy always reads `path`
     filter_type: Any,  # unused; spectroscopy has no filter concept
     catalog_access: Any,
     path: str | None,
@@ -759,7 +845,7 @@ def run_spectroscopy_analysis(
     Returns
     -------
     result : `dict`
-        Has ``"context"`` (the `AnalysisContext` the astrometry pass
+        Has ``"context"`` (the `AnalysisContext` the star-detection pass
         built) and ``"stellar_objects"``.
     """
     from astrometricslib.pipelines.shared.provenance_recording import note_stacked_image_upstream

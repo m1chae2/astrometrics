@@ -59,6 +59,12 @@ describe('jobStepsSubtitle', () => {
             requested: ['photometry'], run: [], skipped: { photometry: 'needs astrometry: no stack' }, finished: true,
         }))).toBe('Photometry (skipped: needs astrometry)');
         expect(jobStepsSubtitle(analysis({
+            requested: ['spectroscopy'], run: [], finished: true,
+            skipped: {
+                spectroscopy: 'needs astrometry: its result is missing; run processing.astrometry.run(target) first',
+            },
+        }))).toBe('Spectroscopy (skipped: needs astrometry)');
+        expect(jobStepsSubtitle(analysis({
             requested: ['photometry'], run: [],
             skipped: { photometry: 'the target has no imaging stack to solve at all' }, finished: true,
         }))).toBe('Photometry (skipped)');

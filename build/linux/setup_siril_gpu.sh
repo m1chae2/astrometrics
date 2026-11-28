@@ -13,6 +13,9 @@ set -euo pipefail
 #   ./build/linux/setup_siril_gpu.sh --check     - report each piece, change nothing
 #   ./build/linux/setup_siril_gpu.sh --dry-run   - report, then print what a run would do
 #   ./build/linux/setup_siril_gpu.sh             - set up what is missing
+#   ./build/linux/setup_siril_gpu.sh --accept-nvidia-license
+#                                                - the same, accepting NVIDIA's CUDA and cuDNN
+#                                                  licenses without asking (no terminal)
 #
 # Run it as your own user, not with sudo: everything it changes is in your
 # home folder. Without an NVIDIA graphics card or without the Flatpak Siril

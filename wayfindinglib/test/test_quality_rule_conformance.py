@@ -132,9 +132,11 @@ UNUSED_DECISION_METRICS = {
     "stacking.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "astrometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
     "photometry.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "photometry.notice_needs_astrometry": _NOTICE_ROW_REASON,
     "photometry.notice_session_without_comparison_stars": _NOTICE_ROW_REASON,
     "photometry.notice_logged_warnings": _NOTICE_ROW_REASON,
     "spectroscopy.notice_camera_without_profile": _NOTICE_ROW_REASON,
+    "spectroscopy.notice_needs_astrometry": _NOTICE_ROW_REASON,
     "spectroscopy.notice_stars_below_feature_limit": (
         "issue 97: counts the extracted spectra too faint for feature detection and classification "
         "(SPE-31), so a job can list them as a warning. No rule reads it yet; the pipeline-quality view "

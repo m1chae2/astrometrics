@@ -41,7 +41,7 @@ flowchart TD
     O --> P["Quality summary"]
 ```
 
-Section 3 names the steps in the usual terms: the grating equation, differential refraction and the zero-point shift (Section 3.1); QE, instrument response, airmass extinction and dereddening (Section 3.3); and the Pickles and Gaia XP comparisons (Sections 3.4 and 3.5). The normal image is the target's solved standard stack, whose WCS (pixel-to-sky map) names the stars. Without it, the stars are named by matching the pattern of their pixel positions to catalog stars (Section 6). The quality summary is a `SpectroscopyQualitySummary` (Section 7).
+Section 3 names the steps in the usual terms: the grating equation, differential refraction and the zero-point shift (Section 3.1); QE, instrument response, airmass extinction and dereddening (Section 3.3); and the Pickles and Gaia XP comparisons (Sections 3.4 and 3.5). The normal image is the target's solved standard stack of the same camera and optic, whose WCS (pixel-to-sky map) names the stars; without one, the spectral stack's own WCS names them when the astrometry pipeline has solved that stack. Spectroscopy never runs astrometry: with neither, the stage is skipped (Section 6). The quality summary is a `SpectroscopyQualitySummary` (Section 7).
 
 ## 2. Input requirements and FITS header specification
 
@@ -139,7 +139,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 `run_spectroscopy_analysis` (`runner.py`) runs `SpectroscopyPipelineAdapter` through `run_pipeline`. `run_pipeline` (`pipeline_base.py`) calls the adapter's four methods in order. It skips `run` only when `process_input` returns a `Result` with `has_work=False`. After `validate_output` it stores the quality summary on the target and records the run's provenance.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`.
-- **Stage 2 (`run`).** Finds the stars with `AstrometryPipeline` (no solve), names them from the target's solved stack, and runs `SpectroscopyPipeline.process`. Each spectrum carries four quality checkpoints, in order: `raw_frame`, `pre_processing`, `processing` and `post_processing`. Each checkpoint is a set of measured values (metrics), some with a limit. The `processing` checkpoint judges the classification: a poor match, an ambiguous match, and a type from line strengths that is more than 20 subtype steps from the template-fit type.
+- **Stage 2 (`run`).** Finds the stars with `AstrometryPipeline` (no solve), names them from the target's solved stack (`resolve_spectral_stack_solution`: the standard stack's WCS shifted onto the spectral stack, else the spectral stack's own WCS), and runs `SpectroscopyPipeline.process`. Each spectrum carries four quality checkpoints, in order: `raw_frame`, `pre_processing`, `processing` and `post_processing`. Each checkpoint is a set of measured values (metrics), some with a limit. The `processing` checkpoint judges the classification: a poor match, an ambiguous match, and a type from line strengths that is more than 20 subtype steps from the template-fit type.
 - **Stage 3 (`validate_output`).** Builds the summary, records the eight `spectroscopy_run_gates`, then `gaia_xp_agreement` (9 run gates in all). It then stores the run totals, the per-stage medians and the gates as quality measurements (`record_spectroscopy_quality`).
 - **Stage 4 (`to_result_dict`).** Returns only `context` and `stellar_objects`.
 
@@ -192,7 +192,7 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 2. **Missing header data.** No `DATE-OBS`, site or WCS skips the refraction correction. No `AIRMASS` skips the extinction correction. Each skip is recorded on the spectrum.
 3. **Ambiguous or poor matches.** They are kept with a flag and counted in the summary. `spectral_classification` fails only on a class-level ambiguity or a poor match.
 4. **Reddened hot stars.** With no catalog $E(B-V)$, an O, B or A star tends to read about one step of the reference list cool. The list skips some subtypes, so one step can be more than one subtype: the A stars of [SPE-16](../validation/spectroscopy.md#spe-16) read two subtypes cool.
-5. **No solved stack.** Stars are named by matching the pattern of their pixel positions to catalog stars ("by geometry"), which can fail on sparse fields.
+5. **No plate solution.** The stage runner skips spectroscopy with the reason `needs astrometry: ...; run processing.astrometry.run(target) first`, one job warning (`spectroscopy.notice_needs_astrometry`) and one INFO log line; it never runs astrometry. When the standard stack's WCS and the spectral field do not share one shift, stars are named by matching the pattern of their pixel positions to catalog stars ("by geometry"), which can fail on sparse fields.
 
 ## 7. Quality summary data models
 

@@ -86,10 +86,12 @@ To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Astrometrics is released under the [MIT License](LICENSE).
+Astrometrics is copyright (C) 2022-2026 Michael Coelho and is free software under the [GNU General Public License, version 3 or (at your option) any later version](LICENSE) (GPL-3.0-or-later). Versions released before 2026-11-28 were under the MIT License.
 
 Some bundled assets are the work of others and remain under their own terms:
 
 * **Hipparcos bright-star catalog** (`wayfindinglib/drivers/catalog/bright_star_catalog.sqlite`): derived from the ESA Hipparcos mission catalogue.
 * **Constellation line data** (`wayfindinglib/drivers/catalog/constellation_lines.json`): derived from [d3-celestial](https://github.com/ofrohn/d3-celestial), Copyright (c) 2015 Olaf Frohn, BSD-3-Clause.
-* **Plotly.js** (`public/js/plotly.min.js`, v4.2.0, a copy of the `plotly.js-dist-min` npm package): Copyright 2012-2026 Plotly, Inc., MIT.
+* **Plotly.js** (`public/js/plotly.min.js`, v4.3.0, a copy of the `plotly.js-dist-min` npm package): Copyright 2012-2026 Plotly, Inc., MIT.
+
+The app's setup scripts install or download other programs, libraries and data sets, each under its own license, and some of them, such as NVIDIA's CUDA libraries, are not open source. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists each one with its license, what you accept when you install it, and the acknowledgements to include when you publish results.

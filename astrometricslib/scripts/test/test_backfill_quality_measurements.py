@@ -625,7 +625,11 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     # which a summary never held either.
     assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8 + 1 + 9 + 1 + 1
     assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1 + 1
-    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3
+    # The photometry count's last term is the "needs astrometry" notice
+    # (`photometry.notice_needs_astrometry`), stored only when the stage is
+    # skipped, so no summary holds it.
+    photometry_not_held = 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3 + 1
+    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == photometry_not_held
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
     assert "stacking.frame_weight" not in rows

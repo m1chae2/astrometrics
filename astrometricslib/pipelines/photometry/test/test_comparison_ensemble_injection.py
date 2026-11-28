@@ -39,7 +39,7 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     MINIMUM_COMPARISON_STARS,
 )
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
-from astrometricslib.test.synthetic import SyntheticStar, make_drifted_sequence
+from astrometricslib.test.synthetic import SyntheticStar, drifted_frame_solves, make_drifted_sequence
 
 START = datetime(2026, 5, 24, 3, 0, 0)
 CADENCE_MIN = 10
@@ -463,7 +463,8 @@ def test_the_dip_is_recovered_from_pixel_frames_with_a_monotonic_airmass_run(
     """
     paths, stars = make_pixel_sequence(tmp_path)
     analyzer = VariabilityAnalyzer()
-    analyzer.process(paths, max_workers=2)
+    solves = drifted_frame_solves(paths, (700, 700), (0.3, -0.2))
+    analyzer.process(paths, solves, max_workers=2)
     analyzer.normalize_light_curves()
     analyzer.detrend_light_curves_airmass()
 

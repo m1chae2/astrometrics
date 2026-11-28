@@ -6,31 +6,27 @@ Terms are defined in the [glossary](../../../../documentation/Glossary.md). This
 
 ## What this stage does, in order
 
-In plain words, the stage lines up every frame of a session with the first one, puts a small circle on each star, adds up the light inside it, and subtracts the sky. The result for each star is one point of its light curve (its brightness against time) per frame, with an error bar and a time stamp. The hard parts are keeping the circle exactly on the star as the telescope drifts, and getting honest error bars and times.
+In plain words, the stage finds where each star is in every frame of a session, puts a small circle on it, adds up the light inside it, and subtracts the sky. The result for each star is one point of its light curve (its brightness against time) per frame, with an error bar and a time stamp. The hard parts are keeping the circle exactly on the star as the telescope drifts, and getting honest error bars and times.
 
 For each frame in a session, the code:
 
 1. Reads the frame's exposure time, airmass, and capture time from its header. Exposure time is how long the camera's shutter was open. Airmass is a measure of how much atmosphere the light passed through, which is lowest when a star is straight overhead and highest near the horizon. The capture time comes from the `DATE-OBS` card (see [Capture times](#capture-times)).
-2. Finds out how this frame sits against the first frame in the session: how far it shifted, and how much it rotated and changed scale. It uses up to 50 bright stars as reference points (the alignment anchors; see [Alignment anchors](#alignment-anchors) and [Frame alignment](#frame-alignment)). Telescopes drift a little between frames even while tracking a target, and a field can turn slightly during a session, so this step lines every frame up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
-3. For every star being tracked, starts at the star's position in the first frame moved by the frame's alignment. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the aligned position (see [Aperture placement](#aperture-placement)).
+2. Finds each star's place in this frame from the frame's own plate solution. A plate solution is the map from pixel positions to sky positions that Siril works out from the frame's stars (see [Frame solutions](#frame-solutions)). The star's sky position comes from the first frame's solution, and this frame's solution turns it back into a pixel position. Telescopes drift a little between frames even while tracking a target, and a field can turn slightly during a session, so each frame has its own map. A frame with no solution is left out and listed with the reason.
+3. For every star being tracked, starts at the position the frame's solution gives. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the solution's position (see [Aperture placement](#aperture-placement)).
 4. Measures the amount of light inside a small circle centered on that position (the aperture), and subtracts the background sky brightness measured in a ring just outside the circle. This gives the star's raw brightness (its flux) in that one frame. The same step computes the brightness's 1σ uncertainty, one standard deviation of the random scatter expected from one measurement to the next (see [Flux uncertainties](#flux-uncertainties)).
 5. Divides that raw brightness and its uncertainty by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly. Both are in ADU per second (ADU is analog-to-digital unit, one step of the stored pixel value).
 
 Every star ends up with a brightness value, its uncertainty, a timestamp, and a flag saying whether the measurement was saturated (too bright to measure accurately) for each frame in the session. The worker also returns the exposure time it used, which the time conversion needs.
 
-## Alignment anchors
+## Frame solutions
 
-The anchors are the stars whose positions give each frame's alignment (see [Frame alignment](#frame-alignment)). `select_alignment_anchors` in `frame_photometry.py` chooses them once per session, from the stars found in the first frame:
+Siril solves every frame of a session (`PlateSolveDriver.solve_frames`; the Siril driver's `sequence_solve.py`). It solves the first frame, the session's reference frame, on its own, with the retries for a wrong focal length. It then solves the other frames in groups of 50 with one Siril run per group, with the focal length that solved the first frame. Siril starts offline, with the app's private settings file, and does not wait for the stack's Siril slot. The frames are only linked into Siril's scratch folder, and the library's files are never changed. On 39 frames of 3,008 by 3,008 pixels the solve took 3.6 s (partly measured; see [PHO-23](../../../../documentation/library_design/validation/photometry.md#pho-23)).
 
-1. Drop every detection with a saturated pixel within 3 pixels of its center.
-2. Rank the rest by total brightness, brightest first.
-3. Keep the detections whose peak is at least 20 times the sky noise (the pixel-to-pixel scatter of the empty sky). The sky noise per pixel comes from `estimate_pixel_noise`: the spread of the differences between pixels three columns apart, divided by the square root of 2 (a difference of two noisy pixels is that much noisier than one pixel). A smooth sky gradient cancels in the difference, so it does not inflate the estimate. The spacing of three columns is a tuned value (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
-4. Skip the brightest 5% of those, which are the most likely to be nearly saturated, and take the next 50.
-5. If fewer than 10 detections qualify, use the detections ranked 50 to 100 by brightness instead. That is the fallback rule. In a sparse field those ranks are mostly noise peaks, so this fallback is a last resort.
+`frame_mapping.py` reads the solutions. `FrameMapping` turns a position in the first frame into a position in another frame: the first frame's solution gives the sky position, and the other frame's solution gives the pixel. It also keeps two numbers for the `registration_drift` gate: how far the middle of the frame moved (`shift_x`, `shift_y`), and how far a corner moves beyond that shift (`corner_displacement_px`), which a turned or rescaled field produces.
 
-`VariabilityAnalyzer.alignment_anchor_rule` and `alignment_anchor_count` record which rule a session used and how many anchors it had. The `registration_drift` gate (the run-level check on frame alignment, see the [photometry README](../README.md#the-registration-drift-gate)) names the fallback rule in its detail when a session used it.
+A frame is left out when Siril cannot solve it, when its solution holds no sky map, or when its map does not place the middle or a corner of the frame at a finite pixel. The reason is logged as a warning, which the job lists, and kept in `VariabilityAnalyzer.frames_without_solution`; the runner lists the frame in the run's excluded frames. If the first frame has no solution, no frame can be placed, and the session gives no light curves. No other way of placing the circles exists: the stage never guesses a position from the stars it can find in the frame. The earlier frame-to-frame tracking fitted a shift, rotation and scale change to up to 50 anchor stars; its register entry was partly measured and is retired (partly measured; retired; see [PHO-05](../../../../documentation/library_design/validation/photometry.md#pho-05)). A star that a frame's solution cannot place gets a flux of 0 and an error of 0, the same as a star near the frame edge.
 
-The main rule exists because in a sparse field the detections ranked 50 to 100 are mostly noise peaks, which give a wrong shift (partly measured; see [PHO-05](../../../../documentation/library_design/validation/photometry.md#pho-05)).
+On one M 13 session whose field drifted by up to 16 pixels, the positions from these solutions agreed with the earlier frame-to-frame tracking to a median of 0.06 pixels (partly measured; see [PHO-24](../../../../documentation/library_design/validation/photometry.md#pho-24)). The light curves of M 13 with the solutions equal those with the earlier tracking (partly measured; see [PHO-25](../../../../documentation/library_design/validation/photometry.md#pho-25)).
 
 ## Aperture placement
 
@@ -38,36 +34,21 @@ The circle (the aperture) and the background ring sit at the star's exact positi
 
 The re-centering box (the small square in which the code computes the centroid) is 11 pixels wide, about 2.5 times the width of the typical star the default circle (radius 4 pixels) is sized for. The code subtracts the local sky level (the median of a 31 by 31 pixel cutout) and sets negative pixels to zero before it averages the positions. It repeats this three times, each time centering the box on the previous result.
 
-The code refuses the re-centered position and keeps the aligned position (the star's position in the first frame, moved by the frame's alignment) when any of these hold:
+The code refuses the re-centered position and keeps the solution's position when any of these hold:
 
 - The box contains a saturated pixel. A saturated core is flat, so its centroid is not reliable.
 - The box has no light above the sky level, or it reaches past the edge of the frame.
-- The centroid is more than 1.5 pixels from the aligned position. A move that large means the box found a neighbor or noise instead of the star.
+- The centroid is more than 1.5 pixels from the solution's position. A move that large means the box found a neighbor or noise instead of the star.
 
 Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason` (`None` means the centroid was accepted). `VariabilityAnalyzer.centroid_fallback_counts` totals the refusals per star over the session. A star near the 1.5 pixel limit in many frames is measured with a circle that may be off-center by up to that amount.
 
-### Frame alignment
-
-`calculate_frame_alignment` fits three things to each frame: a shift, a rotation and a change of scale about the middle of the frame (`FrameAlignment`). It works in two steps:
-
-1. Each anchor is found in a wide box (`locate_star_centroid`, which searches up to 40 pixels from the anchor's expected position) and the median shift is taken. The wide box is easily pulled off by a neighbor or a galaxy, but the median ignores those stars.
-2. Each anchor is re-centered in the small box (`refine_star_centroid`), starting where the alignment so far says it is.
-   - *The fit.* A shift, a rotation and a scale change are then fitted to those accurate positions by least squares, leaving out anchors more than three scaled median absolute deviations from the fit. (The median absolute deviation, MAD, is the median distance of the values from their median; scaled by 1.4826 it estimates a standard deviation without being pulled by outliers.)
-   - *Wrong stars.* The small box refuses a wrong star by itself, because it will not move more than 1.5 pixels from where the alignment so far puts the star.
-   - *Second try.* When that leaves fewer than 10 anchors (a rotation not yet fitted can put the far ones out of reach), the step is tried again with a reach of 4 pixels in place of 1.5 (`ALIGNMENT_ANCHOR_REACH_PX`): an anchor's centroid may then sit up to 4 pixels from where the alignment so far puts it. A wide reach is only the second try, because it lets blends (two stars close enough to merge into one blob) in, which makes the fitted rotation worse (partly measured; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)).
-   - *Repeats.* The step is repeated three times, because a better alignment puts more anchors inside the box.
-
-When fewer than 5 anchors are found (`MINIMUM_ANCHORS_FOR_SHIFT`), the code fits nothing and treats the frame as not shifted at all, rather than guess a shift from too few stars. Only the shift is used when fewer than 10 anchors are found, or when they sit within 7% of the corner distance of one another (a cluster core cannot tell a rotation from a shift). The 7%, the 4 pixels and the three repeats are tuned values (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
-
-**Why the rotation is fitted.** A field can turn during a session far enough that a shift alone leaves the far stars outside the 1.5 pixel reach of the centroid box, and their measurements then fall back to a position off the star (partly measured; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)). A small scale change can also appear in every frame, even on a field that does not turn. It is not a motion of the field. It comes from comparing two ways of measuring a position: the first frame's star positions come from the star finder's centroids, and every later frame's come from the small re-centering box, and the two methods differ slightly.
-
 ### Per-star centroid offsets
 
-`centroid_offsets_px` measures how far each star's own centroid sits from where the alignment says it should be, in pixels, for every star whose centroid was accepted. `VariabilityAnalyzer` keeps the offsets per frame (`centroid_offsets_by_frame`) and the alignment of each frame (`alignment_by_frame`). `centroid_shift_summary()` reduces them to a `CentroidShiftSummary` for the session. The 95th percentile used below is the value that 95% of the measurements fall below.
+`centroid_offsets_px` measures how far each star's own centroid sits from where the frame's solution says it should be, in pixels, for every star whose centroid was accepted. `VariabilityAnalyzer` keeps the offsets per frame (`centroid_offsets_by_frame`) and the mapping of each frame (`mapping_by_frame`). `centroid_shift_summary()` reduces them to a `CentroidShiftSummary` for the session. The 95th percentile used below is the value that 95% of the measurements fall below.
 
-- **Corner displacement.** For each frame, how far the fitted rotation and scale change move a corner of the frame (`FrameAlignment.corner_displacement_px`). The summary keeps the 95th percentile over the frames, the worst frame and how many frames had a rotation fitted. This is the number the `registration_drift` gate judges.
-- **Median and 95th-percentile offset.** What is left after the alignment: centroid noise, which is larger for faint and crowded stars, and any distortion the fit does not describe. It does not change with the rotation fit (values on real fields are partly measured; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)). The gate reports these but does not judge them.
-- **Fallback fraction.** The share of star measurements, over all frames, that kept the aligned position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
+- **Corner displacement.** For each frame, how far a corner of the frame moves beyond the shift of its middle (`FrameMapping.corner_displacement_px`). The summary keeps the 95th percentile over the frames, the worst frame and how many frames were mapped. This is the number the `registration_drift` gate judges.
+- **Median and 95th-percentile offset.** What is left after the solution has placed the star: centroid noise, which is larger for faint and crowded stars, and any error of the solution itself (values on real fields are partly measured; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)). The gate reports these but does not judge them.
+- **Fallback fraction.** The share of star measurements, over all frames, that kept the solution's position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
 - **Worst frame.** The frame with the largest 95th-percentile offset, and that value.
 
 The `registration_drift` gate reads the summary (see the photometry README). The summary is not copied into the quality metrics. It appears only in the gate's detail.
@@ -127,14 +108,13 @@ Once a star's full set of measurements for a session is ready, `assess_input_qua
 
 - How many of the session's frames actually gave a usable measurement for this star, out of how many were possible.
 - How often this star's measurement was saturated. The saturated points themselves are removed from the light curve (see [Saturated points](../README.md#saturated-points)), so this share counts them against all the points the star was measured at.
-- How far the frame-to-frame drift got, at its worst, across every frame this star was measured in.
+- How far the field sat from its place in the first frame, at its worst, across every frame this star was measured in.
 
 The report holds numbers only. It sets no yes/no flag for low coverage or unstable tracking. Any reading of the numbers as good or bad is done later, in wayfindinglib. This report travels with the star's brightness history into the later processing and post-processing steps.
 
 ## Settings
 
-- **Alignment anchors.** The limits are 20 times the sky noise, skipping the brightest 5%, 50 anchors and a minimum of 10 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
-- **Shift and rotation fit.** The minimum of 5 anchors for a shift, the 7% spread for a rotation fit, the 4-pixel second-try reach and the three repeats are tuned values (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
+- **Frame solutions.** Siril solves the frames after the first in groups of 50. The group size only bounds the scratch space (about 1 GB for 9-megapixel frames); it does not change a result. No tuned value remains from the earlier frame tracking.
 - **Aperture and re-centering.** The aperture radius of 4 pixels, the 11-pixel re-centering box, the three re-centering passes and the largest move of 1.5 pixels (`MAX_CENTROID_SHIFT_PX`) are tuned values (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Input-quality limits.** `UNSTABLE_TRACKING_DRIFT_PX` is 20 pixels. The `registration_drift` gate compares the drift with it (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Camera numbers and times.** The gain and read noise come from the camera profile or the frame header (see [Flux uncertainties](#flux-uncertainties)). `latitude`, `longitude` and `elevation` in `[Observatory.Location]` set the observer for BJD_TDB.
@@ -151,11 +131,12 @@ The assessment builds one record per star.
 | `saturated_fraction` | none (0 to 1) | None | High: more measurements were too bright to measure accurately | Reviewers |
 | `max_registration_drift_px` | pixels | At most 20 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | High: tracking, not the star, is the likely cause of anything unusual | `registration_drift` gate |
 
-A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. The wide centroid search box reaches 40 pixels from a star's expected position, so the gate's 20-pixel limit trips well before stars start to fall outside it.
+A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. The 20-pixel limit is a mount check. The solutions place every star wherever the field went, so a large drift does not spoil the measuring itself.
 
 ## Files
 
-- `frame_photometry.py` selects alignment anchors, aligns frames, re-centers stars and measures aperture flux and its error.
+- `frame_mapping.py` reads each frame's plate solution and maps the first frame's positions onto it.
+- `frame_photometry.py` re-centers stars and measures aperture flux and its error.
 - `detector_noise.py` picks the gain and read noise.
 - `observation_times.py` reads capture times and converts them to BJD_TDB.
 - `assess_input_quality.py` builds the per-star input-quality record.

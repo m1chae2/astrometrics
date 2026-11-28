@@ -191,7 +191,6 @@ astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_T
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,_LOGGED_WARNING_TEXT_LENGTH,Display cap on the text kept for one logged warning
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,logged_warnings_notice_measurement.dropped_count,Count the caller passes; zero means none were dropped
 astrometricslib/pipelines/photometry/post_processing/variability_skill.py,_MAGNITUDES_PER_FRACTION,unit or physical constant
-astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,CENTROID_SEARCH_HALF_WIDTH_PX,Default search half width of the centroid locator; the drift limit is half of it (PHO-D16); method choice
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_MAXIMUM_UTC_OFFSET_HOURS,"Time zone range, not a choice"
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_CLIP_MAXIMUM_PASSES,Round cap of an iterative clip that settles in fewer rounds
 astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py,_SKY_CLIP_SIGMA,Repeats the clip level of the star-ring analysis (shared.sky_clip_sigma) for the photometry sky ring
@@ -800,3 +799,6 @@ wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_SPAN_OBJECTS,Tab
 wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_TIME_STEPS,Table size cap
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_DAY_HOURS,unit or physical constant
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_RATE,unit or physical constant
+astrometricslib/_internal/drivers/siril/astrometry/sequence_solve.py,FRAMES_PER_GROUP,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/sequence_solve.py,SEQUENCE_BASE_TIMEOUT_SECONDS,"Plumbing: timeout, cache size, retention or query size"
+astrometricslib/_internal/drivers/siril/astrometry/sequence_solve.py,SEQUENCE_TIMEOUT_SECONDS_PER_FRAME,"Plumbing: timeout, cache size, retention or query size"

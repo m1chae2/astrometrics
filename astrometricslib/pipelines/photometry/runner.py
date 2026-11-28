@@ -237,6 +237,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             "photometry_sessions": [],
             "all_rejected_files": [],
             "unreadable_date_obs_frames": [],
+            "frames_without_solution": [],
             "all_frame_ensemble_composition": [],
             "all_comparison_sets": [],
             "all_centroid_shift_summaries": [],
@@ -439,6 +440,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # Frames whose DATE-OBS header was missing or unreadable, with the
         # reason (`ExcludedFrame`). Reported through `capture_timestamps`.
         all_unreadable_date_obs_frames = []
+        # Frames with no plate solution to place the stars through, with the
+        # reason (`ExcludedFrame`). A frame the solver could not solve is
+        # left out of its session.
+        all_frames_without_solution: list[Any] = []
         all_frame_ensemble_composition = []
         # One comparison-set record per session that had stars to normalize
         # (see `ComparisonSetResult`), for the `comparison_ensemble` gate.
@@ -519,6 +524,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 use_astrometry_seed=use_astrometry_seed,
                 aperture_diameter_mm=session_aperture_mm,
                 aperture_reason=session_aperture_reason or None,
+                drivers=options.get("drivers"),
             )
             if identify_result is not None and identify_result.wcs is not None:
                 solution_problem = plate_solution_problem(
@@ -551,6 +557,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                     session_empty_reasons.append(
                         f"session {session.id}: reference frame has no usable DATE-OBS, 0 stars processed"
                     )
+                elif getattr(analyzer, "frames_without_solution", None):
+                    session_empty_reasons.append(
+                        f"session {session.id}: the reference frame has no plate solution, 0 stars processed"
+                    )
                 else:
                     session_empty_reasons.append(
                         f"session {session.id}: reference-frame star detection failed, 0 stars processed"
@@ -572,6 +582,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_candidates.extend(session_candidates)
             all_rejected_files.extend(analyzer.rejected_files)
             all_unreadable_date_obs_frames.extend(analyzer.frames_without_usable_date_obs)
+            all_frames_without_solution.extend(getattr(analyzer, "frames_without_solution", []))
             all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
             if analyzer.comparison_set is not None:
                 all_comparison_sets.append(analyzer.comparison_set)
@@ -719,6 +730,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             sum(len(session.frame_paths) for session in photometry_sessions)
             - len(all_rejected_files)
             - len(all_unreadable_date_obs_frames)
+            - len(all_frames_without_solution)
         )
 
         return Result(
@@ -729,6 +741,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "photometry_sessions": photometry_sessions,
                 "all_rejected_files": all_rejected_files,
                 "unreadable_date_obs_frames": all_unreadable_date_obs_frames,
+                "frames_without_solution": all_frames_without_solution,
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
                 "all_comparison_sets": all_comparison_sets,
                 "all_centroid_shift_summaries": all_centroid_shift_summaries,
@@ -784,12 +797,17 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         all_rejected_files = payload["all_rejected_files"]
         photometry_frames_without_timestamp = payload["photometry_frames_without_timestamp"]
         unreadable_date_obs_frames = payload.get("unreadable_date_obs_frames", [])
+        frames_without_solution = payload.get("frames_without_solution", [])
         star_id_breakdown = payload["star_id_breakdown"]
         sessions_missing_wcs = payload["sessions_missing_wcs"]
         session_empty_reasons = payload["session_empty_reasons"]
         frames_processed = payload["frames_processed"]
 
-        rejected_paths = set(all_rejected_files) | {frame.path for frame in unreadable_date_obs_frames}
+        rejected_paths = (
+            set(all_rejected_files)
+            | {frame.path for frame in unreadable_date_obs_frames}
+            | {frame.path for frame in frames_without_solution}
+        )
         photometry_session_breakdown = build_target_session_breakdown(photometry_sessions, rejected_paths)
 
         rejected_frames = [
@@ -804,6 +822,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         ]
         rejected_frames += [
             ExcludedFrame(path=frame.path, reason=frame.reason) for frame in unreadable_date_obs_frames
+        ]
+        rejected_frames += [
+            ExcludedFrame(path=frame.path, reason=frame.reason) for frame in frames_without_solution
         ]
         rejected_frames += [
             ExcludedFrame(path=frame.path, reason=f"skipped, set aside by the frame quarantine: {reason}")

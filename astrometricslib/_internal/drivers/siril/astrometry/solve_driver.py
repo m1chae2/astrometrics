@@ -17,17 +17,20 @@ removes it.
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from astropy.io import fits
 
 from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
 from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.interfaces.plate_solve_driver import FrameSolve
 from astrometricslib._internal.drivers.siril.astrometry.plate_solve import (
     SOLVE_TIMEOUT_SECONDS,
     read_inputs,
     solve_image,
 )
+from astrometricslib._internal.drivers.siril.astrometry.sequence_solve import solve_frames
 from astrometricslib.foundation.config import AppConfiguration
 
 logger = logging.getLogger(__name__)
@@ -112,3 +115,31 @@ class SirilPlateSolveDriver(AstrometryNetPlateSolveDriver):
         if image_path:
             return self._solve_online_image(image_path, **hints)
         return None
+
+    def solve_frames(self, image_paths: Sequence[str], **hints: Any) -> dict[str, FrameSolve]:
+        """Solve every frame of a session with Siril, each on its own.
+
+        The first frame is solved alone, and the others in groups with one
+        Siril run for each group (`sequence_solve.solve_frames`). A frame
+        with no solution is not sent to the online service: photometry needs
+        a solution that is the same kind for every frame of the session, and
+        a frame Siril cannot solve from its start position is rarely one the
+        online service would solve better.
+
+        Parameters
+        ----------
+        image_paths : `Sequence` [`str`]
+            The frames of one session, the first being the reference frame.
+        **hints
+            The hints of `PlateSolveDriver.solve`.
+
+        Returns
+        -------
+        solves : `dict` [`str`, `FrameSolve`]
+            One entry for each frame, with its solved header or the reason it
+            has none.
+        """
+        hints.setdefault("verbose", False)
+        timeout = hints.get("solve_timeout")
+        limit = min(float(timeout), SOLVE_TIMEOUT_SECONDS) if timeout else SOLVE_TIMEOUT_SECONDS
+        return solve_frames(image_paths, self.siril_executable, hints, timeout_seconds=limit)

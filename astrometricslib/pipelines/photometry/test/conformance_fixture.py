@@ -66,7 +66,7 @@ FIXTURE_CENTROID_SUMMARIES = (
         worst_frame=None,
         worst_frame_p95_offset_px=None,
         corner_displacement_p95_px=0.1,
-        fitted_frame_count=39,
+        mapped_frame_count=39,
     ),
 )
 

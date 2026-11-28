@@ -1,20 +1,23 @@
 """Measures how the sky background of a stack is tilted and curved.
 
-GraXpert, one of the preview steps (see `stack_preview`), fits a smooth model
-of the sky background to the stack and subtracts it. The model holds what the
-stack's sky does from one side of the picture to the other, so it is also a
-measurement of the stack. This module reads that model and describes it with a
-few numbers. It measures only. It does not judge a stack, and no number here
-is a limit.
+The stack's own sky gives the measurement. `sky_plane` cuts the stack into a
+grid of bin medians and keeps the bins that are robustly sky (it drops the
+bins a bright object or a nebula lifts). This module describes those sky bins
+with a few numbers. It measures only. It does not judge a stack, and no number
+here is a limit. (The decision between a fitted plane and GraXpert in
+`sky_plane` uses the same measure on the same bins.) GraXpert's own model of
+the background is no longer measured. Its level is not in the stack's units,
+so fractions of it came out about 30 times too large, and no decision used it.
 
 The steps are these.
 
-1. The model is cut into a grid of 64 by 64 bins and each bin is replaced by
+1. The stack is cut into a grid of 64 by 64 bins and each bin is replaced by
    the median of its pixels. Everything below works on the 64 by 64 map, so
    the numbers do not depend on the stack's size. A color stack's planes are
-   averaged first.
-2. The sky level is the median of the map. Every other number is a fraction
-   of it, so stacks of different depth can be compared.
+   averaged first. A bin that is not sky is empty (not a number).
+2. The sky level is the median of the sky bins, in the stack's own units.
+   Every other number is a fraction of it, so stacks of different depth can be
+   compared.
 3. The spread is the 5th to 95th percentile range of the map. The range is
    the largest minus the smallest value.
 4. A plane (a flat, tilted sheet) is fitted to the map. Its tilt is the
@@ -29,21 +32,21 @@ The steps are these.
    gradient (see the quality measurements paper).
 6. The residual of each fit is the root-mean-square of what the fit leaves
    behind, so a reader can see how well a plane or a plane plus a round term
-   describes the model.
+   describes the sky.
 
 The 64 by 64 map is also saved as a small FITS file next to the stack's
-preview files (`background_model_path_for`). A later night of the same field
+preview files (`background_model_path_for`; the file name says "model" for
+historical reasons, and it holds the sky map). A later night of the same field
 has the same array coordinates, so the maps can be compared pixel by pixel.
-GraXpert's own full-size model is deleted after it is measured.
+The header keyword ``BGLEVEL`` is the sky level.
 
-A stack that was not measured gets a reason. The reason says whether GraXpert
-was not configured, was skipped because the target is a bright object, failed,
-or wrote no model, so no skipped measurement goes unreported.
+A stack that was not measured gets a reason. The reason says whether the
+preview was skipped for a bright object, the stack could not be read, or too
+few bins were sky, so no skipped measurement goes unreported.
 """
 
 import logging
 import math
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -52,7 +55,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 
-from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.fits_access import write_image
 from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
 from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
 from astrometricslib.pipelines.shared.binned_sky_plane import (
@@ -86,22 +89,24 @@ __all__ = [
     "BackgroundGradient",
     "BackgroundGradientOutcome",
     "background_gradient_measurements",
-    "measure_background_model",
+    "crop_cards_of",
+    "measure_sky_background",
     "not_measured_outcome",
     "record_background_gradient",
-    "write_binned_model",
+    "write_binned_sky",
 ]
 
-# The model is cut into this many bins along each side before it is measured.
-# 64 is the grid of the M 52 trial (2026-11-22, GraXpert 4.0.0): fine enough
+# The sky is cut into this many bins along each side before it is measured.
+# 64 is the grid of the M 52 trial (2026-11-22, on GraXpert's smooth
+# model): fine enough
 # that a bowl or tilt spans many bins, coarse enough that the median of each
 # bin (over about 2,000 to 8,000 pixels of a typical stack) is smooth, because
-# GraXpert's model is already smooth on that scale. Not tuned on other stacks
+# a sky is smooth on that scale. Not tuned on other stacks
 # (register entry STK-D74).
 BACKGROUND_BIN_COUNT = 64
 
 # The spread is the distance between these two percentiles of the binned
-# model, in percent. The 5th and 95th ignore the few bins at the extreme
+# bins, in percent. The 5th and 95th ignore the few bins at the extreme
 # corners, which an edge effect can pull away from the rest. Chosen by
 # reasoning; the M 52 trial gave 0.82% against a full range of 1.25%
 # (STK-D74).
@@ -109,10 +114,14 @@ SPREAD_LOW_PERCENTILE = 5.0
 SPREAD_HIGH_PERCENTILE = 95.0
 
 # At least this share of the 64 by 64 bins must hold finite numbers (a stack
-# with large empty borders has bins of not-a-number values). Below it the
-# fits would describe a corner of the frame, not the frame. The half is a
-# plain majority; it was not tuned (STK-D74).
-MINIMUM_FINITE_BIN_FRACTION = 0.5
+# with large empty borders has bins of not-a-number values, and the sky bins
+# of a stack with a big nebula are only some of them). Below it the fits
+# would describe a corner of the frame, not the frame. 0.3 matches
+# `sky_plane.MINIMUM_SKY_BIN_SHARE`, the least share of the measurable bins
+# the sky selection keeps, so every stack the selection accepts is measured.
+# It was 0.5 until 2026-11-28, which left seven library stacks with 43 to 49%
+# sky bins not measured; not tuned (STK-D74).
+MINIMUM_FINITE_BIN_FRACTION = 0.3
 
 # The distance, in pixels, used to turn a direction in the array into a
 # direction on the sky. Any step well inside the frame gives the same angle;
@@ -128,18 +137,18 @@ _SPEC_BY_NAME = {spec.name: spec for spec in STACKING_METRICS}
 
 @dataclass(frozen=True)
 class BackgroundGradient:
-    """The numbers that describe one stack's background model.
+    """The numbers that describe one stack's sky background.
 
-    Fractions are of the model's median level, so 0.01 means 1 percent.
+    Fractions are of the sky level, so 0.01 means 1 percent.
 
     Attributes
     ----------
     level : `float`
-        The median of the binned model, in the stack's own units.
+        The median of the sky bins, in the stack's own units.
     spread_fraction : `float`
-        The 5th to 95th percentile range of the binned model.
+        The 5th to 95th percentile range of the sky bins.
     range_fraction : `float`
-        The largest minus the smallest value of the binned model.
+        The largest minus the smallest value of the sky bins.
     tilt_fraction : `float`
         How much the fitted plane changes across the frame: the length of the
         vector made of its change across the full width and across the full
@@ -186,8 +195,9 @@ class BackgroundGradientOutcome:
         The numbers, or `None` when the stack was not measured.
     reason : `str`
         Why it was not measured; empty when it was.
-    binned_model : `numpy.ndarray` or `None`
-        The 64 by 64 map the numbers came from, for the side file.
+    binned_sky : `numpy.ndarray` or `None`
+        The 64 by 64 map of sky bins the numbers came from (not a number
+        where a bin is not sky), for the side file.
     crop_cards : `dict` [`str`, `object`]
         The crop keywords of the measured picture (``CROPX0`` and the
         others), copied into the side file so the map can be placed on the
@@ -196,7 +206,7 @@ class BackgroundGradientOutcome:
 
     gradient: BackgroundGradient | None
     reason: str = ""
-    binned_model: np.ndarray | None = None
+    binned_sky: np.ndarray | None = None
     crop_cards: dict[str, object] = field(default_factory=dict)
 
 
@@ -216,13 +226,13 @@ def not_measured_outcome(reason: str) -> BackgroundGradientOutcome:
     return BackgroundGradientOutcome(gradient=None, reason=reason)
 
 
-def _two_dimensional_model(model: np.ndarray) -> np.ndarray:
-    """Reduce a model read from a file to one two-dimensional plane.
+def _two_dimensional_sky(model: np.ndarray) -> np.ndarray:
+    """Reduce a sky array to one two-dimensional plane.
 
     Parameters
     ----------
     model : `numpy.ndarray`
-        The array from the file: two-dimensional, or color planes in front.
+        The array: two-dimensional, or color planes in front.
 
     Returns
     -------
@@ -239,7 +249,7 @@ def _two_dimensional_model(model: np.ndarray) -> np.ndarray:
     if array.ndim == 3 and array.shape[0] <= 4:
         array = np.nanmean(array, axis=0)
     if array.ndim != 2 or min(array.shape) < 2:
-        raise ValueError(f"the background model has the shape {tuple(model.shape)}")
+        raise ValueError(f"the sky array has the shape {tuple(model.shape)}")
     return array
 
 
@@ -251,7 +261,7 @@ def _sky_position_angle(
     Parameters
     ----------
     header : `astropy.io.fits.Header`
-        The header of the picture the model was made from.
+        The header of the picture the sky was measured on.
     row_slope : `float`
         How fast the plane rises per pixel along the rows.
     column_slope : `float`
@@ -285,29 +295,36 @@ def _sky_position_angle(
     return angle, ""
 
 
-def measure_background_model(
-    model: np.ndarray, header: fits.Header | None = None
+def measure_sky_background(
+    sky: np.ndarray, header: fits.Header | None = None, picture_shape: tuple[int, int] | None = None
 ) -> BackgroundGradientOutcome:
-    """Describe a background model with the numbers listed in the module text.
+    """Describe a stack's sky with the numbers listed in the module text.
 
     Parameters
     ----------
-    model : `numpy.ndarray`
-        The model, as GraXpert wrote it (same size as the picture).
+    sky : `numpy.ndarray`
+        The sky: the stack's pixels, or bin medians of it (such as the 64 by
+        64 map of `sky_plane`), with not-a-number where a pixel or bin is
+        not sky.
     header : `astropy.io.fits.Header`, optional
-        The header of the picture the model was made from. Its sky
-        coordinates, if any, give the tilt's position angle.
+        The header of the picture the sky came from. Its sky coordinates, if
+        any, give the tilt's position angle.
+    picture_shape : `tuple` [`int`, `int`], optional
+        The picture's size as (rows, columns), when `sky` is already binned
+        and so has lost the picture's shape. The tilt direction needs it.
+        Left out, the shape of `sky` is used.
 
     Returns
     -------
     outcome : `BackgroundGradientOutcome`
         The numbers and the 64 by 64 map, or the reason nothing was measured.
-        This never raises for a model that cannot be measured.
+        This never raises for a sky that cannot be measured.
     """
     try:
-        plane = _two_dimensional_model(model)
+        plane = _two_dimensional_sky(sky)
     except ValueError as error:
-        return not_measured_outcome(f"the background model could not be read: {error}")
+        return not_measured_outcome(f"the sky could not be read: {error}")
+    rows, columns = picture_shape or plane.shape
     binned = block_medians(
         plane,
         even_block_edges(plane.shape[0], BACKGROUND_BIN_COUNT),
@@ -315,12 +332,10 @@ def measure_background_model(
     )
     finite = np.isfinite(binned)
     if finite.mean() < MINIMUM_FINITE_BIN_FRACTION:
-        return not_measured_outcome(
-            f"only {100 * finite.mean():.0f}% of the background model's bins hold numbers"
-        )
+        return not_measured_outcome(f"only {100 * finite.mean():.0f}% of the bins of the sky hold numbers")
     level = float(np.median(binned[finite]))
     if not math.isfinite(level) or level <= 0.0:
-        return not_measured_outcome("the background model's median level is not above zero")
+        return not_measured_outcome("the sky level is not above zero")
     values = binned[finite]
     low, high = np.percentile(values, [SPREAD_LOW_PERCENTILE, SPREAD_HIGH_PERCENTILE])
     row_index, column_index = np.nonzero(finite)
@@ -336,13 +351,13 @@ def measure_background_model(
     )
     tilt = 2.0 * math.hypot(plane_coefficients[1], plane_coefficients[2])
     # The slopes per pixel: the coordinate runs over half the side per unit.
-    column_slope = plane_coefficients[1] / (plane.shape[1] / 2.0)
-    row_slope = plane_coefficients[2] / (plane.shape[0] / 2.0)
+    column_slope = plane_coefficients[1] / (columns / 2.0)
+    row_slope = plane_coefficients[2] / (rows / 2.0)
     tilt_angle = math.degrees(math.atan2(row_slope, column_slope)) % 360.0
     position_angle, position_reason = (
         (None, "the stack's header was not given")
         if header is None
-        else _sky_position_angle(header, row_slope, column_slope, plane.shape)
+        else _sky_position_angle(header, row_slope, column_slope, (rows, columns))
     )
     radial = (
         radial_coefficients[3] * _CORNER_RADIUS_SQUARED + radial_coefficients[4] * _CORNER_RADIUS_SQUARED**2
@@ -360,47 +375,28 @@ def measure_background_model(
         radial_fit_rms_fraction=float(radial_rms / level),
         bin_count=int(finite.sum()),
     )
-    return BackgroundGradientOutcome(gradient=gradient, binned_model=binned)
+    return BackgroundGradientOutcome(gradient=gradient, binned_sky=binned)
 
 
-def measure_background_model_file(model_path: str, picture_path: str) -> BackgroundGradientOutcome:
-    """Measure the model GraXpert wrote, keeping any failure from the caller.
+def crop_cards_of(header: fits.Header) -> dict[str, object]:
+    """Pick the crop keywords out of a picture's header.
 
     Parameters
     ----------
-    model_path : `str`
-        GraXpert's background model (``<output stem>_background.fits``).
-    picture_path : `str`
-        The picture GraXpert worked on. Its header gives the sky coordinates
-        and the crop cards.
+    header : `astropy.io.fits.Header`
+        The header of the picture that was measured.
 
     Returns
     -------
-    outcome : `BackgroundGradientOutcome`
-        The measurement, or the reason there is none: the model is missing,
-        or reading or measuring it failed (logged as a warning).
+    crop_cards : `dict` [`str`, `object`]
+        ``CROPX0``, ``CROPY0``, ``CROPW`` and ``CROPH`` as far as the header
+        has them; empty for a picture that was not cropped.
     """
-    if not os.path.isfile(model_path):
-        return not_measured_outcome("GraXpert wrote no background model")
-    try:
-        header = read_header(picture_path)
-        outcome = measure_background_model(read_data(model_path), header)
-    except Exception as error:  # a by-product of the preview: no failure here may stop it
-        logger.warning(
-            "The background model '%s' could not be measured: %s", model_path, error, exc_info=True
-        )
-        return not_measured_outcome(f"the background model could not be measured: {error}")
-    crop_cards = {key: header[key] for key in ("CROPX0", "CROPY0", "CROPW", "CROPH") if key in header}
-    return BackgroundGradientOutcome(
-        gradient=outcome.gradient,
-        reason=outcome.reason,
-        binned_model=outcome.binned_model,
-        crop_cards=crop_cards,
-    )
+    return {key: header[key] for key in ("CROPX0", "CROPY0", "CROPW", "CROPH") if key in header}
 
 
-def write_binned_model(outcome: BackgroundGradientOutcome, path: str) -> bool:
-    """Save the 64 by 64 map of a measured stack as a small FITS file.
+def write_binned_sky(outcome: BackgroundGradientOutcome, path: str) -> bool:
+    """Save the 64 by 64 map of a measured stack's sky as a small FITS file.
 
     Parameters
     ----------
@@ -415,19 +411,20 @@ def write_binned_model(outcome: BackgroundGradientOutcome, path: str) -> bool:
         `True` if the file was written. A failure to write is logged as a
         warning.
     """
-    if outcome.binned_model is None or outcome.gradient is None:
+    if outcome.binned_sky is None or outcome.gradient is None:
         return False
     header = fits.Header()
     header["BINCOUNT"] = (BACKGROUND_BIN_COUNT, "Bins along each side of the map")
-    header["BGLEVEL"] = (outcome.gradient.level, "Median of the map, in the stack's units")
-    header["COMMENT"] = "Median of the GraXpert background model in each bin, in the picture's array order."
+    header["BGLEVEL"] = (outcome.gradient.level, "Sky level (stack units)")
+    header["COMMENT"] = "Median of the stack's pixels in each bin, in the picture's array order."
+    header["COMMENT"] = "A bin that is not sky (a bright object or nebula lifts it) is empty (NaN)."
     header["COMMENT"] = "Bins are evenly spaced over the picture. CROP cards place the picture on the stack."
     for key, value in outcome.crop_cards.items():
         header[key] = value
     try:
-        write_image(path, outcome.binned_model.astype(np.float32), header)
+        write_image(path, outcome.binned_sky.astype(np.float32), header)
     except (OSError, ValueError) as error:
-        logger.warning("The background model map '%s' could not be written: %s", path, error)
+        logger.warning("The sky background map '%s' could not be written: %s", path, error)
         return False
     return True
 
@@ -458,7 +455,7 @@ def background_gradient_measurements(
         ""
         if gradient is None
         else f"{gradient.bin_count} bins of {BACKGROUND_BIN_COUNT} by {BACKGROUND_BIN_COUNT}, "
-        "from GraXpert's background model"
+        "of the stack's own sky"
     )
     rows = (
         (STACKING_BACKGROUND_MODEL_LEVEL_STACK_UNIT, None if gradient is None else gradient.level, reason),
@@ -515,8 +512,8 @@ def record_background_gradient(
     ----------
     outcomes : `list` of `BackgroundGradientOutcome`
         What `write_stack_preview` collected. Empty when the preview never got
-        as far as GraXpert (no Siril, or the stack file is missing), which is
-        stored as a not-measured row with that reason.
+        as far as the background step (no Siril, or the stack file is
+        missing), which is stored as a not-measured row with that reason.
     target_id : `str`
         The target's id.
     stack_file_name : `str`
@@ -535,7 +532,7 @@ def record_background_gradient(
         if outcomes
         else not_measured_outcome(
             "no preview was made (Siril is not configured or the stack file is missing), "
-            "so GraXpert did not run"
+            "so the sky was not measured"
         )
     )
     try:

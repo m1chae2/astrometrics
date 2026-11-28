@@ -18,7 +18,7 @@ MODULES = (
     "astrometricslib.pipelines.astrometry.pre_processing.fwhm",
     "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
     "astrometricslib.pipelines.astrometry.processing.simbad_matching",
-    "astrometricslib.pipelines.astrometry.processing.wcs_refinement",
+    "astrometricslib.pipelines.astrometry.processing.gaia_match",
     "astrometricslib.pipelines.astrometry.utilities.catalog_seeding",
 )
 

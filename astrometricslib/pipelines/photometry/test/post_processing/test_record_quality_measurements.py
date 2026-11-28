@@ -203,7 +203,7 @@ def _gate_inputs() -> dict:
     }
 
 
-def test_the_registration_gate_stores_the_global_drift_when_the_corner_test_fails() -> None:
+def test_the_registration_gate_stores_the_corner_displacement_when_it_fails() -> None:
     """A rotated field fails the gate; the corner value has its own metric."""
     from astrometricslib.pipelines.photometry.test.post_processing.test_record_quality import (
         centroid_summary,
@@ -221,9 +221,10 @@ def test_the_registration_gate_stores_the_global_drift_when_the_corner_test_fail
     gate = by_name[PHOTOMETRY_GATE_REGISTRATION_DRIFT]
 
     assert gate.check_outcome is GateStatus.FAILED
-    assert gate.value == pytest.approx(5.0)
+    assert gate.value == pytest.approx(1.9)
     assert gate.check_limit is not None
     assert gate.check_limit.unit == "px"
+    assert gate.check_limit.value == pytest.approx(1.0)
     assert by_name[PHOTOMETRY_CORNER_DISPLACEMENT_P95_PX].value == pytest.approx(1.9)
     assert by_name[PHOTOMETRY_CENTROID_FALLBACK_FRACTION].value == pytest.approx(0.1)
 

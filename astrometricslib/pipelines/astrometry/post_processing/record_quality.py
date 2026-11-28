@@ -6,10 +6,11 @@ Five checks say whether the run can be trusted: were any stars found, did the
 plate solve succeed, is the solution accurate, were enough stars matched to a
 catalog, and did the catalog lookups work.
 
-The residual check judges the RMS distance to Gaia stars when the run refit
+The residual check judges the RMS distance to Gaia stars when the run matched
 the solution against Gaia, because that number does not depend on the plate
-solver. Otherwise it judges the plate solver's own fit residual (how far the
-fitted position of each star it matched sits from the reference star). When
+solver's own fit. Otherwise it judges the plate solver's own fit
+residual (how far the fitted position of each star it matched sits from
+the reference star). When
 the solver reported none, as the online solver does, the check falls back to
 the catalog match separation (the distance from each detected star to the
 nearest SIMBAD or Gaia star). The gate's detail says which number it used.
@@ -50,9 +51,8 @@ from astrometricslib.models.tuned_parameter import (
 from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_CATALOG_MATCH_SEPARATION_RMS_ARCSEC,
     ASTROMETRY_CATALOG_MATCHED_STAR_COUNT,
-    ASTROMETRY_GAIA_FIT_RMS_ARCSEC,
-    ASTROMETRY_GAIA_FIT_RMS_BEFORE_ARCSEC,
-    ASTROMETRY_GAIA_FIT_STAR_COUNT,
+    ASTROMETRY_GAIA_MATCH_RMS_ARCSEC,
+    ASTROMETRY_GAIA_MATCH_STAR_COUNT,
     ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL,
     ASTROMETRY_GATE_CATALOG_LOOKUP,
     ASTROMETRY_GATE_CATALOG_MATCHES,
@@ -71,7 +71,6 @@ from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_SOURCES_DETECTED,
     ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX,
     ASTROMETRY_UNRESOLVED_STAR_COUNT,
-    ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC,
 )
 from astrometricslib.pipelines.astrometry.post_processing.target_clipping import target_clipping_measurements
 from astrometricslib.pipelines.shared.quality.notices import notice_measurement
@@ -162,17 +161,17 @@ def _residual_and_basis(metrics: AstrometryPipelineQualityMetrics) -> tuple[floa
     Returns
     -------
     residual : `float` or `None`
-        The RMS distance to the Gaia stars in arcseconds when the refit of
-        the solution measured one (it does not depend on the solver).
+        The RMS distance to the Gaia stars in arcseconds when the Gaia match
+        of the solution measured one (it does not depend on the solver's fit).
         Otherwise the plate solver's fit residual when it reported one, then
         the catalog match separation RMS, or `None` when none was measured.
     basis : `str`
         A short phrase naming the number used, for the gate's detail.
     """
-    if metrics.gaia_fit_rms_arcsec is not None and metrics.gaia_fit_star_count:
+    if metrics.gaia_match_rms_arcsec is not None and metrics.gaia_match_star_count:
         return (
-            metrics.gaia_fit_rms_arcsec,
-            f"RMS against {metrics.gaia_fit_star_count} Gaia stars, independent of the plate solver",
+            metrics.gaia_match_rms_arcsec,
+            f"RMS against {metrics.gaia_match_star_count} Gaia stars, independent of the plate solver's fit",
         )
     fit_residual = metrics.plate_solve_fit_residual_rms_arcsec
     if fit_residual is not None:
@@ -339,14 +338,12 @@ _VALUE_METRIC_BY_FIELD: dict[str, str] = {
     "unresolved_star_count": ASTROMETRY_UNRESOLVED_STAR_COUNT,
     "plate_solve_attempts": ASTROMETRY_PLATE_SOLVE_ATTEMPTS,
     "plate_solve_matched_star_count": ASTROMETRY_PLATE_SOLVE_MATCHED_STAR_COUNT,
-    "gaia_fit_star_count": ASTROMETRY_GAIA_FIT_STAR_COUNT,
+    "gaia_match_star_count": ASTROMETRY_GAIA_MATCH_STAR_COUNT,
     "remote_catalog_queries_attempted": ASTROMETRY_REMOTE_CATALOG_QUERIES_ATTEMPTED,
     "remote_catalog_queries_failed": ASTROMETRY_REMOTE_CATALOG_QUERIES_FAILED,
     "catalog_match_separation_rms_arcsec": ASTROMETRY_CATALOG_MATCH_SEPARATION_RMS_ARCSEC,
     "plate_solve_fit_residual_rms_arcsec": ASTROMETRY_PLATE_SOLVE_FIT_RESIDUAL_RMS_ARCSEC,
-    "gaia_fit_rms_arcsec": ASTROMETRY_GAIA_FIT_RMS_ARCSEC,
-    "gaia_fit_rms_before_arcsec": ASTROMETRY_GAIA_FIT_RMS_BEFORE_ARCSEC,
-    "wcs_refinement_shift_arcsec": ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC,
+    "gaia_match_rms_arcsec": ASTROMETRY_GAIA_MATCH_RMS_ARCSEC,
     "plate_scale_arcsec_per_pixel": ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL,
     "star_fwhm_px": ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX,
 }
@@ -364,12 +361,10 @@ _RUN_LEVEL_METRICS: frozenset[str] = frozenset({
 _NO_SOLVER_TABLE_REASON = "The plate solver gave no match table (an online solve, or a missing table)."
 _MISSING_REASON_BY_FIELD: dict[str, str] = {
     "plate_solve_matched_star_count": _NO_SOLVER_TABLE_REASON,
-    "gaia_fit_star_count": "The Gaia refit was not tried or had too few stars.",
+    "gaia_match_star_count": "The Gaia match was not made or had too few stars.",
     "catalog_match_separation_rms_arcsec": "No detected star was matched to a catalog star.",
     "plate_solve_fit_residual_rms_arcsec": _NO_SOLVER_TABLE_REASON,
-    "gaia_fit_rms_arcsec": "The Gaia refit was not tried or had too few stars.",
-    "gaia_fit_rms_before_arcsec": "The Gaia refit was not tried or had too few stars.",
-    "wcs_refinement_shift_arcsec": "The Gaia refit was not tried or had too few stars.",
+    "gaia_match_rms_arcsec": "The Gaia match was not made or had too few stars.",
     "plate_scale_arcsec_per_pixel": "The image was not solved, so it has no pixel scale.",
     "star_fwhm_px": "No star in the image could be measured.",
 }

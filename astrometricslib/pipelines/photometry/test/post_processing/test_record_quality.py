@@ -121,6 +121,7 @@ def good_run(**changes: Any) -> dict[str, GateResult]:
         "no_work_reason": None,
         "comparison_sets": [comparison_set(12), comparison_set(15)],
         "registration_drifts_px": [3.0, 5.0, None],
+        "centroid_shift_summaries": [centroid_summary()],
         "stars_with_scatter": 80,
         # Catalogued variables clearly score higher than the others here.
         "known_variable_scores": [3.0 + 0.01 * index for index in range(20)],
@@ -306,17 +307,14 @@ def test_ensemble_gate_passes_when_the_scatter_cannot_be_compared() -> None:
     assert gate.status is GateStatus.PASSED
 
 
-def test_drift_gate_goes_red_on_lost_tracking() -> None:
-    """A 60 px drift fails; no recorded drift is not a pass."""
-    failed = good_run(registration_drifts_px=[2.0, 60.0])[rg.REGISTRATION_DRIFT_GATE_NAME]
-    assert failed.status is GateStatus.FAILED
-    assert failed.measured_value == pytest.approx(60.0)
+def test_drift_gate_does_not_judge_how_far_the_field_moved() -> None:
+    """A field 60 px from its first place passes: the solutions follow it."""
+    gate = good_run(registration_drifts_px=[2.0, 60.0], centroid_shift_summaries=[centroid_summary()])[
+        rg.REGISTRATION_DRIFT_GATE_NAME
+    ]
 
-    unchecked = good_run(registration_drifts_px=[None, None])[rg.REGISTRATION_DRIFT_GATE_NAME]
-    assert unchecked.status is GateStatus.NOT_CHECKED
-    assert (
-        good_run(registration_drifts_px=[])[rg.REGISTRATION_DRIFT_GATE_NAME].status is GateStatus.NOT_CHECKED
-    )
+    assert gate.status is GateStatus.PASSED
+    assert "field offset from the reference frame up to 60.0 px" in gate.detail
 
 
 def test_drift_gate_passes_and_reports_the_per_star_distribution() -> None:
@@ -324,7 +322,7 @@ def test_drift_gate_passes_and_reports_the_per_star_distribution() -> None:
     gate = good_run(centroid_shift_summaries=[centroid_summary()])[rg.REGISTRATION_DRIFT_GATE_NAME]
 
     assert gate.status is GateStatus.PASSED
-    assert gate.measured_value == pytest.approx(5.0)
+    assert gate.measured_value == pytest.approx(0.1)
     assert "field offset from the reference frame up to 5.0 px" in gate.detail
     assert "median 0.05 px" in gate.detail
     assert "95th percentile 0.20 px" in gate.detail
@@ -407,9 +405,9 @@ def test_drift_gate_uses_the_worst_session() -> None:
     assert "worst of 2 sessions" in gate.detail
 
 
-def test_drift_gate_is_not_checked_without_global_drift_or_a_summary() -> None:
-    """With no global drift and no per-star summary, nothing was looked at."""
-    gate = good_run(registration_drifts_px=[None], centroid_shift_summaries=[])[
+def test_drift_gate_is_not_checked_without_a_summary() -> None:
+    """With no per-star summary, nothing was looked at."""
+    gate = good_run(registration_drifts_px=[5.0], centroid_shift_summaries=[])[
         rg.REGISTRATION_DRIFT_GATE_NAME
     ]
 

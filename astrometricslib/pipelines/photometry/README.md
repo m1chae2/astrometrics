@@ -254,7 +254,7 @@ A cycle or dip search reports a verdict (`detected`, `possible`, `not_detected`,
 
 ## Quality outputs
 
-A *gate* is a yes-or-no entry on a whole run, as opposed to the quality records kept for each star. Gates catch problems that affect every star at once, such as lost tracking or a poor comparison set.
+A *gate* is a yes-or-no entry on a whole run, as opposed to the quality records kept for each star. Gates catch problems that affect every star at once, such as a poor plate solution or a poor comparison set.
 
 Besides each star's own quality records, a run keeps one record per run-level gate in the summary's `gates` (built in `post_processing/record_quality.py`). Each gate is `passed`, `failed` or `not_checked`; a gate that could not look is never recorded as passed. The tests in `test/post_processing/test_record_quality.py` give every gate input that must fail it.
 
@@ -266,7 +266,7 @@ Besides each star's own quality records, a run keeps one record per run-level ga
 | `session_plate_solve` | A session could not be plate-solved for cross-session matching | There is only one session |
 | `photometry_work` | The run found nothing to do (the reason is given) | Never |
 | `comparison_ensemble` | A session's comparison set has fewer than five stars, or the number of comparison stars differs from one frame of a session to another (the set must be fixed), or the comparison stars' own light curves scatter more than 5 times what their errors predict (`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED`; the measured value is then the ratio). The detail on a pass gives the set sizes, says each set is the same in every frame, and quotes the ensemble scatter in magnitudes next to the scatter the errors predict | No session was normalized |
-| `registration_drift` | Any of three limits is passed: the field moved far from its place in the first frame, a corner moves far beyond that shift (a turned or rescaled field), or too many refused centroids (see [The registration drift gate](#the-registration-drift-gate)) | No star recorded its offset and no session has a per-star summary |
+| `registration_drift` | Either limit is passed: a corner moves far beyond the shift of the field (a turned or rescaled field), or too many refused centroids (see [The registration drift gate](#the-registration-drift-gate)) | No session has a per-star summary |
 | `scatter_population` | Never | Fewer than 10 stars have a measured scatter, or fewer than 20 can be used to fit the noise model, so the CV cutoff stands in for the noise model. A pass quotes the number of stars the model was fitted from |
 | `variability_discrimination` | Among the field's stars with a light curve, the variability score of those the catalogs list as variable does not rank above that of the others with an AUC against catalog labels of at least 0.7 (`MINIMUM_DISCRIMINATION_AUC`), also checked against the chance level at the 5% level | Fewer than 10 cataloged variables or 30 unlisted stars in the field |
 | `detectable_amplitude` | The gate estimates the smallest variable this run could flag, and fails when that estimate is above 0.3 mag peak to peak (`MAXIMUM_DETECTABLE_AMPLITUDE_MAG`). The estimate is for a sinusoid on a star of median brightness. With a noise model, it is the model's scatter there times `2 sqrt(2) sqrt(1.5^2 - 1)`. Without one, it is the sinusoid whose scatter equals the CV cutoff (see the note below the table) | The run has no noise model and no cutoff |
@@ -294,15 +294,14 @@ The third row is stored by the stage runner (`tasks.report_needs_astrometry`) wh
 
 Registration is the mapping of each frame onto the first one, here by the frames' own plate solutions. This gate checks that the mapping is good enough for the apertures to sit on the stars.
 
-**What it checks.** The gate fails when any of three limits is passed:
+**What it checks.** The gate fails when either of two limits is passed:
 
-1. The middle of a frame sits more than 20 pixels from its place in the first frame, so tracking was probably lost. The solutions place the stars wherever the field went, so this limit judges the mount, not the measuring.
-2. The 95th percentile, over the frames, of how far a corner of the frame moves beyond the shift of its middle exceeds 1 pixel (`MAXIMUM_CORNER_DISPLACEMENT_PX`). The frame's solution follows that rotation, so the apertures follow the stars, but a star lands on different pixels in each frame and the flat-field error adds scatter. (A flat field is the correction for the uneven sensitivity of the sensor's pixels; its small leftover error differs from pixel to pixel.)
-3. More than 20% of the star measurements kept the solution's position because the star's own centroid was refused (`MAXIMUM_CENTROID_FALLBACK_FRACTION`).
+1. The 95th percentile, over the frames, of how far a corner of the frame moves beyond the shift of its middle exceeds 1 pixel (`MAXIMUM_CORNER_DISPLACEMENT_PX`). The frame's solution follows that rotation, so the apertures follow the stars, but a star lands on different pixels in each frame and the flat-field error adds scatter. (A flat field is the correction for the uneven sensitivity of the sensor's pixels; its small leftover error differs from pixel to pixel.)
+2. More than 20% of the star measurements kept the solution's position because the star's own centroid was refused (`MAXIMUM_CENTROID_FALLBACK_FRACTION`).
 
-**What it reports.** The detail reports the field's offset from the first frame, the corner displacement, the median and 95th-percentile per-star offset, the fallback share and the worst frame. The per-star offset is reported, not judged, because centroid noise on faint and crowded stars dominates it. With several sessions, the gate reports the worst one. The measured value is the field's offset for limit 1, the corner displacement for limit 2 and the fallback share (0 to 1) for limit 3.
+**What it reports.** The detail reports the field's offset from the first frame, the corner displacement, the median and 95th-percentile per-star offset, the fallback share and the worst frame. The per-star offset is reported, not judged, because centroid noise on faint and crowded stars dominates it. With several sessions, the gate reports the worst one. The field's offset is not judged: the solutions place every star wherever the field went. The measured value is the corner displacement for limit 1 and the fallback share (0 to 1) for limit 2.
 
-**Status.** The three limits are design estimates, not set from a measured false-positive rate (design estimate; see [photometry design estimates](../../../documentation/library_design/validation/photometry.md#design-estimates)). The gate's values on real fields are in the register (partly measured; see [PHO-04](../../../documentation/library_design/validation/photometry.md#pho-04)).
+**Status.** The two limits are design estimates, not set from a measured false-positive rate (design estimate; see [photometry design estimates](../../../documentation/library_design/validation/photometry.md#design-estimates)). The gate's values on real fields are in the register (partly measured; see [PHO-04](../../../documentation/library_design/validation/photometry.md#pho-04)).
 
 ### Per-star metrics
 

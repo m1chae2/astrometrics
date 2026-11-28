@@ -1,6 +1,6 @@
 """Fetches Gaia DR3 tiles from the online archives and tallies each run.
 
-The star naming and the Gaia refit of the plate solution (see
+The star naming and the Gaia match of the plate solution (see
 `star_identifier`) need the Gaia stars under each image.
 `make_gaia_tile_fetcher` builds the function that downloads one sky tile:
 VizieR first, then the ESA Gaia archive, then VizieR again at brighter

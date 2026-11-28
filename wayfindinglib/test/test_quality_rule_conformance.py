@@ -185,7 +185,7 @@ UNUSED_DECISION_METRICS = {
         "issue 134: input of the noise checks on dark and bias frames (STK-49), judged by the stacker's "
         "gates, which the rule retake_bad_calibration_set reads."
     ),
-    "astrometry.gaia_fit_rms_arcsec": (
+    "astrometry.gaia_match_rms_arcsec": (
         "issue 96: input of the astrometry self-check (AST-02), judged in astrometricslib."
     ),
     "astrometry.plate_scale_arcsec_per_pixel": (

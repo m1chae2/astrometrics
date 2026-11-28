@@ -159,7 +159,10 @@ def run_solve_field(study: StudyFolder, row: dict, mode: str, timeout: float = 3
         Success, times, the index file that solved it and the solver's fit
         residual and matched-star count.
     """
-    from astrometricslib._internal.drivers.astrometry_net_driver import read_corr_fit_statistics
+    # The app lost this module; see the README (commit 62906cee).
+    from astrometricslib._internal.drivers.astrometry_net_driver import (  # pyrefly: ignore[missing-import]
+        read_corr_fit_statistics,
+    )
 
     ident = row["id"]
     temporary = Path(tempfile.mkdtemp(dir=study.work, prefix="sf_"))

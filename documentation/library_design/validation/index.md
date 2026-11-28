@@ -123,7 +123,7 @@ Table 3 lists what each register file covers.
 | Pipeline | Register file | What was checked |
 | --- | --- | --- |
 | Stacking | [stacking.md](stacking.md) | Frame screening and set-aside check, calibration masters, pixel rejection, exposure groups and their brightness scale, the after-stacking checks, color calibration, the preview stretch and the noise of a stack |
-| Astrometry | [astrometry.md](astrometry.md) | Solver residuals against an independent Gaia check, the choice of local plate solver, the Gaia refit, the solution checks, star detection, catalog matching radii and the Gaia service limits |
+| Astrometry | [astrometry.md](astrometry.md) | Solver residuals against an independent Gaia check, the choice of local plate solver, the check of the solution against Gaia, the solution checks, star detection, catalog matching radii and the Gaia service limits |
 | Photometry | [photometry.md](photometry.md) | The comparison ensemble, the error model and camera noise, frame alignment, the variability indices and cutoffs, the period search, cross-session matching, and the comparison with Siril's photometry and per-frame plate solutions |
 | Spectroscopy | [spectroscopy.md](spectroscopy.md) | Sky subtraction, the reading box, resolution and errors, wavelength calibration, the instrument response, classification limits and the Gaia XP comparison |
 | Moving objects | [asteroid_detection.md](asteroid_detection.md) | Recovery of injected movers, false tracks, real fields far from the ecliptic, the pointing correction and the chaining step |

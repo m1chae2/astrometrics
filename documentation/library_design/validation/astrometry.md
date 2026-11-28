@@ -14,8 +14,8 @@ Two quantities appear in many entries. A *residual* is the distance left between
 
 - **Claim:** The plate solver's own fit residual mostly measures position errors in its index files (its pre-built reference stars), not errors in the solution. Measured against Gaia DR3, the solutions were several times better than the fit residual says. One solution still carried a constant shift that no gate measured.
 - **Settings it supports:**
-  - The order in which the `astrometric_residual` gate picks its residual: the RMS against Gaia from the refit first, then the solver's fit residual, then the catalog match separation. This order is code, not a setting (`_residual_and_basis` in `astrometricslib/pipelines/astrometry/post_processing/record_quality.py`; changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis -->
-  - The Gaia refit itself (see [AST-02](#ast-02)). Relation: derived from this entry.
+  - The order in which the `astrometric_residual` gate picks its residual: the RMS distance of the Gaia-matched stars first, then the solver's fit residual, then the catalog match separation. This order is code, not a setting (`_residual_and_basis` in `astrometricslib/pipelines/astrometry/post_processing/record_quality.py`; changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis -->
+  - The Gaia match itself (see [AST-02](#ast-02)). Relation: derived from this entry.
 - **Status:** Partly measured. Two stacks from one camera, measured by hand with no script.
 - **Data you need:** A stacked image solved by Siril, so that Siril's fit numbers and its fit residual exist. (The measurement was made on solve-field solutions, which the app no longer uses.) The image needs a `DATE-OBS` card and at least a few hundred unsaturated stars brighter than G = 16 that Gaia lists.
 - **Procedure:**
@@ -85,7 +85,7 @@ print("constant shift RA, Dec:", np.median(d_ra), np.median(d_dec), "arcsec")
 print("scatter:", np.median(np.hypot(d_ra - np.median(d_ra), d_dec - np.median(d_dec))), "arcsec")
 ```
 
-  Run step 4 once with the solver's solution and once with the refined one. Both are in the run: the identifier keeps the solver's fit residual and the refit's before and after RMS (see [AST-02](#ast-02)).
+  Run step 4 on the solver's solution. The run keeps the solver's fit residual and the Gaia match RMS beside it (see [AST-02](#ast-02)).
 
 - **Acceptance criterion:** A constant shift above about a tenth of a pixel means the solution is offset as a whole.
 - **What to look at:** The solver's fit residual against the scatter and the constant shift from the Gaia check, all in arcseconds. A scatter well under the fit residual means the fit residual is dominated by the index files. A constant shift above about a tenth of a pixel means the solution is offset as a whole.
@@ -96,31 +96,29 @@ print("scatter:", np.median(np.hypot(d_ra - np.median(d_ra), d_dec - np.median(d
   | M 13 | 1.35 arcsec | 95 | 0.29 |
   | NGC 2403 | 0.82 arcsec | 24 | 0.11 |
 
-  The independent Gaia check of the same solutions found a median scatter of 0.23 to 0.24 arcsec, and a constant shift of 0.60 arcsec in declination on NGC 2403. The Gaia refit later removed that shift (0.59 to 0.06 arcsec; see [AST-02](#ast-02)).
+  The independent Gaia check of the same solutions found a median scatter of 0.23 to 0.24 arcsec, and a constant shift of 0.60 arcsec in declination on NGC 2403. The app's old refit to Gaia later removed that shift of a solve-field solution (0.59 to 0.06 arcsec; see [AST-02](#ast-02)); Siril's solutions carry no such shift.
 - **Verdict:** Not judged.
 - **Limits:** Two stacks from one camera and one night of measurement. The check was done by hand and no record was saved. The Gaia check uses Gaia positions, so a systematic error in Gaia would not show.
-- **To tune for your setup:** Nothing to tune directly. If your solver's fit residual is close to the Gaia scatter, your index files are better than ours and the fit residual is a fair measure. If the Gaia check shows a constant shift, check that the refit ran (`wcs_refined_against_gaia` in the run's `astrometry_flags`).
+- **To tune for your setup:** Nothing to tune directly. If your solver's fit residual is close to the Gaia scatter, your index files are better than ours and the fit residual is a fair measure. If the Gaia check shows a constant shift, compare it with the Gaia match RMS of the run (`gaia_match_rms_arcsec`; the flag `gaia_match_skipped` in the run's `astrometry_flags` says it was not measured).
 - **Regenerate with:** No script; measured by hand on 2026-10-10. `astrometricslib/scripts/report_gate_limits.py` reports the spread of the stored fit residuals across the library (`python -m astrometricslib.scripts.report_gate_limits`).
 - **Guarded by tests:** None.
 - **Raw record:** None kept.
 
 ### AST-02
 
-**Refitting the solution to Gaia on real stacks**
+**The RMS distance of the plate solution to the Gaia stars (the Gaia match)**
 
-- **Claim:** The refit to Gaia DR3 removes the constant offsets the solver leaves (up to 1.4 pixels) and leaves a scatter of about a tenth of a pixel, with no trend across the field.
+- **Claim:** The plate solution of a stack sits 0.08 to 0.49 arcsec (RMS) from the Gaia DR3 stars the check matches, which is 0.018 to 0.058 of a star's width, for Siril's solutions of 11 stacks from two cameras. The same stacks, solved by solve-field, sat 0.47 to 3.99 arcsec from Gaia, and after the app's old refit of that solution to Gaia 0.16 to 0.53 arcsec (3.99 arcsec for one stack the refit refused). Siril's solution needs no refit, and the refit was removed.
 - **Settings it supports:**
-  - code constant `INITIAL_MATCH_RADIUS_PIXELS` = 4.0 in `astrometricslib/pipelines/astrometry/processing/wcs_refinement.py` (changing it means editing the code); it must exceed the largest solver error seen. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.INITIAL_MATCH_RADIUS_PIXELS -->
-  - code constant `MAXIMUM_SHIFT_ARCSEC` = 30.0 in the same file; more than ten times the largest solver error seen. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC -->
-  - code constant `SIP_DEGREE` = 2 in the same file; the solver's own solutions use 2 and the M 13 stack showed up to 1.8 arcsec of distortion at a corner. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.SIP_DEGREE -->
-  - code constants `REFINED_MATCH_RADIUS_PIXELS` = 1.5, `CLIP_SIGMAS` = 3.0 and `MAXIMUM_PASSES` = 5 in the same file; these were used in the runs below but not varied. Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.REFINED_MATCH_RADIUS_PIXELS --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.CLIP_SIGMAS --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_PASSES -->
-- **Status:** Partly measured. Three stacks from one camera, checked by hand with the same Gaia positions the fit used.
-- **Data you need:** Solved stacks with `DATE-OBS`, a few hundred or more detected stars that Gaia lists, and if possible one stack with few frames (a short stack is where the solver tends to be furthest off).
+  - code constant `GAIA_MATCH_RADIUS_PIXELS` = 4.0 star widths in `astrometricslib/pipelines/astrometry/processing/gaia_match.py` (changing it means editing the code); it must exceed the largest solution error seen. Relation: sanity check only. The error was 0.5 arcsec at most here, so any radius from 1 star width up would give the same stars. <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_match.GAIA_MATCH_RADIUS_PIXELS -->
+  - code constants `MINIMUM_MATCHED_STARS` = 40, `CLIP_SIGMAS` = 3.0 and `MAXIMUM_PASSES` = 5 in the same file. Relation: sanity check only. The matches kept ranged from 1,078 to 17,519 stars, so the minimum never limited, and the clipping and passes were not varied. `CLIP_SIGMAS` and `MAXIMUM_PASSES` are also used by the spectral star registration. <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_match.MINIMUM_MATCHED_STARS --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_match.CLIP_SIGMAS --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_match.MAXIMUM_PASSES -->
+  - The order in which the `astrometric_residual` gate picks its residual, and its limit (see [AST-04](#ast-04)). Relation: derived from this entry.
+- **Status:** Partly measured. 11 stacks from two cameras (ZWO ASI 533MM Pro and Nikon D5300) at about 1.92 and 2.0 arcsec per pixel, on one computer, one run each, all with a good solution.
+- **Data you need:** Stacked images with a header position, a `DATE-OBS` card and Gaia stars cached for the field (the astrometry run fills the cache), plus Siril 1.4 with its Gaia catalog.
 - **Procedure:**
-  1. Run astrometry on each stack through the public API. The refit runs inside it.
-  2. Read the refit's results from the quality summary: `gaia_fit_rms_before_arcsec`, `gaia_fit_rms_arcsec`, `gaia_fit_star_count` and `wcs_refinement_shift_arcsec`, and the flags. <!-- impl: astrometricslib.reports.AstrometryPipelineQualityMetrics -->
-  3. For an independent view, repeat the Gaia check of [AST-01](#ast-01) (2-D Gaussian centers, Gaia stars brighter than G = 16 moved to the image date) with the solver's solution and with the refined one, and compare the constant shift and the scatter.
-  4. To look at the refit alone, call it directly on your own centroids and Gaia stars (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia -->
+  1. Run astrometry on each stack through the public API. The solve, the Gaia match and the gate run inside it.
+  2. Read the result from the quality summary: `gaia_match_rms_arcsec`, `gaia_match_star_count`, `plate_solve_fit_residual_rms_arcsec`, `star_fwhm_px`, `plate_scale_arcsec_per_pixel` and the gate `astrometric_residual`. <!-- impl: astrometricslib.reports.AstrometryPipelineQualityMetrics -->
+  3. For an independent view, repeat the Gaia check of [AST-01](#ast-01) (2-D Gaussian centers, Gaia stars brighter than G = 16 moved to the image date) and compare the constant shift and the scatter.
 
 ```python
 from astrometricslib import Astrometrics
@@ -130,24 +128,31 @@ for name in ["M 13", "NGC 2403", "Alnath"]:
     answer = astrometrics.processing.astrometry.run(astrometrics.targets.get(name))
     metrics = answer.quality.astrometry.astrometry_metrics
     print(name, metrics.astrometry_flags)
-    print("  Gaia RMS before and after:", metrics.gaia_fit_rms_before_arcsec, metrics.gaia_fit_rms_arcsec)
-    print("  stars used:", metrics.gaia_fit_star_count, " largest move:", metrics.wcs_refinement_shift_arcsec)
+    print("  Gaia match RMS and stars:", metrics.gaia_match_rms_arcsec, metrics.gaia_match_star_count)
     print("  solver fit residual:", metrics.plate_solve_fit_residual_rms_arcsec)
 ```
 
-The direct call takes the solver's astropy WCS (`wcs`), an N by 2 array of zero-based (x, y) centroids (`centroids`), and the Gaia stars moved to the image date as a `SkyCoord` (`gaia_coords`, built as in [AST-01](#ast-01)).
+- **Acceptance criterion:** Not recorded (set after the result). The check of the earlier solutions asked for a constant shift near zero, a scatter of about a tenth of a pixel and no trend across the field.
+- **What to look at:** The Gaia match RMS in arcseconds and as a fraction of the star width (below the gate's limit of 0.5, [AST-04](#ast-04)), and the number of stars it rests on.
+- **Our result:** 2026-11-28, on a copy of the library (the stacks read from the library, nothing written, offline so no catalog was asked, the Gaia stars read from the cache). The astrometry pipeline solved each stack with Siril and matched the detections to the cached Gaia stars. The "stored" columns come from the copy's database, from the earlier code: the RMS of the stars its refit used, and the RMS of the same stars under the solve-field solution.
 
-```python
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import refine_wcs_with_gaia
+  | Stack | Siril fit residual | Gaia match RMS (stars) | Star width | Fraction of the width | Stored: after the refit | Stored: solve-field |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | M 13 | 0.19 arcsec | 0.15 arcsec (3,698) | 2.24 px | 0.035 | 0.26 arcsec | 0.66 arcsec |
+  | NGC 2403 | 0.17 arcsec | 0.16 arcsec (3,668) | 3.68 px | 0.022 | 0.23 arcsec | 0.72 arcsec |
+  | M 31 | 0.15 arcsec | 0.10 arcsec (6,605) | 2.01 px | 0.026 | 0.33 arcsec | 1.12 arcsec |
+  | M 57 | 0.14 arcsec | 0.12 arcsec (14,127) | 3.04 px | 0.020 | 0.20 arcsec | 0.63 arcsec |
+  | Alnath | 0.23 arcsec | 0.38 arcsec (1,653) | 3.46 px | 0.058 | 0.44 arcsec | 0.65 arcsec |
+  | NGC 7331 | 0.16 arcsec | 0.08 arcsec (7,975) | 2.31 px | 0.018 | 0.16 arcsec | 0.47 arcsec |
+  | NGC 7023 (Nikon) | 0.18 arcsec | 0.34 arcsec (7,576) | 5.09 px | 0.034 | 0.42 arcsec | 0.79 arcsec |
+  | Altair | 0.22 arcsec | 0.49 arcsec (12,543) | 5.46 px | 0.045 | 3.99 arcsec | 3.99 arcsec |
+  | M 45 | 0.31 arcsec | 0.27 arcsec (2,768) | 4.56 px | 0.031 | 0.30 arcsec | 2.34 arcsec |
+  | M 42 | 0.31 arcsec | 0.40 arcsec (1,078) | 5.90 px | 0.036 | 0.53 arcsec | 0.88 arcsec |
+  | IC 1396 (Nikon) | 0.17 arcsec | 0.32 arcsec (17,519) | 5.13 px | 0.031 | 0.41 arcsec | 0.95 arcsec |
 
-refinement = refine_wcs_with_gaia(wcs, centroids, gaia_coords, data.shape)
-print(refinement.applied, refinement.reason, refinement.star_count)
-print(refinement.rms_before_arcsec, refinement.rms_after_arcsec, refinement.shift_arcsec)
-```
+  Siril's solution sat closer to Gaia than the stored RMS after the old refit on all 11 stacks, and none came near the gate's limit. The stored Altair solution had been refused by the refit (a solve-field solution 4 arcsec off, passing the gate at 0.34 of the star width); Siril's solution of the same stack is 0.49 arcsec off. The stored values come from earlier runs of other code on other detections, so the columns compare typical size, not star by star. All 11 gates passed.
 
-- **Acceptance criterion:** A constant shift near zero, a scatter of about a tenth of a pixel and no trend across the field.
-- **What to look at:** The constant shift before and after the refit (arcseconds; near zero is good). The scatter after it (arcseconds; compare with the pixel scale, where a tenth of a pixel is good). Any trend of the offsets across the field (none is good). `wcs_refinement_shift_arcsec` against `MAXIMUM_SHIFT_ARCSEC`.
-- **Our result:** 2026-10-11, ASI 533MM stacks at 1.92 arcsec/pixel. Gaia check with stars brighter than G = 16.
+  Earlier result (the refit, since removed). 2026-10-11, ASI 533MM stacks at 1.92 arcsec/pixel, Gaia check with stars brighter than G = 16:
 
   | Stack | Constant shift before refit | After refit | Scatter after refit | Stars in the refit | Solver fit residual |
   | --- | --- | --- | --- | --- | --- |
@@ -155,63 +160,22 @@ print(refinement.rms_before_arcsec, refinement.rms_after_arcsec, refinement.shif
   | NGC 2403 | 0.59 arcsec | 0.06 arcsec | 0.14 arcsec | 431 | 0.73 arcsec |
   | Alnath (2-frame stack) | 2.75 arcsec (1.4 px) | 0.01 arcsec | 0.20 arcsec | 474 | 0.79 arcsec |
 
-  No trend across the field remained after the refit. The largest solver error seen was 2.7 arcsec (Alnath); the solver errors seen reached up to 2 pixels. In M 13 the brightest 500 detections are the unresolved cluster core, where Gaia has no star to match, which is why the refit uses every detection and not only the identified ones.
-
-  2026-11-23, two changes to the code and a re-run on the saved stacks, read only, with the cached Gaia tiles complete to G 18 (Gaia stars of the cache, detections of the current star finder). First, the fit now projects about the middle of the matched stars (`proj_point="center"`) and not about the solver's reference point. M 13's reference pixel is at (1632, 2077) of 3,004 by 3,004, and a fit started there stopped in a wrong answer 8,056 arcsec from the solver's solution, so the refit was refused. With the change it was applied: 2,642 stars, RMS 0.62 to 0.25 arcsec, largest move 2.76 arcsec. On a synthetic field with the same off-center reference pixel the old fit also succeeded, so only the real stack shows the failure, and `test_wcs_refinement.py` checks the projection choice itself. Second, a color stack's single-star detections were scaled back to full size twice (see [AST-D03](#design-estimates)), which refused the refit on the IC 1805 stack (3,957 by 5,936 pixels, one-shot color): only 21 stars matched Gaia. With the positions fixed it was applied: 4,340 stars, RMS 0.64 to 0.42 arcsec, largest move 5.76 arcsec. Both runs were a single stack each; nothing was varied.
+  Those were solve-field solutions, off by up to 2.7 arcsec, and the refit brought them to the Gaia stars. The AST-23 study then found that Siril's solutions are already at that level (0.24 arcsec median against Gaia on the ZWO frames), and that the refit was never applied to a Siril solution, so the refit was removed and only the measurement stayed.
 - **Verdict:** Not judged.
-- **Limits:** Three stacks from one camera. The Gaia check uses the same Gaia positions as the fit, so a systematic error in Gaia would not show. The refit assumes the detected centroids are unbiased; saturated and blended stars are not, and the clipping removes most of them. The RMS is measured on the stars the fit used, so it is slightly smaller than the error at a position with no star.
-- **To tune for your setup:** If your solver is sometimes off by more than about 3 pixels, raise `INITIAL_MATCH_RADIUS_PIXELS` above that error; if your field is crowded at your pixel scale, lower it so neighbors are not matched. If the refit is refused with "moved the field", look at the solution before raising `MAXIMUM_SHIFT_ARCSEC`: a large move usually means wrong matches. Re-run steps 1 to 3.
-- **Regenerate with:** No script. The real-stack check has no script; it was measured by hand on 2026-10-11.
-- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/processing/test_wcs_refinement.py` checks the refit on a synthetic field (see [AST-03](#ast-03)) and that it projects about the middle of the stars. `astrometricslib/pipelines/stacking/test/test_stack_plate_solution_save.py` checks that an accepted refit found by the analysis step is saved with the stack, and that a stack already refit is left alone.
-- **Raw record:** None kept.
-
-### AST-03
-
-**Refitting the solution to Gaia on a synthetic field**
-
-- **Claim:** On a synthetic field with a known solution, the refit brings a solution that starts 2.7 arcsec off back to the truth to a few hundredths of an arcsecond, although 15% of the detections are wrong by about 3 pixels.
-- **Settings it supports:**
-  - The same code constants as [AST-02](#ast-02). Relation: confirmed by this entry.
-  - code constant `MINIMUM_MATCHED_STARS` = 40 in `astrometricslib/pipelines/astrometry/processing/wcs_refinement.py` (the test checks the refusal below it, not the value). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS -->
-- **Status:** Partly measured. Synthetic data only.
-- **Data you need:** None; the test builds the field. To repeat it on your own setup, change the pixel scale and image size in the test to yours.
-- **Procedure:**
-  1. Build 600 stars at random pixels of a 3008 by 3008 image under a known tangent-plane solution with small SIP terms, at 1.92 arcsec/pixel.
-  2. Add 0.1 pixel of noise to every centroid and move 15% of them by about 3 pixels.
-  3. Give the refit a worse solution: 2.7 arcsec off, 0.03% off in scale, slightly rotated and with no SIP terms (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia -->
-  4. Measure the distance between the refined and the true solution at 2,000 random pixels.
-
-```python
-import numpy as np
-
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import refine_wcs_with_gaia
-from astrometricslib.pipelines.astrometry.test.processing import test_wcs_refinement as field
-
-measured, gaia, truth = field.make_field()
-start = field.alnath_like_solution()
-refinement = refine_wcs_with_gaia(start, measured, gaia, field.IMAGE_SHAPE)
-errors = field.error_against_truth_arcsec(refinement.wcs, truth)
-print(refinement.applied, refinement.star_count, np.median(errors), errors.max())
-```
-
-- **Acceptance criterion:** A median error under 0.05 arcsec and a largest error under 0.15 arcsec (the test's limits).
-- **What to look at:** The median and largest error of the refined solution against the truth, in arcseconds. The test requires a median under 0.05 and a largest error under 0.15 arcsec.
-- **Our result:** 2026-10-15 (re-run for this register): the refit used 494 stars; the median error was 0.027 arcsec (0.03) and the largest 0.096 arcsec; the RMS against the synthetic Gaia stars fell from 2.76 to 0.26 arcsec, and the field moved by 4.2 arcsec. The solution it started from was 2.6 arcsec (median) from the truth.
-- **Verdict:** Pass. The median error was 0.027 arcsec against a limit of 0.05, and the largest was 0.096 arcsec against a limit of 0.15.
-- **Limits:** Synthetic data: the wrong detections are random, while real blends and saturated stars are biased in a consistent direction. The distortion is smaller than a real optic's.
-- **To tune for your setup:** Change `PIXEL_SCALE_ARCSEC`, `IMAGE_SHAPE` and the wrong fraction in the test to your camera, then run the test.
-- **Regenerate with:** `.venv/bin/pytest astrometricslib/pipelines/astrometry/test/processing/test_wcs_refinement.py` runs the procedure.
-- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/processing/test_wcs_refinement.py`.
+- **Limits:** 11 stacks from two cameras, all good solves, one run each. The Gaia check uses the same cached Gaia positions as the match, so a systematic error in Gaia would not show. The match assumes the detected centroids are unbiased; saturated and blended stars are not, and the clipping removes most of them. The RMS is measured on the stars that were kept, so it is slightly smaller than the error at a position with no star. The "stored" columns come from other code and detections, so they are only a rough comparison.
+- **To tune for your setup:** If your solution is off by more than about 4 star widths (the match radius), the match finds the wrong stars and the RMS is not the error; look at the solution first. If your field is crowded at your pixel scale, lower `GAIA_MATCH_RADIUS_PIXELS` so neighbors are not matched.
+- **Regenerate with:** No script in the repository. The procedure above reads the same numbers from the quality summary; the 2026-11-28 table was made with a short script run on a copy.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/processing/test_gaia_match.py` checks the match on a synthetic field with a known solution (the RMS under the true solution, a constant shift adding in quadrature, wrong matches clipped, the solution left unchanged, and too little to match giving a reason).
 - **Raw record:** None kept.
 
 ### AST-04
 
 **The residual limit of half a star width**
 
-- **Claim:** On the saved solves, the residual was 0.14 to 0.44 of a star's width, so a limit of 0.5 does not fire on any of them. It is there to catch a failed solve, not to rank good ones.
+- **Claim:** On the saved solves, the residual was 0.14 to 0.44 of a star's width, so a limit of 0.5 does not fire on any of them. The gate now judges the Gaia match RMS of Siril's solution first: on 11 stacks it was 0.018 to 0.058 of a star's width (see [AST-02](#ast-02)), so the limit still fires on none of them, and it stays at 0.5. It is there to catch a failed solve, not to rank good ones.
 - **Settings it supports:**
   - code constant `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` = 0.5 in `astrometricslib/pipelines/astrometry/post_processing/record_quality.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
-- **Status:** Partly measured. Set on catalog match separations, not on the solver's fit residuals or the Gaia refit RMS that the gate now prefers; no failed solve was in the sample.
+- **Status:** Partly measured. Set on catalog match separations. It was never tuned on the solver's fit residual or on the old Gaia refit RMS, so removing the refit leaves it where it was. The Gaia match RMS the gate now prefers was measured on 11 good solves (AST-02); no failed solve was in either sample.
 - **Data you need:** A library of solved stacks with quality summaries that carry a plate scale and a star width. Include at least one known bad solve if you have one.
 - **Procedure:**
   1. Run astrometry on each stack (public API).
@@ -231,7 +195,7 @@ for target in astrometrics.targets.query(include_empty=True).items:
         continue
     width_arcsec = m.plate_scale_arcsec_per_pixel * m.star_fwhm_px
     for label, value in [
-        ("Gaia refit RMS", m.gaia_fit_rms_arcsec),
+        ("Gaia match RMS", m.gaia_match_rms_arcsec),
         ("solver fit residual", m.plate_solve_fit_residual_rms_arcsec),
         ("catalogue match separation", m.catalog_match_separation_rms_arcsec),
     ]:
@@ -245,8 +209,8 @@ for target in astrometrics.targets.query(include_empty=True).items:
 - **What to look at:** The fraction of a star width, with no unit. Good solves should sit well below the limit; a known bad solve should sit above it.
 - **Our result:** 2026-10-09, the library: the 8 saved solves whose stacked image carries a solved plate scale had catalog match separations of 0.14 to 0.44 of a star width (median 0.25). None fired.
 - **Verdict:** Not judged.
-- **Limits:** Eight solves, all from one camera, and all good. The numbers are catalog match separations; a fit residual is usually smaller, so the limit is more lenient for it. The limit has not been re-measured on fit residuals or on the Gaia refit RMS.
-- **To tune for your setup:** Run the procedure with the Gaia refit RMS on your library. If your good solves sit near 0.5, the limit is too tight for your optics; if a known bad solve sits below it, lower the limit. Re-run the procedure afterwards.
+- **Limits:** Eight solves, all from one camera, and all good. The numbers are catalog match separations; a fit residual is usually smaller, so the limit is more lenient for it. The limit has not been re-measured on fit residuals; on the Gaia match RMS it was checked on 11 good solves only (AST-02).
+- **To tune for your setup:** Run the procedure with the Gaia match RMS on your library. If your good solves sit near 0.5, the limit is too tight for your optics; if a known bad solve sits below it, lower the limit. Re-run the procedure afterwards.
 - **Regenerate with:** `astrometricslib/scripts/report_gate_limits.py` reports the spread of the stored fit residuals and catalog match separations in arcseconds, but not the fraction (`python -m astrometricslib.scripts.report_gate_limits`).
 - **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_record_quality.py` checks the gate logic.
 - **Raw record:** None kept.
@@ -974,7 +938,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 
 **Expected position residual: centroid noise, pixel phase and the Gaia epoch gap**
 
-- **Claim:** After the Gaia refit, part of the distance between a star and its Gaia position is noise the star finder cannot avoid. The centroid part is the Cramér-Rao bound for a Gaussian star, `sqrt(2/pi) n / A` pixels along each axis for a peak `A` over a sky noise `n`, which equals `sqrt(2) FWHM / (2.355 SNR)`. On noisy injected stars the project's star finder scatters 1.04 to 1.27 times that bound at peak over noise 8 to 60 (widths 2, 3 and 4 px), so the bound is a floor about 20 percent low. The pixel-phase part is a table found by injection: 0.092, 0.050, 0.033, 0.027, 0.026, 0.022, 0.014 and 0.008 px per axis at widths 1.5, 1.75, 2, 2.25, 2.5, 3, 4 and 5 px. The Gaia epoch part is never measured, because the cached Gaia stars hold no error columns. On the M 57 stack the Gaia refit RMS is 0.200 arcsec over 8,115 stars, and the two parts add in quadrature to 0.115 arcsec (centroid noise 0.090, pixel phase 0.071), so noise alone explains about a third of the squared residual; the rest, 0.163 arcsec in quadrature, is not noise the model knows. The centroid part is a lower bound (the Cramér-Rao limit), and the stack's noise is correlated, which lowers the per-pixel sky noise the bound uses, so the "not noise" remainder is provisional.
+- **Claim:** After the Gaia match, part of the distance between a star and its Gaia position is noise the star finder cannot avoid. The centroid part is the Cramér-Rao bound for a Gaussian star, `sqrt(2/pi) n / A` pixels along each axis for a peak `A` over a sky noise `n`, which equals `sqrt(2) FWHM / (2.355 SNR)`. On noisy injected stars the project's star finder scatters 1.04 to 1.27 times that bound at peak over noise 8 to 60 (widths 2, 3 and 4 px), so the bound is a floor about 20 percent low. The pixel-phase part is a table found by injection: 0.092, 0.050, 0.033, 0.027, 0.026, 0.022, 0.014 and 0.008 px per axis at widths 1.5, 1.75, 2, 2.25, 2.5, 3, 4 and 5 px. The Gaia epoch part is never measured, because the cached Gaia stars hold no error columns. On the M 57 stack the Gaia RMS (from the old refit) was 0.200 arcsec over 8,115 stars, and the two parts add in quadrature to 0.115 arcsec (centroid noise 0.090, pixel phase 0.071), so noise alone explains about a third of the squared residual; the rest, 0.163 arcsec in quadrature, is not noise the model knows. The centroid part is a lower bound (the Cramér-Rao limit), and the stack's noise is correlated, which lowers the per-pixel sky noise the bound uses, so the "not noise" remainder is provisional.
 - **Settings it supports:**
   - code constant `CRAMER_RAO_PEAK_FACTOR` = sqrt(2/pi) in `astrometricslib/pipelines/astrometry/post_processing/expected_residual.py`. Relation: confirmed by this entry (a theory value; the injection puts the finder at 1.04 to 1.27 times it). <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.CRAMER_RAO_PEAK_FACTOR -->
   - code table `PIXEL_PHASE_RMS_PX_BY_FWHM_PX` in the same file. Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.PIXEL_PHASE_RMS_PX_BY_FWHM_PX -->
@@ -983,7 +947,7 @@ print([abs(a - b) / abs(a) for a, b in zip(full, sample)])
 - **Procedure:**
   1. Inject pixel-integrated Gaussian stars at random positions, with and without noise, and find them with `find_sources_above_background`. <!-- impl: astrometricslib.pipelines.shared.star_finding.find_sources_above_background -->
   2. Compare the scatter of the found centroids with `centroid_error_per_axis_px` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.expected_residual.centroid_error_per_axis_px --> after removing the pixel-phase part in quadrature.
-  3. Run the astrometry stage on a stack and read the four `astrometry.expected_*` rows beside `astrometry.gaia_fit_rms_arcsec`.
+  3. Run the astrometry stage on a stack and read the four `astrometry.expected_*` rows beside `astrometry.gaia_match_rms_arcsec`.
 
 ```python
 from astrometricslib import Astrometrics
@@ -991,7 +955,7 @@ from astrometricslib import Astrometrics
 astrometrics = Astrometrics()
 astrometrics.processing.astrometry.run(astrometrics.targets.get("M 57"))
 for metric in (
-    "astrometry.gaia_fit_rms_arcsec",
+    "astrometry.gaia_match_rms_arcsec",
     "astrometry.expected_centroid_noise_rms_arcsec",
     "astrometry.expected_pixel_phase_rms_arcsec",
     "astrometry.expected_gaia_epoch_error_rms_arcsec",
@@ -1007,7 +971,7 @@ for metric in (
 - **Limits:** A Gaussian star and white noise; real stars have wings, a field varies in width, and the stack's noise is correlated (see STK-38), which lowers the per-pixel sky sigma and makes the noise term too small, so the part of the residual called "not noise" is provisional. The centroid part is a lower bound by construction (the Cramér-Rao limit). The noise is the sky's only, so a star bright enough for its own photon noise to matter is placed worse than the bound. Faint stars use the star finder's peak, which is biased up by noise. The pixel-phase table was found with a finder kernel equal to the star width. One-shot-color frames are searched on a binned copy and get no value. The Gaia epoch part is never measured.
 - **To tune for your setup:** Rebuild the pixel-phase table with `science/s5/pixel_phase.py` if the star finder or its kernel changes. Nothing else needs tuning.
 - **Regenerate with:** The scripts named above, run through the session's real-run wrapper; no script in `astrometricslib/scripts/`.
-- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_expected_residual.py` (the bound by hand, the finder against the bound on noisy stars, the table against the finder on noise-free stars, missing inputs, the rows), `astrometricslib/pipelines/astrometry/test/processing/test_wcs_refinement.py` (the fit's stars and their peak over noise) and `astrometricslib/pipelines/astrometry/test/pre_processing/test_background_noise_report.py`.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_expected_residual.py` (the bound by hand, the finder against the bound on noisy stars, the table against the finder on noise-free stars, missing inputs, the rows), `astrometricslib/pipelines/astrometry/test/processing/test_gaia_match.py` (the matched stars and their peak over noise) and `astrometricslib/pipelines/astrometry/test/pre_processing/test_background_noise_report.py`.
 - **Raw record:** None kept.
 
 ### AST-22
@@ -1070,14 +1034,14 @@ for shift in (0.0, 30.0):
 - **Settings it supports:**
   - The removal of solve-field and of its settings (`index_path`, `autoindex` and `cpulimit` in `[Processing.Astrometry.Local Solver]`), of its blind retry and time-limit cut-off, of its widening of the scale window and of the minimum of 10 stars for a local solve (AST-13, a removed register entry). Relation: derived from this entry. A settings file that still holds the old keys loads; nothing reads them.
   - The search radius of 2° around the header position that the pipeline passes to the solver (a literal in `StarIdentifier`, `astrometricslib/pipelines/astrometry/processing/star_identifier.py`; changing it means editing the code). Relation: sanity check only. Hints 2° off still solved with both solvers; solve-field cannot solve a hint 5° off within it. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier -->
-  - The retry focal lengths of the app's Siril solve (0.8, 1.25, 0.64 and 1.5625 of the header's, after the header's own, in that order) and its 60 s limit for one run, `FOCAL_LENGTH_RETRY_FACTORS` and `SOLVE_TIMEOUT_SECONDS` in `astrometricslib/_internal/drivers/siril/astrometry/plate_solve.py`. Relation: sanity check only. The extra Siril cases below (10% too long and 20% too short solved, 20% too long failed) and the app check after them agree with the steps of 0.8 and, in the other direction, 1.25 (the inverse of 0.8), but no step size was tuned. The longer factors 1.25 and 1.5625 were added on 2026-11-29, after the app check showed that a header focal length 26% too short failed; they have not been run on a real frame. The order puts each shorter factor before its longer twin, because a header that is too long (a zoom lens's longest value) is the case seen most. <!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.FOCAL_LENGTH_RETRY_FACTORS --> <!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.SOLVE_TIMEOUT_SECONDS -->
+  - The retry focal lengths of the app's Siril solve (0.8, 1.25, 0.64 and 1.5625 of the header's, after the header's own, in that order) and its 60 s limit for one run, `FOCAL_LENGTH_RETRY_FACTORS` and `SOLVE_TIMEOUT_SECONDS` in `astrometricslib/_internal/drivers/siril/astrometry/plate_solve.py`. Relation: sanity check only. The extra Siril cases below (10% too long and 20% too short solved, 20% too long failed) and the app check after them agree with the steps of 0.8 and, in the other direction, 1.25 (the inverse of 0.8), but no step size was tuned. The longer factors 1.25 and 1.5625 were added on 2026-11-28, after the app check showed that a header focal length 26% too short failed; they have not been run on a real frame. The order puts each shorter factor before its longer twin, because a header that is too long (a zoom lens's longest value) is the case seen most. <!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.FOCAL_LENGTH_RETRY_FACTORS --> <!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.SOLVE_TIMEOUT_SECONDS -->
 - **Status:** Partly measured. Two targets, 28 frames and stacks from two cameras, one Linux computer, one run per frame and mode; ASTAP and Windows were not tested, and Siril ran from the study scripts. The app's own Siril solve (`SirilPlateSolveDriver`) was run on one real frame and the retry on four header focal lengths; see the app check below.
 - **Data you need:** Light frames whose headers carry a pointing hint (`RA`, `DEC`, `FOCALLEN`, `XPIXSZ`), from each camera and optic you use. Include the poor frames a night gives (trailed, short, through a grating, off target) and a stack or two. To rerun the solve-field half you need solve-field with its index files, and the commit before it was removed (62906cee). You also need Siril 1.4 with its local Gaia astrometry catalog, and a Gaia tile cache that covers the fields to G = 16 with proper motions.
 - **Procedure:** The scripts are in `build/agent_tools/plate_solver_study/`; its README gives the commands. solve-field and the project's Gaia refit are no longer in the app, so the scripts that call them need the commit before their removal (62906cee). Each script writes only inside a study folder given on the command line and refuses a folder inside the library.
   1. Copy the frames out of the library and remove their plate solutions (the sky map and SIP distortion cards), keeping the hint cards (`prep_frames.py`).
   2. Run solve-field once per frame with the command line the app's driver builds: `--downsample 2 --uniformize 0`, the pipeline's scale window (5% each side of the header scale) widened by 0.8 and 1.2, `--radius 2` around the hint, `autoindex` and `cpulimit 300`. A blind run passes no position and no scale. The app's blind retry is not run, so each mode is one attempt (`run_solvers.py`). The driver's fit statistics come from an internal function.
   3. Run Siril 1.4 headless and offline, `siril-cli -o -i <private settings file> -s <script>`, with the script `load <frame>`, `platesolve <ra>,<dec> -focal=<FOCALLEN> -pixelsize=<XPIXSZ> -force -noflip` and `save`. The private settings file is a copy of the user's Siril settings with `update_default_scale=false`. Siril's other astrometry settings stay as the user had them: SIP order 3, a near-search radius of 10°, a scale range of 20% and a 30 s limit. A blind run gets a copy of the frame with no `RA`, `DEC`, `OBJCTRA` or `OBJCTDEC` card (`run_solvers.py`).
-  4. Judge every solution with the project's own code (`judge.py`). Detect the stars with `SourceDetector`, refine each center with photutils' `centroid_2dg` and measure the star width with `measure_fwhm_from_data`. Read the Gaia DR3 stars brighter than G = 16 from a copy of the Gaia tile cache and move them to `DATE-OBS`. Then run the AST-01 check (stars matched within 2 arcsec, the constant shift and the scatter about it) and the Gaia refit of [AST-02](#ast-02), `refine_wcs_with_gaia`, which reports the solution's RMS against Gaia before and after the refit. Divide that RMS by the star width and compare it with the [AST-04](#ast-04) limit of half the star width. These are internal functions, not part of the public API, and may change. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_fwhm_from_data --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_field_matching.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib._internal.drivers.catalog_store.stars_in_tiles -->
+  4. Judge every solution with the project's own code (`judge.py`). Detect the stars with `SourceDetector`, refine each center with photutils' `centroid_2dg` and measure the star width with `measure_fwhm_from_data`. Read the Gaia DR3 stars brighter than G = 16 from a copy of the Gaia tile cache and move them to `DATE-OBS`. Then run the AST-01 check (stars matched within 2 arcsec, the constant shift and the scatter about it) and the Gaia refit of [AST-02](#ast-02), `refine_wcs_with_gaia`, which reports the solution's RMS against Gaia before and after the refit. Divide that RMS by the star width and compare it with the [AST-04](#ast-04) limit of half the star width. These are internal functions, not part of the public API, and may change. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_fwhm_from_data --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_field_matching.propagate_gaia_positions --> <!-- impl: astrometricslib._internal.drivers.catalog_store.stars_in_tiles -->
   5. Compare the two solutions of each frame: the center, the local scale, rotation and parity (taken from the full mapping, SIP terms included, by finite differences 50 pixels each side of the image center) and the largest sky difference over a 5 by 5 grid of pixels (`judge.py`).
   6. Time ten hinted solves in a row on ten M 31 frames, as mount centering runs them: Siril in one session, Siril in ten separate runs and solve-field in ten separate runs (`centering_timing.py`).
   7. Run the extra Siril cases on one ZWO frame and one Nikon frame (`extras.py`), and join everything into one table (`summarize.py`).
@@ -1194,7 +1158,6 @@ These values have not been measured. Each is a code constant unless the table sa
 | AST-D10 | Failures in a row before the gateway pauses a service | 2 (refused connections or server errors; a timeout, 429, 503, 404 or 410 pauses at once) | `FAILURES_BEFORE_BACKOFF` in `_internal/drivers/outside_services/services.py` <!-- impl: astrometricslib._internal.drivers.outside_services.services.FAILURES_BEFORE_BACKOFF --> | Pauses start too late, so runs wait out many timeouts, or too early, so one network hiccup silences a service. Before 2026-11-22 the Gaia tile fetcher used 3 failures in a row per run; the gateway now keeps the count for every process (see AST-D27). | Read `get_gaia_query_statistics()` after batch runs and `CatalogUseLog.summary()` per job, and count how often a run recovered after 1 failure. |
 | AST-D11 | Gaia depth when the header gives no prediction; fewest Gaia-matched stars for the depth check | G 18; 5 | `GAIA_DEFAULT_MAGNITUDE_LIMIT` in `pipelines/astrometry/processing/gaia_tile_queries.py`, `MINIMUM_STARS_FOR_DEPTH_ESTIMATE` in `pipelines/astrometry/processing/star_detection.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_DEFAULT_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_detection.MINIMUM_STARS_FOR_DEPTH_ESTIMATE --> | Too few Gaia stars to match on a frame with no camera profile or exposure, or a depth check that rests on too few stars. The frame's own estimate of its faint end (`estimate_faintest_detected_magnitude`, the flux 99 percent of detections exceed, on a zero point from Gaia G magnitudes only, not SIMBAD's V) no longer sets the depth; it only checks the prediction and records `gaia_depth_exceeded`. | Count how often runs record `gaia_depth_exceeded`, and compare the estimate with the faintest Gaia-matched G over several frames. |
 | AST-D12 | Gaia rows per tile download | 50,000 | `GAIA_ROW_LIMIT` in `pipelines/astrometry/processing/gaia_tile_queries.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_tile_queries.GAIA_ROW_LIMIT --> | A tile at the limit is fetched again as four smaller tiles; a smaller tile at the limit stays incomplete and its stars go unmatched. | Count how often runs record `gaia_tiles_missing` in `astrometry_flags` on dense fields (see AST-D22 for the measured row counts). |
-| AST-D13 | Gaia refit: fewest matched stars | 40 | `MINIMUM_MATCHED_STARS` in `pipelines/astrometry/processing/wcs_refinement.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS --> | An unreliable refit, or a good refit refused. | Refit a rich field with random subsets of 20 to 100 stars (`refine_wcs_with_gaia`) and see when the error on the left-out stars grows. |
 | AST-D14 | Warning distance between the center star and the position hint | 30 arcsec | `HINT_MATCH_WARNING_ARCSEC` in `pipelines/astrometry/processing/simbad_matching.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.simbad_matching.HINT_MATCH_WARNING_ARCSEC --> | Wrong center-star matches pass without a warning. | Lies between one correct match (Vega, 25 arcsec from the solved center) and one wrong one (145 arcsec); log the distance on more spectral stacks with the procedure of [AST-09](#ast-09). Tuner `astrometry.pointing_error` sets the warning from the same stored pointing errors. |
 | AST-D15 | Margin around the solved frame for a catalog position | 15 arcmin | `FOOTPRINT_MARGIN_ARCMIN` in `pipelines/shared/target_position.py` <!-- impl: astrometricslib.pipelines.shared.target_position.FOOTPRINT_MARGIN_ARCMIN --> | A catalog answer for the wrong object is accepted, or a right one (a mosaic panel, an offset spectral frame) is rejected. | Log the distance from each solved frame's center to its target's catalog position and look at the largest ones by eye. |
 | AST-D16 | Target clipping check: disc inside the image, sky ring around the disc, fewest ring pixels | At least 0.5 of the disc inside the image; ring from 1.5 to 2.5 disc radii; at least 100 ring pixels | `MINIMUM_DISC_SHARE_INSIDE`, `SKY_RING_INNER_FACTOR`, `SKY_RING_OUTER_FACTOR` and `SKY_RING_MINIMUM_PIXELS` in `pipelines/astrometry/post_processing/target_clipping.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.MINIMUM_DISC_SHARE_INSIDE --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.SKY_RING_INNER_FACTOR --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.SKY_RING_OUTER_FACTOR --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.target_clipping.SKY_RING_MINIMUM_PIXELS --> | A frame with a cut disc is measured on too few pixels, or a good frame is left out. A ring that touches the target's wings or lies too far away gives a wrong sky level, and a ring with too few pixels gives a noisy sky bar. | Repeat the [AST-19](#ast-19) run with the ring edges and the pixel minimum changed, and see whether the share of frames with a measured disc, the sky level and the sky scatter change. |

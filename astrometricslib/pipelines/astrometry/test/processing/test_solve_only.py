@@ -5,8 +5,8 @@ Description: The stack noise step needs only the sky coordinates of a stack
 pipeline for them waited minutes on Gaia and SIMBAD time-outs on 2026-11-04.
 `StarIdentifier.process_image(solve_only=True)` and
 `AstrometryPipeline.solve_wcs` stop after the plate solver answers. These
-tests use a fake solver and make every catalog, refit and cache-seeding step
-fail the test if it is reached, so no network or solve-field is needed.
+tests use a fake solver and make every catalog, Gaia match and
+cache-seeding step fail the test if it is reached, so no network is needed.
 """
 
 from pathlib import Path
@@ -20,7 +20,6 @@ from astropy.io import fits
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces import plate_solve_driver
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-from astrometricslib.pipelines.astrometry.processing import gaia_field_matching, plate_solution_steps
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.astrometry.test.processing.test_plate_solve_fit_statistics import (
     FIELD_DEC_DEG,
@@ -50,7 +49,7 @@ def _fail_if_called(*arguments: Any, **keywords: Any) -> None:
 
 
 def _forbid_catalog_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every refit, naming, query and seeding step fail if called.
+    """Make every Gaia match, naming, query and seeding step fail if called.
 
     Parameters
     ----------
@@ -58,7 +57,7 @@ def _forbid_catalog_work(monkeypatch: pytest.MonkeyPatch) -> None:
         Used to replace the steps.
     """
     for name in (
-        "_refine_wcs_against_gaia",
+        "_measure_wcs_against_gaia",
         "_identify_stars_with_simbad",
         "_prepare_field_gaia_stars",
         "_query_simbad_region",
@@ -145,7 +144,7 @@ def test_an_unsolved_field_raises_with_the_solvers_own_reason(monkeypatch: pytes
         identifier.process_image(np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True)
 
 
-def test_the_pipeline_solve_wcs_skips_refit_and_naming(
+def test_the_pipeline_solve_wcs_skips_the_gaia_match_and_naming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`AstrometryPipeline.solve_wcs` reads a file and returns only the WCS."""
@@ -166,118 +165,3 @@ def test_the_pipeline_solve_wcs_skips_refit_and_naming(
 
     assert wcs is not None
     assert wcs.wcs.crval[0] == pytest.approx(FIELD_RA_DEG)
-
-
-def _allow_only_the_cached_refit(
-    monkeypatch: pytest.MonkeyPatch, cached: tuple[Any, Any] | None
-) -> list[str]:
-    """Allow the refit step but forbid every remote query.
-
-    Parameters
-    ----------
-    monkeypatch : `pytest.MonkeyPatch`
-        Used to replace the steps.
-    cached : `tuple` or `None`
-        What the cache lookup returns: a table and coordinates, or nothing.
-
-    Returns
-    -------
-    calls : `list` [`str`]
-        Filled with ``"cache"`` for each cache lookup.
-    """
-    from astrometricslib.pipelines.astrometry.processing import star_identifier
-
-    calls: list[str] = []
-    table, coords = cached if cached is not None else (None, None)
-
-    def cache_lookup(
-        config: Any, tiles: Any, depth: float, fetch: Any, **keywords: Any
-    ) -> star_identifier.FieldGaiaStars:
-        """Record a cache-only lookup and give the prepared answer.
-
-        Parameters
-        ----------
-        config, tiles, depth : `Any`
-            Ignored.
-        fetch : `Any`
-            Must be `None`: a cache-only read.
-        **keywords
-            Ignored.
-
-        Returns
-        -------
-        field : `FieldGaiaStars`
-            The prepared answer.
-        """
-        assert fetch is None
-        calls.append("cache")
-        return star_identifier.FieldGaiaStars(table=table, coords=coords, depth=depth, tiles=[1])
-
-    monkeypatch.setattr(StarIdentifier, "_refine_wcs_against_gaia", _REAL_REFINE)
-    monkeypatch.setattr(gaia_field_matching, "load_field_gaia_stars", cache_lookup)
-    monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", cache_lookup)
-    monkeypatch.setattr(gaia_field_matching, "tiles_under_image", lambda *arguments, **keywords: [1])
-    monkeypatch.setattr(plate_solution_steps, "tiles_under_image", lambda *arguments, **keywords: [1])
-    return calls
-
-
-_REAL_REFINE = StarIdentifier._refine_wcs_against_gaia
-
-
-def test_refit_from_cache_without_a_complete_download_keeps_the_solution(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With no complete cached download, nothing is sent."""
-    _forbid_catalog_work(monkeypatch)
-    calls = _allow_only_the_cached_refit(monkeypatch, None)
-    identifier = _identifier(plate_solve_driver.PlateSolveHeader.from_header(make_wcs_header()))
-
-    _, wcs = identifier.process_image(
-        np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True, refit_from_cache=True
-    )
-
-    assert wcs is not None and wcs.wcs.crval[0] == pytest.approx(FIELD_RA_DEG)
-    assert calls == ["cache"]
-    assert identifier.astrometry_flags == ["wcs_refinement_skipped"]
-    assert identifier.wcs_refinement is None
-
-
-def test_refit_from_cache_with_a_cached_download_uses_the_refit_solution(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A complete cached download gives a refit with no remote query."""
-    from types import SimpleNamespace
-
-    from astropy.coordinates import SkyCoord
-    from astropy.wcs import WCS
-
-    _forbid_catalog_work(monkeypatch)
-    stars = SkyCoord([FIELD_RA_DEG] * 3, [FIELD_DEC_DEG] * 3, unit="deg")
-    calls = _allow_only_the_cached_refit(monkeypatch, (SimpleNamespace(meta={}), stars))
-    refit_wcs = WCS(make_wcs_header(), naxis=2)
-    refit_wcs.wcs.crval = [FIELD_RA_DEG + 0.001, FIELD_DEC_DEG]
-    refinement = SimpleNamespace(
-        applied=True,
-        wcs=refit_wcs,
-        star_count=3,
-        rms_before_arcsec=1.0,
-        rms_after_arcsec=0.2,
-        shift_arcsec=3.6,
-        reason="",
-        fit_star_indices=(),
-    )
-    monkeypatch.setattr(
-        plate_solution_steps, "refine_wcs_with_gaia", lambda *arguments, **keywords: refinement
-    )
-    monkeypatch.setattr(
-        StarIdentifier, "_move_gaia_coords_to_observation_epoch", lambda self, table, coords: coords
-    )
-    identifier = _identifier(plate_solve_driver.PlateSolveHeader.from_header(make_wcs_header()))
-
-    _, wcs = identifier.process_image(
-        np.zeros((100, 100)), attempt_plate_solving=True, solve_only=True, refit_from_cache=True
-    )
-
-    assert wcs is refit_wcs
-    assert calls == ["cache"]
-    assert identifier.astrometry_flags == ["wcs_refined_against_gaia"]

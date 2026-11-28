@@ -33,13 +33,13 @@ astrometry.fwhm_saturation_fraction,AST-07,exclusion criteria,Partly measured
 astrometry.gaia_default_magnitude_limit,AST-D11,measurement,Design estimate
 astrometry.gaia_depth_step_magnitudes,AST-08,measurement,Partly measured
 astrometry.gaia_depth_steps_down,AST-08,measurement,Partly measured
+astrometry.gaia_match.minimum_matched_stars,AST-02,judgment,Partly measured
+astrometry.gaia_match_radius_pixels,AST-02,exclusion criteria,Partly measured
 astrometry.gaia_tile_level,AST-D22,measurement,Design estimate
-astrometry.initial_match_radius_pixels,AST-02,exclusion criteria,Partly measured
 astrometry.maximum_failed_lookup_fraction,AST-D09,judgment,Design estimate
 astrometry.maximum_identified_stars,AST-D08,measurement,Design estimate
 astrometry.maximum_passes,AST-02,exclusion criteria,Partly measured
 astrometry.maximum_residual_fraction_of_fwhm,AST-04,judgment,Partly measured
-astrometry.maximum_shift_arcsec,AST-02,judgment,Partly measured
 astrometry.minimum_disc_share_inside,AST-D16,exclusion criteria,Design estimate
 astrometry.minimum_matched_stars,AST-05,judgment,Partly measured
 astrometry.minimum_peak_sigma,AST-19,judgment,Partly measured
@@ -48,8 +48,6 @@ astrometry.pixel_phase_fwhm_px,AST-21,measurement,Partly measured
 astrometry.pixel_phase_rms_px,AST-21,measurement,Partly measured
 astrometry.pointing_error_search_radius_arcsec,AST-09,measurement,Partly measured
 astrometry.pointing_search_margin,AST-09,measurement,Partly measured
-astrometry.refined_match_radius_pixels,AST-02,exclusion criteria,Partly measured
-astrometry.sip_degree,AST-02,measurement,Partly measured
 astrometry.sky_ring_inner_factor,AST-D16,exclusion criteria,Design estimate
 astrometry.sky_ring_minimum_pixels,AST-D16,exclusion criteria,Design estimate
 astrometry.sky_ring_outer_factor,AST-D16,exclusion criteria,Design estimate
@@ -58,7 +56,6 @@ astrometry.source_detector_merge_kernel_widths,AST-D02,measurement,Design estima
 astrometry.source_detector_roundness_range,AST-D01,exclusion criteria,Design estimate
 astrometry.unresolved_companion_radius_arcsec,AST-10,measurement,Partly measured
 astrometry.viewing_separation_kernel_widths,AST-D23,measurement,Measured
-astrometry.wcs_refinement.minimum_matched_stars,AST-03,judgment,Partly measured
 foundation.full_scale_counts,STK-38,measurement,Partly measured
 foundation.mount_periodic_error_period_seconds,WAY-D135,measurement,Design estimate
 foundation.star_width_scale_frame_gaussian,AST-17,measurement,Design estimate
@@ -168,7 +165,6 @@ photometry.step_minimum_shift_px,PHO-20,exclusion criteria,Partly measured
 photometry.step_minimum_significance,PHO-20,exclusion criteria,Partly measured
 photometry.step_shift_jitter_sigmas,PHO-20,exclusion criteria,Partly measured
 photometry.tie_clip_sigma,PHO-D37,exclusion criteria,Design estimate
-photometry.unstable_tracking_drift_px,PHO-D16,judgment,Design estimate
 photometry.window_peaks_tried,PHO-D19,judgment,Design estimate
 shared.background_block_pixels,STK-D38,exclusion criteria,Design estimate
 shared.block_range_grid_cells,STK-D44,measurement,Design estimate

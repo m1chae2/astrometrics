@@ -195,8 +195,7 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error."
     ),
     "registration_drift": (
-        "Fails when the field sits more than `UNSTABLE_TRACKING_DRIFT_PX` from its place in the "
-        "reference frame, when a corner of the frame moves by more than "
+        "Fails when a corner of the frame moves by more than "
         "`MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or "
         "rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
         "(brightness-weighted star centers) were untrustworthy and fell back to the position "
@@ -710,12 +709,8 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         "Stars with no catalog match whose sky position could not be worked out (as when the "
         "image has no pixel-to-sky map); not saved."
     ),
-    "gaia_fit_rms_arcsec": "Typical (RMS) distance to Gaia DR3 stars under the kept solution.",
-    "gaia_fit_rms_before_arcsec": (
-        "Typical (RMS) distance to the same Gaia stars under the solver's solution."
-    ),
-    "gaia_fit_star_count": "Stars used in the Gaia refit.",
-    "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
+    "gaia_match_rms_arcsec": "Typical (RMS) distance to Gaia DR3 stars under the plate solution.",
+    "gaia_match_star_count": "Stars used in the Gaia match.",
     "expected_stack_fwhm_px": "Expected stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
@@ -1307,7 +1302,7 @@ def build_astrometry_doc() -> str:
     gates = discover_gate_names("astrometry")
     record_quality_module = "astrometricslib.pipelines.astrometry.post_processing.record_quality"
     identifier_module = "astrometricslib.pipelines.astrometry.processing.star_identifier"
-    refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
+    match_module = "astrometricslib.pipelines.astrometry.processing.gaia_match"
     plate_solve_module = "astrometricslib._internal.drivers.siril.astrometry.plate_solve"
     fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
     require_symbol("astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector")
@@ -1343,12 +1338,10 @@ def build_astrometry_doc() -> str:
             "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
             "SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS",
         ),
-        "refit_min_stars": require_symbol(refine_module, "MINIMUM_MATCHED_STARS"),
-        "refit_sip": require_symbol(refine_module, "SIP_DEGREE"),
-        "refit_clip": require_symbol(refine_module, "CLIP_SIGMAS"),
-        "refit_shift": require_symbol(refine_module, "MAXIMUM_SHIFT_ARCSEC"),
-        "refit_r1": require_symbol(refine_module, "INITIAL_MATCH_RADIUS_PIXELS"),
-        "refit_r2": require_symbol(refine_module, "REFINED_MATCH_RADIUS_PIXELS"),
+        "match_min_stars": require_symbol(match_module, "MINIMUM_MATCHED_STARS"),
+        "match_clip": require_symbol(match_module, "CLIP_SIGMAS"),
+        "match_passes": require_symbol(match_module, "MAXIMUM_PASSES"),
+        "gaia_match_radius": require_symbol(match_module, "GAIA_MATCH_RADIUS_PIXELS"),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
     }
@@ -1475,19 +1468,17 @@ def build_astrometry_doc() -> str:
             "How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1).",
         ],
         [
-            "`MINIMUM_MATCHED_STARS` (`wcs_refinement`)",
-            f"`{values['refit_min_stars']}`",
-            design_estimate_cell("AST"),
-            "Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit "
-            "has about a dozen terms per axis, and 40 stars leaves a wide margin.",
+            "`MINIMUM_MATCHED_STARS` (`gaia_match`)",
+            f"`{values['match_min_stars']}`",
+            status_cell(STATUS_PARTLY_MEASURED, "AST-02"),
+            "Fewest Gaia-matched stars with which the solution's RMS distance to Gaia is recorded. "
+            "With fewer, one or two wrong matches would dominate the RMS.",
         ],
         [
-            "`MAXIMUM_SHIFT_ARCSEC`",
-            f"`{values['refit_shift']}` arcsec",
+            "`GAIA_MATCH_RADIUS_PIXELS`",
+            f"`{values['gaia_match_radius']:g}` star widths",
             status_cell(STATUS_PARTLY_MEASURED, "AST-02"),
-            "Largest move of the whole field a refit may make and still be kept. Set at about "
-            "ten times the largest solver error seen; a larger move means the fit followed "
-            "wrong matches.",
+            "How far from a detected star a Gaia star may sit and still be matched to it.",
         ],
     ])
     template = r"""# Astrometry and plate solving pipeline review guide
@@ -1498,7 +1489,7 @@ def build_astrometry_doc() -> str:
 
 This document reviews the plate solving and astrometric calibration pipeline
 (`astrometricslib.pipelines.astrometry`). It covers the header cards the pipeline reads, its
-detection and solving methods, the Gaia DR3 refit of the solution, how stars are named, the run
+detection and solving methods, the check of the solution against Gaia DR3, how stars are named, the run
 flow, the tuned limits, the fallback paths and the quality-summary fields.
 
 <<glossary_line>>
@@ -1571,7 +1562,7 @@ no scale hint is sent.
 <<heading_3>>
 
 This section covers, in order: finding stars, estimating how much sky a pixel covers, solving
-and refining the map, moving catalog stars to the image date, naming stars, and judging the
+and checking the map, moving catalog stars to the image date, naming stars, and judging the
 map's accuracy.
 
 ### 3.1 Point source detection
@@ -1620,7 +1611,7 @@ where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p_\tex
 size in μm and $f_\text{tel}$ the focal length in mm. The constant is the number of arcseconds in a radian
 (206,265) times $10^{-3}$, which turns μm over mm into the same unit.
 
-### 3.3 Plate solve and Gaia DR3 refit
+### 3.3 Plate solve and the Gaia DR3 match
 
 **Siril first, online for an image with no position.** An image with a start position (the hints
 or the header's `RA` and `DEC`) is solved by Siril alone, in a short Siril process of its own, with
@@ -1636,28 +1627,21 @@ online Astrometry.net service in two ways, in order:
 
 Siril reports its fit statistics; an online solve has none (Section 3.6).
 
-**Why refit.** The solver fits only its reference stars, so its solution can be
-a pixel or more off. The pipeline then refits the solution to the field's Gaia DR3 stars
-(`wcs_refinement.py`).
+**Why match to Gaia.** The solver fits only its own reference stars, so its solution can be a
+pixel or more off and still agree with itself. The pipeline therefore measures the solution
+against the field's Gaia DR3 stars (`gaia_match.py`). It never changes the solution. An earlier
+version also refit the solution to these stars; the solver study (AST-23) found that the refit
+never improved Siril's solution, so it was removed.
 
-**How.** Each detection is matched to the nearest Gaia star within <<refit_r1>> pixels, then
-<<refit_r2>> pixels on later passes. The map is fitted with
-`astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a
-flat plane touching it at the middle of the matched stars) plus SIP distortion of order
-<<refit_sip>>. SIP
-(Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by
-the optics. Stars more than <<refit_clip>> robust standard deviations off are dropped, and the
-fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times
-the median absolute deviation, a measure of spread that a few wild points cannot inflate.
+**How.** Each detection is matched to the nearest Gaia star within <<gaia_match_radius>> star widths
+of the solution's position. Matches more than <<match_clip>> robust standard deviations from the
+median distance are dropped, and this repeats (at most <<match_passes>> times) until the set stops
+changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of
+spread that a few wild points cannot inflate. The RMS distance of the stars that are left is the
+Gaia match RMS.
 
-**When it is kept.** The refit needs at least <<refit_min_stars>> matches. It is kept only when
-it fits Gaia better than the solver's solution and moves the field by at most <<refit_shift>>
-arcsec.
-
-**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only
-when the cache already holds the field. A later analysis step downloads the Gaia stars. When it
-accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks
-it), unless the stack already holds a refit one.
+**When it is recorded.** The match needs at least <<match_min_stars>> stars. With fewer, or with
+no Gaia stars cached for the field, no RMS is recorded and the flag `gaia_match_skipped` is set.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -1707,8 +1691,8 @@ $$\frac{r}{s \cdot \text{FWHM}} \le <<max_res>> \tag{5}$$
 
 The residual is the first of these that was measured:
 
-1. the RMS distance to Gaia stars under the kept solution, when the Gaia refit ran (it does not
-   depend on the solver);
+1. the RMS distance of the Gaia-matched stars under the plate solution, when the Gaia match ran
+   (it does not depend on the solver's own fit);
 2. the solver's own fit residual, which only a local solve reports;
 3. the catalog match separation of Eq. 4.
 
@@ -1723,11 +1707,10 @@ The gate detail names the one used.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has
   already checked that an image path exists.
-- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS
-  fallback, naming). It writes the solved WCS into the FITS header (never over a solution already
-  refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with
-  the solved image's center only as a marked, unverified fallback), and saves the stars to the
-  shared catalog.
+- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, Gaia match,
+  header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the
+  target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center
+  only as a marked, unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records
   `plate_solve`, then `astrometry_run_gates` adds the rest (<<gate_count>> in all).
   The runner then stores the summary's numbers and the gates as quality measurements
@@ -1757,7 +1740,7 @@ The gate detail names the one used.
    `PlateSolveFailedError`, whose message carries Siril's own reason. The reason is also logged as
    a warning. The adapter does not catch it, so the error reaches the caller:
    `validate_output` never runs, and no quality summary or gate is saved for that run.
-4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept.
+4. **No Gaia stars.** The Gaia match is skipped with a flag, and the gate judges the next number.
    Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch
    2016.0 with a flag.
 5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers
@@ -1799,10 +1782,6 @@ def build_photometry_doc() -> str:
         "ens_scatter": require_symbol(record_quality_module, "MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED"),
         "scatter_pop": require_symbol(record_quality_module, "MINIMUM_STARS_FOR_SCATTER_POPULATION"),
         "fallback": require_symbol(record_quality_module, "MAXIMUM_CENTROID_FALLBACK_FRACTION"),
-        "drift": require_symbol(
-            "astrometricslib.pipelines.photometry.pre_processing.assess_input_quality",
-            "UNSTABLE_TRACKING_DRIFT_PX",
-        ),
         "min_comp": require_symbol(ensemble_module, "MINIMUM_COMPARISON_STARS"),
         "max_comp": require_symbol(ensemble_module, "DEFAULT_MAXIMUM_COMPARISON_STARS"),
         "noise_model_stars": require_symbol(indices_module, "MINIMUM_STARS_FOR_NOISE_MODEL"),
@@ -1954,14 +1933,6 @@ def build_photometry_doc() -> str:
             "If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic "
             "brightness scale) is larger, the run is called blind to most variables. Most "
             "pulsating and rotating variables change by less than this." + see_also("PHO-09"),
-        ],
-        [
-            "`UNSTABLE_TRACKING_DRIFT_PX`",
-            f"`{values['drift']:g}` px",
-            design_estimate_cell("PHO"),
-            "Largest shift of the field from its place in the reference frame before "
-            "`registration_drift` fails. It flags a mount that lost tracking; the plate "
-            "solutions place the stars wherever the field went.",
         ],
         [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",

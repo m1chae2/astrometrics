@@ -29,7 +29,7 @@ from astrometricslib.models.tuned_parameter import (
     RunBasis,
     TunedParameter,
 )
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import CLIP_SIGMAS, MAXIMUM_PASSES
+from astrometricslib.pipelines.astrometry.processing.gaia_match import CLIP_SIGMAS, MAXIMUM_PASSES
 from astrometricslib.pipelines.shared.star_recording import is_unresolved_star
 from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA
 

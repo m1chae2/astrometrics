@@ -19,10 +19,13 @@ This module decides, before GraXpert runs, which of the two the stack gets.
    medians and the clipped fit are `pipelines/shared/binned_sky_plane.py`,
    which the exposure-group sky matching also uses (with clipping on both
    sides).
-3. The sky bins are measured with `measure_background_model`, the same
-   measure that describes GraXpert's model. Its tilt (the change of the
-   fitted plane across the frame, as a fraction of the sky level) is the
-   gradient of the stack. A color stack takes the largest tilt of its planes.
+3. The sky bins are measured with `measure_sky_background`. The same
+   numbers (level, spread, tilt, round term, residuals) are stored as the
+   stack's background measurements, whichever method is chosen
+   (`BackgroundDecision.sky_background`; a color stack's stored numbers are
+   those of its planes' mean). The tilt (the change of the fitted plane
+   across the frame, as a fraction of the sky level) is the gradient of the
+   stack. A color stack takes the largest tilt of its planes.
 4. A gradient below `SKY_PLANE_GRADIENT_LIMIT` takes the plane path: a plane
    is fitted to the sky bins of each color plane and subtracted. The level of
    the sky is kept, so the picture's black point does not move. A gradient at
@@ -83,7 +86,10 @@ from astrometricslib.pipelines.shared.binned_sky_plane import (
 )
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
     BACKGROUND_BIN_COUNT,
-    measure_background_model,
+    BackgroundGradientOutcome,
+    crop_cards_of,
+    measure_sky_background,
+    not_measured_outcome,
 )
 
 logger = logging.getLogger(__name__)
@@ -219,6 +225,11 @@ class BackgroundDecision:
     radial_reason : `str`
         A plain sentence saying why the radial part was used or left out.
         Empty on the GraXpert path.
+    sky_background : `BackgroundGradientOutcome`
+        The stack's own sky bins, measured (level, spread, tilt, round term,
+        residuals, and the 64 by 64 map), or the reason they could not be.
+        It is there on both paths, so every stack that gets a preview has its
+        background measured.
     """
 
     method: str
@@ -230,6 +241,9 @@ class BackgroundDecision:
     radial_coefficients: list[tuple[float, float]] = field(default_factory=list)
     radial_fraction: float | None = None
     radial_reason: str = ""
+    sky_background: BackgroundGradientOutcome = field(
+        default_factory=lambda: not_measured_outcome("the sky was not measured")
+    )
 
     @property
     def radial_used(self) -> bool:
@@ -561,7 +575,7 @@ def _channel_radial_spread(binned_planes: list[np.ndarray], sky: np.ndarray) -> 
     return max(fractions) - min(fractions)
 
 
-def choose_background_method(data: np.ndarray) -> BackgroundDecision:
+def choose_background_method(data: np.ndarray, header: fits.Header | None = None) -> BackgroundDecision:
     """Measure a stack's sky tilt and choose its background removal.
 
     Parameters
@@ -569,6 +583,9 @@ def choose_background_method(data: np.ndarray) -> BackgroundDecision:
     data : `numpy.ndarray`
         The stack as the preview sees it: two-dimensional, or color planes in
         front. Its pixels are not changed.
+    header : `astropy.io.fits.Header`, optional
+        The stack's header. Its crop cards go with the saved sky map, and its
+        sky coordinates give the tilt's position angle.
 
     Returns
     -------
@@ -579,9 +596,11 @@ def choose_background_method(data: np.ndarray) -> BackgroundDecision:
         not an image), and when the radial change at the corners differs
         between the color channels by more than `RADIAL_FALLOFF_LIMIT`.
         GraXpert is the method that was used before, so a stack that cannot
-        be judged keeps it. This never raises.
+        be judged keeps it. The decision carries the stack's sky measurement
+        on both paths. This never raises.
     """
     limit = float(resolve(SKY_PLANE_GRADIENT_LIMIT).value)
+    sky_background: BackgroundGradientOutcome | None = None
 
     def graxpert(reason: str, gradient: float | None = None, sky_bins: int = 0) -> BackgroundDecision:
         """Build the decision for the GraXpert path.
@@ -591,7 +610,15 @@ def choose_background_method(data: np.ndarray) -> BackgroundDecision:
         decision : `BackgroundDecision`
             The decision, with no plane.
         """
-        return BackgroundDecision("graxpert", gradient, limit, sky_bins, reason, [])
+        return BackgroundDecision(
+            "graxpert",
+            gradient,
+            limit,
+            sky_bins,
+            reason,
+            [],
+            sky_background=sky_background or not_measured_outcome(reason),
+        )
 
     planes = _color_planes(data)
     if planes is None:
@@ -601,9 +628,18 @@ def choose_background_method(data: np.ndarray) -> BackgroundDecision:
     if not np.isfinite(luminance).any():
         return graxpert("the stack has no pixel above zero")
     sky = select_sky_bins(luminance)
+    measured_sky = measure_sky_background(
+        np.where(sky, luminance, np.nan), header, picture_shape=(planes[0].shape[0], planes[0].shape[1])
+    )
+    sky_background = BackgroundGradientOutcome(
+        gradient=measured_sky.gradient,
+        reason=measured_sky.reason,
+        binned_sky=measured_sky.binned_sky,
+        crop_cards={} if header is None else crop_cards_of(header),
+    )
     tilts: list[float] = []
     for binned in binned_planes:
-        measured = measure_background_model(np.where(sky, binned, np.nan)).gradient
+        measured = measure_sky_background(np.where(sky, binned, np.nan)).gradient
         if measured is None:
             return graxpert("the sky bins of the stack could not be measured")
         tilts.append(measured.tilt_fraction)
@@ -637,6 +673,7 @@ def choose_background_method(data: np.ndarray) -> BackgroundDecision:
         radial_coefficients,
         float(np.mean(radial_fractions)) if radial_fractions else None,
         radial_reason,
+        sky_background,
     )
 
 
@@ -655,14 +692,28 @@ def choose_background_method_for_file(path: str) -> BackgroundDecision:
         with the reason, and a warning in the log.
     """
     limit = float(resolve(SKY_PLANE_GRADIENT_LIMIT).value)
+
+    def unreadable(reason: str) -> BackgroundDecision:
+        """Build the GraXpert decision for a stack that cannot be measured.
+
+        Returns
+        -------
+        decision : `BackgroundDecision`
+            The decision, with the reason as the sky measurement's reason.
+        """
+        return BackgroundDecision(
+            "graxpert", None, limit, 0, reason, [], sky_background=not_measured_outcome(reason)
+        )
+
     try:
+        header = read_header(path)
         data = read_data(path)
     except Exception as error:  # the gate is a by-product of the preview: no failure may stop it
         logger.warning("The sky tilt of '%s' could not be measured: %s", path, error, exc_info=True)
-        return BackgroundDecision("graxpert", None, limit, 0, f"the stack could not be read: {error}", [])
+        return unreadable(f"the stack could not be read: {error}")
     if data is None:
-        return BackgroundDecision("graxpert", None, limit, 0, "the stack file holds no pixels", [])
-    return choose_background_method(data)
+        return unreadable("the stack file holds no pixels")
+    return choose_background_method(data, header)
 
 
 def subtract_sky_plane(

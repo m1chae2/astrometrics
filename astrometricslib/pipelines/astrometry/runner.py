@@ -141,7 +141,7 @@ def _fill_target_position(target: Any, context: Any, drivers: Any = None) -> Non
         logger.warning("Could not look up the position of target %s: %s", target.id, lookup_error)
 
 
-def _write_solved_wcs_to_fits_header(path: str | None, context: Any, refit_applied: bool = False) -> None:
+def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
     """Write a solved WCS back into the source FITS file's header.
 
     So the next tool that opens this file (Siril, another astrometry
@@ -150,12 +150,6 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any, refit_appli
     and replaces any sky-map keywords from an earlier solve. See
     `write_wcs_to_fits_header` for how.
 
-    A solution refit to Gaia is saved through
-    `stage.save_refit_stack_plate_solution`, which also marks the header and
-    updates the stack's viewer copy, and only when the file does not already
-    hold a refit one. A solution that was not refit never replaces one that
-    was.
-
     Parameters
     ----------
     path : `str` or `None`
@@ -163,63 +157,31 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any, refit_appli
     context : `Any`
         The finished pipeline context. Its `wcs` attribute is the solved
         sky map, or `None` when the image was not solved.
-    refit_applied : `bool`, optional
-        True when the Gaia refit of this run was accepted, so `context.wcs`
-        is the refit solution.
     """
     if context.wcs is None or not path:
         return
-    from astrometricslib._internal.drivers.fits_access import read_header
-    from astrometricslib.pipelines.shared.session_identification import header_is_refit_to_gaia
-    from astrometricslib.pipelines.stacking.stage import save_refit_stack_plate_solution
-
-    if refit_applied:
-        save_refit_stack_plate_solution(path, context.wcs)
-        return
-    try:
-        if header_is_refit_to_gaia(read_header(path)):
-            logger.info(
-                "The file already holds a solution refit to Gaia; this run's solver solution is not saved."
-            )
-            return
-    except (OSError, *DATA_ERRORS):
-        pass
     write_wcs_to_fits_header(path, context.wcs)
 
 
-def _refinement_metrics(refinement: Any) -> dict[str, Any]:
-    """Read the quality-summary fields out of a Gaia refit result.
+def _gaia_match_metrics(match: Any) -> dict[str, Any]:
+    """Read the quality-summary fields out of a Gaia match result.
 
     Parameters
     ----------
-    refinement : `WcsRefinement` or `None`
-        What `StarIdentifier._refine_wcs_against_gaia` found, or `None` when
-        no refit was tried.
+    match : `GaiaMatch` or `None`
+        What `StarIdentifier._measure_wcs_against_gaia` found, or `None` when
+        no match was tried.
 
     Returns
     -------
     fields : `dict`
-        Values for the ``gaia_fit_*`` and ``wcs_refinement_shift_arcsec``
-        fields of `AstrometryPipelineQualityMetrics`. All `None` without a
-        fit.
+        Values for the ``gaia_match_*`` fields of
+        `AstrometryPipelineQualityMetrics`. Both `None` without a measured
+        RMS.
     """
-    if refinement is None or not refinement.star_count:
-        return {
-            "gaia_fit_rms_arcsec": None,
-            "gaia_fit_rms_before_arcsec": None,
-            "gaia_fit_star_count": None,
-            "wcs_refinement_shift_arcsec": None,
-        }
-    return {
-        # The RMS under the solution that was kept: the refined one when it
-        # was applied, else the solver's own.
-        "gaia_fit_rms_arcsec": refinement.rms_after_arcsec
-        if refinement.applied
-        else refinement.rms_before_arcsec,
-        "gaia_fit_rms_before_arcsec": refinement.rms_before_arcsec,
-        "gaia_fit_star_count": refinement.star_count,
-        "wcs_refinement_shift_arcsec": refinement.shift_arcsec if refinement.applied else 0.0,
-    }
+    if match is None or not match.star_count:
+        return {"gaia_match_rms_arcsec": None, "gaia_match_star_count": None}
+    return {"gaia_match_rms_arcsec": match.rms_arcsec, "gaia_match_star_count": match.star_count}
 
 
 def _plate_scale_arcsec_per_pixel(wcs: Any) -> float | None:
@@ -414,8 +376,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         target_center_deg = resolve_target_center_hint(target)
 
         _fill_target_position(target, context, request.options.get("drivers"))
-        refinement = getattr(getattr(pipeline, "star_identifier", None), "wcs_refinement", None)
-        _write_solved_wcs_to_fits_header(path, context, bool(refinement and refinement.applied))
+        _write_solved_wcs_to_fits_header(path, context)
         # After the header write, so the saved file's stamp is the final one.
         _save_stack_detections(path, getattr(pipeline, "star_identifier", None))
 
@@ -467,7 +428,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 catalog_match_separation_rms_arcsec=result.context.catalog_match_separation_rms_arcsec,
                 plate_solve_fit_residual_rms_arcsec=result.context.plate_solve_fit_residual_rms_arcsec,
                 plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,
-                **_refinement_metrics(result.context.wcs_refinement),
+                **_gaia_match_metrics(result.context.gaia_match),
                 astrometry_flags=list(result.context.astrometry_flags),
                 gaia_tiles_count=result.context.gaia_tiles_count,
                 gaia_tiles_missing_count=result.context.gaia_tiles_missing_count,
@@ -517,8 +478,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             # the measured one, on the same stack and over the same stars.
             if image_path:
                 record_expected_residual_quality(
-                    getattr(result.context, "gaia_fit_peak_over_noise", ()),
-                    getattr(result.context, "gaia_fit_signal_reason", "no Gaia fit was made"),
+                    getattr(result.context, "gaia_match_peak_over_noise", ()),
+                    getattr(result.context, "gaia_match_signal_reason", "no Gaia match was made"),
                     summary.astrometry_metrics.star_fwhm_px,
                     summary.astrometry_metrics.plate_scale_arcsec_per_pixel,
                     measurement_context,

@@ -18,7 +18,7 @@ Terms are defined in the [glossary](../Glossary.md) and at first use; symbols an
 
 **Stacking.** Siril [1] and PixInsight [2] calibrate, register, and stack frames but keep no shared record of the target. The library uses Siril as its engine, adding a rejection cutoff that follows the frame count (Section 3.2).
 
-**Plate solving.** Astrometry.net [3] finds an image's sky position with no estimate, by matching four-star patterns against an index. The library uses it as its solver, adding a refit against Gaia stars (Section 4.2).
+**Plate solving.** Plate solvers such as Astrometry.net [3] find an image's sky position by matching star patterns against a catalog. The library uses Siril's solver, and measures its solution against Gaia stars (Section 4.2).
 
 **Photometry.** AstroImageJ [4] and photutils [5] give interactive and programmatic aperture photometry. The library automates comparison-star vetting and tests variability against the field's scatter (Section 5.2).
 
@@ -244,7 +244,7 @@ Both noises, $\sigma_{\text{star}}$ and $\sigma_{\text{box}}$, come from Equatio
 
 #### 3.4.4 Sky background gradient
 
-The background is measured as a tilt and a round term, as fractions of sky level. A tilt suggests a sky gradient, a round term a flat-field error. A small tilt gets a plane, which cannot ring a nebula; a larger one, an AI model.<!-- impl: astrometricslib.pipelines.stacking.post_processing.background_gradient.measure_background_model --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_plane.choose_background_method -->
+The background is measured as a tilt and a round term, as fractions of sky level. A tilt suggests a sky gradient, a round term a flat-field error. A small tilt gets a plane, which cannot ring a nebula; a larger one, an AI model.<!-- impl: astrometricslib.pipelines.stacking.post_processing.background_gradient.measure_sky_background --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.sky_plane.choose_background_method -->
 
 ---
 
@@ -277,7 +277,7 @@ Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \d
    The WCS is written to the FITS header with its SIP terms. <!-- impl: astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header -->
 4. **Naming the stars.** Each detected star is matched to the nearest entry in the SIMBAD database [31] or the Gaia catalog [32]. Gaia lists positions for one fixed date, the catalog epoch, with each star's proper motion (its yearly drift across the sky). A fast star can drift a match radius in a decade, so Gaia positions are first moved to the observation date. An extended target (galaxy, nebula, cluster) is located by its catalog position and size, never matched to a star; with the catalog service unreachable, the library's own target record supplies them ([AST-09](validation/astrometry.md#ast-09)). <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_field_matching.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_field_matching.GaiaFieldMatching._move_gaia_coords_to_observation_epoch -->
 5. **Judging the fit.** The *fit residual* is the root mean square (RMS) distance, in arcseconds, between each matched star's position under the fitted WCS and its position in the solver's reference catalog. The *catalog match separation* is the RMS distance from each detected star to its nearest catalog star within the match radius. <!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.parse_fit --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
-6. **Refitting to Gaia.** The solver fits its reference stars, which carry their own errors, so a solution can be a pixel off yet agree with itself. The pipeline refits a low-order SIP solution to the detections matched to Gaia at the observation date, dropping outliers (blends, doubles, wrong matches) until stable. The new solution replaces the solver's only if it fits better. The residual against Gaia is recorded either way, independent of the solver. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.plate_solution_steps.PlateSolutionSteps._refine_wcs_against_gaia -->
+6. **Checking against Gaia.** The solver fits its reference stars, which carry their own errors, so a solution can be a pixel off yet agree with itself. The pipeline therefore measures the solution from the outside. It matches the detections to Gaia stars at the observation date, drops outliers (blends, doubles, wrong matches) until the set is stable, and records the RMS distance of the stars that are left, independent of the solver. The solution itself is never changed. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_match.measure_gaia_match --> <!-- impl: astrometricslib.pipelines.astrometry.processing.plate_solution_steps.PlateSolutionSteps._measure_wcs_against_gaia -->
 
 ### 4.3 Astrometry procedure
 
@@ -290,7 +290,7 @@ Table 5 lists the steps.
 | 1 | Source detection | Find stars. |
 | 2 | Quad pattern hashing | Turn each four-star shape into a numeric code (a hash) for index lookup. |
 | 3 | WCS and distortion fit | Fit Equation (10) and write it into the header. |
-| 4 | Catalog cross-match | Fill the Gaia tiles, refit to Gaia, name the stars. |
+| 4 | Catalog cross-match | Fill the Gaia tiles, check against Gaia, name the stars. |
 | 5 | Solution check | Judge the residual against the star width. |
 
 Before naming, every Gaia sky tile under the image is filled to a depth predicted from equipment and exposure. Stars are matched only in complete tiles, since a tile missing faint stars could give a detection a neighbor's name; missing tiles are counted. Each tile is asked once and kept with its fetch time; a fresh one needs no network call. A paused catalog is answered from stored results, with a warning of their age, and only a field never stored stays unverified.

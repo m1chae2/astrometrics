@@ -462,7 +462,7 @@ def test_the_stack_noise_plate_solve_uses_the_injected_solver(field_image: str) 
     wcs, reason, wcs_source = real_solve(field_image, Drivers(plate_solve=solver, simbad=simbad))
 
     assert reason == ""
-    assert wcs_source == "plate solve of the stack, not refit"
+    assert wcs_source == "plate solve of the stack"
     assert len(solver.calls) == 1
     assert wcs is not None
     assert wcs.wcs.crval[1] == pytest.approx(FIELD_DEC_DEG)

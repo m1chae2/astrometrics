@@ -208,11 +208,9 @@ BACKFILL_RUN_ID_PREFIX = "backfill-"
 # of "unknown", check its estimator's history in git, then add it here with
 # the first version that holds the registered estimator.
 ESTIMATOR_CHANGED_AT: dict[str, str] = {
-    "astrometry.gate_astrometric_residual": "1.4.0",
-    "astrometry.gaia_fit_star_count": "1.4.0",
-    "astrometry.gaia_fit_rms_arcsec": "1.4.0",
-    "astrometry.gaia_fit_rms_before_arcsec": "1.4.0",
-    "astrometry.wcs_refinement_shift_arcsec": "1.4.0",
+    "astrometry.gate_astrometric_residual": "1.5.0",
+    "astrometry.gaia_match_star_count": "1.5.0",
+    "astrometry.gaia_match_rms_arcsec": "1.5.0",
 }
 
 # The text of a stored time that is read as UTC because it has no zone.
@@ -977,9 +975,9 @@ def _photometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult
     """Give a photometry gate as the measurement step stores it.
 
     Two gates quote a steady number that comes from the run's own data (the
-    smallest comparison set and the largest drift). The summary does not hold
-    it, so those gates are copied only when they were not checked. The rest
-    go through the record step's own `gate_for_measurement`.
+    smallest comparison set and the worst corner displacement). The summary
+    does not hold it, so those gates are copied only when they were not
+    checked. The rest go through the record step's own `gate_for_measurement`.
 
     Parameters
     ----------
@@ -1502,7 +1500,8 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
         "plateSolveMatchedStarCount",
         subject=_STACK,
     ),
-    _value("astrometry.gaia_fit_star_count", "astrometryMetrics", "gaiaFitStarCount", subject=_STACK),
+    _value("astrometry.gaia_match_star_count", "astrometryMetrics", "gaiaMatchStarCount", subject=_STACK),
+    _value("astrometry.gaia_match_rms_arcsec", "astrometryMetrics", "gaiaMatchRmsArcsec", subject=_STACK),
     _value(
         "astrometry.remote_catalog_queries_attempted_count",
         "astrometryMetrics",
@@ -1524,16 +1523,6 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
         "astrometry.plate_solve_fit_residual_rms_arcsec",
         "astrometryMetrics",
         "plateSolveFitResidualRmsArcsec",
-        subject=_STACK,
-    ),
-    _value("astrometry.gaia_fit_rms_arcsec", "astrometryMetrics", "gaiaFitRmsArcsec", subject=_STACK),
-    _value(
-        "astrometry.gaia_fit_rms_before_arcsec", "astrometryMetrics", "gaiaFitRmsBeforeArcsec", subject=_STACK
-    ),
-    _value(
-        "astrometry.wcs_refinement_shift_arcsec",
-        "astrometryMetrics",
-        "wcsRefinementShiftArcsec",
         subject=_STACK,
     ),
     _value(

@@ -3,8 +3,7 @@
 Each size in pixels that photometry takes from the star width (the aperture
 and sky ring, the centroid box and the corner displacement limit) resolves
 to its old absolute value when no run has measured a star width, and to its
-factor times the measured width when one has. The unstable-tracking limit
-is 20 px of drift and does not follow it.
+factor times the measured width when one has.
 """
 
 import pytest
@@ -16,9 +15,6 @@ from astrometricslib.pipelines.photometry.post_processing.record_quality import 
     MAXIMUM_CORNER_DISPLACEMENT_PX,
 )
 from astrometricslib.pipelines.photometry.pre_processing import frame_photometry
-from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
-    UNSTABLE_TRACKING_DRIFT_PX,
-)
 
 STAR_WIDTH_VALUES: list[tuple[TunedParameter, float | int]] = [
     (MAXIMUM_CORNER_DISPLACEMENT_PX, 1.0),
@@ -50,11 +46,3 @@ def test_a_measured_star_width_scales_the_value(parameter: TunedParameter, old_v
             RunBasis.STAR_WIDTH_PX, 2.0 * float(parameter.reference_value) / float(parameter.default)
         )
         assert resolve(parameter).value == pytest.approx(2.0 * old_value)
-
-
-def test_the_unstable_tracking_limit_does_not_follow_the_star_width() -> None:
-    """The limit is 20 px of mount drift, whatever the star width."""
-    with parameter_context():
-        assert resolve(UNSTABLE_TRACKING_DRIFT_PX).value == pytest.approx(20.0)
-        record_basis(RunBasis.STAR_WIDTH_PX, 6.0)
-        assert resolve(UNSTABLE_TRACKING_DRIFT_PX).value == pytest.approx(20.0)

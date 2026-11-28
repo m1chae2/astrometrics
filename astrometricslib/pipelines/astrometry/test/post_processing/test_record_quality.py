@@ -238,7 +238,7 @@ def test_the_residual_gate_is_not_checked_with_neither_a_fit_nor_a_catalog_separ
     assert gate.status is GateStatus.NOT_CHECKED
 
 
-def test_the_residual_gate_judges_the_gaia_fit_before_the_solvers_own_residual() -> None:
+def test_the_residual_gate_judges_the_gaia_match_before_the_solvers_own_residual() -> None:
     """A solution that fits Gaia badly fails, whatever the solver reports.
 
     Alnath's solution agreed with itself (a small fit residual) and was 2.7
@@ -247,8 +247,8 @@ def test_the_residual_gate_judges_the_gaia_fit_before_the_solvers_own_residual()
     gate = gates_for(
         plate_solve_fit_residual_rms_arcsec=0.5,
         plate_solve_matched_star_count=24,
-        gaia_fit_rms_arcsec=7.0,
-        gaia_fit_star_count=200,
+        gaia_match_rms_arcsec=7.0,
+        gaia_match_star_count=200,
     )[rg.RESIDUAL_GATE_NAME]
 
     assert gate.status is GateStatus.FAILED
@@ -256,13 +256,13 @@ def test_the_residual_gate_judges_the_gaia_fit_before_the_solvers_own_residual()
     assert "independent of the plate solver" in gate.detail
 
 
-def test_a_good_gaia_fit_passes_even_when_the_catalog_separation_is_large() -> None:
-    """The Gaia fit is the residual judged; the separation is a side number."""
+def test_a_good_gaia_match_passes_even_when_the_catalog_separation_is_large() -> None:
+    """The Gaia match is judged; the separation is a side number."""
     gate = gates_for(
         plate_solve_fit_residual_rms_arcsec=None,
         catalog_match_separation_rms_arcsec=8.0,
-        gaia_fit_rms_arcsec=0.3,
-        gaia_fit_star_count=150,
+        gaia_match_rms_arcsec=0.3,
+        gaia_match_star_count=150,
     )[rg.RESIDUAL_GATE_NAME]
 
     assert gate.status is GateStatus.PASSED

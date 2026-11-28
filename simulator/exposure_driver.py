@@ -70,8 +70,9 @@ from simulator.device_settings import (
     matches,
     merge_device_settings,
 )
-from simulator.fit.results import fitted_device_settings
+from simulator.fit.results import fitted_device_settings, fitted_go_to_scatter
 from simulator.frame_source import FrameSource
+from simulator.goto_scatter import GotoScatter, GotoScatterSettings
 from simulator.guide_log_replay import ReplayItem, load_replay_items, render_line, replay
 from simulator.library_copy import nearest_target_id
 from simulator.rpc_client import call_rpc
@@ -364,6 +365,11 @@ class ExposureDriver:
     capture : `str`, optional
         ``driver`` (default): the driver starts every exposure. ``app``: the
         app starts them, and the driver only files the frames that appear.
+    go_to_scatter : `~simulator.goto_scatter.GotoScatterSettings`, optional
+        The size of the go-to scatter. With it, the driver draws a new
+        offset for the mount at each new destination
+        (`~simulator.goto_scatter.GotoScatter`). Default: none, so the
+        offset stays the constant one the fitted settings wrote.
     """
 
     def __init__(
@@ -380,6 +386,7 @@ class ExposureDriver:
         frame_source: FrameSource | None = None,
         find_target: Callable[[float, float], str | None] | None = None,
         capture: str = CAPTURE_DRIVER,
+        go_to_scatter: GotoScatterSettings | None = None,
     ) -> None:
         """Keep the settings; nothing runs yet.
 
@@ -402,6 +409,7 @@ class ExposureDriver:
         self.device_settings = list(device_settings or [])
         self.frame_source = frame_source
         self.find_target = find_target
+        self.go_to_scatter = GotoScatter(go_to_scatter, self._get, self._set) if go_to_scatter else None
         self._resolved_position: tuple[float, float] | None = None
         self._lookup_failure_reported = False
         self.cooling_seconds: float | None = None
@@ -1005,6 +1013,10 @@ class ExposureDriver:
             log_thread.start()
         stats_thread = threading.Thread(target=self._stats_loop, daemon=True, name="StatsWriter")
         stats_thread.start()
+        if self.go_to_scatter is not None:
+            threading.Thread(
+                target=self.go_to_scatter.watch, args=(self.stop_event,), daemon=True, name="GotoScatter"
+            ).start()
         self.wait_for_cooling()
         if self.capture == CAPTURE_APP:
             self.watch_for_frames()
@@ -1107,6 +1119,9 @@ def main() -> int:
         frame_source,
         find_target,
         arguments.capture,
+        GotoScatterSettings.from_dict(
+            fitted_go_to_scatter(arguments.fitted_settings) if arguments.fitted_settings else None
+        ),
     )
     signal.signal(signal.SIGTERM, lambda *_: driver.stop_event.set())
     signal.signal(signal.SIGINT, lambda *_: driver.stop_event.set())

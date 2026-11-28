@@ -157,9 +157,9 @@ KNOWN_WALL_CLOCK_SITES = frozenset({
     # Measures how long an unfinished job has gone without an update, to say
     # whether its program died. It dates job bookkeeping, not an observation.
     "pipelines/shared/job_history.py",
-    # Writes the time a rejected frame was moved into quarantine, in the
+    # Writes the time a rejected frame was moved aside, in the
     # move log. It dates the move itself, not any frame's observation.
-    "pipelines/stacking/pre_processing/frame_quarantine.py",
+    "pipelines/stacking/pre_processing/frame_set_aside.py",
     # Writes when a preview picture was made, in its settings record. It dates
     # the picture, not any frame's observation.
     "pipelines/stacking/post_processing/preview_settings.py",

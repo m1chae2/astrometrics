@@ -3,7 +3,7 @@
 Description: A stack is only as good as the frames that go into it. This
 module runs the checks that leave out frames which would harm the stack: a
 minority camera gain setting, frames an earlier run already set aside, clouds
-and trailed stars (the quarantine step), a different sky background, and
+and trailed stars (the set-aside step), a different sky background, and
 frames of an exposure length that has too few frames and no group near enough
 to be folded into. Each
 check records which frames it left out and a `GateResult` that says what it
@@ -47,14 +47,14 @@ logger = logging.getLogger(__name__)
 #: (the cloud and trailing check reads all of them, the full measurement every
 #: frame not yet measured, the sky check one pass); they only shape the job's
 #: progress bar.
-QUARANTINE_WINDOW = (0.02, 0.43)
+SET_ASIDE_WINDOW = (0.02, 0.43)
 QUALITY_ROWS_WINDOW = (0.45, 0.35)
 BACKGROUND_WINDOW = (0.80, 0.20)
 
 # The reason recorded for a frame, by the check that left it out. The stack
 # check (`predict_stack`) matches on these to say which check it was.
 MINORITY_GAIN_REASON = "minority gain setting"
-EARLIER_QUARANTINE_REASON = "set aside by an earlier quarantine"
+EARLIER_SET_ASIDE_REASON = "set aside by an earlier set-aside check"
 BACKGROUND_SPLIT_REASON = "background-homogeneity split"
 # The start of the reason recorded for a frame whose exposure length has no
 # group to join; the rest of the sentence names the length, the nearest group
@@ -63,7 +63,7 @@ EXPOSURE_NOT_FOLDABLE_REASON_PREFIX = "left out of every exposure group: "
 
 __all__ = [
     "BACKGROUND_SPLIT_REASON",
-    "EARLIER_QUARANTINE_REASON",
+    "EARLIER_SET_ASIDE_REASON",
     "EXPOSURE_NOT_FOLDABLE_REASON_PREFIX",
     "MINORITY_GAIN_REASON",
     "FrameScreening",
@@ -90,11 +90,11 @@ class FrameScreening:
     background_split : `dict` or `list` [`dict`] or `None`
         What the background check found, when it found a split in the sky
         background; otherwise `None`.
-    flagged_frames : `list` [`QuarantineDecision`]
-        Frames the quarantine step kept with a warning (an uneven sky with
+    flagged_frames : `list` [`SetAsideDecision`]
+        Frames the set-aside step kept with a warning (an uneven sky with
         normal stars), each with its reasons.
-    quarantine_report : `QuarantineReport` or `None`
-        What the quarantine step found, when it ran: the session notes, the
+    set_aside_report : `SetAsideReport` or `None`
+        What the set-aside step found, when it ran: the session notes, the
         warnings and the frames it could not read.
     """
 
@@ -103,7 +103,7 @@ class FrameScreening:
     gate_results: list[GateResult] = field(default_factory=list)
     background_split: dict | list[dict] | None = None
     flagged_frames: list[Any] = field(default_factory=list)
-    quarantine_report: Any = None
+    set_aside_report: Any = None
 
 
 def screen_frames(
@@ -116,10 +116,10 @@ def screen_frames(
 ) -> FrameScreening:
     """Run the frame checks in order and give back the frames that pass.
 
-    The order is: minority gain, frames already set aside, the quarantine
+    The order is: minority gain, frames already set aside, the set-aside check
     step (clouds and trailed stars), the sky background, and last the
     exposure lengths with no group to join (last, so that the frame counts
-    that decide the groups are the final ones). The quarantine
+    that decide the groups are the final ones). The set-aside check
     step moves files and stores frame quality rows, so the order and timing
     of these steps must not change.
 
@@ -137,7 +137,7 @@ def screen_frames(
     target_frames : `list`
         The frames offered to the stack.
     has_spectral : `bool`
-        `True` when the frames are spectral. The quarantine step skips them,
+        `True` when the frames are spectral. The set-aside step skips them,
         because their streaks are the spectra.
     measured_at : `datetime` or `None`
         When the stack started, passed on to the frame quality rows.
@@ -163,7 +163,7 @@ def screen_frames(
     steps = (
         lambda: _drop_minority_gain(target, screening, dry_run),
         lambda: _drop_frames_already_set_aside(target, screening, dry_run),
-        lambda: _quarantine_bad_frames(
+        lambda: _set_aside_bad_frames(
             target, screening, has_spectral, measured_at, quality_recording, dry_run
         ),
         lambda: _drop_background_outliers(target, screening, dry_run),
@@ -243,7 +243,7 @@ def _drop_frames_already_set_aside(target: Target, screening: FrameScreening, dr
         If no frames are left and this is not a dry run.
     """
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
         drop_frames_already_set_aside,
         find_frames_already_set_aside,
     )
@@ -264,13 +264,13 @@ def _drop_frames_already_set_aside(target: Target, screening: FrameScreening, dr
             target.id,
         )
         screening.excluded_frames.extend(
-            ExcludedFrame(path=frame.path, reason=EARLIER_QUARANTINE_REASON) for frame in already_set_aside
+            ExcludedFrame(path=frame.path, reason=EARLIER_SET_ASIDE_REASON) for frame in already_set_aside
         )
     if not screening.frames and not dry_run:
         raise ProcessingError("Target has no frames available to stack after leaving out set-aside frames.")
 
 
-def _quarantine_bad_frames(
+def _set_aside_bad_frames(
     target: Target,
     screening: FrameScreening,
     has_spectral: bool,
@@ -300,7 +300,7 @@ def _quarantine_bad_frames(
     quality_recording : `FrameQualityRecording` or `None`
         The configuration and calibration library for the frame quality rows.
     dry_run : `bool`, optional
-        Decide which frames would be set aside (`find_frames_to_quarantine`,
+        Decide which frames would be set aside (`find_frames_to_set_aside`,
         the same decision the move uses) but move none and store no rows.
 
     Raises
@@ -309,65 +309,64 @@ def _quarantine_bad_frames(
         If no frames are left and this is not a dry run.
     """
     from astrometricslib.models.quality.quality_summary import ExcludedFrame
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-        GATE_NAME as QUARANTINE_GATE_NAME,
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
+        GATE_NAME as SET_ASIDE_GATE_NAME,
     )
 
     if has_spectral:
         logger.info("Skipping the cloud and trailing check: spectral frames are not checked.")
         screening.gate_results.append(
             unchecked_gate(
-                QUARANTINE_GATE_NAME, "spectral frames are not checked: their streaks are the spectra"
+                SET_ASIDE_GATE_NAME, "spectral frames are not checked: their streaks are the spectra"
             )
         )
         return
-    if not get_configuration().get_quarantine_bad_frames_enabled():
+    if not get_configuration().get_set_aside_bad_frames_enabled():
         logger.info("Skipping the cloud and trailing check: it is turned off in the settings.")
         screening.gate_results.append(
-            unchecked_gate(QUARANTINE_GATE_NAME, "frame quarantine is turned off in the settings")
+            unchecked_gate(SET_ASIDE_GATE_NAME, "set-aside check is turned off in the settings")
         )
         return
 
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-        find_frames_to_quarantine,
-        quarantine_bad_frames,
-        quarantine_gate,
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
+        find_frames_to_set_aside,
+        set_aside_bad_frames,
+        set_aside_gate,
     )
 
-    frames_checked_by_quarantine = screening.frames
+    frames_checked_by_set_aside = screening.frames
     logger.info(
         "Checking %d frames for clouds and trailed stars (this reads every frame)\u2026",
         len(screening.frames),
     )
     if dry_run:
         light_frames = [frame for frame in screening.frames if str(frame.role).upper() == "LIGHT"]
-        quarantine_report = find_frames_to_quarantine(light_frames, None, target.id)
-        moved_paths = {decision.path for decision in quarantine_report.moved}
+        set_aside_report = find_frames_to_set_aside(light_frames, None, target.id)
+        moved_paths = {decision.path for decision in set_aside_report.moved}
         screening.frames = [frame for frame in screening.frames if frame.path not in moved_paths]
     else:
-        with stage_window(*QUARANTINE_WINDOW):
-            screening.frames, quarantine_report = quarantine_bad_frames(target, screening.frames)
+        with stage_window(*SET_ASIDE_WINDOW):
+            screening.frames, set_aside_report = set_aside_bad_frames(target, screening.frames)
         logger.info("Measuring the frames that have no stored quality numbers yet\u2026")
         with stage_window(*QUALITY_ROWS_WINDOW):
             record_frame_quality(
                 target,
                 screening.frames,
-                quarantine_report,
-                frames_checked_by_quarantine,
+                set_aside_report,
+                frames_checked_by_set_aside,
                 measured_at,
                 quality_recording,
             )
-    screening.quarantine_report = quarantine_report
-    screening.flagged_frames.extend(quarantine_report.flagged)
+    screening.set_aside_report = set_aside_report
+    screening.flagged_frames.extend(set_aside_report.flagged)
     screening.excluded_frames.extend(
-        ExcludedFrame(path=path, reason=reason)
-        for path, reason in quarantine_report.reasons_by_path().items()
+        ExcludedFrame(path=path, reason=reason) for path, reason in set_aside_report.reasons_by_path().items()
     )
-    for note in quarantine_report.notes:
-        logger.info("Quarantine check for target '%s': %s", target.id, note)
-    screening.gate_results.append(quarantine_gate(quarantine_report))
+    for note in set_aside_report.notes:
+        logger.info("Set-aside check for target '%s': %s", target.id, note)
+    screening.gate_results.append(set_aside_gate(set_aside_report))
     if not screening.frames and not dry_run:
-        why = "; ".join(quarantine_report.warnings) or f"{len(quarantine_report.moved)} frame(s) set aside"
+        why = "; ".join(set_aside_report.warnings) or f"{len(set_aside_report.moved)} frame(s) set aside"
         raise ProcessingError(
             f"Nothing was stacked: every frame failed a quality check and was set aside ({why})."
         )
@@ -444,7 +443,7 @@ def _measure_frame_backgrounds(frames: list[Any], dry_run: bool) -> None:
     """Measure the sky background of every frame, several frames at once.
 
     The frames are measured in the same number of worker threads as the
-    quarantine step (`MEASUREMENT_THREADS`). Each frame's result goes onto
+    set-aside step (`MEASUREMENT_THREADS`). Each frame's result goes onto
     that frame only, so the order of the frames and the values do not depend
     on the order the workers finish. Progress is reported as each frame
     finishes. A cancel is seen within half a second and stops the frames not
@@ -461,7 +460,7 @@ def _measure_frame_backgrounds(frames: list[Any], dry_run: bool) -> None:
     -----
     `RunAbandonedError` is raised if the job was cancelled.
     """
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import MEASUREMENT_THREADS
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import MEASUREMENT_THREADS
 
     logger.info("Checking the sky background of %d frames\u2026", len(frames))
     background_progress = LoopProgress("Sky background measured for", len(frames))
@@ -653,19 +652,19 @@ def refresh_saturated_pixel_fraction(frame: Any) -> bool:
 def record_frame_quality(
     target: Target,
     kept_frames: list[Any],
-    quarantine_report: Any,
+    set_aside_report: Any,
     frames_checked: list[Any],
     measured_at: datetime | None,
     quality_recording: FrameQualityRecording | None,
 ) -> None:
-    """Store the quarantine step's frame numbers and any missing measurements.
+    """Store the set-aside step's frame numbers and any missing measurements.
 
     This never stops a stack. Any failure, whatever its cause (a storage
     error, or an unexpected error such as a ``RuntimeError`` or
     ``MemoryError`` from the image libraries), is logged with its traceback and
     the stack goes on, because the stack does not depend on these numbers.
 
-    The hook runs only for imaging stacks with the quarantine step turned on,
+    The hook runs only for imaging stacks with the set-aside step turned on,
     because it sits inside that step. It does not read the global
     configuration: the caller supplies the configuration and the shared
     calibration library in ``quality_recording``.
@@ -676,10 +675,10 @@ def record_frame_quality(
         The target being stacked.
     kept_frames : `list`
         The frames that stay in the stack.
-    quarantine_report : `QuarantineReport`
-        What the quarantine step measured and moved.
+    set_aside_report : `SetAsideReport`
+        What the set-aside step measured and moved.
     frames_checked : `list`
-        Every frame given to the quarantine step, moved ones included.
+        Every frame given to the set-aside step, moved ones included.
     measured_at : `datetime` or `None`
         When the stack started, passed in by the caller because pipeline code
         does not read the clock. Nothing is stored when it is `None`.
@@ -705,11 +704,11 @@ def record_frame_quality(
         summary = record_stage_frame_quality(
             target,
             kept_frames,
-            quarantine_report.measurements,
+            set_aside_report.measurements,
             frames_checked,
             quality_recording,
             measured_at,
-            actions_by_path=quarantine_report.actions_by_path(),
+            actions_by_path=set_aside_report.actions_by_path(),
         )
     except RunAbandonedError:
         # A cancel is not a failure of the measurements.

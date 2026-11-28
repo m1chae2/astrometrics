@@ -114,7 +114,7 @@ def _account(sky_seconds: float, moon_seconds: float | None) -> LossAccount:
 # -- frames lost -------------------------------------------------------------
 
 
-def test_frames_lost_fires_at_the_share_and_cites_the_quarantine_rows() -> None:
+def test_frames_lost_fires_at_the_share_and_cites_the_set_aside_rows() -> None:
     """Five in a hundred frames set aside warns; four does not."""
     reasons = {SETTING: Counter({"clouded": 3, "trailed": 2})}
     evidence = {SETTING: [MeasurementReference(row_id=7)]}

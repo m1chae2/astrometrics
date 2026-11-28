@@ -18,7 +18,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class SetAsideFrame(BaseModel):
-    """One light frame the quarantine step moved, or would move.
+    """One light frame the set-aside step moved, or would move.
 
     The numbers are the measurements the decision rests on. They come from
     the same check that runs during an observing session.

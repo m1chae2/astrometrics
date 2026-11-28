@@ -13,9 +13,12 @@ stacks are never changed.
    (``stacks_by_configuration``) are searched for a color stack with a
    finished picture. One at the same focal length is preferred, else the
    nearest focal length.
-2. *Alignment.* The color picture and the linear color stack are moved onto
-   the monochrome picture's pixel grid (see `other_stack_alignment`). The
-   step is skipped when the two grids do not agree well enough or when the
+2. *Alignment.* Siril plate-solves the monochrome stack and the color stack
+   again, and the color picture and the linear color stack are read onto
+   the monochrome picture's pixel grid through the two solutions (see
+   `solution_alignment`). The monochrome picture is not resampled. The step
+   is not done, and the job reports why, when Siril cannot solve either
+   stack. It is skipped when the two solutions fit too poorly or when the
    color stack does not cover enough of the monochrome frame.
 3. *Color of the extended light.* StarNet (run through Siril) takes the
    stars out of both pictures. The starless color picture's sky is made gray
@@ -100,24 +103,25 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
     color_preview_record_path_for,
     processed_fits_path_for,
 )
-from astrometricslib.pipelines.stacking.post_processing.other_stack_alignment import (
-    AlignmentFit,
-    align_with_stars,
-    find_bright_stars,
-)
 from astrometricslib.pipelines.stacking.post_processing.preview_color import (
     has_plate_solution,
     is_colour_image,
 )
 from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep
 from astrometricslib.pipelines.stacking.post_processing.sky_levelling import sky_weight
+from astrometricslib.pipelines.stacking.post_processing.solution_alignment import (
+    GridPlacement,
+    SkyAlignment,
+    combined_residual_pixels,
+    placement_in_stack,
+    solve_stack,
+)
 from astrometricslib.pipelines.stacking.post_processing.star_color_measurement import (
     SOURCE_NAMES,
     StarColors,
     StarFootprints,
     measure_star_colors,
 )
-from astrometricslib.pipelines.stacking.processing.image_registration import warp
 from astrometricslib.utilities.robust_statistics import robust_sigma
 
 logger = logging.getLogger(__name__)
@@ -145,34 +149,19 @@ __all__ = [
 # The step's name in the job's notices.
 STEP_NAME = "Color from another stack"
 
-# The expected star width, in pixels, on the monochrome picture, on the color
-# picture and on the linear color stack. It sizes the star finder's template.
-# Measured on M 27: the ZWO ASI533MM picture's stars are about 3.5 pixels
-# across; the stretched Nikon D5300 picture's about 6, and its linear stack's
-# about 4 (STK-62). They are only the starting guess: the alignment measures
-# the star width on each picture and uses that (see `other_stack_alignment`),
-# because the ZWO stars of M 42 and M 45 were about 7 pixels wide, and a 3.5
-# pixel template found 5 stars on M 42.
-COLOR_PREVIEW_STAR_WIDTHS_PIXELS = TunedParameter(
-    name="stacking.color_preview_star_widths_pixels",
-    default=(3.5, 6.0, 4.0),
-    unit="pixels",
-    description="Expected star width on the monochrome picture, the color picture and the linear stack.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
-    register_entry="STK-62",
-)
-
-# The largest root-mean-square distance between paired stars after the move,
-# in monochrome pixels. M 27 (ZWO 405 mm and Nikon 405 mm) gave 0.38 to 0.50.
-# At 1 pixel a star's painted color would start to sit beside the star, so a
-# worse fit is a failed alignment and the step is skipped (STK-62).
+# The largest combined fit residual of the two plate solutions, in monochrome
+# pixels: the root of the sum of the squares of the two stacks' residuals
+# (a matched star's distance from its catalog position, root mean square),
+# in the monochrome picture's pixels. Siril's solutions of the M 27 pair
+# gave 0.3 to 0.7 pixel. At 1 pixel a star's painted color would start to
+# sit beside the star, so a worse fit is a failed alignment and the step is
+# skipped. The leftover offset of the aligned pair was measured by a method
+# that does not use our star finder (STK-62).
 COLOR_PREVIEW_MAXIMUM_ALIGNMENT_RMS_PIXELS = TunedParameter(
     name="stacking.color_preview_maximum_alignment_rms_pixels",
     default=1.0,
     unit="pixels",
-    description="Largest star-pair distance after alignment for the color picture to be made.",
+    description="Largest combined fit residual of the two plate solutions for the color picture to be made.",
     role=ParameterRole.JUDGMENT,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.METHOD_CHOICE,
@@ -386,12 +375,6 @@ _FALLBACK_HALO_PIXELS = 8.0
 # Where fewer than this share of the pixels around a halo lie outside every
 # halo (the core of a dense cluster), the halo is gray. Not tuned.
 _HALO_FILL_MINIMUM_WEIGHT = 0.05
-
-# The most stars found on the monochrome picture for the alignment, and on
-# each color image. Enough for a quadratic fit in every quarter; more only
-# costs time. Not tuned.
-_REFERENCE_STAR_COUNT = 3000
-_MOVING_STAR_COUNT = 2000
 
 # How far past the monochrome frame the Gaia question reaches, in degrees.
 # Not tuned.
@@ -1191,19 +1174,20 @@ def write_color_preview(
     for path, label in ((mono_picture_path, "monochrome picture"), (choice.picture_path, "color picture")):
         if not has_plate_solution(path):
             return _skip(f"the {label} has no plate solution", record)
-    if not has_plate_solution(choice.stacked_path):
-        return _skip("the color stack has no plate solution", record)
-    mono_width, color_picture_width, color_linear_width = (
-        float(value) for value in resolve(COLOR_PREVIEW_STAR_WIDTHS_PIXELS).value
-    )
+    for path, label in ((mono_stacked_path, "monochrome stack"), (choice.stacked_path, "color stack")):
+        if not has_plate_solution(path):
+            return _skip(f"the {label} has no plate solution", record)
     try:
         luminance = read_data(mono_picture_path)
         mono_wcs = celestial_wcs(read_header(mono_picture_path))
         color_picture = read_data(choice.picture_path)
-        color_wcs = celestial_wcs(read_header(choice.picture_path))
+        mono_stack_header = read_header(mono_stacked_path, first_hdu_only=True)
+        mono_picture_header = read_header(mono_picture_path, first_hdu_only=True)
+        color_stack_header = read_header(choice.stacked_path, first_hdu_only=True)
+        color_picture_header = read_header(choice.picture_path, first_hdu_only=True)
     except (OSError, ValueError) as error:
         return ColorPreviewOutcome(False, f"a picture could not be read ({error})", True, record=record)
-    if luminance is None or color_picture is None or mono_wcs is None or color_wcs is None:
+    if luminance is None or color_picture is None or mono_wcs is None:
         return _skip("a picture has no image data or no usable plate solution", record)
     luminance = np.nan_to_num(np.asarray(luminance, dtype=np.float32))
     color_picture = np.nan_to_num(np.asarray(color_picture, dtype=np.float32))
@@ -1211,21 +1195,34 @@ def write_color_preview(
         return _skip("the pictures are not one monochrome and one color picture", record)
     shape = luminance.shape
 
-    reference_stars = find_bright_stars(luminance, _REFERENCE_STAR_COUNT, mono_width)
-    record["mono_stars_for_alignment"] = len(reference_stars)
-    picture_fit = align_with_stars(
-        reference_stars, mono_wcs, color_picture[1], color_wcs, color_picture_width, _MOVING_STAR_COUNT
-    )
-    limit = float(resolve(COLOR_PREVIEW_MAXIMUM_ALIGNMENT_RMS_PIXELS).value)
-    if picture_fit is None:
-        return _skip("too few stars could be paired to align the color picture", record)
-    record["alignment"] = {"picture": picture_fit.record()}
-    if picture_fit.residual_pixels > limit:
-        return _skip(
-            f"the color picture aligns to {picture_fit.residual_pixels:.2f} px, worse than {limit:.2f} px",
-            record,
+    mono_offset = placement_in_stack(mono_stack_header, mono_picture_header, shape)
+    color_offset = placement_in_stack(color_stack_header, color_picture_header, color_picture.shape[1:])
+    if mono_offset is None or color_offset is None:
+        return ColorPreviewOutcome(
+            False,
+            "a picture is not a whole-pixel crop of its stack, so its stack's solution cannot serve it",
+            True,
+            record=record,
         )
-    warped_picture, covered = warp(color_picture, picture_fit.transform, order=3, output_shape=shape)
+    mono_solved, reason = solve_stack(mono_stacked_path, siril_executable)
+    if mono_solved is None:
+        return ColorPreviewOutcome(
+            False, f"the color stack was not aligned to the monochrome stack: {reason}", True, record=record
+        )
+    color_solved, reason = solve_stack(choice.stacked_path, siril_executable)
+    if color_solved is None:
+        return ColorPreviewOutcome(
+            False, f"the color stack was not aligned to the monochrome stack: {reason}", True, record=record
+        )
+    record["alignment"] = {"monochrome": mono_solved.record(), "color": color_solved.record()}
+    residual = combined_residual_pixels(mono_solved, color_solved)
+    record["alignment"]["combined_residual_pixels"] = None if residual is None else round(residual, 3)
+    limit = float(resolve(COLOR_PREVIEW_MAXIMUM_ALIGNMENT_RMS_PIXELS).value)
+    if residual is not None and residual > limit:
+        return _skip(f"the two plate solutions fit to {residual:.2f} px, worse than {limit:.2f} px", record)
+    mono_placement = GridPlacement(mono_solved.wcs, *mono_offset)
+    picture_alignment = SkyAlignment(mono_placement, GridPlacement(color_solved.wcs, *color_offset), shape)
+    warped_picture, covered = picture_alignment.resample(color_picture, 3)
     coverage = float(covered.mean())
     record["coverage_fraction"] = round(coverage, 4)
     minimum_coverage = float(resolve(COLOR_PREVIEW_MINIMUM_COVERAGE).value)
@@ -1240,25 +1237,15 @@ def write_color_preview(
 
     try:
         linear = read_data(choice.stacked_path)
-        linear_wcs = celestial_wcs(read_header(choice.stacked_path))
     except (OSError, ValueError) as error:
         return ColorPreviewOutcome(False, f"the color stack could not be read ({error})", True, record=record)
-    if linear is None or linear_wcs is None or np.ndim(linear) != 3:
-        return _skip("the color stack has no color data or no usable plate solution", record)
+    if linear is None or np.ndim(linear) != 3:
+        return _skip("the color stack has no color data", record)
     linear = np.nan_to_num(np.asarray(linear, dtype=np.float32))
-    linear_fit: AlignmentFit | None = align_with_stars(
-        reference_stars, mono_wcs, linear[1], linear_wcs, color_linear_width, _MOVING_STAR_COUNT
-    )
-    if linear_fit is None:
-        return _skip("too few stars could be paired to align the color stack", record)
-    record["alignment"]["linear"] = linear_fit.record()
-    if linear_fit.residual_pixels > limit:
-        return _skip(
-            f"the color stack aligns to {linear_fit.residual_pixels:.2f} px, worse than {limit:.2f} px",
-            record,
-        )
     # Bilinear, so a star's summed light is not changed by overshoot.
-    linear_on_grid, _ = warp(linear, linear_fit.transform, order=1, output_shape=shape)
+    linear_on_grid, _ = SkyAlignment(mono_placement, GridPlacement(color_solved.wcs), shape).resample(
+        linear, 1
+    )
     del linear
 
     scratch = None
@@ -1279,9 +1266,7 @@ def write_color_preview(
             shutil.rmtree(scratch, ignore_errors=True)
     if mono_starless is None or color_starless_original is None:
         return ColorPreviewOutcome(False, "StarNet did not give a starless picture", True, record=record)
-    color_starless, _ = warp(
-        np.nan_to_num(color_starless_original), picture_fit.transform, order=3, output_shape=shape
-    )
+    color_starless, _ = picture_alignment.resample(np.nan_to_num(color_starless_original), 3)
     del color_starless_original
     color_starless = np.clip(color_starless, 0.0, 1.0)
 

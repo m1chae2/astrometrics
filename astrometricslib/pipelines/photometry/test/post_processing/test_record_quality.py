@@ -22,7 +22,6 @@ from astrometricslib.pipelines.photometry.post_processing.variability_skill impo
     discrimination,
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
-    ANCHOR_RULE_RANK_BAND,
     CentroidShiftSummary,
 )
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
@@ -90,12 +89,10 @@ def centroid_summary(**changes: Any) -> CentroidShiftSummary:
         "p95_offset_px": 0.2,
         "worst_frame": datetime(2026, 5, 24, 5, 30, 0),
         "worst_frame_p95_offset_px": 0.4,
-        "anchor_rule": None,
-        "anchor_count": 50,
         "corner_displacement_p95_px": 0.1,
         "worst_corner_frame": datetime(2026, 5, 24, 5, 12, 0),
         "worst_corner_displacement_px": 0.15,
-        "fitted_frame_count": 39,
+        "mapped_frame_count": 39,
     }
     fields.update(changes)
     return CentroidShiftSummary(**fields)
@@ -328,10 +325,10 @@ def test_drift_gate_passes_and_reports_the_per_star_distribution() -> None:
 
     assert gate.status is GateStatus.PASSED
     assert gate.measured_value == pytest.approx(5.0)
-    assert "global alignment drift up to 5.0 px" in gate.detail
+    assert "field offset from the reference frame up to 5.0 px" in gate.detail
     assert "median 0.05 px" in gate.detail
     assert "95th percentile 0.20 px" in gate.detail
-    assert "0.5% of star measurements kept the aligned position" in gate.detail
+    assert "0.5% of star measurements kept the solution's position" in gate.detail
     assert "worst frame 2026-05-24 05:30:00" in gate.detail
     assert "rank" not in gate.detail
 
@@ -354,7 +351,7 @@ def test_drift_gate_reports_but_does_not_judge_the_per_star_offsets() -> None:
 def test_drift_gate_goes_red_when_the_field_rotated_too_much() -> None:
     """A corner that moves 1.8 px (NGC 2403, 2026-10-11) fails the gate."""
     summary = centroid_summary(
-        corner_displacement_p95_px=1.8, worst_corner_displacement_px=1.9, fitted_frame_count=35
+        corner_displacement_p95_px=1.8, worst_corner_displacement_px=1.9, mapped_frame_count=35
     )
 
     gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_DRIFT_GATE_NAME]
@@ -363,22 +360,22 @@ def test_drift_gate_goes_red_when_the_field_rotated_too_much() -> None:
     assert gate.measured_value == pytest.approx(1.8)
     assert gate.limit == pytest.approx(rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value)
     assert "a corner moves 1.80 px" in gate.detail
-    assert "rotation and scale change move a corner 1.80 px (95th percentile over 35 frames)" in gate.detail
+    assert "beyond the shift of the field (95th percentile over 35 frames)" in gate.detail
 
 
 def test_drift_gate_passes_a_field_that_did_not_rotate_when_no_rotation_was_fitted() -> None:
-    """With no rotation fit (too few anchors), only the other limits apply."""
+    """With no frame mapped, only the other limits apply."""
     summary = centroid_summary(
         corner_displacement_p95_px=None,
         worst_corner_frame=None,
         worst_corner_displacement_px=None,
-        fitted_frame_count=0,
+        mapped_frame_count=0,
     )
 
     gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_DRIFT_GATE_NAME]
 
     assert gate.status is GateStatus.PASSED
-    assert "rotation and scale change move" not in gate.detail
+    assert "beyond the shift of the field" not in gate.detail
 
 
 def test_drift_gate_goes_red_when_more_than_a_fifth_of_the_stars_fell_back() -> None:
@@ -393,22 +390,21 @@ def test_drift_gate_goes_red_when_more_than_a_fifth_of_the_stars_fell_back() -> 
     assert failed.status is GateStatus.FAILED
     assert failed.measured_value == pytest.approx(0.25)
     assert failed.limit == pytest.approx(rg.MAXIMUM_CENTROID_FALLBACK_FRACTION.default)
-    assert "25.0% of star measurements kept the aligned position" in failed.detail
+    assert "25.0% of star measurements kept the solution's position" in failed.detail
     assert edge.status is GateStatus.PASSED
 
 
-def test_drift_gate_uses_the_worst_session_and_names_a_fallback_anchor_rule() -> None:
-    """The worst session decides; the older anchor rule is named."""
+def test_drift_gate_uses_the_worst_session() -> None:
+    """The worst session decides, and the detail says there were two."""
     sessions = [
         centroid_summary(),
-        centroid_summary(corner_displacement_p95_px=1.3, anchor_rule=ANCHOR_RULE_RANK_BAND, anchor_count=30),
+        centroid_summary(corner_displacement_p95_px=1.3),
     ]
 
     gate = good_run(centroid_shift_summaries=sessions)[rg.REGISTRATION_DRIFT_GATE_NAME]
 
     assert gate.status is GateStatus.FAILED
     assert "worst of 2 sessions" in gate.detail
-    assert f"{ANCHOR_RULE_RANK_BAND} rule on 30 stars" in gate.detail
 
 
 def test_drift_gate_is_not_checked_without_global_drift_or_a_summary() -> None:

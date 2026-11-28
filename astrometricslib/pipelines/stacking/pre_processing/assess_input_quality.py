@@ -34,8 +34,8 @@ from astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health 
 GAIN_EXCLUSION_REASON = "minority gain setting"
 BACKGROUND_EXCLUSION_REASON = "background-homogeneity split"
 # A frame moved aside for clouds or trailed stars has a reason that starts
-# with this text (see `frame_quarantine`), followed by what was measured.
-QUARANTINE_EXCLUSION_REASON_PREFIX = "moved to _excluded"
+# with this text (see `frame_set_aside`), followed by what was measured.
+SET_ASIDE_EXCLUSION_REASON_PREFIX = "moved to _excluded"
 
 
 FLAT_LEVEL_GATE_NAME = "flat_level"
@@ -324,8 +324,8 @@ def record_input_counts(
     metrics.frames_excluded_for_background = sum(
         1 for frame in excluded_frames if frame.reason == BACKGROUND_EXCLUSION_REASON
     )
-    metrics.frames_quarantined = sum(
-        1 for frame in excluded_frames if frame.reason.startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
+    metrics.frames_set_aside = sum(
+        1 for frame in excluded_frames if frame.reason.startswith(SET_ASIDE_EXCLUSION_REASON_PREFIX)
     )
     metrics.dark_unique_frame_count = unique_counts.get("dark")
     metrics.bias_unique_frame_count = unique_counts.get("bias")

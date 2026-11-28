@@ -116,11 +116,11 @@ UNUSED_DECISION_METRICS = {
     "astrometry.notice_gaia_tiles_missing": _NOTICE_ROW_REASON,
     "frame.sky_unevenness": (
         "evidence of a set-aside frame, cited by the target report inputs next to the star count; the "
-        "quarantine step judges it, no rule of this table compares it with a limit"
+        "set-aside step judges it, no rule of this table compares it with a limit"
     ),
     "frame.pointing_offset_fraction": (
         "evidence of a set-aside frame, cited by the target report inputs next to the star count; the "
-        "quarantine step judges it, no rule of this table compares it with a limit"
+        "set-aside step judges it, no rule of this table compares it with a limit"
     ),
     "stacking.star_elongation": (
         "stack-level star elongation, read by the star-shape review, not a pass/fail rule"
@@ -158,7 +158,7 @@ UNUSED_DECISION_METRICS = {
     ),
     "frame.background_level_adu": (
         "issue 97: input of the stacker's cloud check (STK-04). The stacker judges it and moves the frame; "
-        "the report counts the frames moved (rule frames_lost, through the quarantine rows). A rule that "
+        "the report counts the frames moved (rule frames_lost, through the set-aside rows). A rule that "
         "reads the level itself would repeat the stacker's check."
     ),
     "frame.saturated_pixel_fraction": (

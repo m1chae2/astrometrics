@@ -441,7 +441,7 @@ def frames_lost_statements(
         How many frames of each setting were set aside, by reason.
     evidence_by_setting : `Mapping`
         Maps `CaptureSetting` to a `Sequence` of `MeasurementReference`.
-        The stored quarantine rows of the set-aside frames of each setting.
+        The stored set-aside rows of the set-aside frames of each setting.
     unassigned_reasons : `Counter`
         Frames set aside that no stored measurement could place in a setting,
         by reason.

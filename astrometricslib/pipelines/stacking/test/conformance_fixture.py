@@ -8,7 +8,7 @@ measurement and two member frames, and runs the stacking record step on it.
 It adds the two rows of one leave-one-night-out stack and the seventeen rows of
 the odd–even difference noise, which the subset jobs store
 (`subset_noise_run.py`).
-The quarantine metrics are frame metrics that the frame measurement run
+The set-aside check metrics are frame metrics that the frame measurement run
 (`frame_measurement_run.py`) stores, so the fixture adds the rows it would add.
 The stack star-shape rows come from `stack_star_shape_measurements`, as in the
 stage, and the background rows from `background_gradient_measurements` on a
@@ -29,7 +29,7 @@ from astrometricslib.models.quality.quality_summary import (
 from astrometricslib.models.quality.subset_stacks import SubsetStackResult
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
-from astrometricslib.pipelines.stacking.frame_measurement_run import quarantine_measurements_for_frame
+from astrometricslib.pipelines.stacking.frame_measurement_run import set_aside_measurements_for_frame
 from astrometricslib.pipelines.stacking.metrics import GATE_METRIC_BY_NAME
 from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     OddEvenResult,
@@ -232,7 +232,7 @@ def fixture_summary() -> StackQualitySummary:
         framesAccepted=18,
         framesExcludedForGain=1,
         framesExcludedForBackground=0,
-        framesQuarantined=1,
+        framesSetAside=1,
     )
     summary = StackQualitySummary(
         targetId="M 99",
@@ -360,7 +360,7 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        What the record step emits, plus the two quarantine rows of one frame
+        What the record step emits, plus the two set-aside rows of one frame
         and the row of an abandoned stack.
     """
     context = PipelineRunContext("M 99", "stacking", "1.3.0", "job-1", "job-1", FIXTURE_TIME)
@@ -463,7 +463,7 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
         )
     )
     measurements.extend(
-        quarantine_measurements_for_frame(
+        set_aside_measurements_for_frame(
             {"sky_median_adu": 500.0, "sky_unevenness": 0.02, "pointing_offset_fraction": 0.01},
             frame,
             "M 99",

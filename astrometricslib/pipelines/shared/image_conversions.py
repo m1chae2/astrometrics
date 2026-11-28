@@ -27,7 +27,7 @@ from astrometricslib.pipelines.shared.image_scaling import (
     ScaledPicture,
     scale_with_parameters,
 )
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
     is_preview_path,
@@ -133,7 +133,7 @@ _unreadable_preview_paths: set[str] = set()
 def _find_moved_frame(path: str) -> str:
     """Find a frame that stacking set aside after its record was made.
 
-    The frame quarantine moves a frame into an ``_excluded`` folder beside it
+    The set-aside check moves a frame into an ``_excluded`` folder beside it
     and keeps the original path on the frame's record, so a list built from the
     records can still ask for the old path.
 
@@ -150,7 +150,7 @@ def _find_moved_frame(path: str) -> str:
     """
     if os.path.exists(path):
         return path
-    moved_path = os.path.join(os.path.dirname(path), QUARANTINE_FOLDER_NAME, os.path.basename(path))
+    moved_path = os.path.join(os.path.dirname(path), SET_ASIDE_FOLDER_NAME, os.path.basename(path))
     return moved_path if os.path.exists(moved_path) else path
 
 

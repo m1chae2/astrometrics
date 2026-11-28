@@ -10,7 +10,7 @@ import type { StackWarning } from '../../common/services/imaging/stackReviewServ
 /** The titles of the stacking checks, by metric name. */
 const STACK_WARNING_TITLES: Record<string, string> = {
     'stacking.gate_gain_homogeneity': 'Frames of different gain',
-    'stacking.gate_frame_quarantine': 'Too many bad frames to set aside',
+    'stacking.gate_frame_set_aside': 'Too many bad frames to set aside',
     'stacking.gate_background_homogeneity': 'Sky background split into groups',
     'stacking.gate_flat_level': 'Flat frames too faint or too bright',
     'stacking.gate_flat_noise': 'Noisy flat frame',

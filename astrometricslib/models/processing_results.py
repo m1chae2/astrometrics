@@ -303,7 +303,7 @@ class PredictedFrame(BaseModel):
     file: str
     # Why, in one sentence with the frame's value and the limit.
     reason: str
-    # "clouded", "trailed" or "off_field" (the quarantine step), "uneven_sky"
+    # "clouded", "trailed" or "off_field" (the set-aside step), "uneven_sky"
     # (kept with a warning), "minority_gain", "already_set_aside",
     # "background_split" or "exposure_not_foldable" (its exposure length has
     # too few frames and no group within the fold ratio limit).
@@ -380,7 +380,7 @@ class StackPrediction(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     # What each frame check found, in the order they ran.
     gates: list[GateResult] = Field(default_factory=list)
-    # Frames the quarantine check could not read. They stay in the stack.
+    # Frames the set-aside check could not read. They stay in the stack.
     unreadable: list[str] = Field(default_factory=list)
     # True when no frame is left, so a stack would fail.
     nothing_left: bool = False

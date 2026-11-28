@@ -15,13 +15,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
-    ANCHOR_RULE_SIGNAL_TO_NOISE,
-    FrameAlignment,
-    StarPosition,
-)
+from astrometricslib._internal.drivers.interfaces.plate_solve_driver import FrameSolve
+from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import StarPosition
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
-from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
+from astrometricslib.test.synthetic import SyntheticStar, drifted_frame_solves, make_photometry_fits
 
 FRAME_SHAPE = (300, 300)
 STAR_COUNT = 16
@@ -45,6 +42,22 @@ def _star_field() -> list[SyntheticStar]:
             stars.append(SyntheticStar(float(x), float(y), 20000.0, 3.5))
     assert len(stars) == STAR_COUNT
     return stars
+
+
+def _solves(paths: list[str]) -> dict[str, FrameSolve]:
+    """Give every frame the exact plate solution of the same field.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        The frame files. Their stars do not move, so one solution fits all.
+
+    Returns
+    -------
+    solves : `dict` [`str`, `FrameSolve`]
+        The solved header of each frame, keyed by path.
+    """
+    return drifted_frame_solves(paths, FRAME_SHAPE, (0.0, 0.0))
 
 
 def _write_frame(path: Path, date_obs: str | None, seed: int) -> str:
@@ -90,7 +103,7 @@ def test_frames_without_a_readable_date_obs_are_rejected_with_reasons(tmp_path: 
     paths = [_write_frame(tmp_path / f"f{index}.fits", date, index) for index, date in enumerate(dates)]
     analyzer = VariabilityAnalyzer()
 
-    analyzer.process(paths, max_workers=2)
+    analyzer.process(paths, _solves(paths), max_workers=2)
 
     reasons = {Path(frame.path).name: frame.reason for frame in analyzer.frames_without_usable_date_obs}
     assert set(reasons) == {"f2.fits", "f4.fits"}
@@ -110,7 +123,7 @@ def test_a_bad_reference_frame_stops_the_session_and_says_why(tmp_path: Path) ->
     ]
     analyzer = VariabilityAnalyzer()
 
-    analyzer.process(paths, max_workers=1)
+    analyzer.process(paths, _solves(paths), max_workers=1)
 
     assert analyzer.stellar_objects == []
     assert [Path(frame.path).name for frame in analyzer.frames_without_usable_date_obs] == ["ref.fits"]
@@ -129,7 +142,7 @@ def _fake_worker(
         flux 1 and sits at its reference position. The first star carries a
         fallback reason, the others do not.
     """
-    path, reference_stars, *_ = args
+    path, reference_stars, mapping, *_ = args
     minute = int(Path(path).stem.removeprefix("f"))
     fluxes = {star_id: (1.0, False, 0.1) for star_id, _, _ in reference_stars}
     positions = {
@@ -137,7 +150,7 @@ def _fake_worker(
         for index, (star_id, x, y) in enumerate(reference_stars)
     }
     timestamp = datetime(2026, 5, 24, 5, minute, 0)
-    return path, (timestamp, fluxes, 0.0, 0.0, 0.0, 1.0, positions, 30.0, FrameAlignment(0.0, 0.0))
+    return path, (timestamp, fluxes, 0.0, 0.0, 0.0, 1.0, positions, 30.0, mapping)
 
 
 def test_stars_whose_centroid_is_refused_are_counted_per_star(
@@ -156,7 +169,7 @@ def test_stars_whose_centroid_is_refused_are_counted_per_star(
     )
     analyzer = VariabilityAnalyzer()
 
-    analyzer.process(paths, max_workers=1)
+    analyzer.process(paths, _solves(paths), max_workers=1)
 
     assert list(analyzer.centroid_fallback_counts.values()) == [3]
     assert list(analyzer.centroid_fallback_counts) == [analyzer.stellar_objects[0].id]
@@ -165,13 +178,13 @@ def test_stars_whose_centroid_is_refused_are_counted_per_star(
 def test_the_analyzer_summarizes_the_per_star_centroid_offsets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The session summary holds the offsets, the fallback share and the rule.
+    """The session summary holds the offsets, the fallbacks and the frames.
 
     The stand-in worker leaves every star at its reference position with a
     shift of zero, and refuses the first star's centroid in every frame. The
     summary then covers 3 frames and one measurement per tracked star per
     frame, 3 of which fell back, with offsets of zero. The reference frame
-    holds 16 bright stars, so the anchors come from the signal-to-noise rule.
+    holds 16 bright stars.
     """
     paths = [_write_frame(tmp_path / f"f{index}.fits", GOOD_DATES[index], index) for index in range(4)]
     monkeypatch.setattr(
@@ -180,7 +193,7 @@ def test_the_analyzer_summarizes_the_per_star_centroid_offsets(
     )
     analyzer = VariabilityAnalyzer()
 
-    analyzer.process(paths, max_workers=1)
+    analyzer.process(paths, _solves(paths), max_workers=1)
     summary = analyzer.centroid_shift_summary()
 
     assert summary is not None
@@ -189,17 +202,17 @@ def test_the_analyzer_summarizes_the_per_star_centroid_offsets(
     assert summary.measurement_count == 3 * tracked_stars
     assert summary.fallback_count == 3
     assert summary.fallback_fraction == pytest.approx(3 / (3 * tracked_stars))
-    assert summary.median_offset_px == pytest.approx(0.0)
-    assert summary.p95_offset_px == pytest.approx(0.0)
-    assert summary.anchor_rule == ANCHOR_RULE_SIGNAL_TO_NOISE
-    assert summary.anchor_count == STAR_COUNT
+    assert summary.median_offset_px == pytest.approx(0.0, abs=1e-6)
+    assert summary.p95_offset_px == pytest.approx(0.0, abs=1e-6)
+    assert summary.mapped_frame_count == 3
 
 
 def test_a_one_frame_session_has_no_centroid_summary(tmp_path: Path) -> None:
     """With only the reference frame there is nothing to summarize."""
     analyzer = VariabilityAnalyzer()
 
-    analyzer.process([_write_frame(tmp_path / "f0.fits", GOOD_DATES[0], 0)], max_workers=1)
+    only_frame = [_write_frame(tmp_path / "f0.fits", GOOD_DATES[0], 0)]
+    analyzer.process(only_frame, _solves(only_frame), max_workers=1)
 
     assert analyzer.centroid_shift_summary() is None
 
@@ -219,9 +232,61 @@ def test_light_curves_hold_only_dates_written_in_the_files(tmp_path: Path, bad_d
     ]
     analyzer = VariabilityAnalyzer()
 
-    analyzer.process(paths, max_workers=1)
+    analyzer.process(paths, _solves(paths), max_workers=1)
 
     expected = {datetime.fromisoformat(GOOD_DATES[0]), datetime.fromisoformat(GOOD_DATES[2])}
     assert len(analyzer.frames_without_usable_date_obs) == 1
     for star in analyzer.stellar_objects:
         assert set(star.photometry.timestamps) == expected
+
+
+def test_a_frame_with_no_plate_solution_is_left_out_with_the_reason(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A frame the solver could not solve gives no points and a warning.
+
+    The frame is not placed by any other means: it is listed in
+    `frames_without_solution` with the solver's reason, it is in no light
+    curve, and the log carries one warning that the job lists.
+    """
+    paths = [_write_frame(tmp_path / f"f{index}.fits", GOOD_DATES[index], index) for index in range(4)]
+    solves = _solves(paths)
+    solves[paths[2]] = FrameSolve(None, "Siril found no solution from the start position")
+    analyzer = VariabilityAnalyzer()
+
+    with caplog.at_level("WARNING"):
+        analyzer.process(paths, solves, max_workers=1)
+
+    assert [Path(frame.path).name for frame in analyzer.frames_without_solution] == ["f2.fits"]
+    assert "Siril found no solution" in analyzer.frames_without_solution[0].reason
+    assert any("left out of photometry" in record.getMessage() for record in caplog.records)
+    expected = {datetime.fromisoformat(GOOD_DATES[index]) for index in (0, 1, 3)}
+    assert len(analyzer.stellar_objects) >= 10
+    for star in analyzer.stellar_objects:
+        assert set(star.photometry.timestamps) == expected
+
+
+def test_a_reference_frame_with_no_plate_solution_stops_the_session(tmp_path: Path) -> None:
+    """Every star is placed through the reference frame; none is measured."""
+    paths = [_write_frame(tmp_path / f"f{index}.fits", GOOD_DATES[index], index) for index in range(3)]
+    solves = _solves(paths)
+    solves[paths[0]] = FrameSolve(None, "Siril could not solve the reference frame")
+    analyzer = VariabilityAnalyzer()
+
+    analyzer.process(paths, solves, max_workers=1)
+
+    assert analyzer.stellar_objects == []
+    assert [Path(frame.path).name for frame in analyzer.frames_without_solution] == ["f0.fits"]
+
+
+def test_a_solution_without_a_sky_map_leaves_the_frame_out(tmp_path: Path) -> None:
+    """A solved header that holds no sky map is not a solution."""
+    paths = [_write_frame(tmp_path / f"f{index}.fits", GOOD_DATES[index], index) for index in range(3)]
+    solves = _solves(paths)
+    solves[paths[1]] = FrameSolve(fits.Header())
+    analyzer = VariabilityAnalyzer()
+
+    analyzer.process(paths, solves, max_workers=1)
+
+    assert [Path(frame.path).name for frame in analyzer.frames_without_solution] == ["f1.fits"]
+    assert "no sky map" in analyzer.frames_without_solution[0].reason

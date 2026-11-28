@@ -117,7 +117,7 @@ def stack_frames(
     quality_recording : `FrameQualityRecording` or `None`, optional
         The configuration and the shared calibration library, from the caller,
         for the frame quality rows. The stage stores them only for an imaging
-        stack with the quarantine step turned on, and only when both this and
+        stack with the set-aside step turned on, and only when both this and
         ``measured_at`` are given. Left out (tests), none are stored.
     make_preview : `bool`, optional
         Make the stack's preview picture too (on by default, as the batch

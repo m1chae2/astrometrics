@@ -343,7 +343,7 @@
     "framesAccepted": 21,
     "framesExcludedForBackground": 0,
     "framesExcludedForGain": 1,
-    "framesQuarantined": 3,
+    "framesSetAside": 3,
     "framesSubmitted": 25,
     "isFlagged": false
    },
@@ -451,7 +451,7 @@
     "framesAccepted": 21,
     "framesExcludedForBackground": 0,
     "framesExcludedForGain": 1,
-    "framesQuarantined": 3,
+    "framesSetAside": 3,
     "framesSubmitted": 25,
     "isFlagged": false
    },

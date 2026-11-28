@@ -26,14 +26,14 @@ from astrometricslib.foundation.warn_once import warn_once
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
 from astrometricslib.pipelines.shared.previous_stack_path import PREVIOUS_STACK_FOLDER_NAME
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME
 from astrometricslib.utilities.iso_text import iso_or_gain_text, setting_number
 
 logger = logging.getLogger(__name__)
 
 # Folders the pipeline keeps inside a target's folder that are not inputs:
 # frames it set aside, and the stack a restack replaced.
-_SKIPPED_FOLDER_NAMES = (QUARANTINE_FOLDER_NAME, PREVIOUS_STACK_FOLDER_NAME)
+_SKIPPED_FOLDER_NAMES = (SET_ASIDE_FOLDER_NAME, PREVIOUS_STACK_FOLDER_NAME)
 
 # The ISO or gain written on a record when the image header gives none, the
 # camera's config section gives no `default_iso`, and so nothing is known.

@@ -110,7 +110,7 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
             exposureGroups=groups if with_groups else [],
             framesAccepted=21,
             framesExcludedForGain=1,
-            framesQuarantined=3,
+            framesSetAside=3,
         ),
     )
     summary.record_gate(passed_gate("flat_noise", 0.002, 0.01, "the flat noise limit"))

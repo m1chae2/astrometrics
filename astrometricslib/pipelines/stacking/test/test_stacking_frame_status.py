@@ -4,7 +4,8 @@ Description: `build_frame_statuses` says, for each frame of a target, whether
 it is included, flagged, not stacked yet or set aside, and lists the frames
 in `_excluded` folders (which the target's own frame list does not hold). A
 stacked frame is flagged when its stored star elongation is at least the
-warning level and the quarantine kept it: the frame lies in the band between
+warning level and the set-aside check kept it: the frame lies in the band
+between
 `STRETCHED_STAR_WARNING_ELONGATION` and its session's set-aside threshold
 (`set_aside_elongation_limit`), both read from their owner.
 The capture time a capture program writes into a file name is read by
@@ -27,7 +28,7 @@ from astrometricslib.pipelines.stacking.frame_status import (
     latest_stack_time,
     set_aside_limits_by_path,
 )
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN,
     ELONGATION_RISE_ABOVE_MEDIAN,
     MINIMUM_FRAMES_TO_JUDGE,
@@ -180,10 +181,10 @@ def test_a_session_too_small_to_judge_has_no_threshold() -> None:
     report = build_frame_statuses(frames, [], 10_000.0, elongations, colour_camera=_mono)
 
     assert set(limits.values()) == {None}
-    assert all("too small for the quarantine" in status.reason for status in report.frames)
+    assert all("too small for the set-aside check" in status.reason for status in report.frames)
 
 
-def test_the_threshold_is_the_quarantines_own_for_mono_and_colour_sessions() -> None:
+def test_the_threshold_is_the_set_aside_checks_own_for_mono_and_colour_sessions() -> None:
     """The threshold is the owner's: the floor, or the median plus the rise."""
     round_session = [1.10] * 10
     stretched_session = [1.30] * 10
@@ -204,7 +205,7 @@ def test_the_threshold_is_the_quarantines_own_for_mono_and_colour_sessions() -> 
 
 
 def test_spectroscopy_frames_and_calibration_frames_are_never_flagged() -> None:
-    """The quarantine judges light frames only, so only they can be flagged."""
+    """Only light frames are judged, so only they can be flagged."""
     frames = [*_session([1.25] * 9), FrameRecord(path="/dark.fits", role="DARK", timestamp=100.0)]
     elongations = {frame.path: 1.25 for frame in frames}
 

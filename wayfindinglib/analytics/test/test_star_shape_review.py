@@ -2,7 +2,7 @@
 
 Description: Each verdict of `judge_star_shape` is checked on made-up metric
 rows: round stars, elongated stars with a shared direction, elongated stars
-with random directions, frames the quarantine set aside, corner widths
+with random directions, frames the set-aside check set aside, corner widths
 reported as not validated, a stack judged against the stack baseline, and no
 rows at all (a plain "not measured yet", not an error). The reader
 `read_star_shape_rows` is checked on a small stand-in library.
@@ -96,8 +96,8 @@ def test_elongated_stars_in_random_directions_point_at_seeing_or_focus() -> None
     assert "seeing or focus" in review.direction.sentence
 
 
-def test_the_frames_the_quarantine_set_aside_are_listed_as_they_are() -> None:
-    """The quarantine's trailed frames are listed and not judged again."""
+def test_the_frames_the_set_aside_set_aside_are_listed_as_they_are() -> None:
+    """The set-aside check's trailed frames are listed and not judged again."""
     frames = _frames([*_typical(), 2.4])
     set_aside = [StandoutFrame(path=frames[-1].path, elongation=2.4, reason="stars stretched 2.40")]
 

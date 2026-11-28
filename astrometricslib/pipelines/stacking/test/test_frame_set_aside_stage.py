@@ -1,6 +1,6 @@
-"""Tests that the stacking stage runs the quarantine step and uses its result.
+"""Tests that the stacking stage runs the set-aside step and uses its result.
 
-The quarantine step itself is tested in `test_frame_quarantine.py`. These
+The set-aside step itself is tested in `test_frame_set_aside.py`. These
 tests check the wiring: the stage hands the step the frames, stacks only the
 frames it keeps, and records the moved ones as excluded.
 """
@@ -19,16 +19,16 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
-    QUARANTINE_EXCLUSION_REASON_PREFIX,
+    SET_ASIDE_EXCLUSION_REASON_PREFIX,
 )
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-    QuarantineDecision,
-    QuarantineReport,
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
+    SetAsideDecision,
+    SetAsideReport,
 )
 
 SIRIL_DRIVER = "astrometricslib._internal.drivers.siril.stacking.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
-QUARANTINE_STEP = "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.quarantine_bad_frames"
+SET_ASIDE_STEP = "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside.set_aside_bad_frames"
 
 
 def make_target(frame_count: int = 10) -> Target:
@@ -86,42 +86,42 @@ def run_stage(
     return driver, summary_builder
 
 
-def test_stage_stacks_only_the_frames_the_quarantine_step_keeps() -> None:
+def test_stage_stacks_only_the_frames_the_set_aside_step_keeps() -> None:
     """A moved frame is left out of the stack and listed as excluded."""
     target = make_target()
     moved_path = target.frames[9].path
-    report = QuarantineReport(
+    report = SetAsideReport(
         moved=[
-            QuarantineDecision(
+            SetAsideDecision(
                 moved_path, "clouded", "203 stars against a typical 3348", 203, 3348.0, 0.88, 5000.0
             )
         ]
     )
 
-    def fake_quarantine(
+    def fake_set_aside(
         target_argument: Target, frames: list[FrameRecord]
-    ) -> tuple[list[FrameRecord], QuarantineReport]:
+    ) -> tuple[list[FrameRecord], SetAsideReport]:
         return [frame for frame in frames if frame.path != moved_path], report
 
-    with patch(QUARANTINE_STEP, side_effect=fake_quarantine) as quarantine_step:
+    with patch(SET_ASIDE_STEP, side_effect=fake_set_aside) as set_aside_step:
         driver, summary_builder = run_stage(target)
 
-    quarantine_step.assert_called_once()
+    set_aside_step.assert_called_once()
     stacked_frames = driver.process_target.call_args.args[0].image_files
     stacked_paths = [frame["path"] if isinstance(frame, dict) else frame.path for frame in stacked_frames]
     assert moved_path not in stacked_paths
     assert len(stacked_frames) == 9
     excluded = summary_builder.call_args.kwargs["excluded_frames"]
     assert [frame.path for frame in excluded] == [moved_path]
-    assert excluded[0].reason.startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
+    assert excluded[0].reason.startswith(SET_ASIDE_EXCLUSION_REASON_PREFIX)
 
 
 def test_stage_says_why_nothing_is_stacked_when_every_frame_is_set_aside() -> None:
     """If every frame fails a check, the job stops with a plain reason."""
     target = make_target()
-    report = QuarantineReport(batches_judged=1, warnings=["10 of 10 frames set aside: 10 trailed"])
+    report = SetAsideReport(batches_judged=1, warnings=["10 of 10 frames set aside: 10 trailed"])
 
-    with patch(QUARANTINE_STEP, side_effect=lambda target_argument, frames: ([], report)):
+    with patch(SET_ASIDE_STEP, side_effect=lambda target_argument, frames: ([], report)):
         with pytest.raises(ProcessingError) as raised:
             run_stage(target)
 
@@ -129,42 +129,42 @@ def test_stage_says_why_nothing_is_stacked_when_every_frame_is_set_aside() -> No
     assert "10 of 10 frames set aside: 10 trailed" in str(raised.value)
 
 
-def test_stage_skips_the_quarantine_step_when_the_setting_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_skips_the_set_aside_step_when_the_setting_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """With the setting off, the stage never calls the step."""
     from astrometricslib.foundation.config import get_configuration
 
     configuration = get_configuration()
-    monkeypatch.setattr(configuration, "get_quarantine_bad_frames_enabled", lambda: False)
+    monkeypatch.setattr(configuration, "get_set_aside_bad_frames_enabled", lambda: False)
 
-    with patch(QUARANTINE_STEP) as quarantine_step:
+    with patch(SET_ASIDE_STEP) as set_aside_step:
         run_stage(make_target())
 
-    quarantine_step.assert_not_called()
+    set_aside_step.assert_not_called()
 
 
-def test_stage_hands_the_quarantine_gate_to_the_summary_builder() -> None:
+def test_stage_hands_the_set_aside_gate_to_the_summary_builder() -> None:
     """A clean, judged session reaches the summary as a passed gate."""
-    report = QuarantineReport(batches_judged=1)
-    with patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)):
+    report = SetAsideReport(batches_judged=1)
+    with patch(SET_ASIDE_STEP, side_effect=lambda target, frames: (list(frames), report)):
         _driver, summary_builder = run_stage(make_target())
 
     gates = {gate.name: gate for gate in summary_builder.call_args.kwargs["gate_results"]}
-    assert gates["frame_quarantine"].status is GateStatus.PASSED
+    assert gates["frame_set_aside"].status is GateStatus.PASSED
 
 
-def test_stage_records_a_switched_off_quarantine_as_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage_records_a_switched_off_set_aside_as_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
     """With the setting off, the summary says the step did not run."""
     from astrometricslib.foundation.config import get_configuration
 
-    monkeypatch.setattr(get_configuration(), "get_quarantine_bad_frames_enabled", lambda: False)
+    monkeypatch.setattr(get_configuration(), "get_set_aside_bad_frames_enabled", lambda: False)
 
     _driver, summary_builder = run_stage(make_target())
 
     gates = {gate.name: gate for gate in summary_builder.call_args.kwargs["gate_results"]}
-    assert gates["frame_quarantine"].status is GateStatus.NOT_CHECKED
+    assert gates["frame_set_aside"].status is GateStatus.NOT_CHECKED
 
 
-def test_a_failed_quarantine_gate_reaches_the_summary() -> None:
+def test_a_failed_set_aside_gate_reaches_the_summary() -> None:
     """The real builder keeps a failed gate and its reason."""
     summary = stacking_tasks._build_stack_quality_summary(
         target=make_target(),
@@ -175,11 +175,11 @@ def test_a_failed_quarantine_gate_reaches_the_summary() -> None:
         diagnostics={},
         background_split=None,
         stacked_path=None,
-        gate_results=[failed_gate("frame_quarantine", "5 of 12 frames set aside: 5 trailed")],
+        gate_results=[failed_gate("frame_set_aside", "5 of 12 frames set aside: 5 trailed")],
     )
 
-    assert summary.gate("frame_quarantine").status is GateStatus.FAILED
-    assert summary.gate("frame_quarantine").detail == "5 of 12 frames set aside: 5 trailed"
+    assert summary.gate("frame_set_aside").status is GateStatus.FAILED
+    assert summary.gate("frame_set_aside").detail == "5 of 12 frames set aside: 5 trailed"
 
 
 MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
@@ -199,18 +199,18 @@ def recording(config_in_tmp_path: AppConfiguration) -> FrameQualityRecording:
     return FrameQualityRecording(configuration=config_in_tmp_path, calibration_library=MagicMock())
 
 
-def test_stage_hands_every_quarantine_measurement_to_the_quality_hook(
+def test_stage_hands_every_set_aside_measurement_to_the_quality_hook(
     recording: FrameQualityRecording,
 ) -> None:
-    """Kept frames' quarantine numbers reach the hook, not only moved ones."""
+    """Kept frames' set-aside numbers reach the hook, not only moved ones."""
     target = make_target()
     measurements = [
         {"path": frame.path, "roundness": 0.95, "sky_median_adu": 1000.0} for frame in target.frames
     ]
-    report = QuarantineReport(batches_judged=1, measurements=measurements)
+    report = SetAsideReport(batches_judged=1, measurements=measurements)
 
     with (
-        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(SET_ASIDE_STEP, side_effect=lambda target, frames: (list(frames), report)),
         patch(HOOK) as hook,
     ):
         run_stage(target, MEASURED_AT, recording)
@@ -228,9 +228,9 @@ def test_a_failing_quality_hook_never_stops_the_stack(
     error: Exception, recording: FrameQualityRecording
 ) -> None:
     """Any error in the hook is logged and the stack still runs."""
-    report = QuarantineReport(batches_judged=1)
+    report = SetAsideReport(batches_judged=1)
     with (
-        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(SET_ASIDE_STEP, side_effect=lambda target, frames: (list(frames), report)),
         patch(HOOK, side_effect=error),
     ):
         driver, _summary_builder = run_stage(make_target(), MEASURED_AT, recording)
@@ -240,9 +240,9 @@ def test_a_failing_quality_hook_never_stops_the_stack(
 
 def test_without_a_measurement_time_the_stage_stores_no_frame_quality() -> None:
     """No measurement time from the caller means no rows are stored."""
-    report = QuarantineReport(batches_judged=1)
+    report = SetAsideReport(batches_judged=1)
     with (
-        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(SET_ASIDE_STEP, side_effect=lambda target, frames: (list(frames), report)),
         patch(HOOK) as hook,
     ):
         run_stage(make_target())
@@ -252,9 +252,9 @@ def test_without_a_measurement_time_the_stage_stores_no_frame_quality() -> None:
 
 def test_without_a_recording_context_the_stage_stores_no_frame_quality() -> None:
     """Without the caller's recording context the stage stores nothing."""
-    report = QuarantineReport(batches_judged=1)
+    report = SetAsideReport(batches_judged=1)
     with (
-        patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
+        patch(SET_ASIDE_STEP, side_effect=lambda target, frames: (list(frames), report)),
         patch(HOOK) as hook,
     ):
         run_stage(make_target(), MEASURED_AT)

@@ -28,21 +28,22 @@ class CorrectionConfig(BaseModel):
     alignment_convergence_tolerance_arcsec: float = Field(default=30.0, gt=0.0)
     alignment_iteration_limit: int = Field(default=3, gt=0)
     alignment_divergence_tolerance_arcsec: float = Field(default=5.0, gt=0.0)
-    # Exposure of a centering frame when the equipment's measurements are not
-    # used or cannot give one (`tasks.control_tasks.centering_exposure`). 5 s:
-    # the shortest ladder step whose star count the model puts well above the
-    # solver's 10 for a 75 mm f/5.4 telescope with the ASI533MM Pro at gain 0
-    # under a dark sky (about 1.9 arcsec per pixel, 1.6 degree field). Design
-    # estimate: the model uses a photometric zero point that is still being
-    # checked (issue #161); the real-data check is register entry WAY-D122.
+    # Exposure of a centering frame when the equipment's measurements cannot
+    # give one (`tasks.control_tasks.centering_exposure`), and for a camera
+    # that has no stored zero point yet (the Nikon D5300). 5 s: with Siril's
+    # plate solver a 5 s frame of the 75 mm f/5.4 telescope with the
+    # ASI533MM Pro shows hundreds of stars, far above the 25 the solver
+    # needs (register entry WAY-77); the Nikon needs 40 to 100, which 5 s
+    # also gives.
     alignment_exposure_s: float = Field(
         default=5.0,
         gt=0.0,
         validation_alias=AliasChoices("alignment_exposure_s", "alignment_exposure_seconds"),
     )
-    # Off until the exposure model passes its real-data check (WAY-D122,
-    # issue #161). Until then centering uses `alignment_exposure_s`.
-    alignment_exposure_from_equipment: bool = False
+    # On since the model passed its real-data check (WAY-77, issue #182):
+    # centering takes the exposure from the equipment's measurements and falls
+    # back to `alignment_exposure_s` when an input is missing.
+    alignment_exposure_from_equipment: bool = True
 
     # Focus
     focus_sample_count: int = Field(default=9, gt=0)

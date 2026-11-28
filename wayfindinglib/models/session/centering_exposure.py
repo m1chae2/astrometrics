@@ -65,7 +65,11 @@ class CenteringExposure(BaseModel):
     catalog_limit_magnitude : `float` or `None`
         Faintest magnitude of the installed star catalog.
     zero_point_mag : `float` or `None`
-        Median Gaia G zero point of recent frames, for ADU per second.
+        Gaia G zero point the model used, for ADU per second: the median of
+        recent frames, after the correction of a stored value above its
+        physical ceiling when `zero_point_corrected` is `True`.
+    zero_point_corrected : `bool`
+        Whether the stored zero point was corrected before use.
     zero_point_frame_count : `int`
         Frames the zero point and the star width were taken from.
     star_width_arcsec : `float` or `None`
@@ -99,6 +103,7 @@ class CenteringExposure(BaseModel):
     catalog_is_lower_bound: bool = False
     catalog_limit_magnitude: float | None = None
     zero_point_mag: float | None = None
+    zero_point_corrected: bool = False
     zero_point_frame_count: int = 0
     star_width_arcsec: float | None = None
     sky_rate_e_per_s_per_px: float | None = None

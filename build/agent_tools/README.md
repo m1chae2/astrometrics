@@ -23,6 +23,7 @@ They were written during issue #94. The full test suites are left to continuous 
 | `validate_plate_solution_check.py` | Runs the plate-solution check on real frames with shifted solutions (run a copy of it through `realrun.sh`) |
 | `benchmark_star_query.py [--stars N] [--points P]` | Builds a made-up star library in a temporary folder and times `stars.query()` with and without light curves |
 | `plate_solver_study/` | Compares solve-field with Siril's own plate solver on copies of library frames and judges each solution against Gaia DR3; writes only into a study folder given with `--study` (see its README) |
+| `centering_exposure_study/` | Measures how few stars Siril's plate solver needs on weakened copies of library frames, and checks the centering exposure calculator against real frames and Siril; writes only into a study folder given with `--study` (see its README) |
 
 `<checkout>` is the folder name of a checkout that sits beside this one, such as `astrometrics` or
 a worktree named `astrometrics-<something>`. The full test suites are left to continuous

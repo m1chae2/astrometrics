@@ -738,6 +738,10 @@ wayfindinglib/tasks/control_tasks/alignment_history.py,query_alignment_nights.of
 wayfindinglib/tasks/control_tasks/centering.py,IMAGE_WAIT_SECONDS,Wait timeout; plumbing
 wayfindinglib/tasks/control_tasks/centering.py,SETTLE_SECONDS,Decided not tuning in the #175 review (WAY-D139): operational wait after a slew
 wayfindinglib/tasks/control_tasks/centering_exposure.py,ARCSEC_PER_RADIAN,unit or physical constant
+wayfindinglib/tasks/control_tasks/centering_exposure.py,GAIA_COLLECTING_AREA_M2,Published constant: the light-collecting area of Gaia's telescope (WAY-77)
+wayfindinglib/tasks/control_tasks/centering_exposure.py,GAIA_G_ZERO_POINT_ELECTRONS_MAG,Published constant: Gaia's own G zero point (Riello et al. 2021; WAY-77)
+wayfindinglib/tasks/control_tasks/centering_exposure.py,STORED_ZERO_POINT_CORRECTION_MAG,Measured offset of one stored value that the code corrects at the point of use; it leaves when photometry stores a correct value (WAY-77)
+wayfindinglib/tasks/control_tasks/centering_exposure.py,ZERO_POINT_CEILING_MARGIN_MAG,Plausibility margin of a physical upper limit; a check on a stored value and not a tuned measurement (WAY-77)
 wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_BACKLASH_STEPS,Input sanity limit
 wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC,Input sanity limit
 wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL,Input sanity limit

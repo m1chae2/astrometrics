@@ -192,12 +192,13 @@ def center_on(
     target_name : `str`, optional
         Name stored with each recorded attempt.
     exposure_s : `float`, optional
-        Exposure length of each centering frame. When omitted it is the
-        ``alignment_exposure_s`` setting. With
-        ``alignment_exposure_from_equipment`` on, it is chosen once, before
-        the first frame, by `choose_centering_exposure`: the shortest
-        exposure expected to show enough stars to solve, or the setting when
-        an input is missing.
+        Exposure length of each centering frame. When omitted, and with
+        ``alignment_exposure_from_equipment`` on (the default), it is chosen
+        once, before the first frame, by `choose_centering_exposure`: the
+        shortest exposure expected to show enough stars for Siril's plate
+        solver, or the ``alignment_exposure_s`` setting when an input is
+        missing. With the switch off it is the ``alignment_exposure_s``
+        setting.
 
     Returns
     -------

@@ -24,6 +24,7 @@ from wayfindinglib.models.session.sky_rate_prediction import SkyRatePrediction
 from wayfindinglib.tasks.control_tasks import centering_exposure
 from wayfindinglib.tasks.control_tasks.centering_exposure import (
     EXPOSURE_LADDER_SECONDS,
+    STORED_ZERO_POINT_CORRECTION_MAG,
     SensorAndSky,
     choose_centering_exposure,
     choose_exposure,
@@ -31,6 +32,8 @@ from wayfindinglib.tasks.control_tasks.centering_exposure import (
     point_source_signal_to_noise,
     predict_star_counts,
     star_electrons,
+    zero_point_ceiling,
+    zero_point_for_use,
 )
 from wayfindinglib.test.camera_profile_support import NO_CAMERAS
 
@@ -124,8 +127,8 @@ def test_the_shortest_step_that_reaches_the_target_is_picked() -> None:
 
 
 def test_enough_stars_at_the_first_step_gives_the_shortest_exposure() -> None:
-    """Many bright stars: the minimum, 1 s, is enough."""
-    exposure, trials, reaches, _ = choose_exposure(_sensor(), _field({8.0: 40}))
+    """Many bright stars (more than the target of 700): 1 s is enough."""
+    exposure, trials, reaches, _ = choose_exposure(_sensor(), _field({8.0: 900}))
     assert exposure == EXPOSURE_LADDER_SECONDS.default[0]
     assert len(trials) == 1
     assert reaches is True
@@ -259,7 +262,7 @@ def stand_ins(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         a missing sky model.
     """
     knobs: dict[str, Any] = {"sky": SkyRatePrediction(sky_rate_e_per_s_per_px=1.0)}
-    telescope = SimpleNamespace(name="Scope", focal_length_mm=405.0)
+    telescope = SimpleNamespace(name="Scope", focal_length_mm=405.0, aperture_mm=75.0)
     camera = SimpleNamespace(name="Cam", pixel_size_um=3.76, sensor_width_px=3008, sensor_height_px=3008)
     catalog = SimpleNamespace(active_telescope=lambda: telescope, active_camera=lambda: camera)
     knobs["catalog"] = catalog
@@ -294,7 +297,7 @@ GOOD = _Quality([20.0] * 10, [3.6] * 10)
 
 def test_the_inputs_give_a_computed_exposure(stand_ins: dict[str, Any]) -> None:
     """With every input, the result is computed and carries its numbers."""
-    result = _choose(_context(GOOD), [16.5] * 30)
+    result = _choose(_context(GOOD), [16.5] * 900)
     assert result.source == "computed"
     assert result.exposure_s in EXPOSURE_LADDER_SECONDS.default
     assert result.reaches_target is True
@@ -307,15 +310,15 @@ def test_the_inputs_give_a_computed_exposure(stand_ins: dict[str, Any]) -> None:
 
 def test_zero_points_without_a_setting_take_their_frames_setting(stand_ins: dict[str, Any]) -> None:
     """A zero point with no setting takes its frame's setting."""
-    result = _choose(_context(_Quality([20.0] * 10, [3.6] * 10, zero_point_setting=None)), [16.5] * 30)
+    result = _choose(_context(_Quality([20.0] * 10, [3.6] * 10, zero_point_setting=None)), [16.5] * 900)
     assert result.source == "computed"
     assert result.zero_point_mag == pytest.approx(20.0)
 
 
 def test_the_star_width_in_pixels_sets_the_noise_area(stand_ins: dict[str, Any]) -> None:
     """A wider star needs a longer exposure for the same field."""
-    narrow = _choose(_context(_Quality([20.0] * 10, [2.0] * 10)), [16.5] * 30)
-    wide = _choose(_context(_Quality([20.0] * 10, [8.0] * 10)), [16.5] * 30)
+    narrow = _choose(_context(_Quality([20.0] * 10, [2.0] * 10)), [16.5] * 900)
+    wide = _choose(_context(_Quality([20.0] * 10, [8.0] * 10)), [16.5] * 900)
     assert wide.exposure_s >= narrow.exposure_s
 
 
@@ -337,7 +340,7 @@ def test_each_missing_input_gives_the_fixed_setting_and_says_why(
     stand_ins: dict[str, Any], what: str, expected: str
 ) -> None:
     """A missing input gives the fixed 5 s setting and the reason."""
-    quality, profile, stars, status = GOOD, None, [16.5] * 30, None
+    quality, profile, stars, status = GOOD, None, [16.5] * 900, None
     if what == "no zero point":
         quality = _Quality([], [3.6])
     elif what == "few zero points":
@@ -369,13 +372,13 @@ def test_a_changed_fallback_setting_is_used(stand_ins: dict[str, Any]) -> None:
     """The fallback follows `alignment_exposure_s`."""
     context = _context(_Quality([], []))
     context.correction_config = CorrectionConfig(alignment_exposure_s=8.0)
-    assert _choose(context, [16.5] * 30).exposure_s == pytest.approx(8.0)
+    assert _choose(context, [16.5] * 900).exposure_s == pytest.approx(8.0)
 
 
 def test_a_partial_catalog_is_flagged_in_the_result(stand_ins: dict[str, Any]) -> None:
     """A catalog still downloading gives a lower bound, said so."""
     status = {"installed": True, "complete": False, "magnitude_limit": 20.7}
-    result = _choose(_context(GOOD), [16.5] * 30, status)
+    result = _choose(_context(GOOD), [16.5] * 900, status)
     assert result.catalog_is_lower_bound is True
     assert "at least" in result.reason
 
@@ -441,3 +444,66 @@ def test_predict_star_counts_names_a_missing_input(stand_ins: dict[str, Any]) ->
     assert facts == {}
     assert missing is not None
     assert "zero point" in missing
+
+
+# -- The stored zero point and its physical ceiling -------------------------
+
+
+def test_the_ceiling_of_a_75_mm_telescope_matches_a_hand_calculation() -> None:
+    """25.6874 + 2.5 log10(0.0044179 / 0.7278) - 2.5 log10(0.783) = 20.411."""
+    assert zero_point_ceiling(75.0, 0.783) == pytest.approx(20.411, abs=1e-3)
+
+
+def test_the_ceiling_rises_with_the_area_and_falls_with_the_gain() -> None:
+    """A larger mirror collects more; more electrons per ADU give fewer ADU."""
+    assert zero_point_ceiling(150.0, 1.0) == pytest.approx(
+        zero_point_ceiling(75.0, 1.0) + 2.5 * math.log10(4)
+    )
+    assert zero_point_ceiling(75.0, 2.0) == pytest.approx(zero_point_ceiling(75.0, 1.0) - 2.5 * math.log10(2))
+
+
+def test_a_possible_zero_point_is_used_as_stored() -> None:
+    """The measured 19.46 of the 75 mm telescope is below its ceiling."""
+    assert zero_point_for_use(19.46, 75.0, 0.783) == (19.46, False)
+
+
+def test_a_zero_point_above_the_ceiling_is_corrected() -> None:
+    """The stored 25.25 of that telescope is not real, so it is corrected."""
+    value, corrected = zero_point_for_use(25.25, 75.0, 0.783)
+    assert corrected is True
+    assert value == pytest.approx(25.25 + STORED_ZERO_POINT_CORRECTION_MAG)
+    assert value == pytest.approx(19.46, abs=0.01)
+
+
+def test_the_correction_waits_for_the_margin() -> None:
+    """A value a little above the ceiling is left alone."""
+    ceiling = zero_point_ceiling(75.0, 0.783)
+    assert zero_point_for_use(ceiling + 0.3, 75.0, 0.783)[1] is False
+    assert zero_point_for_use(ceiling + 0.7, 75.0, 0.783)[1] is True
+
+
+def test_without_an_aperture_the_stored_value_is_used() -> None:
+    """No aperture means no ceiling, so no correction."""
+    assert zero_point_for_use(25.25, None, 0.783) == (25.25, False)
+
+
+def test_a_stored_zero_point_above_the_ceiling_is_reported_corrected(stand_ins: dict[str, Any]) -> None:
+    """The choice uses the corrected zero point and says so."""
+    result = _choose(_context(_Quality([25.0] * 10, [3.6] * 10)), [16.5] * 900)
+    assert result.source == "computed"
+    assert result.zero_point_corrected is True
+    assert result.zero_point_mag == pytest.approx(25.0 + STORED_ZERO_POINT_CORRECTION_MAG)
+    assert _choose(_context(GOOD), [16.5] * 900).zero_point_corrected is False
+
+
+def test_the_default_target_is_the_measured_one() -> None:
+    """The target is 700 catalog stars (register entry WAY-77)."""
+    from astrometricslib.parameters import resolve_parameter
+    from wayfindinglib.tasks.control_tasks.centering_exposure import TARGET_STAR_COUNT
+
+    assert resolve_parameter(TARGET_STAR_COUNT).value == 700
+
+
+def test_centering_takes_the_exposure_from_the_equipment_by_default() -> None:
+    """The switch is on unless a person turns it off."""
+    assert CorrectionConfig().alignment_exposure_from_equipment is True

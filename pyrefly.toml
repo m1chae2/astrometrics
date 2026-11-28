@@ -21,6 +21,7 @@ search-path = [
     # setup step are plain modules next to each other that import each other
     # by name, like the TPM harness above.
     "build/agent_tools/plate_solver_study",
+    "build/agent_tools/centering_exposure_study",
     "build/linux/siril_gpu",
 ]
 

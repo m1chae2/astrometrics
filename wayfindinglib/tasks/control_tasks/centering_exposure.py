@@ -96,19 +96,30 @@ measured for this mount). Design estimate, register row WAY-D122."""
 
 TARGET_STAR_COUNT = TunedParameter(
     name="wayfinding.target_star_count",
-    default=15,
+    default=700,
     unit="stars",
-    description="Detectable catalog stars the centering exposure should reach.",
+    description="Catalog stars the model expects in the field's inscribed circle at the centering exposure.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
-    register_entry="WAY-D122",
+    register_entry="WAY-77",
 )
-"""Detectable catalog stars the exposure should reach. The local solver
-needs at least 10 detected sources (`MINIMUM_SOURCES_FOR_LOCAL_SOLVE`), and a
-detection list also holds hot pixels and merged pairs and misses stars the
-model counts, so 15 leaves a margin of half again. Design estimate, register
-row WAY-D122."""
+"""Catalog stars, counted by the model inside the field's largest inscribed
+circle, that the exposure should reach (register entry WAY-77). Measured on
+real ZWO ASI533MM frames of four fields (M 13, M 31, M 81, NGC 2403), each
+made into shorter exposures and solved with Siril from the header position.
+Siril solved a copy when the model counted 472 stars or more in the circle
+(M 13, whose 254-star copy failed) and every copy it was given down to 206
+to 444 on the other three fields, so 472 is the least that solved on all.
+A margin of 1.5 gives 708, which is 700. At 472 Siril matched 31 stars, and
+cut-down frames solved with 20 to 25 bright stars in the frame, so the count
+is far above what the solver strictly needs: the model counts every catalog
+star above its limit, while a short frame holds fewer than a count says
+(1.3 to 2.6 times fewer for the 5-sigma star finder) and Siril finds fewer
+still. The Nikon D5300 frames needed more stars (40 to 100 bright ones in a
+cut-down frame); the Nikon has no stored zero point yet, so it uses the fixed
+exposure. The old target, 15, was the 10 sources the solve-field driver
+needs, which Siril's driver does not apply."""
 
 DETECTION_SIGNAL_TO_NOISE = TunedParameter(
     name="wayfinding.detection_signal_to_noise",
@@ -170,6 +181,34 @@ FWHM_PER_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
 
 ARCSEC_PER_RADIAN = 206264.806
 """Arcseconds in a radian."""
+
+GAIA_G_ZERO_POINT_ELECTRONS_MAG = 25.6874
+"""Gaia's own G zero point: a star of magnitude ``G`` gives
+``10**(0.4 (25.6874 - G))`` electrons per second in Gaia's telescope (Riello
+et al. 2021, Astronomy and Astrophysics 649, A3, the Gaia EDR3 G band)."""
+
+GAIA_COLLECTING_AREA_M2 = 0.7278
+"""The light-collecting area of Gaia's telescope, in square meters, for which
+`GAIA_G_ZERO_POINT_ELECTRONS_MAG` holds."""
+
+ZERO_POINT_CEILING_MARGIN_MAG = 0.5
+"""How far above its physical ceiling a stored zero point may sit before it is
+treated as wrong. Half a magnitude covers a gain, an aperture and a catalog
+band that differ a little from the ones assumed. Judgment, register entry
+WAY-77."""
+
+STORED_ZERO_POINT_CORRECTION_MAG = -5.79
+"""What is added to a stored zero point that lies above its physical ceiling.
+Measured on four real M 31 frames of the ASI533MM Pro on the 75 mm f/5.4
+telescope (20, 30, 60 and 120 s): the stored zero point was 25.24 to 25.27
+(the same for every exposure, so the photometry run did divide by the
+exposure) and the photometry code's own per-frame worker, run on the same
+frames, gave 19.46, so the stored value is 5.79 magnitudes too bright. The
+cause is not found. The photometry pipeline is not changed here (stored values
+change only by agreement), so this module corrects the value where it uses
+it. The correction applies only to a value above the ceiling, so it drops out
+by itself when photometry stores a correct value. Measured, register entry
+WAY-77."""
 
 
 @dataclass(frozen=True)
@@ -391,6 +430,9 @@ class _Equipment:
         The telescope's focal length and the camera's pixel pitch.
     width_px, height_px : `int`
         The sensor size, in pixels.
+    aperture_mm : `float` or `None`
+        The objective's diameter (focal length over focal ratio), or `None`
+        when the focal ratio is not set.
     """
 
     camera_name: str
@@ -399,6 +441,67 @@ class _Equipment:
     pixel_size_um: float
     width_px: int
     height_px: int
+    aperture_mm: float | None = None
+
+
+def zero_point_ceiling(aperture_mm: float, gain_e_per_adu: float) -> float:
+    """Give the highest zero point a telescope and camera can physically have.
+
+    A perfect system (every photon of the band counted) would give a star of
+    Gaia G magnitude ``G`` the electron rate of Gaia's own telescope scaled by
+    the area ratio. Any real system gives less, so no true zero point lies
+    above this one.
+
+    Parameters
+    ----------
+    aperture_mm : `float`
+        The diameter of the telescope's objective, in millimeters.
+    gain_e_per_adu : `float`
+        Electrons per ADU.
+
+    Returns
+    -------
+    ceiling_mag : `float`
+        ``25.6874 + 2.5 log10(area / 0.7278 m^2) - 2.5 log10(gain)``, in the
+        convention ``m + 2.5 log10(ADU per second)``.
+    """
+    area = math.pi * (aperture_mm / 2000.0) ** 2
+    return (
+        GAIA_G_ZERO_POINT_ELECTRONS_MAG
+        + 2.5 * math.log10(area / GAIA_COLLECTING_AREA_M2)
+        - 2.5 * math.log10(gain_e_per_adu)
+    )
+
+
+def zero_point_for_use(
+    stored_mag: float, aperture_mm: float | None, gain_e_per_adu: float
+) -> tuple[float, bool]:
+    """Give the zero point the exposure model should use.
+
+    The stored value is used as it is, unless it lies more than
+    `ZERO_POINT_CEILING_MARGIN_MAG` above `zero_point_ceiling`, which no real
+    telescope can reach. Then `STORED_ZERO_POINT_CORRECTION_MAG` is added.
+
+    Parameters
+    ----------
+    stored_mag : `float`
+        The median stored Gaia G zero point.
+    aperture_mm : `float` or `None`
+        The objective's diameter. Without it the stored value is used.
+    gain_e_per_adu : `float`
+        Electrons per ADU.
+
+    Returns
+    -------
+    zero_point_mag, corrected : `tuple`
+        The value to use, and whether the correction was applied.
+    """
+    if aperture_mm is None or aperture_mm <= 0.0 or gain_e_per_adu <= 0.0:
+        return stored_mag, False
+    ceiling = zero_point_ceiling(aperture_mm, gain_e_per_adu)
+    if stored_mag > ceiling + ZERO_POINT_CEILING_MARGIN_MAG:
+        return stored_mag + STORED_ZERO_POINT_CORRECTION_MAG, True
+    return stored_mag, False
 
 
 def _active_equipment(context: ControlContext) -> _Equipment:
@@ -430,6 +533,7 @@ def _active_equipment(context: ControlContext) -> _Equipment:
         pixel_size_um=camera.pixel_size_um,
         width_px=camera.sensor_width_px,
         height_px=camera.sensor_height_px,
+        aperture_mm=telescope.aperture_mm,
     )
 
 
@@ -574,9 +678,11 @@ def _sensor_numbers(
     )
     if prediction.sky_rate_e_per_s_per_px is None:
         raise _MissingInputError(f"no sky rate prediction ({prediction.message.strip()})")
+    gain = float(entry.gain_e_per_adu.value)
+    zero_point_mag, zero_point_corrected = zero_point_for_use(zero_point[0], equipment.aperture_mm, gain)
     sensor = SensorAndSky(
-        zero_point_mag=zero_point[0],
-        gain_e_per_adu=float(entry.gain_e_per_adu.value),
+        zero_point_mag=zero_point_mag,
+        gain_e_per_adu=gain,
         read_noise_e=float(entry.read_noise_e.value),
         sky_rate_e_per_s_per_px=prediction.sky_rate_e_per_s_per_px,
         star_width_px=width[0] / pixel_scale,
@@ -588,6 +694,7 @@ def _sensor_numbers(
         "pixel_scale_arcsec": pixel_scale,
         "field_radius_deg": field_radius,
         "zero_point_frame_count": zero_point[1],
+        "zero_point_corrected": zero_point_corrected,
         "star_width_arcsec": width[0],
         "setting_key": baseline_key(setting),
     }
@@ -826,6 +933,7 @@ def choose_centering_exposure(
         catalog_is_lower_bound=lower_bound,
         catalog_limit_magnitude=catalog_limit,
         zero_point_mag=sensor.zero_point_mag,
+        zero_point_corrected=facts["zero_point_corrected"],
         zero_point_frame_count=facts["zero_point_frame_count"],
         star_width_arcsec=facts["star_width_arcsec"],
         sky_rate_e_per_s_per_px=sensor.sky_rate_e_per_s_per_px,

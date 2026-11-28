@@ -531,7 +531,7 @@ limited to the sampled range, so a poorly conditioned fit cannot command an extr
 <!-- impl: wayfindinglib.tasks.control_tasks.focus_correction.sample_focus_curve -->
 <!-- impl: wayfindinglib.analytics.pointing_model.predict_pointing_error -->
 
-Centering plate solves a short exposure, stops when the error is within tolerance, else syncs and slews again. The exposure is the shortest whose limiting magnitude shows enough catalog stars: where $S/\sqrt{S + n(Bt + R^2)}$ ($S$ star signal, $n$ pixels, $B$ sky, $R$ read noise, $t$ time) reaches the detection threshold. A missing input gives a fixed one (WAY-D122).
+Centering plate solves a short exposure, stops when the error is within tolerance, else syncs and slews again. The exposure is the shortest whose limiting magnitude shows enough catalog stars ([WAY-77](validation/wayfinding.md#way-77)): where $S/\sqrt{S + n(Bt + R^2)}$ ($S$ star signal, $n$ pixels, $B$ sky, $R$ read noise, $t$ time) reaches the detection threshold. A missing input gives a fixed one (WAY-D122).
 
 <!-- impl: wayfindinglib.tasks.control_tasks.centering.center_on -->
 <!-- impl: wayfindinglib.tasks.control_tasks.centering_exposure.choose_centering_exposure -->

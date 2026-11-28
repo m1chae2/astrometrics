@@ -17,7 +17,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 
 ## Checks on the models
 
-- `check_centering_exposure.py` tests the centering exposure model (`control.mount.get_centering_exposure`). For one target it takes real light frames, predicts the catalog star count of each from the frame's exposure, time and pointing, detects the stars in the frame with a 5-sigma star finder, and prints the ratio of the two. The medians and the share within a factor of 2 go in the validation register (row WAY-D122).
+- `check_centering_exposure.py` tests the centering exposure model (`control.mount.get_centering_exposure`). For one target it takes real light frames, predicts the catalog star count of each from the frame's exposure, time and pointing, detects the stars in the frame with a 5-sigma star finder, and prints the ratio of the two. The medians and the share within a factor of 2 go in the validation register (entry WAY-77).
   - It reads frames and writes nothing. Run it on the data copy with `build/agent_tools/realrun.sh`, not on the real library. Its tests, on made-up numbers, are in `test/test_check_centering_exposure.py`.
 
 ## Catalog and reference data

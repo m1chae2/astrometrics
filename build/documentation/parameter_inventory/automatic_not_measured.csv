@@ -768,7 +768,7 @@ wayfinding.phd2_settle_seconds,WAY-D147,judgment,Design estimate
 wayfinding.pulse_merge_window_seconds,WAY-D128,measurement,Design estimate
 wayfinding.session_time_margin_seconds,WAY-D141,exclusion criteria,Design estimate
 wayfinding.spurious_alignment_error_arcsec,WAY-D124,exclusion criteria,Design estimate
-wayfinding.target_star_count,WAY-D122,measurement,Design estimate
+wayfinding.target_star_count,WAY-77,measurement,Partly measured
 wayfinding.tracking_checks,WAY-D140,hardware limit,Design estimate
 wayfinding.tracking_retry_seconds,WAY-D140,hardware limit,Design estimate
 wayfinding.tuning_guide_pause_limit_seconds,WAY-D126,measurement,Design estimate

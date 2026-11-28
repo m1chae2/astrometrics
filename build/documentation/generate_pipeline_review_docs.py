@@ -3662,8 +3662,9 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 1. **Temperature gap above <<dark_tol>> °C.** The nearest dark is applied with a soft flag;
    `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
 2. **Bad frames.** The cloud and target alignment check moves frames with too few stars,
-   non-round stars or a pointing off the target to `_excluded`. A batch
-   whose share of bad frames is above <<quarantine>> moves nothing and `frame_quarantine` fails.
+   non-round stars or a pointing off the target to `_excluded`. It moves every failing frame.
+   A batch whose share of bad frames is above <<quarantine>> only draws a warning, and
+   `frame_quarantine` fails as a warning.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R
    > <<degrade>>$ in `stack_sharpness`.
 4. **Over-subtraction.** `zero_pixel_fraction` and `negative_pixels` catch darks or biases that

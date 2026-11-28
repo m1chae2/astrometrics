@@ -12,7 +12,7 @@ import { formatExposureSeconds } from './stackFormatting';
  * with it. The same frame checks also set aside frames of a different gain or sky level.
  */
 export const SET_ASIDE_PURPOSE =
-    'Frames are set aside by a cloud and target alignment check: clouds, stars smeared into streaks, or a frame not pointed at the target. Nothing is deleted.';
+    'Frames are set aside by a cloud and target alignment check: clouds or stars smeared into streaks, or a frame not pointed at the target. Nothing is deleted.';
 
 /** The library folder names that start the part of a calibration path worth showing. */
 const CALIBRATION_ROOT_FOLDERS = ['darks', 'biases', 'flats'];

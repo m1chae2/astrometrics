@@ -201,7 +201,7 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 ## 6. Degraded states and fallback pathways
 
 1. **Temperature gap above 3 °C.** The nearest dark is applied with a soft flag; `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
-2. **Bad frames.** The cloud and target alignment check moves frames with too few stars, non-round stars or a pointing off the target to `_excluded`. A batch whose share of bad frames is above 0.25 moves nothing and `frame_quarantine` fails.
+2. **Bad frames.** The cloud and target alignment check moves frames with too few stars, non-round stars or a pointing off the target to `_excluded`. It moves every failing frame. A batch whose share of bad frames is above 0.25 only draws a warning, and `frame_quarantine` fails as a warning.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R > 1.2$ in `stack_sharpness`.
 4. **Over-subtraction.** `zero_pixel_fraction` and `negative_pixels` catch darks or biases that remove more than the sky, which pushes pixels to zero or below.
 5. **A dropped exposure group.** The combined stack is still written, and `exposure_groups_combined` fails.

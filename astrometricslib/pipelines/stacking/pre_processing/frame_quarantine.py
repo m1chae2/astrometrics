@@ -1,9 +1,9 @@
 """Checks frames for clouds and for alignment on the target.
 
 This is a cloud and target alignment check. The cloud check looks for few
-stars and an uneven sky. The target alignment check looks for a pointing off
-the session's field (or at another field) and for stars smeared by drift, which
-means the mount did not hold the target. Siril's stack filters have no
+stars, an uneven sky with dimmer stars, and stars smeared into streaks. The
+target alignment check looks for a pointing off the session's field or at
+another field. Siril's stack filters have no
 uneven-sky or off-field check, give no reason for each frame and do not move
 frames where the user can see and restore them, so the project keeps this step.
 
@@ -1002,10 +1002,10 @@ def judge_batch_in_full(
 ) -> tuple[list[QuarantineDecision], list[QuarantineDecision], list[str]]:
     """Pick the batch frames that fail the cloud and alignment check.
 
-    The cloud rules are few stars and an uneven sky. The target alignment
-    rules are a center off the session's field and trailed stars (the mount
-    did not hold the target). Four rules are tried on every frame, and a
-    frame that breaks several is reported for each (see `RuleFinding`):
+    The cloud rules are few stars, an uneven sky and trailed stars. The
+    target alignment rule is a center off the session's field. Four rules are
+    tried on every frame, and a frame that breaks several is reported for each
+    (see `RuleFinding`):
 
     - Trailed stars: the frame's stored star elongation is above both
       `TRAILED_ELONGATION_LIMIT` and the batch median plus the rise

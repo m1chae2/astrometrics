@@ -47,17 +47,17 @@ A frame that disagrees with the others is excluded rather than stacked. The pipe
 
 ### Frame quarantine
 
-**What it is for.** It is a cloud and target alignment check. It finds frames shot through cloud and frames that are not aligned on the target (off the field, another field, or smeared because the mount drifted during the exposure), and moves them out of the stack. It compares each frame with the other frames of its own session. It moves a frame when it fails one of these rules.
+**What it is for.** It is a cloud and target alignment check. It finds frames shot through cloud (few stars, an uneven sky, or stars smeared into streaks) and frames that are not aligned on the target (off the field, or another field), and moves them out of the stack. It compares each frame with the other frames of its own session. It moves a frame when it fails one of these rules.
 
 *Cloud check:*
 
 - it has fewer stars than half the session median (cloud, fog or heavy trailing);
+- its stars are more elongated than the session's. Elongation is a star's long width divided by its short width, 1.0 for a circle, taken from the stored `frame.star_elongation`. The step moves the frame when elongation is above 1.32 and at least 0.12 above the session median (0.22 for a color camera). Smeared stars are treated as a loss of star quality, like cloud. The register separates "trailed from round" from "clouded from clear" (partly measured; see [STK-01](../../../documentation/library_design/validation/stacking.md#stk-01));
 - its sky is uneven across the frame and its stars suffer too (cloud): the sky in a 4 by 4 grid differs from the session's usual pattern by 5 robust spreads and at least 0.01, and the star transparency (the geometric mean of the star count and the bright-star flux, each as a share of the session median) is below 0.83. An uneven sky with normal stars (a gradient, a glow or a tree in a corner) is kept and flagged "uneven sky (gradient or obstruction)".
 
 *Target alignment check:*
 
-- its center lies more than 0.10 of the frame width from the session's main pointing (the median center). A frame turned half a revolution by a meridian flip that points at the same field is not off the field. A deliberate second field (at least 2 frames and 15% of the session at another pointing) is set aside too, with the reason "Other field (n frames): not in this stack", so you can see it and put it back if you want it;
-- its stars are more elongated than the session's, which means the target moved on the sensor during the exposure. Elongation is a star's long width divided by its short width, 1.0 for a circle, taken from the stored `frame.star_elongation`. The step moves the frame when elongation is above 1.32 and at least 0.12 above the session median (0.22 for a color camera). This rule sits here because trailing is a pointing failure (the mount did not hold the target), not a sky failure. The register separates it as "trailed from round", beside "clouded from clear" (partly measured; see [STK-01](../../../documentation/library_design/validation/stacking.md#stk-01)).
+- its center lies more than 0.10 of the frame width from the session's main pointing (the median center). A frame turned half a revolution by a meridian flip that points at the same field is not off the field. A deliberate second field (at least 2 frames and 15% of the session at another pointing) is set aside too, with the reason "Other field (n frames): not in this stack", so you can see it and put it back if you want it.
 
 **Why Siril does not do it.** Siril's stack filters (star count, roundness, FWHM and background) have no check like the uneven-sky grid or the off-field test. They give no reason for each frame and do not move a frame to `_excluded`, where you can see it and put it back. So the project keeps its own step.
 

@@ -60,28 +60,3 @@ def test_failed_warmup_still_marks_ready(mocker: MockerFixture, unfinished_warmu
     startup.warm_start_up_caches()
 
     assert startup.sky_catalog_warmup_finished.is_set()
-
-
-def test_warmup_loads_earth_orientation_data_before_marking_ready(
-    mocker: MockerFixture, unfinished_warmup: None
-) -> None:
-    """The table is loaded under the splash, not on the first click."""
-    mocker.patch.object(startup, "container")
-    warm = mocker.patch.object(startup, "warm_earth_orientation_data", return_value=0.1)
-
-    startup.warm_start_up_caches()
-
-    warm.assert_called_once()
-    assert startup.sky_catalog_warmup_finished.is_set()
-
-
-def test_failed_earth_orientation_warmup_still_marks_ready(
-    mocker: MockerFixture, unfinished_warmup: None
-) -> None:
-    """A failure loading that table must not lock the user out of the app."""
-    mocker.patch.object(startup, "container")
-    mocker.patch.object(startup, "warm_earth_orientation_data", side_effect=RuntimeError("table unreadable"))
-
-    startup.warm_start_up_caches()
-
-    assert startup.sky_catalog_warmup_finished.is_set()

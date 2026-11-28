@@ -290,7 +290,6 @@ def test_start_up_warm_up_loads_the_quality_metric_list(monkeypatch: pytest.Monk
     """The start-up warm-up builds the quality metric list (public API)."""
     fake_container = MagicMock()
     monkeypatch.setattr(startup, "container", fake_container)
-    monkeypatch.setattr(startup, "warm_earth_orientation_data", MagicMock(return_value=0.1))
 
     startup.warm_start_up_caches()
 
@@ -306,7 +305,6 @@ def test_the_cache_warm_ups_log_a_failure_as_a_warning(
     fake_container.wayfinder.planning.catalogs.query_sources.side_effect = RuntimeError("no catalog")
     fake_container.wayfinder.review.nights.query.side_effect = RuntimeError("no nights")
     monkeypatch.setattr(startup, "container", fake_container)
-    monkeypatch.setattr(startup, "warm_earth_orientation_data", MagicMock(side_effect=RuntimeError("iers")))
     fake_container.stellar_service.warm_catalog_summary_cache.side_effect = RuntimeError("cache")
 
     with caplog.at_level("DEBUG"):

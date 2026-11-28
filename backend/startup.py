@@ -31,7 +31,6 @@ import sys
 import threading
 import time
 
-from astrometricslib import warm_earth_orientation_data
 from backend.container import container
 from backend.services.infrastructure.background_logging import background_log_context
 
@@ -101,8 +100,6 @@ def warm_start_up_caches() -> None:
 
     * the Planetarium's star catalog, which the first `planetarium:get_sources`
       request would otherwise load while the user waits on an empty sky;
-    * astropy's Earth-orientation table, read by the first altitude/azimuth
-      conversion;
     * the Astronomy Manager's stellar summary cache;
     * the list of quality metrics. Building it imports every pipeline's
       metric list and SciPy's statistics module, which otherwise costs about
@@ -122,16 +119,6 @@ def warm_start_up_caches() -> None:
             # Warm-up runs in the background; a failure only makes the first
             # request slower, so it is logged and the server keeps going.
             logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow", exc_info=True)
-
-    def warm_earth_orientation() -> None:
-        """Load astropy's Earth-orientation table."""
-        try:
-            elapsed = warm_earth_orientation_data()
-            logger.info("Earth-orientation data loaded in %.1fs", elapsed)
-        except Exception:
-            logger.warning(
-                "Earth-orientation warm-up failed; the first star click will be slow", exc_info=True
-            )
 
     def warm_stellar_summaries() -> None:
         """Fill the stellar catalog summary cache."""
@@ -158,7 +145,7 @@ def warm_start_up_caches() -> None:
     try:
         steps = [
             threading.Thread(target=step, name=step.__name__, daemon=True)
-            for step in (warm_sky, warm_earth_orientation, warm_stellar_summaries, warm_quality_metrics)
+            for step in (warm_sky, warm_stellar_summaries, warm_quality_metrics)
         ]
         for step_thread in steps:
             step_thread.start()

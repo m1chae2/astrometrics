@@ -233,6 +233,14 @@ RENAMES: dict[str, str] = {
     "astrometricslib.drivers.tile_of_source_id": "nothing public (a private sky-tile helper)",
     "astrometricslib.drivers.tiles_for_cone": "nothing public (a private sky-tile helper)",
     "astrometricslib.drivers.tiles_for_footprint": "nothing public (a private sky-tile helper)",
+    # Issue #182: astropy's offline setup and table warm-up are private.
+    "astrometricslib.configure_offline_iers": (
+        "nothing: astropy is set offline when astrometricslib is imported, so the call is not needed"
+    ),
+    "astrometricslib.warm_earth_orientation_data": (
+        "nothing: Astrometrics(...) loads astropy's Earth-rotation table in the background, "
+        "so the call is not needed"
+    ),
     "astrometricslib.parameters.run_tuning": "astrometricslib.parameters.tune(...)",
     "astrometricslib.parameters.collect_tuners": "astrometricslib.parameters.tune(...)",
     "astrometricslib.parameters.read_tuned_record": "astrometricslib.parameters.tune(...)",

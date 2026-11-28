@@ -44,11 +44,10 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 31 names:
+The package root holds 29 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
-  `get_configuration`, `configure_logging`, `configure_offline_iers` and
-  `warm_earth_orientation_data`;
+  `get_configuration` and `configure_logging`;
 - the sub-API classes, which you normally reach as attributes of
   `Astrometrics` (`TargetCatalog`, with its `TargetFrames`,
   `StellarCatalog`, `ProcessingPipelines`, with its `StackingPipeline`,
@@ -99,9 +98,9 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
-from astrometricslib._internal.renames import MovedNames
+from astrometricslib._internal.renames import MovedNames, moved_module_name
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
-from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
+from astrometricslib.foundation import astropy_setup as _astropy_setup
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.jobs import register_interrupted_job_cleanup
@@ -143,7 +142,7 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 # Every program that uses the library works offline: astropy uses its bundled
 # Earth-rotation table instead of downloading a new one.
-configure_offline_iers()
+_astropy_setup.configure_offline_iers()
 
 # A restack that a program left half done has parked the old stack. Closing
 # the job puts it back.
@@ -178,14 +177,14 @@ def __getattr__(name: str) -> Any:
     resolved : `Any`
         The loaded tool.
 
-    Raises
-    ------
-    AttributeError
-        If the tool name is not recognized.
+    Notes
+    -----
+    A removed public name in the rename table raises an `ImportError` that
+    says where it went; any other unknown name raises `AttributeError`.
     """
     module_name = _DEFERRED_EXPORTS.get(name)
     if module_name is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        moved_module_name(__name__, name)
     import importlib
 
     return getattr(importlib.import_module(module_name), name)
@@ -242,6 +241,9 @@ class Astrometrics(MovedNames):
         from astrometricslib._internal.drivers.driver_set import Drivers
 
         self._build(config, None, Drivers())
+        # Load astropy's Earth-rotation table in the background, once per
+        # process, so the first altitude conversion does not wait for it.
+        _astropy_setup.start_earth_orientation_warmup()
 
     def _build(
         self,
@@ -328,7 +330,5 @@ __all__ = [
     "Telescope",
     "Visualization",
     "configure_logging",
-    "configure_offline_iers",
     "get_configuration",
-    "warm_earth_orientation_data",
 ]

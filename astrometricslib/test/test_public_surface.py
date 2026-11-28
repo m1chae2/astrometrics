@@ -87,9 +87,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "Telescope",
     "Visualization",
     "configure_logging",
-    "configure_offline_iers",
     "get_configuration",
-    "warm_earth_orientation_data",
 })
 
 EXPECTED_MODULE_NAMES = {

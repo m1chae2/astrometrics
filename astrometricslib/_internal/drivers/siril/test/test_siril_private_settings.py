@@ -26,6 +26,15 @@ from astrometricslib._internal.drivers.siril.core.settings import (
 # view of it, so this still names the real one.
 REAL_HOME = Path(os.path.expanduser("~")).resolve()
 
+# The user's own Siril settings folders on each system. A test's temporary
+# folder may itself sit under the home folder (Windows keeps it in
+# AppData\Local\Temp), so the check is against these folders, not the home.
+REAL_SIRIL_SETTINGS_FOLDERS = (
+    Path(os.environ.get("XDG_CONFIG_HOME") or REAL_HOME / ".config").resolve() / "siril",
+    REAL_HOME / ".var" / "app" / "org.siril.Siril" / "config",
+    Path(os.environ.get("LOCALAPPDATA") or REAL_HOME / "AppData" / "Local").resolve() / "siril",
+)
+
 USER_SETTINGS = """[core]
 wd=
 swap_dir=/tmp
@@ -152,9 +161,8 @@ def test_a_flatpak_siril_reads_its_settings_from_its_own_folder(monkeypatch: pyt
     monkeypatch.setenv("XDG_CONFIG_HOME", "/home/user/.config")
     monkeypatch.setattr(settings.sys, "platform", "linux")
 
-    assert (
-        user_settings_folder("flatpak run org.siril.Siril")
-        == "/home/user/.var/app/org.siril.Siril/config/siril"
+    assert user_settings_folder("flatpak run org.siril.Siril") == os.path.join(
+        "/home/user", ".var", "app", "org.siril.Siril", "config", "siril"
     )
     assert user_settings_folder("siril-cli") == os.path.join("/home/user/.config", "siril")
 
@@ -201,7 +209,8 @@ def test_no_test_reads_the_users_real_siril_settings(temporary_siril_settings_ho
     """Every settings folder a test reaches is the made-up one."""
     for siril_executable in ("siril-cli", "flatpak run org.siril.Siril"):
         folder = user_settings_folder(siril_executable)
-        assert not Path(folder).resolve().is_relative_to(REAL_HOME), folder
+        resolved = Path(folder).resolve()
+        assert not any(resolved.is_relative_to(real) for real in REAL_SIRIL_SETTINGS_FOLDERS), folder
         assert Path(folder).is_relative_to(temporary_siril_settings_home)
         assert find_user_settings_file(folder) == os.path.join(folder, "config.1.4.ini")
 

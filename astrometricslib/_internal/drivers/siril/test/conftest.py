@@ -31,6 +31,11 @@ REAL_CONFIG_HOME = os.path.realpath(os.environ.get("XDG_CONFIG_HOME") or os.path
 REAL_SIRIL_SETTINGS_FOLDERS = (
     os.path.join(REAL_CONFIG_HOME, "siril"),
     os.path.join(REAL_HOME, ".var", "app", "org.siril.Siril", "config"),
+    # Siril on Windows keeps its settings in %LOCALAPPDATA%\siril.
+    os.path.join(
+        os.path.realpath(os.environ.get("LOCALAPPDATA") or os.path.join(REAL_HOME, "AppData", "Local")),
+        "siril",
+    ),
 )
 
 # The made-up settings file the fake folders hold.

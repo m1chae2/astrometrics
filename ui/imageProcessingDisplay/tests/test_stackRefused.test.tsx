@@ -11,6 +11,7 @@ import { reportError } from '../../common/utils/reportError';
 import { useStackingJob } from '../hooks/useStackingJob';
 
 import { BackendError } from '../../common/services/backendError';
+import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 
 const refusal = new BackendError({
     code: 'invalid_argument',
@@ -27,7 +28,7 @@ vi.mock('../../common/services/imaging/processingService', () => ({
     streamJobLog: vi.fn(async () => vi.fn()),
     openSiril: vi.fn(),
 }));
-vi.mock('../../common/services/targetService', () => ({ fetchFrameStatsGrouped: vi.fn(async () => []) }));
+vi.mock('../../common/services/targetService', () => ({ requestFrameStatsGrouped: vi.fn(async () => []) }));
 vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 vi.mock('../../common/context/TargetContext', () => ({
     useTargetContext: () => ({ framesReloadKey: 0, invalidate: vi.fn() }),
@@ -41,7 +42,7 @@ describe('a refused Stack Frames click', () => {
     it('shows the refusal and starts no job', async () => {
         const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
         const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const { result } = renderHook(() => useStackingJob('M 57', true, false));
+        const { result } = renderHook(() => useStackingJob('M 57', true, false), { wrapper: createQueryClientTestWrapper().wrapper });
         await act(async () => { await result.current.startProcessing(['/a.fits', '/b.fits']); });
         expect(errorLog).not.toHaveBeenCalled();
         expect(warnLog).toHaveBeenCalled();

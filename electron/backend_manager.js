@@ -6,6 +6,7 @@ import os from 'os';
 import log from 'electron-log';
 import { getPlatform } from './platforms/index.js';
 import { checkReady, readyUrl as backendReadyUrl } from './backend_client.js';
+import { isHarnessRun } from './harness_mode.js';
 
 /**
  * Manages the backend process lifecycle.
@@ -171,11 +172,17 @@ export class BackendManager {
    * starts Electron, so a process id that no longer exists means the backend
    * crashed during start-up. Without that file there is nothing to check.
    *
+   * A TPM harness run never reads the file. The harness starts its own backend,
+   * so the file belongs to the user's real app, and an old file there would
+   * make the harness think its backend had died.
+   *
    * @private
    * @return {boolean} True only when the file names a process that is gone.
    */
   _externalBackendHasDied() {
     if (!process.env.SKIP_BACKEND || !this.app?.getAppPath) return false;
+    // The harness owns its backend; a run must not depend on the real app's files.
+    if (isHarnessRun(process.env)) return false;
     try {
       const pidFile = path.join(this.app.getAppPath(), '.run_pids', 'backend.pid');
       const pid = parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);

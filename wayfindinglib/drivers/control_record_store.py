@@ -79,6 +79,11 @@ some of those attempts at once with "database is locked" instead of waiting.
 _NIGHT_OF_TIMESTAMP = "strftime('%Y-%m-%d', timestamp - 43200, 'unixepoch', 'localtime')"
 """SQL that names the observing night a row's ``timestamp`` falls in."""
 
+_SAMPLE_NIGHTS_AFTER_SQL = (
+    f"SELECT DISTINCT session_id, {_NIGHT_OF_TIMESTAMP} FROM guiding_samples WHERE id > ?"
+)
+"""SQL that names the session ids and nights of the samples after a row."""
+
 _SCHEMA = (
     """
     CREATE TABLE IF NOT EXISTS alignment_attempts (
@@ -918,6 +923,63 @@ class ControlRecordStore:
             return int(connection.execute("SELECT COUNT(*) FROM guiding_samples").fetchone()[0])
         except sqlite3.Error, StorageError:
             logger.exception("Could not count the guiding samples.")
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def newest_guiding_sample_id(self) -> int | None:
+        """Give the row number of the newest stored guiding sample.
+
+        The row numbers only grow (the table uses ``AUTOINCREMENT``), and
+        samples are removed only by `replace_guiding_samples`, which also
+        adds one to the `BULK_GUIDING_SAMPLES_KIND` counter. So while that
+        counter stays the same, the samples stored since a moment are
+        exactly those with a larger row number than the newest one then.
+
+        Returns
+        -------
+        row_id : `int` or `None`
+            The largest row number, 0 when there are no samples, or `None`
+            if the database could not be read.
+        """
+        connection = None
+        try:
+            connection = self._connect()
+            return int(connection.execute("SELECT COALESCE(MAX(id), 0) FROM guiding_samples").fetchone()[0])
+        except sqlite3.Error, StorageError:
+            logger.exception("Could not read the newest guiding sample.")
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def guiding_sample_nights_after(self, row_id: int) -> frozenset[str] | None:
+        """Name the nights that the samples stored after a row belong to.
+
+        A sample belongs to a night, for `get_guiding_samples`, when its
+        session id is that night or it was taken during that night. Both are
+        named here, so a night not named has exactly the samples it had.
+
+        Parameters
+        ----------
+        row_id : `int`
+            Look at the samples with a larger row number than this
+            (`newest_guiding_sample_id`).
+
+        Returns
+        -------
+        nights : `frozenset` [`str`] or `None`
+            The session ids and observing nights of those samples. `None`
+            if the database could not be read.
+        """
+        connection = None
+        try:
+            connection = self._connect()
+            rows = connection.execute(_SAMPLE_NIGHTS_AFTER_SQL, (int(row_id),)).fetchall()
+            return frozenset(str(name) for row in rows for name in row if name is not None)
+        except sqlite3.Error, StorageError:
+            logger.exception("Could not read the nights of the newest guiding samples.")
             return None
         finally:
             if connection is not None:

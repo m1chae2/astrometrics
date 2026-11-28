@@ -3,7 +3,8 @@
  * @description Calls the backend for what the File Browser shows about a target's frames: each frame's
  * status (included, not stacked yet, set aside), and the action that puts a set-aside frame back. The
  * read is quiet: a target with nothing to report is a status, not an error, so it answers `null` when
- * the backend has nothing to say.
+ * the backend has nothing to say. `readFrameStatuses` is the same read, but it throws when the call
+ * fails, so a cache can keep a real answer and ask again after a failure.
  */
 
 import { callBackend } from '../backendApi';
@@ -16,10 +17,20 @@ import type { BlinkPair, FrameStatusReport } from '../../types/backendTypes';
  */
 export async function fetchFrameStatuses(targetId: string): Promise<FrameStatusReport | null> {
     try {
-        return (await callBackend('target:get_frame_statuses', { target_id: targetId }, { silent: true })) ?? null;
+        return await readFrameStatuses(targetId);
     } catch {
         return null;
     }
+}
+
+/**
+ * Reads the status of every frame of a target, and throws when the call fails.
+ * The call is quiet: a failure shows no message, because a backend that is not reachable is a status.
+ * @param targetId The target.
+ * @return The report, or `null` when the backend has nothing to report.
+ */
+export async function readFrameStatuses(targetId: string): Promise<FrameStatusReport | null> {
+    return (await callBackend('target:get_frame_statuses', { target_id: targetId }, { silent: true })) ?? null;
 }
 
 /**

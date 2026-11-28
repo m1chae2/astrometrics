@@ -88,6 +88,30 @@ def _spec_fingerprint(spec: DatasetSpec) -> str:
     return hashlib.blake2b(text.encode("utf-8"), digest_size=8).hexdigest()
 
 
+def _remove_dotted_path(payload: Any, path: str) -> None:
+    """Remove one value from a parsed record, as SQLite's ``json_remove`` does.
+
+    Nothing happens when a key on the path is missing or a step along the
+    way is not an object.
+
+    Parameters
+    ----------
+    payload : `Any`
+        The parsed record; changed in place.
+    path : `str`
+        Dotted keys of the value to remove, such as
+        ``"photometry.timestamps"``.
+    """
+    *parents, last = path.split(".")
+    node = payload
+    for key in parents:
+        if not isinstance(node, dict):
+            return
+        node = node.get(key)
+    if isinstance(node, dict):
+        node.pop(last, None)
+
+
 def _is_schema_error(error: sqlite3.Error) -> bool:
     """Say whether an error means the table or a column is not there.
 
@@ -412,7 +436,40 @@ class Butler(AbstractButler):
         return ", ".join(("data_json", *spec.read_columns))
 
     def _row_to_obj(self, spec: DatasetSpec, row: Any) -> Any:
-        payload = json.loads(row["data_json"])
+        """Turn one stored row into the model instance it records.
+
+        Parameters
+        ----------
+        spec : `DatasetSpec`
+            The spec of the row's dataset type.
+        row : `sqlite3.Row`
+            The row, holding ``data_json`` and the spec's read columns.
+
+        Returns
+        -------
+        obj : `Any`
+            The recorded instance.
+        """
+        return self._payload_to_obj(spec, json.loads(row["data_json"]), row)
+
+    @staticmethod
+    def _payload_to_obj(spec: DatasetSpec, payload: Any, row: Any) -> Any:
+        """Turn a parsed record and its row's other columns into a model.
+
+        Parameters
+        ----------
+        spec : `DatasetSpec`
+            The spec of the row's dataset type.
+        payload : `Any`
+            The parsed ``data_json`` of the row.
+        row : `sqlite3.Row`
+            The row, holding the spec's read columns.
+
+        Returns
+        -------
+        obj : `Any`
+            The recorded instance.
+        """
         if spec.deserializer is None:
             return spec.model_class.model_validate(payload)
         return spec.deserializer(payload, {column: row[column] for column in spec.read_columns})
@@ -816,6 +873,13 @@ class Butler(AbstractButler):
         light curve) reads quickly. The length each counted list had is
         returned beside the record.
 
+        A record that holds a ``NaN`` value is the exception. SQLite reads
+        ``NaN`` but writes it back as ``null``, which a model's ``float``
+        field rejects. So the database returns such a record whole, and
+        Python parses it (keeping ``NaN``) and removes the lists itself.
+        ``Infinity`` needs no such care: SQLite writes it back as
+        ``9e999``, which Python reads as infinity again.
+
         Parameters
         ----------
         dataset_type : `str`
@@ -854,7 +918,14 @@ class Butler(AbstractButler):
             return []
         json_paths = [f"$.{path}" for path in leave_out]
         counted_paths = [f"$.{path}" for path in counted]
-        removed = f"json_remove(data_json{', ?' * len(json_paths)}) AS data_json"
+        # SQLite would turn NaN into null, so a record holding the text NaN
+        # comes back whole and Python takes the lists out (see the docstring).
+        holds_nan = "instr(data_json, 'NaN') > 0"
+        removed = (
+            f"CASE WHEN {holds_nan} THEN data_json "
+            f"ELSE json_remove(data_json{', ?' * len(json_paths)}) END AS data_json, "
+            f"{holds_nan} AS returned_whole"
+        )
         lengths = [
             f"COALESCE(json_array_length(data_json, ?), 0) AS length_{i}" for i in range(len(counted_paths))
         ]
@@ -873,7 +944,11 @@ class Butler(AbstractButler):
                 )
                 for row in cursor.fetchall():
                     list_lengths = {path: int(row[f"length_{i}"]) for i, path in enumerate(counted)}
-                    records.append((self._row_to_obj(spec, row), list_lengths))
+                    payload = json.loads(row["data_json"])
+                    if row["returned_whole"]:
+                        for path in leave_out:
+                            _remove_dotted_path(payload, path)
+                    records.append((self._payload_to_obj(spec, payload, row), list_lengths))
             return records
         finally:
             conn.close()

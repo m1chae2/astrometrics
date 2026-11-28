@@ -103,7 +103,26 @@ def test_new_frames_are_announced_when_the_sync_ends() -> None:
 
     remote.release.set()
     thread_management._syncing["M 31"].join(timeout=5.0)
-    assert events == [("library:frames_updated", {"targetId": "M 31", "framesAdded": 2})]
+    assert events == [
+        ("library:frames_updated", {"targetId": "M 31", "framesAdded": 2, "isCalibration": False})
+    ]
+
+
+def test_a_calibration_folder_sync_is_announced_as_calibration() -> None:
+    """A calibration folder sync is marked, so the app reads all targets."""
+    events: list[tuple[str, dict]] = []
+    socket_manager = SimpleNamespace(
+        broadcast_ui_event_sync=lambda action, payload: events.append((action, payload))
+    )
+    remote = _Remote()
+    remote.release.set()
+    service = SyncService(observatory_api=SimpleNamespace(remote=remote), socket_manager=socket_manager)
+
+    service.start_sync("Dark")
+    thread_management._syncing["Dark"].join(timeout=5.0)
+    assert events == [
+        ("library:frames_updated", {"targetId": "Dark", "framesAdded": 2, "isCalibration": True})
+    ]
 
 
 def test_two_starts_for_one_target_run_one_sync() -> None:

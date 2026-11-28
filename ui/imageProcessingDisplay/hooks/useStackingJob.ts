@@ -5,11 +5,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { processTarget, cancelProcessing, fetchAllProcesses, fetchJobs, openSiril } from '../../common/services/imaging/processingService';
 import {
-    GroupedFrameStat,
     ProcessStatus,
     ProcessingJob
 } from '../../common/types/backendTypes';
-import { fetchFrameStatsGrouped } from '../../common/services/targetService';
+import { useGroupedFrameStats } from './useGroupedFrameStats';
 import { reportError } from '../../common/utils/reportError';
 import { emitToast } from '../../common/utils/emitToast';
 import { useTargetContext } from '../../common/context/TargetContext';
@@ -59,9 +58,8 @@ export function useStackingJob(
     shouldFetch: boolean = true,
     historyWanted: boolean = true
 ): StackingJobResult {
-    const { framesReloadKey, invalidate } = useTargetContext();
+    const { invalidate } = useTargetContext();
     const { activeJobs } = useAstrometrics();
-    const [lightFrames, setLightFrames] = useState<LightFrameRow[]>([]);
     const [isProcessing, setIsProcessing] = useState<boolean>(false);
     const [processingError, setProcessingError] = useState<string | null>(null);
     /** The job this hook started and is watching to its end. */
@@ -105,7 +103,6 @@ export function useStackingJob(
     // Clear state only when the target really changes, not when the display is shown again.
     useOnValueChange(selectedTarget, () => {
         setLogLines([]);
-        setLightFrames([]);
         setIsProcessing(false);
         setProcessingError(null);
         setWatchedJobId(null);
@@ -150,52 +147,17 @@ export function useStackingJob(
         return () => { mounted = false; };
     }, [selectedTarget, historyWanted]);
 
-    // Identifies which fetch of the light-frame summary is currently wanted:
-    // null means "nothing to fetch" (no target selected, or `shouldFetch` --
-    // typically whether the target is confirmed local -- is false); a string
-    // means a fetch for that target+reload-generation is wanted. Comparing
-    // this against `settledFramesKey` below gives `isLoadingFrames` purely
-    // from this render's own values, with no dependency on a *separate*
-    // piece of state that this hook's own effect would otherwise have to
-    // "catch up" to a render late. That matters because `shouldFetch` itself
-    // often flips from false to true only once a prerequisite (e.g. the
-    // shared target list) finishes loading elsewhere -- if `isLoadingFrames`
-    // were instead toggled by this hook's effect, callers gating "fully
-    // loaded" on it (see ImageProcessingDisplay.tsx's app boot readiness
-    // check) could read a stale "not loading" value for one render after
-    // `shouldFetch` flips true but before this hook's effect has run again.
-    const pendingFramesKey = selectedTarget && shouldFetch ? `${selectedTarget}:${framesReloadKey}` : null;
-    const [settledFramesKey, setSettledFramesKey] = useState<string | null>(null);
-    const isLoadingFrames = pendingFramesKey !== null && settledFramesKey !== pendingFramesKey;
-
-    // Fetch and parse light frames
-    useEffect(() => {
-        let mounted = true;
-        const loadFrames = async () => {
-            if (!selectedTarget || !shouldFetch) {
-                if (mounted) setLightFrames([]);
-                return;
-            }
-            try {
-                const stats = await fetchFrameStatsGrouped(selectedTarget);
-                if (!mounted) return;
-
-                const rows: LightFrameRow[] = stats.map(s => [
-                    s.gain ?? null,
-                    s.exposureS,
-                    s.count
-                ]);
-
-                if (mounted) setLightFrames(rows);
-            } catch (err) {
-                if (mounted) reportError(err, 'useStackingJob');
-            } finally {
-                if (mounted) setSettledFramesKey(`${selectedTarget}:${framesReloadKey}`);
-            }
-        };
-        loadFrames();
-        return () => { mounted = false; };
-    }, [selectedTarget, shouldFetch, framesReloadKey]);
+    // The light-frame summary is kept per target and reload counts (see useGroupedFrameStats), so
+    // showing the display again or going back to a target already opened shows it at once with no
+    // new call. `isLoadingFrames` is true on the very render the read becomes wanted (for example
+    // when `shouldFetch` flips true once the shared target list confirms the target is local), so
+    // the app boot readiness check in ImageProcessingDisplay.tsx never reads a false "done".
+    const groupedFrames = useGroupedFrameStats(selectedTarget, shouldFetch);
+    const isLoadingFrames = groupedFrames.isLoading;
+    const lightFrames = useMemo<LightFrameRow[]>(
+        () => (groupedFrames.groups ?? []).map((group) => [group.gain ?? null, group.exposureS, group.count]),
+        [groupedFrames.groups]
+    );
 
     // Global Process Monitoring: derived from AstrometricsContext's shared
     // active-jobs feed (one poll for the whole app) instead of this hook
@@ -216,7 +178,8 @@ export function useStackingJob(
         // Detect transition from processing to finished to trigger a refresh
         // of frames and job history (a one-off fetch, not a recurring poll).
         if (prevIsProcessing.current && !currentlyProcessing) {
-            invalidate('frames');
+            // Only the restacked target's kept reads are read again.
+            invalidate('frames', [selectedTarget]);
             // Tell the viewers to read the restacked picture (once per job, whoever sees the end).
             if (lastFeedJobId.current) void announceFinishedStack(selectedTarget, lastFeedJobId.current);
         }
@@ -272,7 +235,7 @@ export function useStackingJob(
             setProcessingError(job.message || 'The stacking job failed.');
         }
         if (prevIsProcessing.current || isProcessingRef.current) {
-            invalidate('frames');
+            invalidate('frames', [selectedTarget]);
         }
         void announceFinishedStack(selectedTarget, job.id, job);
         prevIsProcessing.current = false;
@@ -323,7 +286,7 @@ export function useStackingJob(
         cancelProcessingJob,
         clearLogs: () => setLogLines([]),
         appendLog: jobLog.appendLocal,
-        refreshFrames: () => invalidate('frames'),
+        refreshFrames: () => invalidate('frames', [selectedTarget]),
         jobHistory,
         loadingHistory,
         onSelectJob: (job: ProcessingJob) => {

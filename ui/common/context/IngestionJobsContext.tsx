@@ -21,6 +21,7 @@ import { createTarget, fetchTargetObject } from '../services/targetService';
 import { emit as emitEvent } from '../utils/eventBus';
 import { emitToast } from '../utils/emitToast';
 import { useTargetContext } from './TargetContext';
+import { invalidateTargetReads } from '../queries/targetReadQueryKeys';
 
 /** The channel the Observatory Manager's Download Frames window uses. */
 export const OBSERVATORY_INGESTION_CHANNEL = 'observatory';
@@ -82,7 +83,7 @@ export const IngestionJobsProvider: React.FC<{ children: React.ReactNode }> = ({
         jobsRef.current = jobs;
     });
     const queryClient = useQueryClient();
-    const { forceReload, setSelectedTarget, setPendingTarget, selectedTarget } = useTargetContext();
+    const { setSelectedTarget, setPendingTarget, selectedTarget } = useTargetContext();
     // The selection now, and the selection when each job started, so a finished
     // download only moves the selection if the user has not moved on.
     const selectedTargetRef = useRef<string>(selectedTarget ?? '');
@@ -96,9 +97,9 @@ export const IngestionJobsProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Keep the newest target actions in a ref so the finish step below always
     // uses the current ones without restarting the polling.
-    const targetActionsRef = useRef({ forceReload, setSelectedTarget, setPendingTarget });
+    const targetActionsRef = useRef({ setSelectedTarget, setPendingTarget });
     useEffect(() => {
-        targetActionsRef.current = { forceReload, setSelectedTarget, setPendingTarget };
+        targetActionsRef.current = { setSelectedTarget, setPendingTarget };
     });
     /** Job ids whose finish step already ran, so each runs once. */
     const finishedJobIds = useRef<Set<string>>(new Set());
@@ -143,6 +144,8 @@ export const IngestionJobsProvider: React.FC<{ children: React.ReactNode }> = ({
             if (channel === CALIBRATION_INGESTION_CHANNEL) {
                 void queryClient.invalidateQueries({ queryKey: ['calibrationLibrary'] });
                 void queryClient.invalidateQueries({ queryKey: ['calibrationHealth'] });
+                // New calibration frames can change the calibration matches of every target.
+                void invalidateTargetReads(queryClient);
                 return;
             }
             try {
@@ -158,14 +161,15 @@ export const IngestionJobsProvider: React.FC<{ children: React.ReactNode }> = ({
             // New frames change the target list, the camera summary and what the
             // telescope still has to send. Those reads stay fresh for 30 s, so
             // they are marked stale here. The target list and camera summary are
-            // not read here: forceReload() below makes the mounted list read them
-            // once. A list that is not on screen reads them when it is shown.
+            // not read here: the `targetsUpdated` event below makes the mounted list
+            // read them once. A list that is not on screen reads them when it is shown.
+            // The event names this target, so only its kept reads (star shapes, frame
+            // statuses, grouped frames) are read again; other targets keep theirs.
             void queryClient.invalidateQueries({ queryKey: ['targetList'], refetchType: 'none' });
             void queryClient.invalidateQueries({ queryKey: ['targetCameraIndex'], refetchType: 'none' });
             void queryClient.invalidateQueries({ queryKey: ['remoteTargets'] });
             const actions = targetActionsRef.current;
-            actions.forceReload();
-            emitEvent('targetsUpdated');
+            emitEvent('targetsUpdated', { id: targetName });
             const selectionAtStart = selectionAtStartRef.current.get(jobId) ?? '';
             selectionAtStartRef.current.delete(jobId);
             if (selectedTargetRef.current === selectionAtStart || selectedTargetRef.current === targetName) {

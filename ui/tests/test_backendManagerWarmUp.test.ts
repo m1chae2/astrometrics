@@ -173,4 +173,20 @@ describe('BackendManager.waitUntilWarm', () => {
     expect(await manager.waitUntilWarm({ timeoutMs: 5000, ...FAST_POLL })).toBe(true);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('ignores a pid file naming a dead process in a TPM harness run, which owns its own backend', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'warmup-pid-'));
+    fs.mkdirSync(path.join(root, '.run_pids'));
+    // A pid far above the kernel's maximum cannot belong to a live process.
+    fs.writeFileSync(path.join(root, '.run_pids', 'backend.pid'), '99999999');
+    vi.stubEnv('SKIP_BACKEND', '1');
+    const manager = new BackendManager({ getAppPath: () => root });
+
+    vi.stubEnv('ASTROMETRICS_TPM_HARNESS', '');
+    expect((manager as any)._externalBackendHasDied()).toBe(true);
+
+    vi.stubEnv('ASTROMETRICS_TPM_HARNESS', '1');
+    expect((manager as any)._externalBackendHasDied()).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });

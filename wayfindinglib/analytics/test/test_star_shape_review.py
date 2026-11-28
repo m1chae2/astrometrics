@@ -277,13 +277,16 @@ class _Quality:
         """
         return list(self.set_aside)
 
-    def query(self, metric: str, level: str, target: Any = None, latest_only: bool = True) -> list[Any]:
+    def query(
+        self, metric: str | None = None, level: str = "frame", target: Any = None, latest_only: bool = True
+    ) -> list[Any]:
         """Answer with the rows of one metric, or refuse an unknown one.
 
         Returns
         -------
         rows : `list`
-            The rows of the metric.
+            The rows of the metric, or every row of the level when no
+            metric is given.
 
         Raises
         ------
@@ -292,6 +295,8 @@ class _Quality:
         """
         if metric == STACK_ELONGATION_METRIC and not any(row.metric == metric for row in self.rows):
             raise InvalidArgumentError("not registered")
+        if metric is None:
+            return [row for row in self.rows if row.subject.level == level]
         return [row for row in self.rows if row.metric == metric]
 
 

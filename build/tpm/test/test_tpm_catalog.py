@@ -326,3 +326,17 @@ def test_simulator_chip_is_not_applicable_without_a_simulated_observatory() -> N
     flow = {"sourceChip": {"expected": False, "present": None}}
     assert compile_tpm.simulator_chip_entries([flow])[0]["value"] is None
     assert compile_tpm.simulator_chip_entries([{}])[0]["value"] is None
+
+
+def test_flow_always_records_the_ready_time(catalog: dict) -> None:
+    """The flow's wait for the app uses the page's ready check.
+
+    ``time_to_app_ready`` reads ``readyAt``. The flow waits until the same
+    check says the page is ready, and that check records the time the first
+    time it is true, so the value cannot be missing when the wait ends.
+    """
+    source = (TPM_DIR / "flow.mjs").read_text()
+    assert "page.waitForFunction(() => window.__tpm.checkReady(" in source
+    assert "recorder.checkReady('last-call-ended')" in source
+    entry = next(tpm for tpm in catalog["tpms"] if tpm["id"] == "time_to_app_ready")
+    assert "always recorded" in entry["method"]

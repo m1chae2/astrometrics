@@ -153,6 +153,10 @@ class ControlContext:
         self._guiding_driver_lock = threading.Lock()
         self.review_cache = VersionedCache()
         """Results of the slow night reviews, kept until their data changes."""
+        self.star_shape_cache = VersionedCache()
+        """The star-shape review's stored rows and limits, kept until their
+        data change. Its own cache, so busy targets do not push the night
+        reviews out of `review_cache`."""
         self.night_frame_memo = TargetFrameMemo()
         """Each target's frames in their nights, for the list of nights."""
         self._indi_diagnostics: IndiDiagnostics | None = None

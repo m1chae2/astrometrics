@@ -16,6 +16,12 @@ results and drops the one used longest ago when it is full.
 The cache never reads data itself. The caller decides what the version is.
 A caller that cannot work out a version passes `None`, and the result is
 built and not kept.
+
+Some results can be brought up to date more cheaply than they can be built,
+for example when the only change is that new rows were added. Such a caller
+passes an ``update`` function. When the kept result is for an older version,
+the cache hands it to ``update`` (one thread at a time, like a build), and
+builds from scratch only when ``update`` says it cannot.
 """
 
 from __future__ import annotations
@@ -62,6 +68,7 @@ class VersionedCache:
         builder: Callable[[], Any],
         *,
         copy_result: bool = True,
+        update: Callable[[Hashable, Any, Hashable], Any | None] | None = None,
     ) -> Any:
         """Give the remembered result for `key`, building it when it is stale.
 
@@ -85,6 +92,15 @@ class VersionedCache:
         copy_result : `bool`, optional
             Give each caller its own deep copy, so no caller can change what
             the cache holds. Defaults to true.
+        update : `~collections.abc.Callable`, optional
+            Brings a kept result for an older version up to date. It is
+            called with the kept version, the kept result and the current
+            version, while this thread holds the lock for `key`. It gives
+            the result for the current version, or `None` when it cannot,
+            and then `builder` is used. It must not change the kept result,
+            which other callers may still hold. An error it raises goes to
+            the caller and the old result stays kept. Defaults to always
+            building.
 
         Returns
         -------
@@ -107,7 +123,13 @@ class VersionedCache:
             # A thread that waited here finds the result the first one built.
             found, remembered = self._lookup(key, current)
             if not found:
-                remembered = builder()
+                remembered = None
+                if update is not None:
+                    kept = self._kept(key)
+                    if kept is not None:
+                        remembered = update(kept[0], kept[1], current)
+                if remembered is None:
+                    remembered = builder()
                 self._store(key, current, remembered)
         return copy.deepcopy(remembered) if copy_result else remembered
 
@@ -156,6 +178,17 @@ class VersionedCache:
                 return False, None
             self._entries.move_to_end(key)
             return True, entry[1]
+
+    def _kept(self, key: Hashable) -> tuple[Hashable, Any] | None:
+        """Find the result kept for `key`, whatever its version.
+
+        Returns
+        -------
+        entry : `tuple` or `None`
+            The kept version and result, or `None` when nothing is kept.
+        """
+        with self._guard:
+            return self._entries.get(key)
 
     def _store(self, key: Hashable, version: Hashable, result: Any) -> None:
         """Keep a result and drop the one used longest ago when full."""

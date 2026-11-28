@@ -11,6 +11,7 @@ the JPEG the enhancement stage saved beside it, when that picture is current.
 
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, NamedTuple
@@ -21,7 +22,11 @@ from PIL import Image
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.models.target import ImageCrop, RenderedImage, StretchParameters
-from astrometricslib.pipelines.shared.image_scaling import ImageScaler
+from astrometricslib.pipelines.shared.image_scaling import (
+    ImageScaler,
+    ScaledPicture,
+    scale_with_parameters,
+)
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -73,27 +78,51 @@ class PngPicture(NamedTuple):
 # Shared in-memory cache for rendered PNG frames
 # The key includes the file's modified time and size, so a picture rewritten at
 # the same path (a preview remade without a restack) is drawn again.
-_png_cache: dict[tuple[str, int, float | None, float | None, bool, int, int], PngPicture] = {}
+_PngCacheKey = tuple[str, int, float | None, float | None, bool, int, int]
+_png_cache: dict[_PngCacheKey, PngPicture] = {}
+
+# The most pictures the cache keeps; the oldest is dropped first.
+_PNG_CACHE_MOST_PICTURES = 128
+
+# The cache is shared by every thread that serves pictures. `_png_cache_lock`
+# guards it and `_png_renders_in_progress`, which holds one event for each
+# picture being drawn now. A second request for a picture that is being drawn
+# waits for that event instead of drawing it again.
+_png_cache_lock = threading.Lock()
+_png_renders_in_progress: dict[_PngCacheKey, threading.Event] = {}
 
 
-def _stretch_used(data: Any, auto_stretched: bool) -> StretchParameters | None:
+def _stretch_used(
+    data: Any, stretch: bool, brightness: tuple[float | None, float | None], scaled: ScaledPicture
+) -> StretchParameters | None:
     """Return the automatic stretch a picture was drawn with.
 
     Parameters
     ----------
     data : `numpy.ndarray`
         The image data that was drawn.
-    auto_stretched : `bool`
-        Whether the automatic stretch was asked for (stretch on, no manual
-        brightness range).
+    stretch : `bool`
+        Whether the automatic stretch was asked for.
+    brightness : `tuple` [`float` or `None`, `float` or `None`]
+        The manual black and white values, or two `None`.
+    scaled : `ScaledPicture`
+        The scaled picture (see `scale_with_parameters`).
 
     Returns
     -------
     parameters : `StretchParameters` or `None`
         The stretch, measured the way `ImageScaler.scale_to_uint8` measures
-        it, or `None` when none was used.
+        it, or `None` when none was used (stretch off, or a black value
+        given). The scaling's own numbers are reused, so the image is
+        measured once. Only a white value given without a black value, which
+        callers do not send, measures the image a second time, as before.
     """
-    return ImageScaler.autostretch_parameters(data) if auto_stretched else None
+    black, white = brightness
+    if not stretch or black is not None:
+        return None
+    if white is None:
+        return scaled.stretch_parameters
+    return ImageScaler.autostretch_parameters(data)
 
 
 # Paths whose saved picture could not be read, so the warning is logged once
@@ -214,47 +243,89 @@ class ImageConverter:
         except OSError:
             file_version = (0, 0)
         cache_key = (path, int(max_dimensions), black, white, stretch, *file_version)
-        if cache_key in _png_cache:
-            return _png_cache[cache_key]
-
-        image = AstrometricsImage(path)
-        data = image.data
-
-        img8, vmin, vmax = ImageScaler.scale_to_uint8(data, vmin=black, vmax=white, stretch=stretch)
-        stretch_parameters = _stretch_used(data, stretch and black is None)
-
-        pil_image = Image.fromarray(img8)
-        if pil_image.mode != "L":
-            pil_image = pil_image.convert("L")
-
-        width_px, height_px = pil_image.size
-        scale = (
-            min(1.0, float(max_dimensions) / max(width_px, height_px))
-            if max(width_px, height_px) > 0
-            else 1.0
-        )
-        if scale < 1.0:
-            pil_image = pil_image.resize((round(width_px * scale), round(height_px * scale)), Image.LANCZOS)
-
-        buffer = BytesIO()
-        # Compression level 1 encodes about 2.5 times faster than the default 6
-        # and makes the file about 10% bigger. The picture goes to the app on
-        # this computer, where the extra size costs almost nothing.
-        pil_image.save(buffer, format="PNG", optimize=False, compress_level=1)
-        picture = PngPicture(
-            buffer.getvalue(),
-            float(vmin),
-            float(vmax),
-            stretch_parameters,
-            (int(width_px), int(height_px)),
-            (int(pil_image.size[0]), int(pil_image.size[1])),
-        )
-
-        # Simple cache pruning: evict oldest entry if cache grows too large
-        if len(_png_cache) > 128:
-            _png_cache.pop(next(iter(_png_cache)))
-        _png_cache[cache_key] = picture
+        while True:
+            with _png_cache_lock:
+                cached = _png_cache.get(cache_key)
+                if cached is not None:
+                    return cached
+                in_progress = _png_renders_in_progress.get(cache_key)
+                if in_progress is None:
+                    # No one is drawing this picture: this request draws it.
+                    in_progress = threading.Event()
+                    _png_renders_in_progress[cache_key] = in_progress
+                    break
+            # Another request is drawing this picture. When it ends, look in
+            # the cache again. If that drawing failed, the picture is not
+            # there and this request draws it itself, so it gets its own
+            # result or its own error.
+            in_progress.wait()
+        try:
+            picture = _draw_png_picture(path, max_dimensions, black, white, stretch)
+            with _png_cache_lock:
+                # Drop the oldest picture when the cache is full.
+                if len(_png_cache) > _PNG_CACHE_MOST_PICTURES:
+                    _png_cache.pop(next(iter(_png_cache)))
+                _png_cache[cache_key] = picture
+        finally:
+            # Always wake the waiting requests, also when drawing failed.
+            with _png_cache_lock:
+                _png_renders_in_progress.pop(cache_key, None)
+            in_progress.set()
         return picture
+
+
+def _draw_png_picture(
+    path: str, max_dimensions: int, black: float | None, white: float | None, stretch: bool
+) -> PngPicture:
+    """Read a FITS file and draw it as a PNG, without the cache.
+
+    Parameters
+    ----------
+    path : `str`
+        The FITS file.
+    max_dimensions : `int`
+        Longest side of the picture, in pixels.
+    black, white : `float` or `None`
+        A manual brightness range, in pixel values. Both or neither.
+    stretch : `bool`
+        Brighten faint detail automatically.
+
+    Returns
+    -------
+    picture : `PngPicture`
+        The PNG, the brightness range, the automatic stretch used (or `None`)
+        and the sizes.
+    """
+    image = AstrometricsImage(path)
+    data = image.data
+
+    scaled = scale_with_parameters(data, vmin=black, vmax=white, stretch=stretch)
+    stretch_parameters = _stretch_used(data, stretch, (black, white), scaled)
+
+    pil_image = Image.fromarray(scaled.picture)
+    if pil_image.mode != "L":
+        pil_image = pil_image.convert("L")
+
+    width_px, height_px = pil_image.size
+    scale = (
+        min(1.0, float(max_dimensions) / max(width_px, height_px)) if max(width_px, height_px) > 0 else 1.0
+    )
+    if scale < 1.0:
+        pil_image = pil_image.resize((round(width_px * scale), round(height_px * scale)), Image.LANCZOS)
+
+    buffer = BytesIO()
+    # Compression level 1 encodes about 2.5 times faster than the default 6
+    # and makes the file about 10% bigger. The picture goes to the app on
+    # this computer, where the extra size costs almost nothing.
+    pil_image.save(buffer, format="PNG", optimize=False, compress_level=1)
+    return PngPicture(
+        buffer.getvalue(),
+        float(scaled.black),
+        float(scaled.white),
+        stretch_parameters,
+        (int(width_px), int(height_px)),
+        (int(pil_image.size[0]), int(pil_image.size[1])),
+    )
 
 
 @dataclass
@@ -445,15 +516,13 @@ def scale_for_display(
         )
 
     black, white = brightness
-    picture, black_drawn, white_drawn = ImageScaler.scale_to_uint8(
-        data, vmin=black, vmax=white, stretch=stretch
-    )
+    scaled = scale_with_parameters(data, vmin=black, vmax=white, stretch=stretch)
     return DisplayPixels(
-        picture=picture,
-        black=float(black_drawn),
-        white=float(white_drawn),
+        picture=scaled.picture,
+        black=float(scaled.black),
+        white=float(scaled.white),
         stretched=bool(stretch),
-        stretch_parameters=_stretch_used(data, stretch and black is None),
+        stretch_parameters=_stretch_used(data, stretch, (black, white), scaled),
         full_width=int(full_width),
         full_height=int(full_height),
         crop=piece,

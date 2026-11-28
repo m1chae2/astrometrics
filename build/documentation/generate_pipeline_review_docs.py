@@ -194,7 +194,7 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "that changes between frames, or comparison stars that scatter more than "
         "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error."
     ),
-    "registration_drift": (
+    "registration_corner_displacement": (
         "Fails when a corner of the frame moves by more than "
         "`MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or "
         "rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "

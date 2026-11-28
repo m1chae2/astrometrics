@@ -920,7 +920,7 @@ class VariabilityAnalyzer:
         # pixels (see `centroid_offsets_px`). A frame in which every star
         # fell back has an empty list. Filled during `process()`;
         # `centroid_shift_summary()` summarizes it for the
-        # `registration_drift` gate.
+        # `registration_corner_displacement` gate.
         self.centroid_offsets_by_frame: dict[datetime, list[float]] = {}
         # For each frame, keyed by timestamp: the map from the reference
         # frame's pixels to the frame's, made from the two plate solutions
@@ -1418,8 +1418,8 @@ class VariabilityAnalyzer:
     def centroid_shift_summary(self) -> CentroidShiftSummary | None:
         """Summarize how far star centroids sat from their solution positions.
 
-        The result feeds the ``registration_drift`` gate. It is built from
-        the per-frame offsets that `process()` recorded.
+        The result feeds the ``registration_corner_displacement`` gate. It is
+        built from the per-frame offsets that `process()` recorded.
 
         Returns
         -------

@@ -64,7 +64,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_GATE_ENSEMBLE_FRAME_REJECTION,
     PHOTOMETRY_GATE_FLUX_UNCERTAINTY,
     PHOTOMETRY_GATE_PHOTOMETRY_WORK,
-    PHOTOMETRY_GATE_REGISTRATION_DRIFT,
+    PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT,
     PHOTOMETRY_GATE_SCATTER_POPULATION,
     PHOTOMETRY_GATE_SESSION_CONTENT,
     PHOTOMETRY_GATE_SESSION_PLATE_SOLVE,
@@ -201,12 +201,12 @@ MAXIMUM_DETECTABLE_AMPLITUDE_MAG = TunedParameter(
 )
 
 # The largest 95th-percentile (over the frames) displacement of a frame's
-# corner, in pixels, that the `registration_drift` gate accepts. Each frame's
-# own plate solution maps it onto the first frame (see `FrameMapping`). The
-# corner displacement is how far a corner of the field moves beyond the shift
-# of the field's middle, from a turn, a change of scale or of distortion. A
-# translation leaves it at zero. The apertures follow the stars, so a
-# rotation does not by itself
+# corner, in pixels, that the `registration_corner_displacement` gate
+# accepts. Each frame's own plate solution maps it onto the first frame
+# (see `FrameMapping`). The corner displacement is how far a corner of the
+# field moves beyond the shift of the field's middle, from a turn, a change
+# of scale or of distortion. A translation leaves it at zero. The apertures
+# follow the stars, so a rotation does not by itself
 # spoil the photometry. Past this limit, though, a star lands on pixels
 # whose flat-field error differs by a different amount in every frame, which
 # adds scatter no comparison star can remove. 1 pixel is two thirds of
@@ -278,7 +278,7 @@ MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED = TunedParameter(
     kind=HardcodedKind.RELATIVE,
     register_entry="PHO-02",
 )
-REGISTRATION_DRIFT_GATE_NAME = "registration_drift"
+REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME = "registration_corner_displacement"
 SCATTER_POPULATION_GATE_NAME = "scatter_population"
 VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
 DETECTABLE_AMPLITUDE_GATE_NAME = "detectable_amplitude"
@@ -686,7 +686,7 @@ def _centroid_distribution_text(summaries: Sequence[CentroidShiftSummary]) -> st
 def _registration_drift_gate(
     registration_drifts_px: Sequence[float | None], summaries: Sequence[CentroidShiftSummary]
 ) -> GateResult:
-    """Build the ``registration_drift`` gate.
+    """Build the ``registration_corner_displacement`` gate.
 
     The gate looks at two things. The first is how far a corner of the field
     moves beyond the shift of the field's middle, which shows a field that
@@ -727,7 +727,9 @@ def _registration_drift_gate(
     )
     recorded_drifts = [drift for drift in registration_drifts_px if drift is not None]
     if not summaries:
-        return unchecked_gate(REGISTRATION_DRIFT_GATE_NAME, "no session has a per-star summary", source)
+        return unchecked_gate(
+            REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME, "no session has a per-star summary", source
+        )
 
     worst_drift = max(recorded_drifts) if recorded_drifts else None
     corner_values = [
@@ -766,14 +768,14 @@ def _registration_drift_gate(
     if problems:
         suffix = f" ({'; '.join(part for part in (drift_text, distribution) if part)})"
         return failed_gate(
-            REGISTRATION_DRIFT_GATE_NAME, "; ".join(problems) + suffix, measured, limit, source
+            REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME, "; ".join(problems) + suffix, measured, limit, source
         )
     if worst_corner is not None:
         passed_limit = maximum_corner_displacement_px
     else:
         passed_limit = maximum_centroid_fallback_fraction
     return passed_gate(
-        REGISTRATION_DRIFT_GATE_NAME,
+        REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME,
         measured,
         passed_limit,
         source,
@@ -1094,8 +1096,8 @@ GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
     COMPARISON_ENSEMBLE_GATE_NAME: GateLimitSource(
         PHOTOMETRY_GATE_COMPARISON_ENSEMBLE, LimitTier.DESIGN_ESTIMATE, "PHO-D06"
     ),
-    REGISTRATION_DRIFT_GATE_NAME: GateLimitSource(
-        PHOTOMETRY_GATE_REGISTRATION_DRIFT, LimitTier.DESIGN_ESTIMATE, "PHO-D16"
+    REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT, LimitTier.DESIGN_ESTIMATE, "PHO-D16"
     ),
     SCATTER_POPULATION_GATE_NAME: GateLimitSource(
         PHOTOMETRY_GATE_SCATTER_POPULATION, LimitTier.DESIGN_ESTIMATE, "PHO-D13"
@@ -1162,7 +1164,7 @@ def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateR
                 "limit_source": COMPARISON_SET_SIZE_LIMIT_SOURCE,
             }
         )
-    if gate.name == REGISTRATION_DRIFT_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED:
+    if gate.name == REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED:
         corner_px, _ = _worst_centroid_values(inputs.centroid_shift_summaries)
         return gate.model_copy(
             update={"measured_value": corner_px, "limit": float(maximum_corner_displacement_px)}
@@ -1197,7 +1199,7 @@ def steady_number_needs_run_data(gate: GateResult) -> bool:
         `True` when the gate ran and its steady number comes from run data.
     """
     return (
-        gate.name in (COMPARISON_ENSEMBLE_GATE_NAME, REGISTRATION_DRIFT_GATE_NAME)
+        gate.name in (COMPARISON_ENSEMBLE_GATE_NAME, REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME)
         and gate.status is not GateStatus.NOT_CHECKED
     )
 

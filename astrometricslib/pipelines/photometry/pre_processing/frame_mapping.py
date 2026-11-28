@@ -9,10 +9,10 @@ photometry register entry PHO-24). Siril solves each frame (see
 solutions it returns.
 
 `FrameMapping` is the map from one frame's pixels to another's. It also keeps
-the three numbers the `registration_drift` gate reads: how far the middle of
-the frame moved, how far a corner moves beyond that (the part a single shift
-cannot describe, from a turned or rescaled field), and whether the solution
-maps the frame at all.
+the three numbers the `registration_corner_displacement` gate reads: how
+far the middle of the frame moved, how far a corner moves beyond that
+(the part a single shift cannot describe, from a turned or rescaled
+field), and whether the solution maps the frame at all.
 
 A frame with no usable solution has no `FrameMapping`. The caller leaves such
 a frame out and says why; there is no other way to place the circles.

@@ -1,7 +1,7 @@
 """Unit tests for `assess_input_quality`.
 
 Covers the derived coverage fraction and the two boolean flags against
-the drift limit that the registration_drift gate uses.
+the drift limit that the registration_corner_displacement gate uses.
 """
 
 import pytest

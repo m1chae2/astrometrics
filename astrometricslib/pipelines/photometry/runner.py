@@ -450,7 +450,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         all_comparison_sets = []
         # One per-star centroid offset summary per session with more than
         # one frame (see `CentroidShiftSummary`), for the
-        # `registration_drift` gate.
+        # `registration_corner_displacement` gate.
         all_centroid_shift_summaries = []
         # One catalog zero point record per session that has frames (see
         # `SessionZeroPoints`), stored as measurements next to the summary.

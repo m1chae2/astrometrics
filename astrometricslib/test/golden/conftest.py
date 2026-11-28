@@ -47,8 +47,9 @@ _SECTION_COMMENTS = {
     ),
     "photometry_sequence": (
         "The committed photometry worker run over the five luminance lights. About 60 stars (detections "
-        "ranked 10 to 70 of the first light) are measured. Detections ranked 50 to 100 line the lights up. "
-        "Shifts are for lights 020 to 023 against 019. The scatter is the median coefficient of variation "
+        "ranked 10 to 70 of the first light) are measured. Each later light has a plain shift as its plate "
+        "solution, so the shifts are inputs. Shifts are for lights 020 to 023 against 019. The scatter is "
+        "the median coefficient of variation "
         "of the unsaturated stars, in percent."
     ),
     "source_detection": (

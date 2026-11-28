@@ -50,7 +50,7 @@ The table uses these terms:
 | `spectral_frame` | spectroscopy `024` | whether the zero-order finder found a target, whether its extended-target search found it, the found row and column, sky level, zero-order peak, peak-to-sky ratio, spectrum peak above sky, cross-streak FWHM, bands that held the streak, saturated pixels, streak tilt, tilt contrast | `locate_zero_order`, `analyze_spectral_frame`, `SpectroscopyPipeline.measure_dispersion_trail` |
 | `photometry_pre_S2` | `020` | flux (ADU per second) and saturated flag of the 10 brightest stars, apertures on whole-pixel centers | `_measure_aperture_flux` |
 | `photometry_sub_pixel` | `020` | the same ten stars, apertures on the exact detected positions | `_measure_aperture_flux` |
-| `photometry_sequence` | `019` to `023` | shift (x, y) of lights `020` to `023` from `019`, number of measured stars, number that stayed unsaturated in all five lights, median flux scatter (coefficient of variation) of those stars | `_process_single_frame_worker` |
+| `photometry_sequence` | `019` to `023` | shift (x, y) of lights `020` to `023` from `019` (inputs), number of measured stars, number that stayed unsaturated in all five lights, median flux scatter (coefficient of variation) of those stars | `_process_single_frame_worker` |
 
 The raw check's FWHM comes from image moments (brightness-weighted averages of position and its square over each star's pixels) of up to 150 stars. The `fwhm_top5` value comes from a Gaussian fit of 5 stars. The two methods give different numbers on purpose, and each has its own pin.
 
@@ -84,8 +84,8 @@ The source detector draws a random subsample to estimate the background, but onl
 - `photometry_sequence` pins the photometry pipeline's per-frame worker, `_process_single_frame_worker`, on fixed inputs.
   - **Detection.** `SourceDetector` runs on light `019` with `VariabilityAnalyzer`'s first setting: 3σ (three times the background noise) and FWHM 4 pixels. Detections come out brightest first.
   - **Measured stars.** Detections ranked 10 to 69, at least 50 pixels from every edge, are the measured stars (58 of them). The ten brightest are skipped because they come closest to saturating.
-  - **Alignment anchors.** Detections ranked 50 to 99 are the alignment anchors: `(x, y, flux)` stars the worker matches in each later light to measure how far that light is shifted from `019`. The anchor range may overlap the measured range, because the anchors only measure the shift.
-  - **Fixed choices.** These two selections are fixed choices of the test. The pipeline itself measures detections from the brightest down and picks its anchors with `select_alignment_anchors` (unsaturated stars with a high signal-to-noise ratio), so this pin checks the worker, not the pipeline's star selection.
+  - **Plate solutions.** Each later light's plate solution is a plain shift of light `019` (the values in `SEQUENCE_SHIFTS_PX`, which the earlier drift tracking measured), because Siril is not installed here. The worker places every star through it, so the pinned shifts are inputs and the pins check the fluxes and their scatter.
+  - **Fixed choices.** The star selection and the shifts are fixed choices of the test; the pipeline itself takes its stars and its solutions from the reference frame and from Siril.
   - **Run.** Light `019` is measured in the test process, and lights `020` to `023` go through `_process_single_frame_worker` one after the other. The whole run takes about 8 s.
   - **Check.** Each light's shift agrees with the independent shift from the raw check to within 0.05 pixel (largest gap 0.043).
   - **Noise.** The gain and read noise come from the camera profile through `resolve_detector_noise`, as in the pipeline. Only the fluxes are pinned, not their errors.

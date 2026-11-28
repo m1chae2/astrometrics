@@ -189,7 +189,7 @@ def photometry_summary() -> dict[str, Any]:
     )
     summary.record_gate(passed_gate("capture_timestamps", 0.0, 0.0))
     summary.record_gate(passed_gate("comparison_ensemble", 8.0, 5.0, "scatter test"))
-    summary.record_gate(unchecked_gate("registration_drift", "no session was registered"))
+    summary.record_gate(unchecked_gate("registration_corner_displacement", "no session was registered"))
     return _dump(summary)
 
 

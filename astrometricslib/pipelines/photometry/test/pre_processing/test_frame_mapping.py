@@ -1,7 +1,7 @@
 """Tests for the map that places each star through a frame's plate solution.
 
-On 2026-10-11, the `registration_drift` gate failed on M 13, M 81 and NGC
-2403. Replaying the gate on the raw frames showed two causes: centroid noise
+On 2026-10-11, the registration gate failed on M 13, M 81 and NGC 2403.
+Replaying the gate on the raw frames showed two causes: centroid noise
 on faint and crowded stars (M 13 and M 81), and a real field rotation of
 0.05 degrees over the night (NGC 2403, 1.8 px at the corner). Each frame's
 own plate solution now places the stars (register entry PHO-24). These tests

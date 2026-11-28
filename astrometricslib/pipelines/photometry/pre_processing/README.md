@@ -22,7 +22,7 @@ Every star ends up with a brightness value, its uncertainty, a timestamp, and a 
 
 Siril solves every frame of a session (`PlateSolveDriver.solve_frames`; the Siril driver's `sequence_solve.py`). It solves the first frame, the session's reference frame, on its own, with the retries for a wrong focal length. It then solves the other frames in groups of 50 with one Siril run per group, with the focal length that solved the first frame. Siril starts offline, with the app's private settings file, and does not wait for the stack's Siril slot. The frames are only linked into Siril's scratch folder, and the library's files are never changed. On 39 frames of 3,008 by 3,008 pixels the solve took 3.6 s (partly measured; see [PHO-23](../../../../documentation/library_design/validation/photometry.md#pho-23)).
 
-`frame_mapping.py` reads the solutions. `FrameMapping` turns a position in the first frame into a position in another frame: the first frame's solution gives the sky position, and the other frame's solution gives the pixel. It also keeps two numbers for the `registration_drift` gate: how far the middle of the frame moved (`shift_x`, `shift_y`), and how far a corner moves beyond that shift (`corner_displacement_px`), which a turned or rescaled field produces.
+`frame_mapping.py` reads the solutions. `FrameMapping` turns a position in the first frame into a position in another frame: the first frame's solution gives the sky position, and the other frame's solution gives the pixel. It also keeps two numbers for the `registration_corner_displacement` gate: how far the middle of the frame moved (`shift_x`, `shift_y`), and how far a corner moves beyond that shift (`corner_displacement_px`), which a turned or rescaled field produces.
 
 A frame is left out when Siril cannot solve it, when its solution holds no sky map, or when its map does not place the middle or a corner of the frame at a finite pixel. The reason is logged as a warning, which the job lists, and kept in `VariabilityAnalyzer.frames_without_solution`; the runner lists the frame in the run's excluded frames. If the first frame has no solution, no frame can be placed, and the session gives no light curves. No other way of placing the circles exists: the stage never guesses a position from the stars it can find in the frame. The earlier frame-to-frame tracking fitted a shift, rotation and scale change to up to 50 anchor stars; its register entry was partly measured and is retired (partly measured; retired; see [PHO-05](../../../../documentation/library_design/validation/photometry.md#pho-05)). A star that a frame's solution cannot place gets a flux of 0 and an error of 0, the same as a star near the frame edge.
 
@@ -46,12 +46,12 @@ Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason
 
 `centroid_offsets_px` measures how far each star's own centroid sits from where the frame's solution says it should be, in pixels, for every star whose centroid was accepted. `VariabilityAnalyzer` keeps the offsets per frame (`centroid_offsets_by_frame`) and the mapping of each frame (`mapping_by_frame`). `centroid_shift_summary()` reduces them to a `CentroidShiftSummary` for the session. The 95th percentile used below is the value that 95% of the measurements fall below.
 
-- **Corner displacement.** For each frame, how far a corner of the frame moves beyond the shift of its middle (`FrameMapping.corner_displacement_px`). The summary keeps the 95th percentile over the frames, the worst frame and how many frames were mapped. This is the number the `registration_drift` gate judges.
+- **Corner displacement.** For each frame, how far a corner of the frame moves beyond the shift of its middle (`FrameMapping.corner_displacement_px`). The summary keeps the 95th percentile over the frames, the worst frame and how many frames were mapped. This is the number the `registration_corner_displacement` gate judges.
 - **Median and 95th-percentile offset.** What is left after the solution has placed the star: centroid noise, which is larger for faint and crowded stars, and any error of the solution itself (values on real fields are partly measured; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)). The gate reports these but does not judge them.
 - **Fallback fraction.** The share of star measurements, over all frames, that kept the solution's position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
 - **Worst frame.** The frame with the largest 95th-percentile offset, and that value.
 
-The `registration_drift` gate reads the summary (see the photometry README). The summary is not copied into the quality metrics. It appears only in the gate's detail.
+The `registration_corner_displacement` gate reads the summary (see the photometry README). The summary is not copied into the quality metrics. It appears only in the gate's detail.
 
 The re-centering box has a fixed size. It assumes a star width near 3 to 4 pixels (FWHM, full width at half maximum). For wider stars the box cuts off more of the star's wings and the centroid shifts toward the box center by a few hundredths of a pixel.
 
@@ -128,7 +128,7 @@ The assessment builds one record per star.
 | `frames_available` | frames | None | The number of frames in the session | `coverage_fraction` |
 | `coverage_fraction` | none (0 to 1) | None | Low: the brightness history has many gaps | Reviewers |
 | `saturated_fraction` | none (0 to 1) | None | High: more measurements were too bright to measure accurately | Reviewers |
-| `max_registration_drift_px` | pixels | None | High: the field sat far from its place in the first frame. The solutions follow it, so this is a mount fact, not a measuring problem | Reviewers; the `registration_drift` gate quotes it |
+| `max_registration_drift_px` | pixels | None | High: the field sat far from its place in the first frame. The solutions follow it, so this is a mount fact, not a measuring problem | Reviewers; the `registration_corner_displacement` gate quotes it |
 
 A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. No limit judges this offset: the solutions place every star wherever the field went, so a large drift does not spoil the measuring itself.
 

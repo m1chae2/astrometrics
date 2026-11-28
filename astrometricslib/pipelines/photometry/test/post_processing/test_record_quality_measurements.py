@@ -25,7 +25,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_GATE_COMPARISON_ENSEMBLE,
     PHOTOMETRY_GATE_FLUX_UNCERTAINTY,
     PHOTOMETRY_GATE_PHOTOMETRY_WORK,
-    PHOTOMETRY_GATE_REGISTRATION_DRIFT,
+    PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT,
     PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,
     PHOTOMETRY_METRICS,
     PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES,
@@ -218,7 +218,7 @@ def test_the_registration_gate_stores_the_corner_displacement_when_it_fails() ->
         m.metric: m
         for m in rq.photometry_run_measurements(photometry_fixture_metrics(), gates, inputs, _context())
     }
-    gate = by_name[PHOTOMETRY_GATE_REGISTRATION_DRIFT]
+    gate = by_name[PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT]
 
     assert gate.check_outcome is GateStatus.FAILED
     assert gate.value == pytest.approx(1.9)

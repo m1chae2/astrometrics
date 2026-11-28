@@ -1,4 +1,4 @@
-"""Tests for the per-star centroid offsets behind `registration_drift`.
+"""Tests for the per-star centroid offsets behind the registration gate.
 
 Each frame's plate solution places every reference star. The star's own
 centroid then sits near that place, and what is left is the per-star offset.
@@ -202,7 +202,7 @@ def test_a_pure_translation_leaves_the_per_star_offsets_near_zero(tmp_path: Path
 
 
 def _drift_gate(summaries: list[CentroidShiftSummary]) -> GateResult:
-    """Build only the ``registration_drift`` gate from summaries.
+    """Build only the ``registration_corner_displacement`` gate from summaries.
 
     Parameters
     ----------
@@ -212,7 +212,8 @@ def _drift_gate(summaries: list[CentroidShiftSummary]) -> GateResult:
     Returns
     -------
     gate : `GateResult`
-        The ``registration_drift`` gate, with one star's global drift of 3 px.
+        The ``registration_corner_displacement`` gate, with one star's
+        global drift of 3 px.
     """
     return rg._registration_drift_gate([3.0], summaries)
 
@@ -270,7 +271,7 @@ def test_the_gate_reports_the_offsets_and_the_corner_displacement(tmp_path: Path
     assert summary.median_offset_px is not None
     assert summary.corner_displacement_p95_px is not None
     assert summary.corner_displacement_p95_px < rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value
-    assert gate.name == rg.REGISTRATION_DRIFT_GATE_NAME
+    assert gate.name == rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     assert gate.status is GateStatus.PASSED
     assert f"median {summary.median_offset_px:.2f} px" in gate.detail
     assert f"95th percentile {summary.p95_offset_px:.2f} px" in gate.detail

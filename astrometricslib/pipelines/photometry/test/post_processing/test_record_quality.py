@@ -310,7 +310,7 @@ def test_ensemble_gate_passes_when_the_scatter_cannot_be_compared() -> None:
 def test_drift_gate_does_not_judge_how_far_the_field_moved() -> None:
     """A field 60 px from its first place passes: the solutions follow it."""
     gate = good_run(registration_drifts_px=[2.0, 60.0], centroid_shift_summaries=[centroid_summary()])[
-        rg.REGISTRATION_DRIFT_GATE_NAME
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     ]
 
     assert gate.status is GateStatus.PASSED
@@ -319,7 +319,9 @@ def test_drift_gate_does_not_judge_how_far_the_field_moved() -> None:
 
 def test_drift_gate_passes_and_reports_the_per_star_distribution() -> None:
     """A well-aligned session passes and the detail gives the distribution."""
-    gate = good_run(centroid_shift_summaries=[centroid_summary()])[rg.REGISTRATION_DRIFT_GATE_NAME]
+    gate = good_run(centroid_shift_summaries=[centroid_summary()])[
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
+    ]
 
     assert gate.status is GateStatus.PASSED
     assert gate.measured_value == pytest.approx(0.1)
@@ -339,7 +341,7 @@ def test_drift_gate_reports_but_does_not_judge_the_per_star_offsets() -> None:
     """
     summary = centroid_summary(p95_offset_px=1.6, median_offset_px=0.6)
 
-    gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_DRIFT_GATE_NAME]
+    gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME]
 
     assert gate.status is GateStatus.PASSED
     assert "95th percentile 1.60 px" in gate.detail
@@ -352,7 +354,7 @@ def test_drift_gate_goes_red_when_the_field_rotated_too_much() -> None:
         corner_displacement_p95_px=1.8, worst_corner_displacement_px=1.9, mapped_frame_count=35
     )
 
-    gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_DRIFT_GATE_NAME]
+    gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME]
 
     assert gate.status is GateStatus.FAILED
     assert gate.measured_value == pytest.approx(1.8)
@@ -370,7 +372,7 @@ def test_drift_gate_passes_a_field_that_did_not_rotate_when_no_rotation_was_fitt
         mapped_frame_count=0,
     )
 
-    gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_DRIFT_GATE_NAME]
+    gate = good_run(centroid_shift_summaries=[summary])[rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME]
 
     assert gate.status is GateStatus.PASSED
     assert "beyond the shift of the field" not in gate.detail
@@ -379,10 +381,10 @@ def test_drift_gate_passes_a_field_that_did_not_rotate_when_no_rotation_was_fitt
 def test_drift_gate_goes_red_when_more_than_a_fifth_of_the_stars_fell_back() -> None:
     """A fallback share of 25 percent fails; exactly 20 percent passes."""
     failed = good_run(centroid_shift_summaries=[centroid_summary(fallback_count=100)])[
-        rg.REGISTRATION_DRIFT_GATE_NAME
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     ]
     edge = good_run(centroid_shift_summaries=[centroid_summary(fallback_count=80)])[
-        rg.REGISTRATION_DRIFT_GATE_NAME
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     ]
 
     assert failed.status is GateStatus.FAILED
@@ -399,7 +401,7 @@ def test_drift_gate_uses_the_worst_session() -> None:
         centroid_summary(corner_displacement_p95_px=1.3),
     ]
 
-    gate = good_run(centroid_shift_summaries=sessions)[rg.REGISTRATION_DRIFT_GATE_NAME]
+    gate = good_run(centroid_shift_summaries=sessions)[rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME]
 
     assert gate.status is GateStatus.FAILED
     assert "worst of 2 sessions" in gate.detail
@@ -408,7 +410,7 @@ def test_drift_gate_uses_the_worst_session() -> None:
 def test_drift_gate_is_not_checked_without_a_summary() -> None:
     """With no per-star summary, nothing was looked at."""
     gate = good_run(registration_drifts_px=[5.0], centroid_shift_summaries=[])[
-        rg.REGISTRATION_DRIFT_GATE_NAME
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     ]
 
     assert gate.status is GateStatus.NOT_CHECKED
@@ -417,7 +419,7 @@ def test_drift_gate_is_not_checked_without_a_summary() -> None:
 def test_drift_gate_can_run_on_the_per_star_summary_alone() -> None:
     """A summary without any global drift is enough to check the gate."""
     gate = good_run(registration_drifts_px=[None], centroid_shift_summaries=[centroid_summary()])[
-        rg.REGISTRATION_DRIFT_GATE_NAME
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     ]
 
     assert gate.status is GateStatus.PASSED
@@ -444,7 +446,7 @@ def test_the_real_validate_output_records_the_gates_for_a_run_with_no_work() -> 
     assert summary.gate(rg.PHOTOMETRY_WORK_GATE_NAME).status is GateStatus.FAILED
     for name in (
         rg.COMPARISON_ENSEMBLE_GATE_NAME,
-        rg.REGISTRATION_DRIFT_GATE_NAME,
+        rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME,
         rg.SCATTER_POPULATION_GATE_NAME,
     ):
         assert summary.gate(name).status is GateStatus.NOT_CHECKED

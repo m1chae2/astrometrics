@@ -88,7 +88,7 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "session_plate_solve": ALL_THREE,
         "photometry_work": frozenset({PASSED, FAILED}),
         "comparison_ensemble": ALL_THREE,
-        "registration_drift": ALL_THREE,
+        "registration_corner_displacement": ALL_THREE,
         # Too few stars only makes the cutoff unreliable; it never fails.
         "scatter_population": frozenset({PASSED, NOT_CHECKED}),
         "variability_discrimination": ALL_THREE,

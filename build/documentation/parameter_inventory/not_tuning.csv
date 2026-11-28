@@ -809,3 +809,6 @@ wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_SPAN_OBJECTS,Tab
 wayfindinglib/tasks/planning_tasks/visibility_report.py,MAXIMUM_TIME_STEPS,Table size cap
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_DAY_HOURS,unit or physical constant
 wayfindinglib/tasks/planning_tasks/visibility_report.py,SIDEREAL_RATE,unit or physical constant
+wayfindinglib/analytics/pointing_model.py,MINIMUM_POINTS,Fewest points a fit is tried with: the structure of a six-term fit
+wayfindinglib/analytics/pointing_model.py,RANK_TOLERANCE,Numerical rank cutoff of the least-squares solve
+wayfindinglib/analytics/pointing_model.py,_TERM_COUNT,Number of fitted terms: structure of the model

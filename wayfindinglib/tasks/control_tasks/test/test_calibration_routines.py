@@ -26,10 +26,10 @@ from wayfindinglib.tasks.control_tasks.calibration_routines import (
 )
 
 _ATTEMPTS = [
-    {"ra": 10.0, "dec": 20.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
-    {"ra": 11.0, "dec": 21.0, "delta_ra_arcsec": 4.5, "delta_dec_arcsec": -2.5},
-    {"ra": 12.0, "dec": 22.0, "delta_ra_arcsec": 5.5, "delta_dec_arcsec": -3.5},
-    {"ra": 13.0, "dec": 23.0, "delta_ra_arcsec": 5.2, "delta_dec_arcsec": -3.2},
+    {"ra": 10.0, "dec": 20.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
+    {"ra": 11.0, "dec": 21.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 4.5, "delta_dec_arcsec": -2.5},
+    {"ra": 12.0, "dec": 22.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 5.5, "delta_dec_arcsec": -3.5},
+    {"ra": 13.0, "dec": 23.0, "timestamp": 1_795_000_000.0, "delta_ra_arcsec": 5.2, "delta_dec_arcsec": -3.2},
 ]
 
 
@@ -224,15 +224,20 @@ def test_run_backlash_calibration_stops_at_the_declared_motion_threshold() -> No
 
 
 def test_run_polar_alignment_assist_fits_from_the_given_attempts() -> None:
-    """Verify the assist routine fits directly from the passed-in attempts."""
-    model = run_polar_alignment_assist(_ATTEMPTS, latitude_deg=39.7)
+    """Verify the assist routine fits directly from the passed-in attempts.
+
+    The four attempts sit within a few degrees of each other, so the fit is
+    refused as a status (not raised): it cannot separate the terms.
+    """
+    model = run_polar_alignment_assist(_ATTEMPTS, latitude_deg=39.7, longitude_deg=-105.0)
 
     assert model.sample_count == len(_ATTEMPTS)
-    assert model.confidence != "insufficient_data" or model.sample_count < 4
+    assert model.confidence == "insufficient_data"
+    assert "too close together" in model.message
 
 
 def test_run_polar_alignment_assist_reports_insufficient_data_early() -> None:
     """Verify fewer than 4 attempts reports insufficient_data, not a fit."""
-    model = run_polar_alignment_assist(_ATTEMPTS[:2], latitude_deg=45.0)
+    model = run_polar_alignment_assist(_ATTEMPTS[:2], latitude_deg=45.0, longitude_deg=-105.0)
 
     assert model.confidence == "insufficient_data"

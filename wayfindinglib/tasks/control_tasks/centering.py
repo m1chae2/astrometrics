@@ -243,6 +243,8 @@ def center_on(
             iteration,
             config,
             latitude_deg=context.observer_latitude_deg(),
+            longitude_deg=context.observer_longitude_deg(),
+            timestamp=time.time(),
         )
         _record(context, "aligned" if correction.converged else "warning", correction, target_name)
         logger.info(

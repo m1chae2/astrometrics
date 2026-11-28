@@ -19,6 +19,7 @@ quality math in ``pipelines/shared/quality/``.
 import math
 import os
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -82,6 +83,102 @@ def reports_imprecise_color_calibration(output: str) -> bool:
         `True` if the output holds Siril's "imprecise solution" warning.
     """
     return _IMPRECISE_COLOR_CALIBRATION_TEXT in output
+
+
+# What Siril prints for each image while ``seqplatesolve`` works through a
+# sequence one image at a time (the run sets ``setcpu 1`` so the lines of two
+# images never mix):
+#
+#   Found 158 Gaussian profile stars in image, channel #0 (FWHM 3.167741)
+#   order: 3, nmatched: 49, sigx:0.258079, sigy:0.269835
+#   Image s_00005.fits platesolved and updated        (solved)
+#   Image s_00001 did not solve                       (not solved)
+_STARS_FOUND_PATTERN = re.compile(r"Found (\d+) Gaussian profile stars")
+_SEQUENCE_FIT_PATTERN = re.compile(r"order: (\d+), nmatched: (\d+), sigx:([\d.eE+-]+), sigy:([\d.eE+-]+)")
+_SEQUENCE_SOLVED_PATTERN = re.compile(r"Image \S*?_(\d+)\.fits? platesolved and updated")
+_SEQUENCE_NOT_SOLVED_PATTERN = re.compile(r"Image \S*?_(\d+) did not solve")
+
+
+@dataclass(frozen=True)
+class SequenceSolveRecord:
+    """What Siril printed about one image of a plate-solved sequence.
+
+    Attributes
+    ----------
+    image_number : `int`
+        The image's number in the sequence, counted from 1.
+    solved : `bool`
+        Whether Siril solved the image.
+    stars_found : `int` or `None`
+        How many stars Siril found in the image, or `None` if it printed none.
+    matched_star_count : `int` or `None`
+        How many of them Siril matched to the Gaia catalog (solved images
+        only).
+    fit_residual_rms_arcsec : `float` or `None`
+        The two axes' spreads of the matched stars' position errors,
+        combined as a root mean square, in arcseconds (solved images only).
+    fit_order : `int` or `None`
+        The order of the distortion fit Siril kept (solved images only). It
+        falls to 1 when the image holds too few stars for a higher one.
+    """
+
+    image_number: int
+    solved: bool
+    stars_found: int | None = None
+    matched_star_count: int | None = None
+    fit_residual_rms_arcsec: float | None = None
+    fit_order: int | None = None
+
+
+def parse_sequence_solve(output: str) -> dict[int, SequenceSolveRecord]:
+    """Read, for each image, how a sequence plate solve went.
+
+    Parameters
+    ----------
+    output : `str`
+        What Siril printed while ``seqplatesolve`` ran with one thread.
+
+    Returns
+    -------
+    records : `dict` [`int`, `SequenceSolveRecord`]
+        One record for each image Siril reported on, keyed by the image's
+        number in the sequence. An image Siril never reported on has none.
+    """
+    records: dict[int, SequenceSolveRecord] = {}
+    stars_found: int | None = None
+    fit: tuple[int, int, float] | None = None
+    for line in output.splitlines():
+        found_match = _STARS_FOUND_PATTERN.search(line)
+        if found_match:
+            stars_found, fit = int(found_match.group(1)), None
+            continue
+        fit_match = _SEQUENCE_FIT_PATTERN.search(line)
+        if fit_match:
+            fit = (
+                int(fit_match.group(1)),
+                int(fit_match.group(2)),
+                math.hypot(float(fit_match.group(3)), float(fit_match.group(4))),
+            )
+            continue
+        solved_match = _SEQUENCE_SOLVED_PATTERN.search(line)
+        if solved_match:
+            number = int(solved_match.group(1))
+            records[number] = SequenceSolveRecord(
+                number,
+                True,
+                stars_found,
+                None if fit is None else fit[1],
+                None if fit is None else fit[2],
+                None if fit is None else fit[0],
+            )
+            stars_found, fit = None, None
+            continue
+        failed_match = _SEQUENCE_NOT_SOLVED_PATTERN.search(line)
+        if failed_match:
+            number = int(failed_match.group(1))
+            records[number] = SequenceSolveRecord(number, False, stars_found)
+            stars_found, fit = None, None
+    return records
 
 
 def parse_negative_pixel_percentage(line: str) -> int | None:

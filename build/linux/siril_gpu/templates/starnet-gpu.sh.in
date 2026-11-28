@@ -1,0 +1,26 @@
+#!/bin/sh
+# Starts StarNet2 (the ONNX Runtime build) on the graphics card, with the same
+# arguments as the program.
+#
+# Installed by build/linux/setup_siril_gpu.sh from
+# build/linux/siril_gpu/templates/starnet-gpu.sh.in. Run that script again
+# instead of editing this copy.
+#
+# The StarNet2 package ships a CPU-only ONNX Runtime 1.26. Its README allows
+# supplying a GPU ONNX Runtime instead, which this script does without
+# changing the package: LD_LIBRARY_PATH is searched before the program's own
+# lib/ folder. StarNet2 needs exactly ONNX Runtime 1.26 (symbol version
+# VERS_1.26.0), so the GPU build is onnxruntime-gpu 1.26.0 from PyPI. That
+# build is for CUDA 12; the CUDA 12 runtime, cuBLAS, cuFFT and cuDNN 9 come
+# from ~/cuda_libs (the same folder the Siril Flatpak uses). A system cuDNN
+# can fail here (HEURISTIC_QUERY_FAILED), so it must not be found first. If
+# CUDA fails anyway, StarNet2 falls back to the CPU by itself.
+#
+# When started inside the Siril Flatpak, it runs StarNet2 on the host through
+# flatpak-spawn, the same way the GraXpert wrapper does.
+STARNET="@STARNET_PROGRAM@"
+LIBS="@STARNET_LIBS@"
+if [ "$container" = "flatpak" ]; then
+    exec flatpak-spawn --host --env=LD_LIBRARY_PATH="$LIBS" "$STARNET" "$@"
+fi
+LD_LIBRARY_PATH="$LIBS" exec "$STARNET" "$@"

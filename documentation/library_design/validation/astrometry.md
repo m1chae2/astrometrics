@@ -1,6 +1,6 @@
 # Astrometry Validation and Tuning
 
-*Version 1.0 · 2026-10-15 · Status: current*
+*Version 1.1 · 2026-11-27 · Status: current*
 
 This file records how the tuned values of the astrometry pipeline were checked. The astrometry pipeline finds the stars in an image, works out where the image points on the sky (plate solving) and names the stars from the SIMBAD and Gaia DR3 catalogs. Each entry gives the library calls behind a number, so you can repeat the check on your own frames and keep or change the value. Terms are defined in the [glossary](../../Glossary.md), and the status labels in [index.md](index.md).
 
@@ -1107,6 +1107,117 @@ for shift in (0.0, 30.0):
 - **Regenerate with:** The procedure above. `astrometricslib/scripts/reconcile_position_only_star_catalog.py` (dry run by default) lists the merges this radius makes.
 - **Guarded by tests:** `astrometricslib/test/test_reconcile_position_only_star_catalog.py` and `astrometricslib/pipelines/shared/test/test_star_recording_identified_reconciliation.py` check the merges at this radius, not the radius.
 - **Raw record:** None kept.
+
+### AST-23
+
+**Choosing the local plate solver: solve-field against Siril's own solver**
+
+- **Claim:** On 28 frames and stacks of M 13 and M 31 from two cameras, Siril's own plate solver solved every frame that carried a position hint, also with the hint 2° or 5° off. Its solutions lie closer to Gaia DR3 than those of solve-field (the local solver of astrometry.net that the app runs), and it solves in about a fifth of the time. It cannot solve a frame with no position, which solve-field can. ASTAP was not tested. On these results the user chose Siril's own solver as the local solver.
+- **Settings it supports:**
+  - config keys `index_path`, `autoindex` and `cpulimit` in `[Processing.Astrometry.Local Solver]`, the settings of the local solve-field run, read by `AstrometryNetPlateSolveDriver` in `astrometricslib/_internal/drivers/astrometry_net_driver.py`. Relation: challenged by this entry. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver -->
+  - The search radius of 2° around the header position that the pipeline passes to the solver (a literal in `StarIdentifier`, `astrometricslib/pipelines/astrometry/processing/star_identifier.py`; changing it means editing the code). Relation: sanity check only. Hints 2° off still solved with both solvers; solve-field cannot solve a hint 5° off within it. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier -->
+- **Status:** Partly measured. Two targets, 28 frames and stacks from two cameras, one Linux computer, one run per frame and mode; ASTAP and Windows were not tested, and Siril ran from the study scripts, not through the app.
+- **Data you need:** Light frames whose headers carry a pointing hint (`RA`, `DEC`, `FOCALLEN`, `XPIXSZ`), from each camera and optic you use. Include the poor frames a night gives (trailed, short, through a grating, off target) and a stack or two. You also need solve-field with its index files, Siril 1.4 with its local Gaia astrometry catalog, and a Gaia tile cache that covers the fields to G = 16 with proper motions.
+- **Procedure:** The scripts are in `build/agent_tools/plate_solver_study/`; its README gives the commands. Each script writes only inside a study folder given on the command line and refuses a folder inside the library.
+  1. Copy the frames out of the library and remove their plate solutions (the sky map and SIP distortion cards), keeping the hint cards (`prep_frames.py`).
+  2. Run solve-field once per frame with the command line the app's driver builds: `--downsample 2 --uniformize 0`, the pipeline's scale window (5% each side of the header scale) widened by 0.8 and 1.2, `--radius 2` around the hint, `autoindex` and `cpulimit 300`. A blind run passes no position and no scale. The app's blind retry is not run, so each mode is one attempt (`run_solvers.py`). The driver's fit statistics come from an internal function. <!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.read_corr_fit_statistics -->
+  3. Run Siril 1.4 headless and offline, `siril-cli -o -i <private settings file> -s <script>`, with the script `load <frame>`, `platesolve <ra>,<dec> -focal=<FOCALLEN> -pixelsize=<XPIXSZ> -force -noflip` and `save`. The private settings file is a copy of the user's Siril settings with `update_default_scale=false`. Siril's other astrometry settings stay as the user had them: SIP order 3, a near-search radius of 10°, a scale range of 20% and a 30 s limit. A blind run gets a copy of the frame with no `RA`, `DEC`, `OBJCTRA` or `OBJCTDEC` card (`run_solvers.py`).
+  4. Judge every solution with the project's own code (`judge.py`). Detect the stars with `SourceDetector`, refine each center with photutils' `centroid_2dg` and measure the star width with `measure_fwhm_from_data`. Read the Gaia DR3 stars brighter than G = 16 from a copy of the Gaia tile cache and move them to `DATE-OBS`. Then run the AST-01 check (stars matched within 2 arcsec, the constant shift and the scatter about it) and the Gaia refit of [AST-02](#ast-02), `refine_wcs_with_gaia`, which reports the solution's RMS against Gaia before and after the refit. Divide that RMS by the star width and compare it with the [AST-04](#ast-04) limit of half the star width. These are internal functions, not part of the public API, and may change. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_fwhm_from_data --> <!-- impl: astrometricslib.pipelines.astrometry.processing.gaia_field_matching.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib._internal.drivers.catalog_store.stars_in_tiles -->
+  5. Compare the two solutions of each frame: the center, the local scale, rotation and parity (taken from the full mapping, SIP terms included, by finite differences 50 pixels each side of the image center) and the largest sky difference over a 5 by 5 grid of pixels (`judge.py`).
+  6. Time ten hinted solves in a row on ten M 31 frames, as mount centering runs them: Siril in one session, Siril in ten separate runs and solve-field in ten separate runs (`centering_timing.py`).
+  7. Run the extra Siril cases on one ZWO frame and one Nikon frame (`extras.py`), and join everything into one table (`summarize.py`).
+
+```bash
+cd build/agent_tools/plate_solver_study
+python prep_frames.py --library <library folder> --study <study folder>
+python run_solvers.py --study <study folder> solve-field
+python run_solvers.py --study <study folder> siril --siril-settings-source <the user's Siril settings file>
+python judge.py --study <study folder> --gaia-cache <the app's catalog_cache.db>
+python centering_timing.py --study <study folder>
+python extras.py --study <study folder>
+python summarize.py --study <study folder>
+```
+
+- **Acceptance criterion:** Not recorded (set after the result). The study compared the two solvers side by side and set no limit in advance.
+- **What to look at:** The solve rate in each hint mode. The RMS of each solver's own solution against Gaia before any refit, in arcseconds, and that RMS as a fraction of the star width; lower is better. The constant shift in pixels; above about a tenth of a pixel the solution is offset as a whole (AST-01). The Siril minus solve-field differences of center, scale, rotation and parity. The wall-clock time of one solve and of ten solves in a row, and the disk space of each solver's star data.
+- **Our result:** 2026-11-27. Code version: commit 1257e980 for the project's measuring code and the app's solve-field command line. solve-field 0.98 (the Ubuntu `astrometry.net` package) with the 4200-series and Tycho-2 index files; Siril 1.4.5 (Flatpak) in offline mode with its Gaia DR3 astrometry catalog `siril_cat_healpix8_astro.dat`. Sample size: 28 frames and stacks.
+
+  - M 13, ZWO ASI 533MM Pro on the 405 mm Apertura 75Q, 10 frames of 30 s: 6 luminance frames of 2026-05-24 (one of them trailed and set aside), 2 grating frames of the same night and 2 frames of 2026-01-11.
+  - M 31, the same camera and optic, 10 frames of 2026-11-05: one each of 20 s, 30 s and 120 s, six of 60 s, and one 60 s frame set aside as off target.
+  - M 13, Nikon D5300 color camera (raw, with its RGGB color filter pattern), 5 frames of 30 s: 2 of 2023-04-28 and 3 of 2023-05-14. The lens is a Nikkor 75 to 300 mm zoom, which the headers record as 300 mm.
+  - Three stacks: the ZWO luminance stacks of M 13 and M 31 and the Nikon color stack of M 13.
+
+  Uncertainty: each number is a median over frames, with the smallest and largest value; no confidence interval was estimated. Data split: no value was tuned on these frames, so the in-sample or held-out question does not arise.
+
+  **Table A.** Solve rate by hint mode, solved of tried.
+
+  | Hint | solve-field | Siril |
+  | --- | --- | --- |
+  | The header position and scale | 28 of 28 | 28 of 28 |
+  | None (blind) | 28 of 28 | 0 of 28 |
+  | Position 2° north of the header's | 28 of 28 | 28 of 28 |
+  | Position 5° north of the header's | 0 of 4 tried | 28 of 28 |
+
+  Siril's solver needs a position: with none it stops with "no target coordinates passed". solve-field searches 2° around the hint, so a hint 5° off lies outside its search by construction. The four such runs took 60 to 270 s each before failing; only four were tried, because each takes minutes. In the app the blind retry follows such a failure; the blind runs here took a median of 6.7 s (4.5 to 14.2 s). Siril found every 5° error with its near search, which moved the solution 294 to 308 arcmin from the hint.
+
+  **Table B.** Position accuracy of the hinted solutions against Gaia DR3, median (smallest to largest). The RMS is that of the solver's own solution, before any refit.
+
+  | Frames | Solver | RMS against Gaia | Constant shift | Scatter about the shift | RMS / star width |
+  | --- | --- | --- | --- | --- | --- |
+  | ZWO frames (20) | solve-field | 0.67 arcsec (0.53 to 1.92) | 0.16 px (0.09 to 0.51) | 0.41 arcsec | 0.16 (0.11 to 0.48) |
+  | ZWO frames (20) | Siril | 0.24 arcsec (0.12 to 0.31) | 0.026 px (0.019 to 0.034) | 0.15 arcsec | 0.053 (0.033 to 0.074) |
+  | Nikon frames (5) | solve-field | 4.85 arcsec (4.71 to 6.85) | 0.11 px (0.03 to 0.20) | 1.33 arcsec | 0.43 (0.28 to 0.63) |
+  | Nikon frames (5) | Siril | 1.44 arcsec (1.40 to 1.75) | 0.038 px (0.021 to 0.132) | 0.70 arcsec | 0.12 (0.09 to 0.13) |
+  | ZWO stacks, M 13 and M 31 | solve-field | 0.54 and 0.71 arcsec | 0.10 and 0.26 px | 0.33 and 0.37 arcsec | 0.13 and 0.18 |
+  | ZWO stacks, M 13 and M 31 | Siril | 0.096 and 0.077 arcsec | 0.026 and 0.022 px | 0.048 and 0.035 arcsec | 0.022 and 0.020 |
+  | Nikon stack | solve-field | 5.82 arcsec | 0.15 px | 1.09 arcsec | 0.47 |
+  | Nikon stack | Siril | 0.95 arcsec | 0.055 px | 0.33 arcsec | 0.076 |
+
+  Siril fits a third-order SIP distortion to a median of 458 matched stars (102 to 1018) on the ZWO frames; solve-field fits a second-order one to a median of 20.5 (11 to 45). The Gaia refit brought solve-field's ZWO solutions to a median of 0.28 arcsec (0.17 to 0.35) and was applied to all 20. On Siril's ZWO solutions it was never applied, because its result (median 0.28 arcsec) did not fit Gaia better than Siril's own. On the Nikon frames and stack the refit was refused for both solvers, because it would have moved the field by more than its 30 arcsec limit. Two of the five Nikon solutions of solve-field sit above half the star width before the refit (0.63 and 0.51); Siril's largest is 0.13.
+
+  The poor frames solved with both solvers with the header hint and the 2° hint, and with Siril also with the 5° hint: the trailed frame, both grating frames, the 20 s frame and the off-target frame. Siril's RMS against Gaia on them was 0.14 to 0.31 arcsec, solve-field's 0.53 to 0.73 arcsec.
+
+  **Table C.** Siril minus solve-field, hinted solutions: median size of the difference (largest).
+
+  | Frames | Center | Scale | Rotation | Parity | Largest sky difference on a 5 by 5 grid |
+  | --- | --- | --- | --- | --- | --- |
+  | ZWO frames (20) | 0.46 arcsec (0.94) | 0.021% (0.030%) | 0.008° (0.012°) | Same on all | 2.8 arcsec (5.3), 1.5 px (2.7) |
+  | ZWO stacks, M 13 and M 31 | 0.29 and 0.73 arcsec | 0.021% and 0.007% | 0.010° and 0.008° | Same | 3.1 and 2.7 arcsec |
+  | Nikon frames (5) | 4.5 arcsec (5.3) | 0.28% (0.40%) | 0.017° (0.026°) | Same on all | 238 arcsec (248), 87 px (91) |
+  | Nikon stack | 4.2 arcsec | 0.39% | 0.003° | Same | 164 arcsec, 60 px |
+
+  On the ZWO frames the two solutions agree to well under a pixel at the center and to under 3 px everywhere. On the Nikon field they part near the edges by up to 91 px. Table B shows which one fits there: under solve-field's solution 39 to 89 stars per Nikon frame lie within 2 arcsec of a Gaia star, under Siril's 367 to 709. The Nikon scale solved at 2.737 arcsec/pixel (solve-field) and 2.747 arcsec/pixel (Siril), against 2.675 from the header, which is a focal length of 292 to 293 mm. That is expected of the zoom lens, not an error.
+
+  **Table D.** Wall-clock time, median (smallest to largest). Siril's times include starting its Flatpak; Siril's own reported run time on the ZWO frames was a median of 0.32 s.
+
+  | Case | solve-field | Siril |
+  | --- | --- | --- |
+  | One hinted solve, ZWO frame | 2.8 s (2.0 to 4.3) | 0.56 s (0.52 to 0.84) |
+  | One hinted solve, Nikon frame | 3.9 s (3.8 to 4.2) | 1.30 s (1.26 to 1.31) |
+  | One solve, hint 2° off, all 28 | 3.9 s (2.0 to 5.4) | 1.56 s (1.34 to 1.79) |
+  | One solve, hint 5° off, all 28 | Failed after 60 to 270 s (4 tried) | 1.59 s (1.50 to 2.57) |
+  | Ten centering solves, separate runs | 39.7 s, 10 solved | 6.0 s, 10 solved |
+  | Ten centering solves, one Siril session | Not applicable | 3.1 s, 10 solved |
+
+  Disk space: the installed solve-field index files take 458 MB (the 4200 series 160 MB, the Tycho-2 series 298 MB), and the app points solve-field at the whole folder. These runs solved with Tycho-2 indexes 08 to 12 and index 4211. Siril's Gaia astrometry catalog takes 1,521 MB.
+
+  The extra Siril cases, on one M 31 ZWO frame and one M 13 Nikon frame: a focal length 20% too long failed on both (the near search over 10° found nothing); 20% too short and 10% too long solved on both. With the near search turned off (`-radius=0`), positions 0.5° and 1° off solved on both and 2° off only on the wider Nikon field. A position about 20° off solved with `-radius=30` in 5.9 s (ZWO) and 2.7 s (Nikon); radii of 50° and more were rejected as invalid arguments (tried on the ZWO frame only). `-downscale` solved on both. The same command run twice gave identical solution cards on both frames.
+
+  Before the study the user's own Siril settings held a focal length of 292.6 mm and a pixel size of 3.89 µm, the values of a Nikon solve. Siril writes each solve's focal length and pixel size into those settings when `update_default_scale` is true, which is why the study gave Siril a private copy.
+
+  **Decisions.** The user made these on 2026-11-27, on these results:
+
+  1. Siril's own plate solver is the local solver for image astrometry and for mount centering.
+  2. A frame with no usable position, which Siril cannot solve, goes to the online astrometry.net service.
+  3. The app always runs Siril with a private settings file and `update_default_scale=false`, so the user's own Siril settings never change.
+  4. The app always passes `-noflip`, so Siril does not flip the image to match the sky.
+  5. ASTAP was not tested, because the user chose not to install it. This is a decision, not a measurement.
+- **Verdict:** Not judged.
+- **Limits:** Two targets, both in the northern sky near declination +36° and +41°, and one computer running Linux; Windows was not tested. Siril ran from the study scripts, so the app's own Siril driver still needs its own check. Each frame and mode ran once; only the extra cases repeated a solve, on two frames. solve-field's 5° case ran on 4 frames, and the app's blind retry and online fallback were not run. The Gaia check reads the cached stars to G = 16, so an error common to Gaia and both solvers would not show. The centering times cover the solve only, not the slew or the exposure. The study's star-width fraction after the refit uses the refit's RMS even where the refit was not applied, so Table B gives the fraction before the refit. The frame copies were deleted after the study, so a rerun starts at step 1.
+- **To tune for your setup:** Run the study on your own frames, one camera and optic at a time. If Siril fails on a frame whose hint is right, check `FOCALLEN` and `XPIXSZ` in its header: Siril accepts a scale error up to its scale range (`percent_scale_range` in its astrometry settings, 20% here), and a focal length 20% too long failed here. If your pointing errors exceed Siril's near-search radius (`radius`, 10° here), raise it. For a wide field with strong distortion, compare the Nikon rows of Tables B and C.
+- **Regenerate with:** The scripts in `build/agent_tools/plate_solver_study/`, in the order of the procedure; their README gives each command. `summarize.py` prints every number above from the study folder's `out/` files.
+- **Guarded by tests:** None.
+- **Raw record:** Not in the repository. The study folder's `out/` folder on the observatory computer (`~/.cache/astrometrics/solver-study/out/`) holds `results.csv`, `results.json`, `runs.jsonl`, `judge.jsonl`, `compare.jsonl`, `centering_timing.json`, `extras.json`, `manifest.json`, the saved solutions and every run's log.
 
 ## Design estimates
 

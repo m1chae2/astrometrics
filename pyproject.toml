@@ -147,7 +147,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "simulator", "build/tpm/test"]
+testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "simulator", "build/tpm/test", "build/linux/siril_gpu/test"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
@@ -351,6 +351,10 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "build/tpm/seed_library.py" = ["banned-api"] # the seeder writes the private guiding stores directly, into a throwaway library
 "build/agent_tools/validate_plate_solution_check.py" = ["banned-api"] # runs the private plate-solution check on shifted solutions of a library copy; no public call takes a shifted map
+"build/agent_tools/plate_solver_study/judge.py" = ["banned-api"] # measures saved plate solutions with the private detector, refit and Gaia cache reader, as register entry AST-23 records; no public call takes an outside solution
+"build/agent_tools/plate_solver_study/corner_check.py" = ["banned-api"] # reads the private Gaia cache copy, as judge.py does
+"build/agent_tools/plate_solver_study/run_solvers.py" = ["banned-api", "subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form solve-field and flatpak calls; reads the private solve-field fit statistics
+"build/linux/siril_gpu/siril_gpu_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form flatpak, pip and nvidia-smi calls only, no shell
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/main_backend.py" = ["module-import-not-at-top-of-file"] # warnings.filterwarnings() must precede import

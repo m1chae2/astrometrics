@@ -1,6 +1,6 @@
 # Installation
 
-*Version 2.1 · 2026-11-14 · Status: current*
+*Version 2.2 · 2026-11-27 · Status: current*
 
 This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
@@ -125,6 +125,36 @@ The app chooses at start. It cannot switch cards while it runs, so plugging in o
 On Windows the `gpu` setting does nothing. The app asks Windows for the high-performance card (the NVIDIA or AMD card next to an Intel one) every time it starts, on battery too. On a computer with one card this changes nothing. The start-up log, `main.log` in `%LOCALAPPDATA%\astrometrics\logs`, names the card the window got, on the line that starts with `GPU:`.
 
 GraXpert, which removes the sky's gradient from the preview picture, chooses its card on its own. On Windows it uses the graphics card through DirectML, Microsoft's interface for running AI models on any graphics card.
+
+### Siril's tools on an NVIDIA graphics card
+
+Siril's AI tools can run on an NVIDIA graphics card, which is usually faster than the processor. They are GraXpert, StarNet2 (which removes stars from an image) and the Python scripts Siril runs, such as GraXpert-AI and Cosmic Clarity. With the Flathub Siril, each tool needs extra pieces: permissions for the Siril sandbox, NVIDIA's CUDA libraries at fixed versions, a GPU build of ONNX Runtime (the library that runs the AI models) and two small wrapper scripts. `build/linux/setup_siril_gpu.sh` puts each piece in place. It is optional. Without it, the tools run on the processor.
+
+1. Install Siril from Flathub (`--siril-source=flatpak`), open it once and run any script from its **Scripts** menu. Siril then makes its Python environment and settings file.
+2. Install GraXpert and StarNet2 in `~/Applications`, or note where they are.
+3. See what the script would do. It changes nothing in this step.
+
+   ```bash
+   ./build/linux/setup_siril_gpu.sh --dry-run
+   ```
+
+4. Close Siril, then run the script.
+
+   ```bash
+   ./build/linux/setup_siril_gpu.sh
+   ```
+
+   Run it as your own user, not with `sudo`. It downloads 2 to 3 GB of libraries from PyPI. It checks each file against a pinned checksum and refuses any file that does not match. If GraXpert or StarNet2 is somewhere else, add `--graxpert=<path>` or `--starnet=<path>`.
+
+5. Check the result. Every part should show `ready`.
+
+   ```bash
+   ./build/linux/setup_siril_gpu.sh --check
+   ```
+
+The script adds only settings that are missing and never removes one. It fills the GraXpert setting of the app (`graxpert_executable`) and the StarNet and GraXpert settings of Siril only when they are empty. On a computer without an NVIDIA card, or without the Flathub Siril, it says so and stops without an error. GraXpert 4 also needs NVIDIA's CUDA 13 libraries in `/usr/local/cuda`. The script reports whether they are there but does not install them. The details are in `build/linux/README.md`.
+
+Windows needs none of this. Siril's normal Windows installer has no sandbox to open, and GraXpert uses the graphics card through DirectML.
 
 ### Storage layout
 

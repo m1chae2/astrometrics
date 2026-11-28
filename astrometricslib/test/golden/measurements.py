@@ -6,8 +6,8 @@ tests compare those numbers with ``golden_values.json``; the
 ``--update-golden`` option writes them there.
 
 Only code that runs in pure Python is measured here. Anything that needs
-Siril (stacking) or astrometry.net (plate solving) is left out, because
-neither program is installed on the machines that run this suite.
+Siril (stacking and plate solving) is left out, because
+Siril is not installed on the machines that run this suite.
 
 This module also holds the tolerance rules (`tolerance_for`), so a new
 pinned number gets a sensible tolerance without anyone typing it by hand.

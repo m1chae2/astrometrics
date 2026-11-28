@@ -92,7 +92,7 @@ def test_the_table_maps_text_to_text() -> None:
     """Every entry has a library-qualified key and a non-empty new call."""
     assert renames.RENAMES is RENAMES
     for old, new in RENAMES.items():
-        assert old.startswith("astrometricslib.") and old.count(".") == 2, old
+        assert old.startswith("astrometricslib.") and old.count(".") in (1, 2), old
         assert new.strip(), old
 
 

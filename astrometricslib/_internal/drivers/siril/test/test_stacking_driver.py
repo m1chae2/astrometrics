@@ -200,12 +200,12 @@ def test_the_driver_interfaces_cannot_be_built_without_their_methods() -> None:
 
 def test_the_concrete_drivers_implement_their_interfaces() -> None:
     """Each concrete driver implements its interface."""
-    from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
     from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
     from astrometricslib._internal.drivers.interfaces import PlateSolveDriver, SimbadDriver, StackingDriver
+    from astrometricslib._internal.drivers.siril.astrometry.solve_driver import SirilPlateSolveDriver
 
     assert issubclass(SirilStackingDriver, StackingDriver)
-    assert issubclass(AstrometryNetPlateSolveDriver, PlateSolveDriver)
+    assert issubclass(SirilPlateSolveDriver, PlateSolveDriver)
     assert issubclass(AstroquerySimbadDriver, SimbadDriver)
 
 

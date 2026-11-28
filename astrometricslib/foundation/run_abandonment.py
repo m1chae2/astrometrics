@@ -242,7 +242,7 @@ def run_registered(arguments: Sequence[str], timeout_seconds: float) -> subproce
     The program always leads a process group of its own, so a timeout ends
     the program and every helper it started (`stop_process_group`), not just
     the program. This is the one way the library runs GraXpert, Cosmic
-    Clarity, the headless Siril preview and ``solve-field``. When a run is
+    Clarity and the headless Siril preview. When a run is
     bound, the program is also registered with that run, so giving up on the
     run stops it too.
 

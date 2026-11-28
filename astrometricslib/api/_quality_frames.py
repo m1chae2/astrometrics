@@ -287,7 +287,7 @@ class QualityFrames(MovedNames):
             astrometricslib.pipelines.stacking.pre_processing.blink_pair.find_blink_partner
 
         Nothing is stored. The typical frame is the frame of the same session
-        (the batch the quarantine step judges the frame in) whose stored
+        (the batch the set-aside step judges the frame in) whose stored
         ``frame.star_elongation`` and ``frame.sky_unevenness`` lie closest to
         the session medians. The reference star is a bright, isolated,
         unsaturated star near the frame center, chosen with the rules of the
@@ -335,7 +335,7 @@ class QualityFrames(MovedNames):
         (frame to stack, stack to frame, frame to frame, or those chained
         through the sky for frames of two stacks), and, between two frames
         of one size that nothing else links, matching the frames' bright
-        stars the way the quarantine's pointing check does (trying the
+        stars the way the set-aside check's pointing check does (trying the
         second frame as it is and turned half a revolution). The first two
         read only headers and small files, so they are fast; star matching
         reads both frames' pixels. When nothing applies, the same pixel is
@@ -529,7 +529,7 @@ class QualityStacks(MovedNames):
         spaced evenly through the possible ones, and a subset with fewer
         than four frames is left out. Each is stacked into the target's
         ``_subsets`` folder with the normal settings (without the frame
-        quarantine step) and its noise is measured in the library stack's
+        set-aside step) and its noise is measured in the library stack's
         sky apertures, so the numbers compare. The library stack is the
         last point of the curve and is not stacked again. The noise, the
         reference flux, the effective frame count and the effective time are

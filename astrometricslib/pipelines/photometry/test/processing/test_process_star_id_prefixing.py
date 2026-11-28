@@ -17,6 +17,7 @@ from astropy.modeling.models import Gaussian2D
 
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
+from astrometricslib.test.synthetic import drifted_frame_solves
 
 
 def _write_single_star_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
@@ -30,13 +31,29 @@ def _write_single_star_fits(path) -> None:  # ruff: ignore[missing-type-function
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
+def _solves(path: Path) -> dict:
+    """Give the one frame its plate solution.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        The frame, 64 by 64 pixels.
+
+    Returns
+    -------
+    solves : `dict`
+        The frame's solved header, keyed by its path as text.
+    """
+    return drifted_frame_solves([str(path)], (64, 64))
+
+
 def test_process_uses_plain_star_ids_by_default(tmp_path: Path) -> None:
     """Verify process() ids default to plain Star_N without a prefix."""
     path = tmp_path / "frame.fits"
     _write_single_star_fits(path)
 
     analyzer = VariabilityAnalyzer()
-    analyzer.process([str(path)])
+    analyzer.process([str(path)], _solves(path))
 
     assert analyzer.stellar_objects
     assert analyzer.stellar_objects[0].id == "Star_1"
@@ -48,7 +65,7 @@ def test_process_prefixes_star_ids_when_given(tmp_path: Path) -> None:
     _write_single_star_fits(path)
 
     analyzer = VariabilityAnalyzer()
-    analyzer.process([str(path)], id_prefix="sess:")
+    analyzer.process([str(path)], _solves(path), id_prefix="sess:")
 
     assert analyzer.stellar_objects
     assert analyzer.stellar_objects[0].id == "sess:Star_1"
@@ -72,7 +89,7 @@ def test_process_seeded_stars_keep_their_real_identity(tmp_path: Path) -> None:
     seed_star.spectral_type = "A0Va"
 
     analyzer = VariabilityAnalyzer()
-    analyzer.process([str(path)], id_prefix="sess:", seed_stars=[seed_star])
+    analyzer.process([str(path)], _solves(path), id_prefix="sess:", seed_stars=[seed_star])
 
     assert len(analyzer.stellar_objects) == 1
     tracked = analyzer.stellar_objects[0]
@@ -99,7 +116,7 @@ def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path: Path) ->
     positionless_star.star_data = {}
 
     analyzer = VariabilityAnalyzer()
-    analyzer.process([str(path)], seed_stars=[good_star, positionless_star])
+    analyzer.process([str(path)], _solves(path), seed_stars=[good_star, positionless_star])
 
     assert len(analyzer.stellar_objects) == 1
     assert analyzer.stellar_objects[0].id == "* alf Lyr"
@@ -123,7 +140,7 @@ def test_process_excludes_seed_stars_with_no_signal_on_the_reference_frame(tmp_p
     on_blank_sky.star_data = {"xcentroid": 8.0, "ycentroid": 56.0}
 
     analyzer = VariabilityAnalyzer()
-    analyzer.process([str(path)], seed_stars=[on_the_real_star, on_blank_sky])
+    analyzer.process([str(path)], _solves(path), seed_stars=[on_the_real_star, on_blank_sky])
 
     assert len(analyzer.stellar_objects) == 1
     assert analyzer.stellar_objects[0].id == "* alf Lyr"
@@ -144,7 +161,7 @@ def test_process_keeps_a_seed_star_with_only_marginal_signal(tmp_path: Path) -> 
     faint_but_real.star_data = {"xcentroid": 36.0, "ycentroid": 32.0}
 
     analyzer = VariabilityAnalyzer()
-    analyzer.process([str(path)], seed_stars=[faint_but_real])
+    analyzer.process([str(path)], _solves(path), seed_stars=[faint_but_real])
 
     assert len(analyzer.stellar_objects) == 1
     assert analyzer.stellar_objects[0].flux > 0

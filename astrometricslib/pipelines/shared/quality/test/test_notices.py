@@ -152,7 +152,7 @@ def test_stacking_notice_rows_follow_the_summary() -> None:
         stackingMetrics=StackingPipelineQualityMetrics(isSpectral=False, framesSubmitted=1, framesStacked=1),
     )
     summary.stacking_metrics.frames_accepted = 6
-    summary.stacking_metrics.frames_quarantined = 2
+    summary.stacking_metrics.frames_set_aside = 2
     summary.stacking_metrics.flat_calibration_issues = [
         "flats are faint: 5% of full scale",
         "flats are bright: 95% of full scale",

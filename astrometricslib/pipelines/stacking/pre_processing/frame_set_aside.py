@@ -1,4 +1,11 @@
-"""Moves frames with clouds, trails or a bad pointing out of the stack.
+"""Checks frames for clouds and for alignment on the target.
+
+This is a cloud and target alignment check. The cloud check looks for few
+stars, an uneven sky with dimmer stars, and stars smeared into streaks. The
+target alignment check looks for a pointing off the session's field or at
+another field. Siril's stack filters have no
+uneven-sky or off-field check, give no reason for each frame and do not move
+frames where the user can see and restore them, so the project keeps this step.
 
 A frame shot through cloud has few stars or an uneven sky, a frame shot while
 the mount drifted has stars smeared into streaks, and a frame that points far
@@ -15,7 +22,7 @@ The step is built to be undone:
 - It writes `excluded_frames.json` in the `_excluded` folder, listing where
   each frame came from and why it was moved (the rule, the frame's value and
   the limit, in plain words).
-- `restore_quarantined_frames` moves the frames back.
+- `restore_set_aside_frames` moves the frames back.
 - `processing.stacking.predict` shows which frames the step would
   move, without moving any.
 - It judges each frame against the other frames of its own session, camera,
@@ -79,9 +86,9 @@ from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
     StarProfileResult,
     usable_top_level_adu,
 )
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
-    QUARANTINE_EXCLUSION_REASON_PREFIX,
+    SET_ASIDE_EXCLUSION_REASON_PREFIX,
 )
 from astrometricslib.pipelines.stacking.stage_progress import LoopProgress
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -93,34 +100,34 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "MANIFEST_FILE_NAME",
-    "QuarantineDecision",
-    "QuarantineReport",
+    "SetAsideDecision",
+    "SetAsideReport",
     "decision_to_set_aside_frame",
     "drop_frames_already_set_aside",
     "find_frames_already_set_aside",
-    "find_frames_to_quarantine",
-    "find_quarantine_folders",
+    "find_frames_to_set_aside",
+    "find_set_aside_folders",
     "judge_batch",
     "judge_batch_in_full",
     "list_set_aside_frames",
-    "quarantine_bad_frames",
-    "read_quarantine_manifest",
-    "restore_quarantined_frames",
+    "read_set_aside_manifest",
+    "restore_set_aside_frames",
+    "set_aside_bad_frames",
     "set_aside_elongation_limit",
     "split_into_batches",
 ]
 
 MANIFEST_FILE_NAME = "excluded_frames.json"
 
-# The name the quarantine step goes by in a stack's gate record.
-GATE_NAME = "frame_quarantine"
+# The name the set-aside step goes by in a stack's gate record.
+GATE_NAME = "frame_set_aside"
 """The record, inside each `_excluded` folder, of the frames moved there."""
 
 MINIMUM_FRAMES_TO_JUDGE = TunedParameter(
     name="stacking.minimum_frames_to_judge",
     default=8,
     unit="frames",
-    description="Fewest frames a batch needs before any frame is judged for quarantine.",
+    description="Fewest frames a batch needs before any frame is judged for the set-aside check.",
     role=ParameterRole.EXCLUSION_CRITERIA,
     source=ParameterSource.HARDCODED,
     kind=HardcodedKind.STATISTICS,
@@ -137,7 +144,7 @@ stayed within 5.8% to 18.3%. The star limit below (half the median) leaves
 room for that spread.
 """
 
-WARN_QUARANTINED_FRACTION = 0.25
+WARN_SET_ASIDE_FRACTION = 0.25
 """The share of a batch above which setting frames aside draws a warning.
 
 This is a documented constant, not a tuned parameter, and it blocks nothing:
@@ -196,7 +203,7 @@ Elongation is the long width of a star divided by its short width, 1.0 for
 a circle. It is the stored `frame.star_elongation` of the frame (the median
 over up to 196 isolated, unsaturated stars, from their full second moments,
 so a trail at any angle counts). The earlier test used the median ratio of
-the x and y widths alone (`frame.quarantine_roundness`). It missed trails at
+the x and y widths alone (`frame.set_aside_roundness`). It missed trails at
 an angle to the pixel axes: NGC 7331 L_037 (elongation 1.58, by eye a
 trail) read 0.93.
 
@@ -204,7 +211,7 @@ On 21 sessions of the ZWO ASI 533MM Pro (675 frames, STK-01) the middle of
 all frames is 1.096 and the spread of a frame about its own session's median
 is 0.045 (robust standard deviation). The limit sits five of those spreads
 above the library median, 1.32 (the repository's usual cut for an outlier,
-see `quarantine_tuning.ELONGATION_OUTLIER_SIGMAS`). It is the floor under
+see `set_aside_tuning.ELONGATION_OUTLIER_SIGMAS`). It is the floor under
 the session-relative limit below, so a very round session is not cut at a
 tiny rise.
 
@@ -233,7 +240,7 @@ Some sessions are mildly elongated throughout. The M 27 session of
 0.12 the cut-off there is 1.40. On a round session such as NGC 7331 (median
 1.096) the cut-off is the fixed 1.32.
 
-The rise is `quarantine_tuning.ELONGATION_RISE_SIGMAS` (2.7) robust standard
+The rise is `set_aside_tuning.ELONGATION_RISE_SIGMAS` (2.7) robust standard
 deviations of a frame's distance above its own session's median (0.045 over
 the same 675 frames as the fixed limit). It was 0.22 (five spreads) until
 the contact sheets of 2026-11-20 showed visibly elongated stars from about
@@ -457,7 +464,7 @@ MEASUREMENT_THREADS = 4
 SET_ASIDE_ACTION_PREFIX = "frame moved to _excluded/"
 """Start of the ``action_taken`` text of a set-aside frame's rows.
 
-The folder name is `QUARANTINE_FOLDER_NAME`. A reader finds the rows of
+The folder name is `SET_ASIDE_FOLDER_NAME`. A reader finds the rows of
 set-aside frames by this prefix (see `parse_set_aside_action`).
 """
 
@@ -525,7 +532,7 @@ class RuleFinding:
 
 
 @dataclass(frozen=True)
-class QuarantineDecision:
+class SetAsideDecision:
     """One frame this step judged unfit to stack.
 
     Attributes
@@ -569,12 +576,12 @@ class QuarantineDecision:
 
 
 @dataclass
-class QuarantineReport:
-    """What the quarantine step did.
+class SetAsideReport:
+    """What the set-aside step did.
 
     Attributes
     ----------
-    moved : `list` [`QuarantineDecision`]
+    moved : `list` [`SetAsideDecision`]
         The frames moved into `_excluded`.
     notes : `list` [`str`]
         One sentence for each batch the step left alone, with the reason.
@@ -585,7 +592,7 @@ class QuarantineReport:
     batches_too_small : `int`
         Batches with too few frames, or too few readable ones, to judge.
     batches_with_many_set_aside : `int`
-        Batches judged in which more than `WARN_QUARANTINED_FRACTION` of the
+        Batches judged in which more than `WARN_SET_ASIDE_FRACTION` of the
         frames were set aside. The frames are moved all the same.
     warnings : `list` [`str`]
         One sentence for each such batch, for example "35 of 123 frames set
@@ -598,12 +605,12 @@ class QuarantineReport:
         the step could read, whether the frame was moved or kept. A batch
         too small to judge is not measured, so it adds none. The stacking
         stage stores these as quality measurements.
-    flagged : `list` [`QuarantineDecision`]
+    flagged : `list` [`SetAsideDecision`]
         Frames kept with a warning: an uneven sky with normal stars (a
         gradient or an obstruction such as a tree), not cloud.
     """
 
-    moved: list[QuarantineDecision] = field(default_factory=list)
+    moved: list[SetAsideDecision] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
     # How each session (batch) of frames ended up. A batch is judged only if
@@ -615,7 +622,7 @@ class QuarantineReport:
     warnings: list[str] = field(default_factory=list)
     warning_by_path: dict[str, str] = field(default_factory=dict)
     measurements: list[dict[str, Any]] = field(default_factory=list)
-    flagged: list[QuarantineDecision] = field(default_factory=list)
+    flagged: list[SetAsideDecision] = field(default_factory=list)
 
     def actions_by_path(self) -> dict[str, str]:
         """Return the action text of each moved frame, for its stored rows.
@@ -624,7 +631,7 @@ class QuarantineReport:
         -------
         actions : `dict` [`str`, `str`]
             Original frame path mapped to the sentence stored as the
-            ``action_taken`` of the frame's quarantine measurements. See
+            ``action_taken`` of the frame's set-aside check measurements. See
             `set_aside_action_text`. A flagged frame, kept with a warning,
             gets "frame kept, flagged: " and its reason.
         """
@@ -641,10 +648,10 @@ class QuarantineReport:
         -------
         reasons : `dict` [`str`, `str`]
             Original frame path mapped to the reason, starting with
-            `QUARANTINE_EXCLUSION_REASON_PREFIX`.
+            `SET_ASIDE_EXCLUSION_REASON_PREFIX`.
         """
         return {
-            decision.path: f"{QUARANTINE_EXCLUSION_REASON_PREFIX}: {decision.kind} ({decision.reason})"
+            decision.path: f"{SET_ASIDE_EXCLUSION_REASON_PREFIX}: {decision.kind} ({decision.reason})"
             for decision in self.moved
         }
 
@@ -972,14 +979,16 @@ def set_aside_elongation_limit(elongations: Sequence[float], colour_camera: bool
 
 def judge_batch_with_notes(
     measurements: Sequence[dict[str, Any]],
-) -> tuple[list[QuarantineDecision], list[str]]:
-    """Pick the frames of one batch that are clouded, trailed or off the field.
+) -> tuple[list[SetAsideDecision], list[str]]:
+    """Pick the batch frames that fail the cloud and alignment check.
 
-    See `judge_batch_in_full`; the frames kept with a warning are left out.
+    The check is for clouded frames and for frames not aligned on the target
+    (trailed or off the field). See `judge_batch_in_full`; the frames kept
+    with a warning are left out.
 
     Returns
     -------
-    decisions : `list` [`QuarantineDecision`]
+    decisions : `list` [`SetAsideDecision`]
         The frames to move.
     notes : `list` [`str`]
         One sentence for each check that could not be made on some frames.
@@ -990,11 +999,13 @@ def judge_batch_with_notes(
 
 def judge_batch_in_full(
     measurements: Sequence[dict[str, Any]],
-) -> tuple[list[QuarantineDecision], list[QuarantineDecision], list[str]]:
-    """Pick the frames of one batch that are clouded, trailed or off the field.
+) -> tuple[list[SetAsideDecision], list[SetAsideDecision], list[str]]:
+    """Pick the batch frames that fail the cloud and alignment check.
 
-    Four rules are tried on every frame, and a frame that breaks several is
-    reported for each (see `RuleFinding`):
+    The cloud rules are few stars, an uneven sky and trailed stars. The
+    target alignment rule is a center off the session's field. Four rules are
+    tried on every frame, and a frame that breaks several is reported for each
+    (see `RuleFinding`):
 
     - Trailed stars: the frame's stored star elongation is above both
       `TRAILED_ELONGATION_LIMIT` and the batch median plus the rise
@@ -1030,10 +1041,10 @@ def judge_batch_in_full(
 
     Returns
     -------
-    decisions : `list` [`QuarantineDecision`]
+    decisions : `list` [`SetAsideDecision`]
         The frames to move, in the order given. Empty when the batch is
         too small to judge.
-    flagged : `list` [`QuarantineDecision`]
+    flagged : `list` [`SetAsideDecision`]
         The frames kept with a warning (uneven sky with normal stars).
     notes : `list` [`str`]
         One sentence for each check that could not be made on some frames.
@@ -1069,8 +1080,8 @@ def judge_batch_in_full(
     pointing_limit = resolve(OFF_FIELD_POINTING_FRACTION).value
 
     transparency_limit = resolve(UNEVEN_SKY_TRANSPARENCY_FRACTION).value
-    decisions: list[QuarantineDecision] = []
-    flagged: list[QuarantineDecision] = []
+    decisions: list[SetAsideDecision] = []
+    flagged: list[SetAsideDecision] = []
     for measurement, elongation, uneven, offset, other_field_size in zip(
         measurements, elongations, unevenness, pointing_offsets, other_field_sizes, strict=True
     ):
@@ -1148,15 +1159,15 @@ def judge_batch_in_full(
 
 def _decision_from_findings(
     measurement: dict[str, Any], findings: Sequence[RuleFinding], typical_stars: float
-) -> QuarantineDecision:
+) -> SetAsideDecision:
     """Build a decision from a frame's measurements and the rules it broke.
 
     Returns
     -------
-    decision : `QuarantineDecision`
+    decision : `SetAsideDecision`
         The kind of the first finding, and every finding's reason.
     """
-    return QuarantineDecision(
+    return SetAsideDecision(
         path=measurement["path"],
         kind=findings[0].kind,
         reason="; ".join(finding.reason for finding in findings),
@@ -1170,8 +1181,8 @@ def _decision_from_findings(
     )
 
 
-def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecision]:
-    """Pick the frames of one batch that are clouded, trailed or off the field.
+def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[SetAsideDecision]:
+    """Pick the batch frames that fail the cloud and alignment check.
 
     Parameters
     ----------
@@ -1180,7 +1191,7 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
 
     Returns
     -------
-    decisions : `list` [`QuarantineDecision`]
+    decisions : `list` [`SetAsideDecision`]
         The frames to move, in the order given. Empty when the batch is
         too small to judge.
     """
@@ -1196,12 +1207,12 @@ RULE_WORDS = {
 """The words that name each rule in a warning."""
 
 
-def describe_many_set_aside(decisions: Sequence[QuarantineDecision], batch_size: int) -> str | None:
+def describe_many_set_aside(decisions: Sequence[SetAsideDecision], batch_size: int) -> str | None:
     """Write the warning for a batch in which many frames were set aside.
 
     Parameters
     ----------
-    decisions : `Sequence` [`QuarantineDecision`]
+    decisions : `Sequence` [`SetAsideDecision`]
         What `judge_batch_with_notes` found for the batch.
     batch_size : `int`
         Frames judged in the batch.
@@ -1211,10 +1222,10 @@ def describe_many_set_aside(decisions: Sequence[QuarantineDecision], batch_size:
     warning : `str` or `None`
         For example "35 of 123 frames set aside: 4 trailed, 12 off field, 19
         uneven sky". A frame that broke two rules counts under each. `None`
-        when no more than `WARN_QUARANTINED_FRACTION` of the batch was set
+        when no more than `WARN_SET_ASIDE_FRACTION` of the batch was set
         aside.
     """
-    if len(decisions) <= WARN_QUARANTINED_FRACTION * batch_size:
+    if len(decisions) <= WARN_SET_ASIDE_FRACTION * batch_size:
         return None
     counts: dict[str, int] = defaultdict(int)
     for decision in decisions:
@@ -1346,8 +1357,8 @@ def measure_star_elongation(path: str, camera: str | None) -> float | None:
     return median_star_elongation(measure_star_profile_planes(path, camera))
 
 
-def make_quarantine_measurer(target_id: str | None) -> Callable[[str], dict[str, Any]]:
-    """Build the function that measures one frame for the quarantine step.
+def make_set_aside_measurer(target_id: str | None) -> Callable[[str], dict[str, Any]]:
+    """Build the function that measures one frame for the set-aside step.
 
     The raw-frame check gives the star count, sky level, sky grid and star
     positions. The star elongation is the frame's stored
@@ -1436,7 +1447,7 @@ def _measure_frames(
         except RunAbandonedError:
             raise
         except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as error:
-            logger.debug("Cannot measure '%s' for the quarantine check: %s", frame.path, error)
+            logger.debug("Cannot measure '%s' for the set-aside check: %s", frame.path, error)
             return None
         measurement["path"] = frame.path
         return measurement
@@ -1472,7 +1483,7 @@ def _measure_frames(
         # One line, not one per frame: a folder of missing frames would
         # otherwise bury the rest of the log.
         logger.warning(
-            "Could not measure %d of %d frames for the quarantine check (first: '%s'). "
+            "Could not measure %d of %d frames for the set-aside check (first: '%s'). "
             "Run with debug logging to see each reason.",
             len(unreadable),
             len(frames),
@@ -1481,19 +1492,19 @@ def _measure_frames(
     return [result for result in results if result is not None], unreadable
 
 
-def find_frames_to_quarantine(
+def find_frames_to_set_aside(
     frames: Sequence[Any],
     measure: Callable[[str], dict[str, Any]] | None = None,
     target_id: str | None = None,
-) -> QuarantineReport:
-    """Decide which frames to move, without moving any.
+) -> SetAsideReport:
+    """Decide which frames fail the cloud and alignment check, moving none.
 
     Parameters
     ----------
     frames : `Sequence`
         Light frame records of the target.
     measure : `Callable`, optional
-        Measures one frame file. Defaults to `make_quarantine_measurer`;
+        Measures one frame file. Defaults to `make_set_aside_measurer`;
         tests pass a stand-in.
     target_id : `str`, optional
         The target's id, to read the stored star elongations of its frames
@@ -1501,15 +1512,15 @@ def find_frames_to_quarantine(
 
     Returns
     -------
-    report : `QuarantineReport`
+    report : `SetAsideReport`
         ``moved`` holds the decisions (nothing has been moved yet), ``notes``
         the batches left alone, ``unreadable`` the frames that could not be
         measured.
     """
     minimum_frames_to_judge = resolve(MINIMUM_FRAMES_TO_JUDGE).value
     if measure is None:
-        measure = make_quarantine_measurer(target_id)
-    report = QuarantineReport()
+        measure = make_set_aside_measurer(target_id)
+    report = SetAsideReport()
     batches = split_into_batches(frames)
     # Only batches big enough to judge are measured, so only they are counted.
     progress = LoopProgress(
@@ -1555,8 +1566,8 @@ def find_frames_to_quarantine(
     return report
 
 
-def quarantine_gate(report: QuarantineReport) -> GateResult:
-    """Turn a quarantine report into the stack's gate record.
+def set_aside_gate(report: SetAsideReport) -> GateResult:
+    """Turn a set-aside report into the stack's gate record.
 
     The three outcomes are kept apart on purpose:
 
@@ -1570,23 +1581,23 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
 
     Parameters
     ----------
-    report : `QuarantineReport`
-        What `find_frames_to_quarantine` found.
+    report : `SetAsideReport`
+        What `find_frames_to_set_aside` found.
 
     Returns
     -------
     gate : `GateResult`
-        The result, named ``frame_quarantine``.
+        The result, named ``frame_set_aside``.
     """
     source = (
         f"at least {resolve(MINIMUM_FRAMES_TO_JUDGE).value} frames per session; "
-        f"warns above {WARN_QUARANTINED_FRACTION:.0%} set aside"
+        f"warns above {WARN_SET_ASIDE_FRACTION:.0%} set aside"
     )
     if report.batches_with_many_set_aside:
         return failed_gate(
             GATE_NAME,
             "; ".join(report.warnings),
-            limit=WARN_QUARANTINED_FRACTION,
+            limit=WARN_SET_ASIDE_FRACTION,
             limit_source=source,
         )
     if report.batches_judged == 0:
@@ -1598,7 +1609,7 @@ def quarantine_gate(report: QuarantineReport) -> GateResult:
     detail = f"{report.batches_judged} session(s) checked, {len(report.moved)} frame(s) moved"
     if report.batches_too_small:
         detail += f"; {report.batches_too_small} session(s) too small to check"
-    return passed_gate(GATE_NAME, limit=WARN_QUARANTINED_FRACTION, limit_source=source, detail=detail)
+    return passed_gate(GATE_NAME, limit=WARN_SET_ASIDE_FRACTION, limit_source=source, detail=detail)
 
 
 def _unused_destination(directory: str, file_name: str) -> str:
@@ -1619,8 +1630,8 @@ def _unused_destination(directory: str, file_name: str) -> str:
     return destination
 
 
-def read_quarantine_manifest(manifest_path: str) -> list[dict[str, Any]]:
-    """Read a quarantine manifest.
+def read_set_aside_manifest(manifest_path: str) -> list[dict[str, Any]]:
+    """Read a set-aside manifest.
 
     Returns
     -------
@@ -1634,7 +1645,7 @@ def read_quarantine_manifest(manifest_path: str) -> list[dict[str, Any]]:
 
 
 def _write_manifest(manifest_path: str, entries: list[dict[str, Any]]) -> None:
-    """Write a quarantine manifest.
+    """Write a set-aside manifest.
 
     The new copy is written beside the old one and then replaces it, so a
     crash never leaves a half-written manifest.
@@ -1645,12 +1656,12 @@ def _write_manifest(manifest_path: str, entries: list[dict[str, Any]]) -> None:
     os.replace(temporary_path, manifest_path)
 
 
-def _move_to_quarantine(decision: QuarantineDecision, warning: str | None = None) -> str:
+def _move_to_set_aside(decision: SetAsideDecision, warning: str | None = None) -> str:
     """Move one frame into the `_excluded` folder beside it and record it.
 
     Parameters
     ----------
-    decision : `QuarantineDecision`
+    decision : `SetAsideDecision`
         The frame to move and why.
     warning : `str`, optional
         The batch warning to store in the frame's manifest entry, when many
@@ -1661,13 +1672,13 @@ def _move_to_quarantine(decision: QuarantineDecision, warning: str | None = None
     new_path : `str`
         Where the frame now is.
     """
-    quarantine_directory = os.path.join(os.path.dirname(decision.path), QUARANTINE_FOLDER_NAME)
-    os.makedirs(quarantine_directory, exist_ok=True)
-    new_path = _unused_destination(quarantine_directory, os.path.basename(decision.path))
+    set_aside_directory = os.path.join(os.path.dirname(decision.path), SET_ASIDE_FOLDER_NAME)
+    os.makedirs(set_aside_directory, exist_ok=True)
+    new_path = _unused_destination(set_aside_directory, os.path.basename(decision.path))
     shutil.move(decision.path, new_path)
 
-    manifest_path = os.path.join(quarantine_directory, MANIFEST_FILE_NAME)
-    entries = read_quarantine_manifest(manifest_path)
+    manifest_path = os.path.join(set_aside_directory, MANIFEST_FILE_NAME)
+    entries = read_set_aside_manifest(manifest_path)
     entries.append({
         "file": os.path.basename(new_path),
         "original_path": decision.path,
@@ -1688,12 +1699,12 @@ def _move_to_quarantine(decision: QuarantineDecision, warning: str | None = None
     return new_path
 
 
-def quarantine_bad_frames(
+def set_aside_bad_frames(
     target: Any,
     frames: Sequence[Any],
     measure: Callable[[str], dict[str, Any]] | None = None,
-) -> tuple[list[Any], QuarantineReport]:
-    """Move the frames with clouds or trailed stars out of the target's folder.
+) -> tuple[list[Any], SetAsideReport]:
+    """Move frames that fail the cloud and alignment check out of the target.
 
     Only light frames are judged. The moved frames are removed from
     ``target.frames`` too, so the target no longer lists them, and its total
@@ -1708,36 +1719,36 @@ def quarantine_bad_frames(
         The frames the stack is about to use.
     measure : `Callable`, optional
         Measures one frame file; tests pass a stand-in. Defaults to
-        `make_quarantine_measurer`.
+        `make_set_aside_measurer`.
 
     Returns
     -------
     kept_frames : `list`
         `frames` without the moved ones.
-    report : `QuarantineReport`
+    report : `SetAsideReport`
         What was moved and what was left alone.
     """
     light_frames = [frame for frame in frames if str(frame.role).upper() == "LIGHT"]
-    report = find_frames_to_quarantine(light_frames, measure, getattr(target, "id", None))
+    report = find_frames_to_set_aside(light_frames, measure, getattr(target, "id", None))
 
     moved_paths: set[str] = set()
     for decision in list(report.moved):
         try:
-            _move_to_quarantine(decision, report.warning_by_path.get(decision.path))
+            _move_to_set_aside(decision, report.warning_by_path.get(decision.path))
         except OSError as error:
-            logger.warning("Could not move '%s' into %s: %s", decision.path, QUARANTINE_FOLDER_NAME, error)
+            logger.warning("Could not move '%s' into %s: %s", decision.path, SET_ASIDE_FOLDER_NAME, error)
             report.moved.remove(decision)
             report.notes.append(f"Could not move {os.path.basename(decision.path)}: {error}")
             continue
         moved_paths.add(decision.path)
 
     for warning in report.warnings:
-        logger.warning("Frame quarantine for target '%s': %s", getattr(target, "id", "?"), warning)
+        logger.warning("Set-aside check for target '%s': %s", getattr(target, "id", "?"), warning)
     if moved_paths:
         logger.info(
             "Moved %d frame(s) with clouds or trailed stars into %s for target '%s'.",
             len(moved_paths),
-            QUARANTINE_FOLDER_NAME,
+            SET_ASIDE_FOLDER_NAME,
             getattr(target, "id", "?"),
         )
         target.frames = [frame for frame in target.frames if frame.path not in moved_paths]
@@ -1751,7 +1762,7 @@ def drop_frames_already_set_aside(
 ) -> tuple[list[Any], list[Any]]:
     """Drop frames that an earlier run moved into `_excluded`.
 
-    The quarantine step removes the frames it moves from the target's
+    The set-aside step removes the frames it moves from the target's
     records, but that change only lasts if the target was saved afterwards.
     When it was not, the target still lists files that are no longer in
     their folder, and the stack would count them as frames it kept. A frame
@@ -1792,7 +1803,7 @@ def find_frames_already_set_aside(target_id: str, frames: Sequence[Any], frames_
     A frame counts only when the `_excluded` manifest lists its original path
     and no file lies there now, so a frame that was restored does not count.
     Nothing is changed. The stacker (through `drop_frames_already_set_aside`)
-    and the quarantine preview both use this one rule.
+    and the set-aside preview both use this one rule.
 
     Parameters
     ----------
@@ -1820,8 +1831,8 @@ def find_frames_already_set_aside(target_id: str, frames: Sequence[Any], frames_
     ]
 
 
-def restore_quarantined_frames(directory: str, only_files: Collection[str] | None = None) -> list[str]:
-    """Move quarantined frames back to where they came from.
+def restore_set_aside_frames(directory: str, only_files: Collection[str] | None = None) -> list[str]:
+    """Move set-aside frames back to where they came from.
 
     Parameters
     ----------
@@ -1839,18 +1850,18 @@ def restore_quarantined_frames(directory: str, only_files: Collection[str] | Non
         The original paths of the frames moved back. A frame whose original
         place is now taken stays in `_excluded`.
     """
-    quarantine_directory = (
+    set_aside_directory = (
         directory
-        if os.path.basename(os.path.normpath(directory)) == QUARANTINE_FOLDER_NAME
-        else os.path.join(directory, QUARANTINE_FOLDER_NAME)
+        if os.path.basename(os.path.normpath(directory)) == SET_ASIDE_FOLDER_NAME
+        else os.path.join(directory, SET_ASIDE_FOLDER_NAME)
     )
-    manifest_path = os.path.join(quarantine_directory, MANIFEST_FILE_NAME)
-    entries = read_quarantine_manifest(manifest_path)
+    manifest_path = os.path.join(set_aside_directory, MANIFEST_FILE_NAME)
+    entries = read_set_aside_manifest(manifest_path)
 
     restored: list[str] = []
     remaining: list[dict[str, Any]] = []
     for entry in entries:
-        current_path = os.path.join(quarantine_directory, entry["file"])
+        current_path = os.path.join(set_aside_directory, entry["file"])
         original_path = entry["original_path"]
         if only_files is not None and entry["file"] not in only_files:
             remaining.append(entry)
@@ -1866,12 +1877,12 @@ def restore_quarantined_frames(directory: str, only_files: Collection[str] | Non
         _write_manifest(manifest_path, remaining)
     elif os.path.exists(manifest_path):
         os.remove(manifest_path)
-        if not os.listdir(quarantine_directory):
-            os.rmdir(quarantine_directory)
+        if not os.listdir(set_aside_directory):
+            os.rmdir(set_aside_directory)
     return restored
 
 
-def decision_to_set_aside_frame(decision: QuarantineDecision) -> SetAsideFrame:
+def decision_to_set_aside_frame(decision: SetAsideDecision) -> SetAsideFrame:
     """Describe a decision in the shape the public API returns.
 
     Returns
@@ -1909,7 +1920,7 @@ def target_folder_names(target_id: str) -> list[str]:
     )
 
 
-def find_quarantine_folders(frames_path: str, target_id: str) -> list[str]:
+def find_set_aside_folders(frames_path: str, target_id: str) -> list[str]:
     """Find the `_excluded` folders that hold set-aside frames of a target.
 
     Parameters
@@ -1933,7 +1944,7 @@ def find_quarantine_folders(frames_path: str, target_id: str) -> list[str]:
         folders.extend(
             directory
             for directory, _, files in os.walk(root)
-            if os.path.basename(directory) == QUARANTINE_FOLDER_NAME and MANIFEST_FILE_NAME in files
+            if os.path.basename(directory) == SET_ASIDE_FOLDER_NAME and MANIFEST_FILE_NAME in files
         )
     return folders
 
@@ -1955,8 +1966,8 @@ def list_set_aside_frames(frames_path: str, target_id: str) -> list[SetAsideFram
         it is in.
     """
     frames = []
-    for folder in find_quarantine_folders(frames_path, target_id):
-        for entry in read_quarantine_manifest(os.path.join(folder, MANIFEST_FILE_NAME)):
+    for folder in find_set_aside_folders(frames_path, target_id):
+        for entry in read_set_aside_manifest(os.path.join(folder, MANIFEST_FILE_NAME)):
             frames.append(
                 SetAsideFrame(
                     file=entry["file"],

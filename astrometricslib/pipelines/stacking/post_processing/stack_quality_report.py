@@ -195,7 +195,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
         skipped_reasons=[
             {"file": frame.path.rsplit("/", 1)[-1], "reason": frame.reason} for frame in excluded[:10]
         ],
-        frames_set_aside_before_stacking=metrics.frames_quarantined,
+        frames_set_aside_before_stacking=metrics.frames_set_aside,
         sessions=[
             {
                 "session": session.session_id,

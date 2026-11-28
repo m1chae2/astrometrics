@@ -30,7 +30,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "get_stack_filter_wfwhm_percentile": None,
     "get_stack_filter_round_percentile": None,
     "get_trim_noisy_stack_edges_enabled": True,
-    "get_quarantine_bad_frames_enabled": True,
+    "get_set_aside_bad_frames_enabled": True,
     "get_background_homogeneity_check_enabled": True,
 }
 

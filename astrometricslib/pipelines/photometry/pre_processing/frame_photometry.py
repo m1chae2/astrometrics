@@ -2,26 +2,21 @@
 
 These are the raw, per-frame measurement steps -- reading a frame's
 exposure time, airmass, and capture time from its FITS header,
-re-locating a star's centroid, fitting how a frame sits against the
-reference frame (shift, rotation and scale change), and measuring a
-star's aperture flux -- with no shared state across frames. They are
-module-level functions rather than methods because
-`_process_single_frame_worker` is dispatched to a `ProcessPoolExecutor`
-and needs to be picklable/forkable independent of any analyzer instance.
+re-locating a star's centroid, and measuring a star's aperture flux --
+with no shared state across frames. They are module-level functions rather
+than methods because `_process_single_frame_worker` is dispatched to a
+`ProcessPoolExecutor` and needs to be picklable/forkable independent of any
+analyzer instance.
 
 Three rules keep the measured light curves honest:
 
 * Aperture centers are never rounded to whole pixels. Each star is placed
-  at its reference position moved by the frame's alignment (a shift, a
-  rotation and a scale change), then re-centered on its own
-  brightness-weighted centroid (see `refine_star_centroid`). When that
-  refinement is not trustworthy, the star keeps the aligned reference
-  position and the frame result records why.
+  where the frame's own plate solution puts it (see `FrameMapping`), then
+  re-centered on its own brightness-weighted centroid (see
+  `refine_star_centroid`). When that refinement is not trustworthy, the star
+  keeps the solution's position and the frame result records why.
 * A frame whose ``DATE-OBS`` is missing or unreadable is rejected with a
   reason (see `read_observation_time`). It never gets the wall-clock time.
-* The frame's alignment is measured on stars chosen for being bright
-  enough to centroid but not saturated (see `select_alignment_anchors`),
-  never on noise peaks.
 * Every flux comes with its 1-sigma uncertainty, from the CCD equation (see
   `aperture_flux_error_adu`). The uncertainty uses the camera's gain and
   read noise (see `detector_noise`). The flux values themselves do not
@@ -55,6 +50,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
+from astrometricslib.pipelines.photometry.pre_processing.frame_mapping import FrameMapping
 from astrometricslib.pipelines.shared.neighbor_masking import (
     NeighborField,
     clipped_median_and_sigma,
@@ -74,7 +70,6 @@ from astrometricslib.pipelines.shared.quality.star_ring import (
     STAR_RING_NEIGHBOR_SEARCH_MARGIN_PX,
     STAR_RING_TARGET_MATCH_RADIUS_PX,
 )
-from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -208,683 +203,6 @@ def read_observation_time(header: Any) -> datetime:
     return parse_observation_time(value)
 
 
-# Half-width, in pixels, of the box around a star's expected position that
-# `locate_star_centroid` searches. The unstable-tracking limit in
-# `assess_input_quality` is a fraction of it.
-CENTROID_SEARCH_HALF_WIDTH_PX = 40
-
-
-def locate_star_centroid(
-    data: np.ndarray,
-    expected_x: float,
-    expected_y: float,
-    search_half_width: int = CENTROID_SEARCH_HALF_WIDTH_PX,
-) -> tuple[float, float] | None:
-    """Find the exact center of a star if we already know roughly where it is.
-
-    Instead of searching the whole picture, we just look in a small box
-    around where we expect the star to be. This is much faster. Pixels
-    within 3 noise widths of the background are ignored, so sky noise does
-    not drag the answer toward the middle of the box.
-
-    Returns
-    -------
-    centroid : `tuple` [`float`, `float`] or `None`
-        The exact `(x, y)` center, or None if we couldn't find the star.
-    """
-    height, width = data.shape
-    x0 = round(expected_x) - search_half_width
-    x1 = round(expected_x) + search_half_width + 1
-    y0 = round(expected_y) - search_half_width
-    y1 = round(expected_y) + search_half_width + 1
-    if x0 < 0 or y0 < 0 or x1 > width or y1 > height:
-        return None
-
-    cutout = data[y0:y1, x0:x1]
-    background_level = np.median(cutout)
-    # Noise alone puts about half the pixels above the median. Counted as
-    # light, those pixels add up to more than a faint star and pull the
-    # centroid toward the middle of the window, so the measured shift comes
-    # out too small. Only pixels more than 3 noise widths above the median
-    # count. The noise width is the median absolute deviation (MAD, a spread
-    # that ignores the star) scaled to match a standard deviation. On a
-    # noise-free window the MAD is zero and nothing changes.
-    noise_width = MAD_TO_SIGMA * np.median(np.abs(cutout - background_level))
-    weights = np.clip(cutout - background_level - 3.0 * noise_width, 0.0, None)
-    if weights.sum() <= 0:
-        return None
-
-    centroid_x, centroid_y = centroid_com(weights)
-    return x0 + float(centroid_x), y0 + float(centroid_y)
-
-
-# The fewest located anchors for which a frame's alignment is fitted at all.
-# With fewer, the frame is taken as not shifted rather than guessed.
-MINIMUM_ANCHORS_FOR_SHIFT = TunedParameter(
-    name="photometry.minimum_anchors_for_shift",
-    default=5,
-    unit="stars",
-    description="Fewest located anchor stars for which a frame's alignment is fitted at all.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D04",
-)
-
-# The fewest located anchors for which a rotation and a scale change are
-# fitted as well as the shift. A similarity transform has four numbers, so
-# ten stars leave six more than the fit needs.
-MINIMUM_ANCHORS_FOR_SIMILARITY = TunedParameter(
-    name="photometry.minimum_anchors_for_similarity",
-    default=10,
-    unit="stars",
-    description=(
-        "Fewest located anchor stars for which a rotation and a scale change are fitted as well as the shift."
-    ),
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D04",
-)
-
-# The least spread of the anchors, as a fraction of the distance from the
-# middle of the frame to a corner, for which a rotation and a scale change are
-# fitted. The spread is the root-mean-square distance of the anchors from
-# their own mean. Anchors bunched in a small part of the field (a cluster
-# core) cannot tell a rotation from a shift. A centroid error of 0.1 pixel on
-# ten anchors then moves a corner by about 0.1 / (0.07 * sqrt(10)) = 0.45
-# pixel, under half of the 1 pixel the `registration_drift` gate allows. A
-# design estimate.
-MINIMUM_ANCHOR_SPREAD_FRACTION = TunedParameter(
-    name="photometry.minimum_anchor_spread_fraction",
-    default=0.07,
-    unit="fraction",
-    description=(
-        "Least spread of the anchors, as a fraction of the half-diagonal, for which a rotation "
-        "and scale change are fitted."
-    ),
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D04",
-)
-
-# Anchors that sit farther than this many scaled median absolute deviations
-# from the fitted alignment are left out of the fit, then the fit is made
-# again. This is the usual cut for a mistaken star (a blend or a hot pixel).
-ALIGNMENT_CLIP_SIGMAS = TunedParameter(
-    name="photometry.alignment_clip_sigmas",
-    default=3.0,
-    unit="sigma",
-    description=(
-        "Distance, in scaled median absolute deviations, beyond which an anchor is left out of "
-        "the alignment fit."
-    ),
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D04",
-)
-
-# How many times the fit is made again with the clipped anchors.
-ALIGNMENT_CLIP_PASSES = TunedParameter(
-    name="photometry.alignment_clip_passes",
-    default=3,
-    unit="passes",
-    description="How many times the alignment is fitted again with the clipped anchors.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D04",
-)
-
-# How many times the anchors are re-centered and the rotation and scale fitted
-# again (see `calculate_frame_alignment`). The first pass starts from the
-# shift alone and keeps the anchors that the shift puts within reach of the
-# box. On NGC 2403 the rotation puts the corners 2.5 px from the shifted
-# positions. Each pass brings more anchors within reach. Three passes were
-# enough to bring in all of them there. A design estimate.
-ALIGNMENT_REFINEMENT_PASSES = TunedParameter(
-    name="photometry.alignment_refinement_passes",
-    default=3,
-    unit="passes",
-    description="How many times the anchors are re-centered and the rotation and scale fitted again.",
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
-    register_entry="PHO-04",
-)
-
-# How far, in pixels, an anchor's centroid may sit from where the alignment so
-# far puts it and still be used in the fit, when the usual reach
-# (`MAX_CENTROID_SHIFT_PX`) leaves fewer than `MINIMUM_ANCHORS_FOR_SIMILARITY`
-# anchors. A rotation that the shift alone has not yet described can put the
-# far anchors outside the usual reach, and a wider one brings them back. It is
-# only a second try, because a wide reach lets blends in: on M 81 the corner
-# displacement came out 0.9 px with the usual reach and 1.3 to 1.6 px with 3
-# to 4 px, where an independent fit on 800 bright stars gave about 0.6 px.
-# The fit's own clipping cuts the blends that remain. A design estimate.
-# The reach stands for about 1.3 star widths (4 px at the reference setup's 3
-# px width) and follows the measured star width.
-ALIGNMENT_ANCHOR_REACH_PX = TunedParameter(
-    name="photometry.alignment_anchor_reach_px",
-    default=factor_for(4.0, RunBasis.STAR_WIDTH_PX),
-    reference_value=4.0,
-    unit="× star width",
-    description=(
-        "How far an anchor's centroid may sit from where the alignment so far puts it when the "
-        "usual reach leaves too few anchors."
-    ),
-    role=ParameterRole.MEASUREMENT,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    basis=RunBasis.STAR_WIDTH_PX,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
-    register_entry="PHO-04",
-)
-
-
-@dataclass(frozen=True)
-class FrameAlignment:
-    """How one frame sits against the reference frame.
-
-    The model is a shift plus a rotation and a scale change about the middle
-    of the frame, which is what a polar-alignment error, a lens change with
-    temperature, or atmospheric refraction does to a field over a night. A
-    star at ``(x, y)`` in the reference frame is expected at::
-
-        x + shift_x + scale_change * (x - centre_x) - rotation * (y - centre_y)
-        y + shift_y + rotation * (x - centre_x) + scale_change * (y - centre_y)
-
-    Attributes
-    ----------
-    shift_x, shift_y : `float`
-        The shift of the middle of the frame, in pixels.
-    centre_x, centre_y : `float`
-        The middle of the frame, in pixels.
-    rotation : `float`
-        The rotation, in radians. Positive turns the field from +x toward +y.
-    scale_change : `float`
-        The change in scale, as a fraction (0.001 is 0.1 percent larger).
-    half_diagonal_px : `float`
-        Distance from the middle of the frame to a corner, in pixels.
-    anchor_count : `int`
-        How many anchors the fit used. 0 when none were located.
-    includes_similarity : `bool`
-        Whether the rotation and scale were fitted. When `False` they are
-        zero and the frame is only shifted.
-    """
-
-    shift_x: float
-    shift_y: float
-    centre_x: float = 0.0
-    centre_y: float = 0.0
-    rotation: float = 0.0
-    scale_change: float = 0.0
-    half_diagonal_px: float = 0.0
-    anchor_count: int = 0
-    includes_similarity: bool = False
-
-    def predict(self, x: float, y: float) -> tuple[float, float]:
-        """Say where a star of the reference frame should sit in this frame.
-
-        Parameters
-        ----------
-        x, y : `float`
-            The star's position in the reference frame, in pixels.
-
-        Returns
-        -------
-        position : `tuple` [`float`, `float`]
-            The expected ``(x, y)`` in this frame.
-        """
-        relative_x, relative_y = x - self.centre_x, y - self.centre_y
-        return (
-            x + self.shift_x + self.scale_change * relative_x - self.rotation * relative_y,
-            y + self.shift_y + self.rotation * relative_x + self.scale_change * relative_y,
-        )
-
-    def predict_many(self, positions: np.ndarray) -> np.ndarray:
-        """Say where many reference-frame stars should sit in this frame.
-
-        The same arithmetic as `predict`, for an array.
-
-        Parameters
-        ----------
-        positions : `numpy.ndarray`
-            Shape ``(stars, 2)``: each star's ``(x, y)`` in the reference
-            frame, in pixels.
-
-        Returns
-        -------
-        moved : `numpy.ndarray`
-            The expected ``(x, y)`` of each star in this frame.
-        """
-        relative_x = positions[:, 0] - self.centre_x
-        relative_y = positions[:, 1] - self.centre_y
-        return np.column_stack([
-            positions[:, 0] + self.shift_x + self.scale_change * relative_x - self.rotation * relative_y,
-            positions[:, 1] + self.shift_y + self.rotation * relative_x + self.scale_change * relative_y,
-        ])
-
-    @property
-    def corner_displacement_px(self) -> float:
-        """Give how far the rotation and scale move a corner, in pixels.
-
-        Returns
-        -------
-        displacement : `float`
-            The distance a corner moves because of the rotation and the
-            scale change alone, not the shift. It is the part of the
-            alignment that a single shift cannot describe.
-        """
-        return math.hypot(self.rotation, self.scale_change) * self.half_diagonal_px
-
-
-def fit_frame_alignment(
-    anchors: Sequence[tuple[float, float]],
-    located: Sequence[tuple[float, float] | None],
-    image_shape: tuple[int, int],
-    *,
-    fit_similarity: bool = True,
-) -> FrameAlignment:
-    """Fit the shift, rotation and scale change of a frame from its anchors.
-
-    The shift comes first, as the median shift of the anchors, because the
-    median ignores a few wrong stars. When there are enough anchors that
-    cover enough of the field, the shift, rotation and scale are then fitted
-    together by least squares, leaving out the anchors that sit far from the
-    fit and fitting again. The fitted result replaces the median only when
-    at least `MINIMUM_ANCHORS_FOR_SIMILARITY` anchors are left.
-
-    Parameters
-    ----------
-    anchors : `Sequence` [`tuple` [`float`, `float`]]
-        The anchors' ``(x, y)`` in the reference frame.
-    located : `Sequence` [`tuple` [`float`, `float`] or `None`]
-        Where each anchor was found in this frame, or `None` when it was
-        not found. Same order as ``anchors``.
-    image_shape : `tuple` [`int`, `int`]
-        The frame's ``(height, width)``, in pixels.
-    fit_similarity : `bool`, optional
-        Whether to fit the rotation and scale at all. `False` gives the
-        median shift alone, which is the right answer for rough positions
-        (see `calculate_frame_alignment`).
-
-    Returns
-    -------
-    alignment : `FrameAlignment`
-        The fit. It has no shift when fewer than `MINIMUM_ANCHORS_FOR_SHIFT`
-        anchors were located.
-    """
-    minimum_anchors_for_shift = resolve(MINIMUM_ANCHORS_FOR_SHIFT).value
-    minimum_anchors_for_similarity = resolve(MINIMUM_ANCHORS_FOR_SIMILARITY).value
-    minimum_anchor_spread_fraction = resolve(MINIMUM_ANCHOR_SPREAD_FRACTION).value
-    alignment_clip_passes = resolve(ALIGNMENT_CLIP_PASSES).value
-    alignment_clip_sigmas = resolve(ALIGNMENT_CLIP_SIGMAS).value
-    height, width = image_shape
-    centre_x, centre_y = (width - 1) / 2.0, (height - 1) / 2.0
-    half_diagonal = math.hypot(centre_x, centre_y)
-    pairs = [(anchor, found) for anchor, found in zip(anchors, located, strict=True) if found is not None]
-    if len(pairs) < minimum_anchors_for_shift:
-        return FrameAlignment(0.0, 0.0, centre_x, centre_y, half_diagonal_px=half_diagonal)
-
-    reference = np.array([anchor for anchor, _ in pairs], dtype=float)
-    found_positions = np.array([found for _, found in pairs], dtype=float)
-    displacement = found_positions - reference
-    median_x, median_y = float(np.median(displacement[:, 0])), float(np.median(displacement[:, 1]))
-    shift_only = FrameAlignment(
-        median_x, median_y, centre_x, centre_y, half_diagonal_px=half_diagonal, anchor_count=len(pairs)
-    )
-    spread = float(np.sqrt(np.var(reference[:, 0]) + np.var(reference[:, 1])))
-    if (
-        not fit_similarity
-        or len(pairs) < minimum_anchors_for_similarity
-        or spread < minimum_anchor_spread_fraction * half_diagonal
-    ):
-        return shift_only
-
-    relative_x, relative_y = reference[:, 0] - centre_x, reference[:, 1] - centre_y
-    keep = np.ones(len(pairs), dtype=bool)
-    parameters = np.array([median_x, median_y, 0.0, 0.0])
-    for _ in range(alignment_clip_passes + 1):
-        rows_x = np.column_stack([np.ones(len(pairs)), np.zeros(len(pairs)), relative_x, -relative_y])
-        rows_y = np.column_stack([np.zeros(len(pairs)), np.ones(len(pairs)), relative_y, relative_x])
-        design = np.vstack([rows_x[keep], rows_y[keep]])
-        target = np.concatenate([displacement[keep, 0], displacement[keep, 1]])
-        parameters, *_ = np.linalg.lstsq(design, target, rcond=None)
-        residual = np.hypot(
-            displacement[:, 0] - rows_x @ parameters, displacement[:, 1] - rows_y @ parameters
-        )
-        scatter = MAD_TO_SIGMA * float(np.median(residual[keep]))
-        if scatter <= 0:
-            break
-        updated = residual <= alignment_clip_sigmas * max(scatter, 1e-3)
-        if updated.sum() < minimum_anchors_for_similarity:
-            return shift_only
-        if np.array_equal(updated, keep):
-            break
-        keep = updated
-    return FrameAlignment(
-        shift_x=float(parameters[0]),
-        shift_y=float(parameters[1]),
-        centre_x=centre_x,
-        centre_y=centre_y,
-        rotation=float(parameters[3]),
-        scale_change=float(parameters[2]),
-        half_diagonal_px=half_diagonal,
-        anchor_count=int(keep.sum()),
-        includes_similarity=True,
-    )
-
-
-def calculate_frame_alignment(
-    data: np.ndarray,
-    reference_top_refs_minimal: Sequence[tuple[float, float, float]],
-    *,
-    saturation_threshold_adu: float = math.inf,
-) -> FrameAlignment:
-    """Figure out how the frame sits against the first picture.
-
-    We look at a few bright stars and see where they moved since the
-    first picture. This takes two steps:
-
-    1. Find each anchor in a wide box (see `locate_star_centroid`) and take
-       the median shift. The wide box is easily pulled off by a neighbour or
-       a galaxy, with errors of several pixels on a few stars in M 81, but
-       the median ignores them.
-    2. Re-center every anchor on its own centroid in a small box (see
-       `refine_star_centroid`), starting where the alignment so far says it
-       should be. Then fit a shift, rotation and scale change to those
-       accurate positions (see `fit_frame_alignment`). The small box refuses
-       a wrong star by itself, because it will not move more than
-       `MAX_CENTROID_SHIFT_PX` (or `ALIGNMENT_ANCHOR_REACH_PX`, when that
-       leaves too few anchors). The step is repeated
-       `ALIGNMENT_REFINEMENT_PASSES` times, because a better alignment puts
-       more of the anchors inside the small box. A field that turned a
-       little during the night is still lined up.
-
-    When there are too few anchors, or they are bunched together, only the
-    shift is used.
-
-    Parameters
-    ----------
-    data : `numpy.ndarray`
-        The frame, shape ``(ny, nx)``, in ADU.
-    reference_top_refs_minimal : `Sequence` [`tuple`]
-        The alignment anchors as ``(x, y, flux)`` in the reference frame.
-    saturation_threshold_adu : `float`, optional
-        A pixel at or above this value counts as saturated, and an anchor
-        with one in its box is not used for the rotation fit. Nothing is
-        saturated by default.
-
-    Returns
-    -------
-    alignment : `FrameAlignment`
-        The fit.
-    """
-    minimum_anchors_for_similarity = resolve(MINIMUM_ANCHORS_FOR_SIMILARITY).value
-    alignment_refinement_passes = resolve(ALIGNMENT_REFINEMENT_PASSES).value
-    max_centroid_shift_px = resolve(MAX_CENTROID_SHIFT_PX).value
-    alignment_anchor_reach_px = resolve(ALIGNMENT_ANCHOR_REACH_PX).value
-    anchors = [(reference_x, reference_y) for reference_x, reference_y, _ in reference_top_refs_minimal]
-    located = [locate_star_centroid(data, reference_x, reference_y) for reference_x, reference_y in anchors]
-    image_shape = (data.shape[0], data.shape[1])
-    alignment = fit_frame_alignment(anchors, located, image_shape, fit_similarity=False)
-    if alignment.anchor_count < minimum_anchors_for_similarity:
-        return alignment
-
-    for _ in range(alignment_refinement_passes):
-        for reach in (max_centroid_shift_px, alignment_anchor_reach_px):
-            refined: list[tuple[float, float] | None] = []
-            for reference_x, reference_y in anchors:
-                expected_x, expected_y = alignment.predict(reference_x, reference_y)
-                position = refine_star_centroid(
-                    data,
-                    expected_x,
-                    expected_y,
-                    saturation_threshold_adu=saturation_threshold_adu,
-                    max_shift_px=reach,
-                )
-                refined.append((position.x, position.y) if position.is_refined else None)
-            if sum(position is not None for position in refined) >= minimum_anchors_for_similarity:
-                break
-        fitted = fit_frame_alignment(anchors, refined, image_shape)
-        if not fitted.includes_similarity:
-            break
-        alignment = fitted
-    return alignment
-
-
-# The two ways `select_alignment_anchors` can pick the stars that measure a
-# frame's global shift. The analyzer records which one a session used.
-ANCHOR_RULE_SIGNAL_TO_NOISE = "signal-to-noise ranked"
-ANCHOR_RULE_RANK_BAND = "detections ranked 50 to 100"
-
-# How many alignment anchors to take.
-ALIGNMENT_ANCHOR_COUNT = TunedParameter(
-    name="photometry.alignment_anchor_count",
-    default=50,
-    unit="stars",
-    description="How many alignment anchors to take.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-05",
-)
-
-# The share of the brightest unsaturated detections that is skipped. The
-# brightest stars are the ones most likely to be nearly saturated, and a
-# flattened core gives a poor centroid. A design estimate.
-ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION = TunedParameter(
-    name="photometry.alignment_anchor_skipped_brightest_fraction",
-    default=0.05,
-    unit="fraction",
-    description="Share of the brightest unsaturated detections skipped when choosing anchors.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-05",
-)
-
-# The least peak signal-to-noise (the detection's peak above the sky, divided
-# by the sky noise per pixel) an anchor may have. At 20 the centroid of a
-# star is good to a small fraction of a pixel, and a noise peak is far below
-# it. A design estimate.
-ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR = TunedParameter(
-    name="photometry.alignment_anchor_minimum_peak_snr",
-    default=20.0,
-    unit="ratio",
-    description="Least peak signal-to-noise a detection needs to be an alignment anchor.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-05",
-)
-
-# The fewest anchors the signal-to-noise rule must find. With fewer, the
-# median shift rests on too few stars, and the older rank band is used.
-ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING = TunedParameter(
-    name="photometry.alignment_anchor_minimum_qualifying",
-    default=10,
-    unit="stars",
-    description=(
-        "Fewest anchors the signal-to-noise rule must find before the older rank band is used instead."
-    ),
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-05",
-)
-
-# Half-width, in pixels, of the box around a detection searched for a
-# saturated pixel.
-# The half-width stands for one star width (3 px at the reference setup's 3 px
-# width) and follows the measured star width.
-ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX = TunedParameter(
-    name="photometry.alignment_anchor_saturation_box_half_width_px",
-    default=factor_for(3, RunBasis.STAR_WIDTH_PX),
-    reference_value=3,
-    unit="× star width",
-    description="Half-width of the box around a detection that is searched for a saturated pixel.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.DETERMINED_EACH_RUN,
-    basis=RunBasis.STAR_WIDTH_PX,
-    equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA}),
-    register_entry="PHO-D03",
-)
-
-# The older rule's band of detections, ranked by flux, brightest first.
-ALIGNMENT_ANCHOR_FALLBACK_BAND = TunedParameter(
-    name="photometry.alignment_anchor_fallback_band",
-    default=(50, 100),
-    unit="rank",
-    description="First and last flux rank, brightest first, of the older rule's band of detections.",
-    role=ParameterRole.EXCLUSION_CRITERIA,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.METHOD_CHOICE,
-    register_entry="PHO-D03",
-)
-
-
-@dataclass(frozen=True)
-class AlignmentAnchors:
-    """The stars chosen to measure a frame's global shift.
-
-    Attributes
-    ----------
-    stars : `tuple` [`tuple` [`float`, `float`, `float`]]
-        Each anchor as ``(x, y, flux)`` in the reference frame.
-    rule : `str`
-        Which rule chose them: `ANCHOR_RULE_SIGNAL_TO_NOISE` or
-        `ANCHOR_RULE_RANK_BAND`.
-    """
-
-    stars: tuple[tuple[float, float, float], ...]
-    rule: str
-
-
-def estimate_pixel_noise(data: np.ndarray) -> float:
-    """Estimate the sky noise per pixel of a frame, ignoring gradients.
-
-    The function subtracts pixels three columns apart, so a smooth sky
-    gradient cancels. It takes the median absolute deviation (MAD, a spread
-    that ignores stars and outliers) of those differences, scales it to a
-    standard deviation, and divides by the square root of 2 because a
-    difference of two noisy pixels is that much noisier than one pixel. It
-    reads every fourth row, which is enough for a stable estimate.
-
-    Parameters
-    ----------
-    data : `numpy.ndarray`
-        The frame, shape ``(ny, nx)``.
-
-    Returns
-    -------
-    noise_adu : `float`
-        The noise per pixel, in ADU. It is 0.0 for a frame narrower than
-        four columns or one with no noise at all.
-    """
-    if data.shape[1] < 4:
-        return 0.0
-    rows = data[::4, :]
-    differences = rows[:, 3:] - rows[:, :-3]
-    return robust_sigma(differences) / math.sqrt(2.0)
-
-
-def select_alignment_anchors(
-    data: np.ndarray,
-    detections: Sequence[Mapping[str, Any]],
-    *,
-    saturation_threshold_adu: float,
-) -> AlignmentAnchors:
-    """Choose the stars whose shift measures a frame's drift.
-
-    The old rule took the detections ranked 50 to 100 by flux. In a sparse
-    field those do not exist or are noise peaks, and a noise peak has no
-    centroid to follow. The rule here picks real stars:
-
-    1. Drop detections with a saturated pixel next to them.
-    2. Rank the rest by flux, brightest first.
-    3. Keep the stars whose peak is at least 20 times the sky noise (see
-       `estimate_pixel_noise`).
-    4. Skip the brightest 5 percent of those, which are the most likely to
-       be nearly saturated, and take the next 50.
-    5. If fewer than 10 stars qualify, return the detections ranked 50 to
-       100 instead, as the older rule did.
-
-    The result says which rule was used.
-
-    Parameters
-    ----------
-    data : `numpy.ndarray`
-        The reference frame, shape ``(ny, nx)``, in ADU.
-    detections : `Sequence` [`Mapping`]
-        The detected stars, brightest first, each with ``xcentroid`` (or
-        ``x_centroid``), ``ycentroid`` (or ``y_centroid``), ``flux``, and
-        ``peak`` (the peak above the sky, in ADU).
-    saturation_threshold_adu : `float`
-        A pixel at or above this value counts as saturated.
-
-    Returns
-    -------
-    anchors : `AlignmentAnchors`
-        The anchors and the rule that chose them.
-    """
-    alignment_anchor_saturation_box_half_width_px = resolve(
-        ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX
-    ).value
-    alignment_anchor_minimum_peak_snr = resolve(ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR).value
-    alignment_anchor_skipped_brightest_fraction = resolve(ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION).value
-    alignment_anchor_count = resolve(ALIGNMENT_ANCHOR_COUNT).value
-    alignment_anchor_minimum_qualifying = resolve(ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING).value
-    alignment_anchor_fallback_band = resolve(ALIGNMENT_ANCHOR_FALLBACK_BAND).value
-    height, width = data.shape
-    noise = estimate_pixel_noise(data)
-    box = alignment_anchor_saturation_box_half_width_px
-    unsaturated: list[tuple[float, float, float, float]] = []
-    for detection in detections:
-        x = detection.get("xcentroid", detection.get("x_centroid"))
-        y = detection.get("ycentroid", detection.get("y_centroid"))
-        if x is None or y is None:
-            continue
-        ix, iy = round(float(x)), round(float(y))
-        cutout = data[
-            max(0, iy - box) : min(height, iy + box + 1), max(0, ix - box) : min(width, ix + box + 1)
-        ]
-        if cutout.size and np.any(cutout >= saturation_threshold_adu):
-            continue
-        peak = detection.get("peak")
-        unsaturated.append((
-            float(x),
-            float(y),
-            float(detection.get("flux", 0.0)),
-            float(peak) if peak is not None else 0.0,
-        ))
-
-    unsaturated.sort(key=lambda row: row[2], reverse=True)
-    # The skip is a share of the stars that pass the signal-to-noise cut, not
-    # of every detection: in a sparse field most detections are noise peaks,
-    # and a share of those would skip real stars.
-    bright_enough = [
-        (x, y, flux)
-        for x, y, flux, peak in unsaturated
-        if noise > 0 and peak >= alignment_anchor_minimum_peak_snr * noise
-    ]
-    skipped = int(alignment_anchor_skipped_brightest_fraction * len(bright_enough))
-    chosen = bright_enough[skipped : skipped + alignment_anchor_count]
-    if len(chosen) >= alignment_anchor_minimum_qualifying:
-        return AlignmentAnchors(tuple(chosen), ANCHOR_RULE_SIGNAL_TO_NOISE)
-
-    first, last = alignment_anchor_fallback_band
-    band: list[tuple[float, float, float]] = []
-    for detection in detections[first:last]:
-        x = detection.get("xcentroid", detection.get("x_centroid"))
-        y = detection.get("ycentroid", detection.get("y_centroid"))
-        if x is not None and y is not None:
-            band.append((float(x), float(y), float(detection.get("flux", 0.0))))
-    return AlignmentAnchors(tuple(band), ANCHOR_RULE_RANK_BAND)
-
-
 def compute_frame_airmass(header: fits.Header) -> float:
     """Figure out how much atmosphere we are looking through.
 
@@ -938,12 +256,12 @@ CENTROID_BOX_HALF_WIDTH_PX = TunedParameter(
     register_entry="PHO-D02",
 )
 
-# The largest move, in pixels, a re-centering may make from the shifted
-# reference position. A larger move means the box found a neighbor, a hot
-# pixel, or noise instead of the star, so the refinement is discarded. A
-# design estimate: the global shift is good to well under a pixel on a
-# clean frame, so 1.5 px leaves room for an imperfect shift but not for
-# jumping to another star.
+# The largest move, in pixels, a re-centering may make from the position the
+# frame's plate solution gives. A larger move means the box found a neighbor,
+# a hot pixel, or noise instead of the star, so the refinement is discarded. A
+# design estimate: the solution's positions agreed with the stars' measured
+# centers to well under a pixel (PHO-24), so 1.5 px leaves room for an
+# imperfect solution but not for jumping to another star.
 # The move stands for half a star width (1.5 px at the reference setup's 3 px
 # width) and follows the measured star width.
 MAX_CENTROID_SHIFT_PX = TunedParameter(
@@ -951,7 +269,7 @@ MAX_CENTROID_SHIFT_PX = TunedParameter(
     default=factor_for(1.5, RunBasis.STAR_WIDTH_PX),
     reference_value=1.5,
     unit="× star width",
-    description="Largest move a re-centering may make from the shifted reference position.",
+    description="Largest move a re-centering may make from the plate solution's position.",
     role=ParameterRole.MEASUREMENT,
     source=ParameterSource.DETERMINED_EACH_RUN,
     basis=RunBasis.STAR_WIDTH_PX,
@@ -1003,8 +321,8 @@ class StarPosition:
     fallback_reason : `str` or `None`
         `None` when ``(x, y)`` is the star's own brightness-weighted
         centroid. Otherwise a short phrase saying why the centroid was
-        rejected. ``(x, y)`` is then the reference position plus the
-        frame's global shift. The analyzer counts these per star.
+        rejected. ``(x, y)`` is then the position the frame's plate solution
+        gives. The analyzer counts these per star.
     """
 
     x: float
@@ -1034,10 +352,10 @@ def refine_star_centroid(
 ) -> StarPosition:
     """Re-center one star on its brightness-weighted centroid.
 
-    The frame's global shift only moves every star by the same amount.
-    Each star's true position differs slightly from that estimate, and an
-    aperture that is off-center loses part of the star's light. This
-    function measures the star's own center in a small box.
+    The frame's plate solution gives each star's position to a fraction of a
+    pixel, but not exactly, and an aperture that is off-center loses part of
+    the star's light. This function measures the star's own center in a
+    small box.
 
     The steps are:
 
@@ -1059,8 +377,8 @@ def refine_star_centroid(
     data : `numpy.ndarray`
         The frame, shape ``(ny, nx)``.
     x, y : `float`
-        Starting position in pixels: the reference position plus the
-        frame's global shift.
+        Starting position in pixels: where the frame's plate solution puts
+        the star.
     saturation_threshold_adu : `float`
         A pixel at or above this value counts as saturated. Take it from
         the camera's profile.
@@ -1112,30 +430,23 @@ def refine_star_centroid(
         centre_x, centre_y = x0 + float(centroid_x), y0 + float(centroid_y)
 
     if np.hypot(centre_x - x, centre_y - y) > max_shift_px:
-        return StarPosition(x, y, f"centroid moved more than {max_shift_px:g} px from the shifted position")
+        return StarPosition(x, y, f"centroid moved more than {max_shift_px:g} px from the solution")
     return StarPosition(centre_x, centre_y)
 
 
 def centroid_offsets_px(
     positions: Mapping[str, StarPosition],
     reference_positions: Mapping[str, tuple[float, float]],
-    shift_x: float,
-    shift_y: float,
-    *,
-    alignment: FrameAlignment | None = None,
+    mapping: FrameMapping,
 ) -> tuple[list[float], int]:
-    """Measure how far each star's own centroid sits from the aligned position.
+    """Measure how far each star's centroid sits from the solution's place.
 
-    The frame's alignment says where each star should be. A star whose own
-    centroid lands elsewhere has a per-star offset. With the shift alone
-    (no ``alignment``), the offsets are close to zero on a frame that only
-    translated, and grow with the star's distance from the middle of the
-    anchors on a frame that also rotated or changed scale. With the fitted
-    alignment, a rotation and a scale change are already taken out, so what
-    is left is the centroid noise and any distortion the fit does not
+    The frame's plate solution says where each star should be. A star whose
+    own centroid lands elsewhere has a per-star offset. What is left of the
+    offset is the centroid noise and any distortion the solution does not
     describe.
 
-    A star whose centroid was refused sits at the aligned position by
+    A star whose centroid was refused sits at the solution's position by
     construction, so its offset says nothing. It is counted instead.
 
     Parameters
@@ -1144,21 +455,16 @@ def centroid_offsets_px(
         Where each star was measured in one frame.
     reference_positions : `Mapping` [`str`, `tuple` [`float`, `float`]]
         Each star's ``(x, y)`` in the reference frame.
-    shift_x, shift_y : `float`
-        The frame's global shift, in pixels. Used when ``alignment`` is not
-        given.
-    alignment : `FrameAlignment`, optional
-        The frame's fitted alignment. It replaces the shift.
+    mapping : `FrameMapping`
+        The frame's mapping from the reference frame.
 
     Returns
     -------
     offsets_px : `list` [`float`]
         The offset of each star with a refined centroid, in pixels.
     fallback_count : `int`
-        How many stars kept the aligned position.
+        How many stars kept the solution's position.
     """
-    if alignment is None:
-        alignment = FrameAlignment(shift_x, shift_y)
     offsets: list[float] = []
     fallback_count = 0
     for star_id, position in positions.items():
@@ -1168,7 +474,7 @@ def centroid_offsets_px(
         if not position.is_refined:
             fallback_count += 1
             continue
-        expected_x, expected_y = alignment.predict(reference[0], reference[1])
+        expected_x, expected_y = mapping.predict(reference[0], reference[1])
         offsets.append(math.hypot(position.x - expected_x, position.y - expected_y))
     return offsets, fallback_count
 
@@ -1185,36 +491,31 @@ class CentroidShiftSummary:
     measurement_count : `int`
         Star measurements in those frames (one per star per frame).
     fallback_count : `int`
-        How many of those measurements kept the shifted reference position
+        How many of those measurements kept the plate solution's position
         because the star's own centroid was refused.
     median_offset_px : `float` or `None`
         The median per-star offset, in pixels, over the measurements with a
         refined centroid. `None` when there were none.
     p95_offset_px : `float` or `None`
         The 95th percentile of the same offsets, in pixels. It is large when
-        the field rotated or changed scale between frames.
+        the solutions do not describe the stars' places, for example when
+        the stars were found in a frame with a different distortion.
     worst_frame : `datetime.datetime` or `None`
         The capture time of the frame with the largest per-frame 95th
         percentile.
     worst_frame_p95_offset_px : `float` or `None`
         That frame's 95th percentile, in pixels.
-    anchor_rule : `str` or `None`
-        Which rule chose the alignment anchors (see
-        `select_alignment_anchors`).
-    anchor_count : `int`
-        How many anchors the session used.
     corner_displacement_p95_px : `float` or `None`
-        The 95th percentile, over the frames, of how far the fitted
-        rotation and scale change move a corner of the frame (see
-        `FrameAlignment.corner_displacement_px`). It is what a single shift
-        cannot describe. `None` when no frame had a rotation and scale
-        fitted.
+        The 95th percentile, over the frames, of how far a corner of the
+        frame moves beyond the shift of its middle (see
+        `FrameMapping.corner_displacement_px`). It is what a single shift
+        cannot describe. `None` when no frame was mapped.
     worst_corner_frame : `datetime.datetime` or `None`
         The capture time of the frame with the largest corner displacement.
     worst_corner_displacement_px : `float` or `None`
         That frame's corner displacement, in pixels.
-    fitted_frame_count : `int`
-        How many frames had a rotation and scale fitted.
+    mapped_frame_count : `int`
+        How many frames the plate solutions mapped onto the reference frame.
     """
 
     frame_count: int
@@ -1224,16 +525,14 @@ class CentroidShiftSummary:
     p95_offset_px: float | None
     worst_frame: datetime | None
     worst_frame_p95_offset_px: float | None
-    anchor_rule: str | None = None
-    anchor_count: int = 0
     corner_displacement_p95_px: float | None = None
     worst_corner_frame: datetime | None = None
     worst_corner_displacement_px: float | None = None
-    fitted_frame_count: int = 0
+    mapped_frame_count: int = 0
 
     @property
     def fallback_fraction(self) -> float:
-        """Give the share of measurements that kept the shifted position.
+        """Give the share of measurements that kept the solution's position.
 
         Returns
         -------
@@ -1248,11 +547,9 @@ def summarize_centroid_shifts(
     measurement_count: int,
     fallback_count: int,
     *,
-    anchor_rule: str | None = None,
-    anchor_count: int = 0,
-    alignments_by_frame: Mapping[datetime, FrameAlignment] | None = None,
+    mappings_by_frame: Mapping[datetime, FrameMapping] | None = None,
 ) -> CentroidShiftSummary | None:
-    """Summarize a session's per-star centroid offsets and frame alignments.
+    """Summarize a session's per-star centroid offsets and frame mappings.
 
     Parameters
     ----------
@@ -1262,13 +559,9 @@ def summarize_centroid_shifts(
     measurement_count : `int`
         Star measurements in all the frames, refined or not.
     fallback_count : `int`
-        How many of them kept the shifted position.
-    anchor_rule : `str`, optional
-        The rule that chose the alignment anchors.
-    anchor_count : `int`, optional
-        The number of anchors.
-    alignments_by_frame : `Mapping`, optional
-        Each frame's `FrameAlignment`, keyed by capture time.
+        How many of them kept the solution's position.
+    mappings_by_frame : `Mapping`, optional
+        Each frame's `FrameMapping`, keyed by capture time.
 
     Returns
     -------
@@ -1279,9 +572,7 @@ def summarize_centroid_shifts(
     if measurement_count <= 0:
         return None
     corner_displacements = {
-        timestamp: alignment.corner_displacement_px
-        for timestamp, alignment in (alignments_by_frame or {}).items()
-        if alignment.includes_similarity
+        timestamp: mapping.corner_displacement_px for timestamp, mapping in (mappings_by_frame or {}).items()
     }
     worst_corner_frame = max(corner_displacements, key=corner_displacements.__getitem__, default=None)
     all_offsets = [offset for offsets in offsets_by_frame.values() for offset in offsets]
@@ -1301,8 +592,6 @@ def summarize_centroid_shifts(
         p95_offset_px=float(np.percentile(all_offsets, 95)) if all_offsets else None,
         worst_frame=worst_frame,
         worst_frame_p95_offset_px=worst_p95,
-        anchor_rule=anchor_rule,
-        anchor_count=anchor_count,
         corner_displacement_p95_px=(
             float(np.percentile(list(corner_displacements.values()), 95)) if corner_displacements else None
         ),
@@ -1310,7 +599,7 @@ def summarize_centroid_shifts(
         worst_corner_displacement_px=(
             corner_displacements[worst_corner_frame] if worst_corner_frame is not None else None
         ),
-        fitted_frame_count=len(corner_displacements),
+        mapped_frame_count=len(corner_displacements),
     )
 
 
@@ -2014,32 +1303,30 @@ def _process_single_frame_worker(
 ) -> tuple[str, tuple[Any, ...] | FrameRejection | None]:
     """Analyze a single picture.
 
-    This aligns the picture and measures the brightness of every star.
-    We measure brightness in "light per second" so we can compare a
-    3-minute exposure fairly against a 5-minute exposure.
+    This places a circle on every star and measures its brightness. We
+    measure brightness in "light per second" so we can compare a 3-minute
+    exposure fairly against a 5-minute exposure.
 
     The steps are:
 
     1. Read the capture time from ``DATE-OBS``. A picture with no usable
        time is rejected (see `read_observation_time`).
-    2. Fit the picture's shift, rotation and scale change from the
-       reference stars chosen as anchors (see `calculate_frame_alignment`).
-    3. For each star, start at its reference position moved by that
-       alignment, then re-center it on its own centroid (see
+    2. For each star, start at the position the picture's own plate solution
+       gives (see `FrameMapping`), then re-center it on its own centroid (see
        `refine_star_centroid`). If the centroid is refused, keep the
-       aligned position.
-    4. Measure each star's flux in an aperture centered on that position,
+       solution's position.
+    3. Measure each star's flux in an aperture centered on that position,
        and its 1-sigma uncertainty from the CCD equation.
 
     Parameters
     ----------
     args : `tuple`
-        The picture's path, the reference stars as (id, x, y), the
-        brightest reference stars used to line the picture up, the
-        camera's saturation threshold in ADU, and the camera's
-        `DetectorNoise` (gain and read noise). An optional sixth item is the
-        reference frame's `NeighborField`; with it, each star's sky ring
-        leaves out the pixels lit by bright neighbors.
+        The picture's path, the reference stars as (id, x, y), the picture's
+        `FrameMapping` from the reference frame, the camera's saturation
+        threshold in ADU, and the camera's `DetectorNoise` (gain and read
+        noise). An optional sixth item is the reference frame's
+        `NeighborField`; with it, each star's sky ring leaves out the pixels
+        lit by bright neighbors.
 
     Returns
     -------
@@ -2047,21 +1334,21 @@ def _process_single_frame_worker(
         The picture's path and one of:
 
         * A tuple ``(timestamp, fluxes, shift_x, shift_y, background,
-          airmass, positions, exposure_s, alignment, peaks)``.
+          airmass, positions, exposure_s, mapping, peaks)``.
           ``timestamp`` is the exposure start in UTC. ``fluxes`` maps
           each star id to ``(flux in ADU per second, is_saturated, flux
           error in ADU per second)``. ``positions`` maps each star id to its
           `StarPosition`, which says where the aperture sat and whether
           the centroid was refused. ``exposure_s`` is the exposure
-          time used to turn ADU into ADU per second. ``alignment`` is the
-          picture's `FrameAlignment`; ``shift_x`` and ``shift_y`` are its
+          time used to turn ADU into ADU per second. ``mapping`` is the
+          picture's `FrameMapping`; ``shift_x`` and ``shift_y`` are the
           shift of the middle of the frame. The last item, ``peaks``, maps
           each star id to the largest raw pixel value in its aperture, in
           ADU.
         * A `FrameRejection` when the picture has no usable ``DATE-OBS``.
         * `None` when the picture could not be read or measured.
     """
-    path, reference_stars_list, reference_top_refs_minimal, saturation_threshold_adu, noise, *optional = args
+    path, reference_stars_list, mapping, saturation_threshold_adu, noise, *optional = args
     reference_neighbors: NeighborField | None = optional[0] if optional else None
 
     try:
@@ -2080,16 +1367,10 @@ def _process_single_frame_worker(
         sampled_data = data[::4, ::4]  # 1/16th of pixels
         global_background = np.median(sampled_data)
 
-        # 2. Alignment: re-locate the known reference stars locally
-        # rather than re-running full-frame detection every frame.
-        alignment = calculate_frame_alignment(
-            data, reference_top_refs_minimal, saturation_threshold_adu=saturation_threshold_adu
-        )
-
-        # 3. Forced Photometry. The neighbors sit where the alignment moves
-        # them to in this frame.
+        # 2. Forced Photometry. The neighbors sit where the frame's solution
+        # puts them.
         frame_neighbors = (
-            reference_neighbors.moved(alignment.predict_many(reference_neighbors.positions))
+            reference_neighbors.moved(mapping.predict_many(reference_neighbors.positions))
             if reference_neighbors is not None and len(reference_neighbors.positions)
             else None
         )
@@ -2097,16 +1378,27 @@ def _process_single_frame_worker(
         positions_dict = {}
         peaks_dict = {}
 
-        for reference_id, reference_x, reference_y in reference_stars_list:
-            # The frame's alignment (shift, rotation and scale change) says
-            # where each star should be. Each star is then re-centered on
-            # its own centroid, and keeps the aligned position when that
-            # refinement is refused.
-            expected_x, expected_y = alignment.predict(reference_x, reference_y)
+        reference_positions = np.array([[x, y] for _, x, y in reference_stars_list], dtype=float)
+        expected_positions = mapping.predict_many(reference_positions)
+        for (reference_id, _, _), (expected_x, expected_y) in zip(
+            reference_stars_list, expected_positions, strict=True
+        ):
+            if not (math.isfinite(expected_x) and math.isfinite(expected_y)):
+                # The frame's solution cannot place this star. It gets no
+                # measurement, the same as a star outside the frame.
+                positions_dict[reference_id] = StarPosition(
+                    math.nan, math.nan, "the plate solution does not place the star"
+                )
+                fluxes_dict[reference_id] = (0.0, False, 0.0)
+                peaks_dict[reference_id] = math.nan
+                continue
+            # The frame's plate solution says where each star should be.
+            # Each star is then re-centered on its own centroid, and keeps
+            # the solution's position when that refinement is refused.
             position = refine_star_centroid(
                 data,
-                expected_x,
-                expected_y,
+                float(expected_x),
+                float(expected_y),
                 saturation_threshold_adu=saturation_threshold_adu,
             )
             positions_dict[reference_id] = position
@@ -2133,13 +1425,13 @@ def _process_single_frame_worker(
         return path, (
             timestamp,
             fluxes_dict,
-            alignment.shift_x,
-            alignment.shift_y,
+            mapping.shift_x,
+            mapping.shift_y,
             global_background,
             airmass,
             positions_dict,
             exposure_s,
-            alignment,
+            mapping,
             peaks_dict,
         )
 

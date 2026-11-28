@@ -33,6 +33,7 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
     read_fit_statistics,
+    solve_failure_reason,
 )
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
@@ -682,7 +683,11 @@ def _resolve_frame_wcs_with_fit(
         solve_timeout=solve_timeout,
     )
     if header is None:
-        logger.warning("Plate solve failed for %s; no WCS available.", image.path)
+        logger.warning(
+            "Plate solve failed for %s; no WCS available (%s).",
+            image.path,
+            solve_failure_reason(star_identifier.solver) or "no reason given",
+        )
         return None, False, True, no_fit_statistics
 
     with warnings.catch_warnings():

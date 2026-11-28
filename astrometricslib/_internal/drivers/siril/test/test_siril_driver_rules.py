@@ -44,7 +44,8 @@ CHECKED_PACKAGES = ("astrometricslib", "wayfindinglib", "backend", "mcp_servers"
 # ``starnet``) counts only with an option after it.
 SIRIL_COMMAND_PATTERN = re.compile(
     r"^(?:"
-    r"requires \d|load \"|save \"|savejpg \S|platesolve\b|pcc -|spcc -|autostretch\b|mtf \S|rmgreen\b|"
+    r"requires \d|load \"|save \"|savejpg \S|platesolve\b|seqplatesolve\b|link \w+$|pcc -|spcc -|"
+    r"autostretch\b|mtf \S|rmgreen\b|"
     r"starnet -|setext \S|set32bits\b|set16bits\b|setfindstar\b|setcompress \S|seqapplyreg \S|"
     r"convert \S+ -out|register \S+(?:\s+-|\s*$)|stack \S+ (?:rej|sum|mean|med|min|max)\b|calibrate \S+ -|"
     r"fmul \S|mirrorx\b|cd \.\./process|cd lights|set core\."

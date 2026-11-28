@@ -243,7 +243,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
                 ),
             ],
             framesAccepted=1,
-            framesQuarantined=2,
+            framesSetAside=2,
             flatCalibrationIssues=["not smoothed: a test note"],
             stackCropReason="cropped 120 px on the left: fewer than half the frames covered it",
             stackCropAreaFraction=0.04,
@@ -318,7 +318,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
 
 # Metrics that stay declared so stored rows and reports citing them can be
 # read, although no step measures them any more.
-RETIRED_METRICS = frozenset({"frame.quarantine_roundness"})
+RETIRED_METRICS = frozenset({"frame.set_aside_roundness"})
 
 # Phase 3: a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record

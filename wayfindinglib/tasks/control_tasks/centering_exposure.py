@@ -118,8 +118,8 @@ star above its limit, while a short frame holds fewer than a count says
 (1.3 to 2.6 times fewer for the 5-sigma star finder) and Siril finds fewer
 still. The Nikon D5300 frames needed more stars (40 to 100 bright ones in a
 cut-down frame); the Nikon has no stored zero point yet, so it uses the fixed
-exposure. The old target, 15, was the 10 sources the solve-field driver
-needs, which Siril's driver does not apply."""
+exposure. The old target, 15, was set from the 10 sources the solve-field
+driver needed, which Siril's solver does not need."""
 
 DETECTION_SIGNAL_TO_NOISE = TunedParameter(
     name="wayfinding.detection_signal_to_noise",

@@ -11,7 +11,6 @@ These parts do not work on Windows yet:
 
 - Telescope control and the simulated observatory. Both need INDI, which is not available on Windows.
 - Downloading frames from the telescope computer, which uses `rsync`.
-- The local plate solver. Plate solving uses the online astrometry.net service instead, which needs an API key.
 - A packaged installer. Windows runs from a copy of the source code.
 
 Windows limits a path to 260 characters unless long paths are turned on, and a deep library folder, for example on Google Drive, can pass that. The setup script warns when they are off and prints the one-line command that turns them on. It needs administrator rights and a restart.
@@ -36,7 +35,7 @@ Each item is the work of others, under its own license, and you accept that lice
 | Node.js 24 and npm | Runs the app window (built with Electron, a toolkit for desktop apps) | You install it yourself. `install_ubuntu_deps.sh` does not add it |
 | Siril | Stacks frames. Stacking combines many frames into one image | `install_ubuntu_deps.sh` |
 | INDI and `swig`, `build-essential` and other build tools | Controls the telescope hardware | `install_ubuntu_deps.sh` |
-| A plate solver | Works out which part of the sky an image shows | The online astrometry.net service (needs an API key) or a local solver from `install_ubuntu_deps.sh --with-local-solver` |
+| Siril's plate solver | Works out which part of the sky an image shows | Comes with Siril 1.4 or newer. Step 5 below sets up its star catalog. An image with no position uses the online astrometry.net service, which needs an API key |
 
 Node.js 24 is the version the project's own tests use. On Ubuntu under WSL (Windows Subsystem for Linux), `sudo ./build/linux/setup_wsl.sh` installs it from NodeSource.
 
@@ -55,16 +54,14 @@ Node.js 24 is the version the project's own tests use. On Ubuntu under WSL (Wind
    sudo ./build/linux/install_ubuntu_deps.sh
    ```
 
-   The script has two optional settings. Run it with `--help` to list them.
+   The script has optional settings. Run it with `--help` to list them.
 
    **Siril source.** `--siril-source=apt` is the default. It uses Ubuntu's own package, which stays at the version Ubuntu ships. `--siril-source=flatpak` installs Siril from Flathub, which tracks new releases more closely. It is also the only choice that supports weighted stacking.
 
-   **Local plate solver.** `--with-local-solver` also installs astrometry.net and its index files, so plate solving runs on your computer. Leave it off to use the online service instead.
-
-   The two settings work together:
+   Both settings are optional. For example:
 
    ```bash
-   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
+   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
    ```
 
 3. Install Node.js 24 and npm if `node -v` does not show version 24 or newer. See the table above.
@@ -103,7 +100,7 @@ The configuration file is `~/.config/astrometrics/astrometrics.config.toml`. Its
 | Setting | Section | What to do |
 | --- | --- | --- |
 | `frames_path` | `[Image Library]` | Set the folder where raw and calibration frames are saved. Use a folder on your local disk. |
-| `api_key` | `[Processing.Astrometry.Online Solver]` | Enter your astrometry.net API key. Do this if you did not install the local solver. |
+| `api_key` | `[Processing.Astrometry.Online Solver]` | Enter your astrometry.net API key. Only an image with no position in its header uses it. |
 | `siril_executable` | `[Processing.Siril]` | The default, `siril-cli`, is correct for an `apt` install. For a Flathub install, set `flatpak run --command=siril-cli org.siril.Siril`. |
 | `stack_weight` | `[Processing.Siril]` | Leave it blank for an `apt` install. For a Flathub install, you can set `wfwhm` to turn on weighted stacking. |
 
@@ -115,10 +112,6 @@ Stacking must use Siril's `-cli` command. The plain `siril` and `flatpak run org
 
 :::{warning}
 Weighted stacking (`stack_weight = wfwhm`) needs a Siril that accepts the `-weight=` argument of the `stack` command. Ubuntu's `apt` package does not. Stacking then fails with `Unexpected argument to stacking`. This is why `stack_weight` ships blank.
-:::
-
-:::{note}
-`--with-local-solver` installs index files sized for the camera and telescope in the configuration template. A different camera or telescope sees a different amount of sky and needs index files to match. They are listed by field-of-view size at [data.astrometry.net](https://data.astrometry.net). You can also run `apt-cache search astrometry-data`.
 :::
 
 ### Graphics card on a laptop with two cards
@@ -263,7 +256,7 @@ Your frames, and any database copies in `backup_path`, are in folders that the s
 
 **`Unexpected argument to stacking`.** Siril is too old for weighted stacking. Leave `stack_weight` blank, or reinstall Siril with `--siril-source=flatpak`.
 
-**Plate solving fails.** Plate solving needs one solver. Install the local one with `--with-local-solver`, or set `api_key` for the online one.
+**Plate solving fails.** Siril needs version 1.4 or newer and its star catalog (step 5). Run `./build/linux/setup_siril_catalog.sh --check` to see whether the catalog is in place. An image with no position in its header needs `api_key` for the online service.
 
 ## Next steps
 

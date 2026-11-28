@@ -31,8 +31,6 @@ The packaged Linux app (`build/linux/build_installer.sh`) is different from the 
 | INDI library and server | 2 or newer | [ppa:mutlaqja/ppa](https://launchpad.net/~mutlaqja/+archive/ubuntu/ppa) | [LGPL-2.1](https://github.com/indilib/indi/blob/master/LICENSE) | Yes | Telescope-control protocol and drivers. |
 | INDI third-party drivers | PPA's `indi-3rdparty-drivers` | ppa:mutlaqja/ppa | [LGPL-2.1](https://github.com/indilib/indi-3rdparty) for the repository | Yes | |
 | pyindi-client | Newest on PyPI | [PyPI](https://pypi.org/project/pyindi-client/) | [GPL-3.0-or-later](https://github.com/indilib/pyindi-client/blob/master/LICENSE) | Yes | Python binding to INDI that `wayfindinglib` imports. See [Python packages](#python-packages). |
-| astrometry.net (`solve-field`) | Ubuntu's | Ubuntu archive | [BSD-3-Clause, GPL-3.0-or-later as a whole](https://github.com/dstndstn/astrometry.net/blob/main/LICENSE) | Yes | Only with `--with-local-solver`. The team's own code is BSD-3-Clause; because it uses GPL libraries, the combined program is under the GPL. |
-| Tycho-2 index files (`astrometry-data-tycho2-*`) | Ubuntu's | Ubuntu archive | [BSD-2-Clause](https://sources.debian.org/src/tycho2/2-4/debian/copyright/) | Yes | Only with `--with-local-solver`. Index files from [data.astrometry.net](https://data.astrometry.net) that you download yourself state no license (*not confirmed*); they are built from Tycho-2 and Gaia. |
 | Python 3.14 | Ubuntu's, or the deadsnakes PPA | Ubuntu archive or [ppa:deadsnakes/ppa](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa) | [PSF-2.0](https://docs.python.org/3/license.html) | Yes | The PPA describes itself as having no guarantee of timely security updates. |
 | Node.js 24 | Ubuntu's, or NodeSource | Ubuntu archive or [NodeSource](https://github.com/nodesource/distributions) | [MIT](https://github.com/nodejs/node/blob/main/LICENSE) | Yes | `setup_wsl.sh` adds the NodeSource repository, whose scripts are [MIT](https://github.com/nodesource/distributions/blob/master/LICENSE.md). |
 | Electron | 45.4.1 | npm | [MIT](https://github.com/electron/electron/blob/main/LICENSE) | Yes | Draws the app window. |
@@ -150,7 +148,7 @@ The copyleft packages, and how the project uses each one:
 | `pyinstaller`, `pyinstaller-hooks-contrib` | 6.22.0, 2026.6 | GPL-2.0 with an exception for bundled programs; GPL-2.0 or Apache-2.0 | Build tool for the packaged app, in the `dev` extra. | None: PyInstaller's license exception lets it package programs under any license. |
 | `docutils` | 0.22.4 | Public domain and BSD, with a few GPL files | Used by Sphinx to build the documentation. | None: a build tool, not imported by the app. |
 
-The separate programs above (Siril, GraXpert, astrometry.net, rsync and others) are under the GPL too, but the app starts them as separate programs and exchanges files with them. That use does not make the app a combined work.
+The separate programs above (Siril, GraXpert, rsync and others) are under the GPL too, but the app starts them as separate programs and exchanges files with them. That use does not make the app a combined work.
 
 ## npm packages
 

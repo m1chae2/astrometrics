@@ -16,9 +16,9 @@ stored rows and says what they suggest:
 * **Direction**: when the stars are elongated, a high coherence means the
   stars share one direction, which points at tracking, guiding, wind or
   flexure. A low coherence points at seeing or focus.
-* **Set-aside frames**: the frames the stacker's quarantine set aside as
+* **Set-aside frames**: the frames the stacker's set-aside check set aside as
   trailed (`astrometrics.targets.frames.get_set_aside`). The review does not
-  judge the frames again; the quarantine owns that rule.
+  judge the frames again; the set-aside check owns that rule.
 * **Corners**: the corner widths compared with the center width. They are
   reported only. The corner measurements are exploratory (AST-18), so no tilt
   or curvature verdict is made.
@@ -138,7 +138,7 @@ ROUNDNESS_LIMIT_NAME = "night_star_roundness_low_limit"
 """The envelope limit that separates round from elongated frames (WAY-42)."""
 
 TRAILED_KIND = "trailed"
-"""The kind the quarantine gives a frame it set aside for stretched stars."""
+"""The kind given to a frame set aside for stretched stars."""
 
 SHARED_DIRECTION_COHERENCE = TunedParameter(
     name="wayfinding.shared_direction_coherence",
@@ -248,7 +248,7 @@ def read_star_shape_rows(
         left out when a night or a frame list narrows the question, because a
         stack covers all of the target's frames.
     set_aside : `list` [`StandoutFrame`]
-        The frames the quarantine set aside as trailed, oldest first, with
+        The frames the set-aside check set aside as trailed, oldest first, with
         their stored elongation when there is one. The set-aside listing is
         read once per call.
     """
@@ -284,7 +284,7 @@ def _read_set_aside_trailed(
     night: str | None,
     wanted: set[str] | None,
 ) -> list[StandoutFrame]:
-    """List the frames the quarantine set aside for stretched stars.
+    """List the frames the set-aside check set aside for stretched stars.
 
     Parameters
     ----------
@@ -621,7 +621,7 @@ def judge_star_shape(
         The scope to name in the result. ``"stack"`` or ``"frames"`` is
         chosen when omitted.
     set_aside : `Sequence` [`StandoutFrame`], optional
-        The frames the quarantine set aside as trailed (see
+        The frames the set-aside check set aside as trailed (see
         `read_star_shape_rows`). They are reported as they are; nothing is
         judged again.
     stack_roundness_low_limit : `float`, optional
@@ -676,7 +676,7 @@ def judge_star_shape(
 def _not_measured(target_id: str, scope: str, set_aside: Sequence[StandoutFrame]) -> StarShapeReview:
     """Build the review for a target with no stored star shapes.
 
-    The frames the quarantine set aside are still listed.
+    The frames the set-aside check set aside are still listed.
 
     Returns
     -------
@@ -827,7 +827,7 @@ def _direction(
 
 
 def _standout_verdict(set_aside: Sequence[StandoutFrame], measured_count: int) -> ShapeVerdict:
-    """Say whether the quarantine set frames aside for stretched stars.
+    """Say whether the set-aside check set frames aside for stretched stars.
 
     Returns
     -------

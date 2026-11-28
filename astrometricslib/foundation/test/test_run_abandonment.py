@@ -182,9 +182,9 @@ def test_a_timeout_without_a_bound_run_ends_the_program_and_its_helper(tmp_path:
     """A timed-out stand-in program leaves no helper process running.
 
     The stand-in starts a sleeping helper and writes its id to the file named
-    by the first argument, as GraXpert or ``solve-field`` start helpers of
-    their own. No run is bound, so this is the plain call that GraXpert,
-    Cosmic Clarity, the preview's Siril and ``solve-field`` use in scripts.
+    by the first argument, as GraXpert starts helpers of
+    their own. No run is bound, so this is the plain call that GraXpert
+    and Cosmic Clarity use in scripts.
     """
     helper_file = tmp_path / "helper_pid.txt"
     script = CHILD_WITH_GRANDCHILD.replace(

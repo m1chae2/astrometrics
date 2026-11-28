@@ -11,12 +11,12 @@ normal one at the same star:
   chosen.
 - The typical frame is the frame of the same session whose stored star
   elongation and sky unevenness lie closest to the session medians. The
-  session is the batch the quarantine step judges the frame in
+  session is the batch the set-aside step judges the frame in
   (`split_into_batches`).
 - The star's position in the typical frame comes from matching the stars of
   the two frames (`raw_frame_check.measure_field_shift`), the matching the
-  quarantine's pointing check uses. It allows for the drift between frames and
-  for the half turn of a meridian flip.
+  set-aside check's pointing check uses. It allows for the drift between
+  frames and for the half turn of a meridian flip.
 
 Every position leaving this module is in 1-based pixels, as in FITS and DS9.
 """
@@ -48,7 +48,7 @@ from astrometricslib.pipelines.shared.quality.star_profile_fitting import (
     usable_top_level_adu,
 )
 from astrometricslib.pipelines.stacking.metrics import FRAME_SKY_UNEVENNESS
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     split_into_batches,
     stored_frame_values,
 )

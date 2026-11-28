@@ -18,7 +18,7 @@ __all__ = [
 
 
 def frames_moved_to_excluded_reason(frame_count: int) -> str:
-    """Write the sentence for frames the quarantine step moved.
+    """Write the sentence for frames the set-aside step moved.
 
     Parameters
     ----------

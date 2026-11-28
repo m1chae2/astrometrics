@@ -1,8 +1,8 @@
 """Builds and records the quality measurements of one stack.
 
 The stacking stage keeps its checks where they are measured (the frame
-quarantine, the background check, the flat assessment and so on), and collects
-their results in the stack's quality summary. This file does not judge
+the set-aside check, the background check, the flat assessment and so on), and
+collects their results in the stack's quality summary. This file does not judge
 anything. It only turns that finished summary into quality measurements and
 stores them next to the summary, which stays as it is.
 
@@ -78,7 +78,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_FRAMES_ACCEPTED,
     STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND,
     STACKING_FRAMES_EXCLUDED_FOR_GAIN,
-    STACKING_FRAMES_QUARANTINED,
+    STACKING_FRAMES_SET_ASIDE,
     STACKING_FRAMES_STACKED,
     STACKING_FRAMES_SUBMITTED,
     STACKING_GROUP_ALIGNMENT_SHIFT_PX,
@@ -205,7 +205,7 @@ _GATE_TIERS: dict[str, tuple[LimitTier, str | None]] = {
     # No limit at all: setting a minority gain aside corrects the stack.
     "gain_homogeneity": (LimitTier.GEOMETRY, None),
     # STK-03: the 25% warning threshold (13% is the largest normal share).
-    "frame_quarantine": (LimitTier.DESIGN_ESTIMATE, "STK-03"),
+    "frame_set_aside": (LimitTier.DESIGN_ESTIMATE, "STK-03"),
     # STK-04: the gap ratio of 4 rests on unit tests with made-up sky levels.
     "background_homogeneity": (LimitTier.DESIGN_ESTIMATE, "STK-04"),
     # The 10% and 90% of full scale are common practice, "design estimates"
@@ -304,7 +304,7 @@ _METRICS_FIELDS: dict[str, tuple[str, str]] = {
         STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND,
         "the input checks did not run",
     ),
-    "frames_quarantined": (STACKING_FRAMES_QUARANTINED, "the input checks did not run"),
+    "frames_set_aside": (STACKING_FRAMES_SET_ASIDE, "the input checks did not run"),
     "dark_unique_frame_count": (
         STACKING_DARK_UNIQUE_FRAME_COUNT,
         "the stack used no dark, or the dark frames' numbers were not measured",
@@ -524,7 +524,7 @@ def stacking_notice_measurements(
     """
     stack_subject = context.stack_subject(stack_file_name)
     rows: list[QualityMeasurement] = []
-    moved = summary.stacking_metrics.frames_quarantined
+    moved = summary.stacking_metrics.frames_set_aside
     if moved:
         rows.append(
             notice_measurement(

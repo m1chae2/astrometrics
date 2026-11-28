@@ -6,16 +6,15 @@ since (issue #182). `wayfindinglib` keeps only what it works out from them,
 with the science library's opaque data version
 (``quality.records.get_data_version``) as the cache version. So no
 `wayfindinglib` module may use the storage details a cache would need to
-bring stored rows up to date itself, and every narrower version of the
-science library's data (one target, a camera, the stacks, a group of
-frames, the target records) is an opaque text from a public object, such as
-``targets.get_data_version``. So no `wayfindinglib` module may import a
+bring stored rows up to date itself, and every version of the science
+library's data (all of one kind, one target, a camera, the stacks, a group
+of frames, the target records) is an opaque text from a public object, such
+as ``targets.get_data_version``. So no `wayfindinglib` module may import a
 storage-version helper of `astrometricslib.drivers`, or read the named parts
 of a stored-rows version (the row count, the newest row number, the sum of
 the row numbers and the newest time). The only version helpers it may
-import are the write counters: `bump_data_version` and `read_data_versions`
-for its own database, and `get_library_data_version`, the library-wide
-counters of each kind of data (no rows). These tests read the source of
+import are `bump_data_version` and `read_data_versions`, the write counters
+of its own database. These tests read the source of
 every `wayfindinglib` module that is not a test.
 """
 
@@ -30,6 +29,7 @@ FORBIDDEN_NAMES = frozenset({
     "FrameMetricDataVersion",
     "TargetDataVersion",
     "get_camera_data_versions",
+    "get_library_data_version",
     "get_frame_metric_data_versions",
     "get_frame_metric_signs",
     "get_stack_quality_data_version",
@@ -39,8 +39,8 @@ FORBIDDEN_NAMES = frozenset({
 })
 """Storage-version helpers that give out storage details."""
 
-ALLOWED_COUNTERS = frozenset({"bump_data_version", "read_data_versions", "get_library_data_version"})
-"""The write-counter helpers `wayfindinglib` may still import (see above)."""
+ALLOWED_COUNTERS = frozenset({"bump_data_version", "read_data_versions"})
+"""The counter helpers of its own database that `wayfindinglib` may import."""
 
 FORBIDDEN_ATTRIBUTES = frozenset({
     "measurement_count",

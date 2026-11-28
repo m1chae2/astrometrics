@@ -415,6 +415,11 @@ DECISIONS = {
         "in pixels on its stack or a named image and writes nothing.",
         tool_class="observe",
     ),
+    "star_get_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes on any write to the star catalog, so "
+        "a cache knows when to work out again. Of no use to an AI client.",
+    ),
     "star_count_by_class": ToolDecision(
         "keep",
         "Since #206 the class counts that star_query's detail='class_counts' gave. Counts the stars of each "

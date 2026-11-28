@@ -41,7 +41,7 @@ def catalog_version(mocker: MockerFixture) -> list[int]:
     version = [1]
     mocker.patch.object(
         stellar_service_module,
-        "get_library_data_version",
+        "star_catalog_version",
         side_effect=lambda *_args, **_kwargs: (("stars", version[0]),),
     )
     return version
@@ -231,7 +231,7 @@ def test_whole_catalog_answers_are_cached_until_the_version_changes(catalog_vers
 
 def test_an_unreadable_version_is_never_served_from_memory(mocker: MockerFixture) -> None:
     """With no readable write counter, every request asks the library."""
-    mocker.patch.object(stellar_service_module, "get_library_data_version", return_value=None)
+    mocker.patch.object(stellar_service_module, "star_catalog_version", return_value=None)
     service = _service()
     service.astrometrics.stars.count_by_class.return_value = _ONE_CLASS
 

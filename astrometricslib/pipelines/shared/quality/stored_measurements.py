@@ -208,7 +208,9 @@ def get_data_version(
     level and target changes it, whether it is the newest row of its subject
     or not, and so does a newer row of one of the target's frames that names
     another target (the frame moved). A row of another metric, level or
-    target does not.
+    target does not. With no filter at all, it covers everything the quality
+    store holds (the rows, the capture settings and the calibration
+    records), and any write to it changes the text.
 
     Parameters
     ----------
@@ -245,6 +247,10 @@ def get_data_version(
         check_choice("level", level, tuple(member.value for member in SubjectLevel))
     if target is not None and not isinstance(target, Target):
         raise InvalidArgumentError("Pass the Target itself; turn an id into one with targets.get(id).")
+    if metric is None and level is None and target is None and subject_ids is None:
+        from astrometricslib.pipelines.shared.data_version_texts import get_kind_data_version
+
+        return get_kind_data_version(config, "quality")
     if subject_ids is not None:
         if metric is None or target is not None or level not in (None, SubjectLevel.FRAME.value):
             raise InvalidArgumentError("subject_ids needs a metric, and takes no target and no other level.")

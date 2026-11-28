@@ -10,6 +10,11 @@ depend on how the library stores its data. The texts are made from the
 storage versions in `astrometricslib.foundation.storage.data_versions`,
 which only the library itself reads.
 
+* `get_kind_data_version`: everything of one kind of library data (every
+  target record, every quality record, or every star), from the library's
+  write counter of that kind (``targets.get_data_version()``,
+  ``quality.records.get_data_version()`` and ``stars.get_data_version()``
+  with no filter).
 * `get_target_data_version`: one target's stored record, quality
   measurements and calibration records (``targets.get_data_version``).
 * `get_target_record_versions`: each target's stored record alone
@@ -40,6 +45,7 @@ from astrometricslib.models.target import Target
 __all__ = [
     "get_camera_data_version",
     "get_frame_group_data_version",
+    "get_kind_data_version",
     "get_stack_data_version",
     "get_target_data_version",
     "get_target_record_versions",
@@ -105,6 +111,42 @@ def _check_target(target: Any) -> Target:
     if not isinstance(target, Target):
         raise InvalidArgumentError("Pass the Target itself; turn an id into one with targets.get(id).")
     return target
+
+
+def get_kind_data_version(config: AppConfiguration, kind: str) -> str:
+    """Give a text that changes whenever any data of one kind change.
+
+    Every write of a kind adds one to the library's write counter of that
+    kind in the same transaction, so an insert, an update in place, a
+    delete and a write by another program all change the text.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The settings, which give the library folder.
+    kind : `str`
+        ``"targets"`` (the target records, with their frames and stacks),
+        ``"quality"`` (the quality measurements, capture settings and
+        calibration records) or ``"stars"`` (the star catalog).
+
+    Returns
+    -------
+    version : `str`
+        The opaque text.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `kind` is not one of the three.
+
+    Notes
+    -----
+    A library that cannot be read raises `StorageError`.
+    """
+    if kind not in data_versions.ALL_KINDS:
+        raise InvalidArgumentError(f"Unknown kind of library data: {kind!r}.")
+    found = _required(data_versions.get_library_data_version(config, (kind,)), f"the {kind} data")
+    return opaque_text(("kind", tuple(found)))
 
 
 def get_target_data_version(config: AppConfiguration, target: Target) -> str:

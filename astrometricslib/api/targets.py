@@ -349,7 +349,7 @@ class TargetCatalog(MovedNames):
             offset=offset,
         )
 
-    def get_data_version(self, target: Target) -> str:
+    def get_data_version(self, target: Target | None = None) -> str:
         """Give a short text that changes when one target's own data change.
 
         Owner:
@@ -358,21 +358,27 @@ class TargetCatalog(MovedNames):
         The target's own data are its stored record (frames and stacks), its
         stored quality measurements and its calibration records. A result
         about the target can keep its answer while this text stays the same.
-        Data of other targets do not change it. The text is opaque: compare
-        it with an earlier one.
+        Data of other targets do not change it. With no target, the text
+        changes whenever any target record is written. The text is opaque:
+        compare it with an earlier one.
 
         Parameters
         ----------
-        target : `Target`
-            The target.
+        target : `Target`, optional
+            The target. Every target record when omitted.
 
         Returns
         -------
         version : `str`
             The text.
         """
-        from astrometricslib.pipelines.shared.data_version_texts import get_target_data_version
+        from astrometricslib.pipelines.shared.data_version_texts import (
+            get_kind_data_version,
+            get_target_data_version,
+        )
 
+        if target is None:
+            return get_kind_data_version(self._config, "targets")
         return get_target_data_version(self._config, target)
 
     def get_record_versions(self) -> TargetRecordVersions:

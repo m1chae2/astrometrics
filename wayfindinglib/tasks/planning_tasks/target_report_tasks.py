@@ -2288,7 +2288,7 @@ def build_target_dataset_report(
         )
     return _TARGET_REPORT_CACHE.get_or_build(
         key,
-        lambda: report_data_version(config, butler),
+        lambda: report_data_version(config, butler, astrometrics),
         lambda: _build_target_dataset_report(
             target,
             astrometrics=astrometrics,

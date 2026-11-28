@@ -23,7 +23,6 @@ from astrometricslib import Astrometrics, StellarObject, Target
 from astrometricslib.arguments import Page
 from astrometricslib.drivers import (
     VersionedCache,
-    get_library_data_version,
     is_path_inside,
     resolve_mounted_path,
 )
@@ -49,10 +48,10 @@ _MAXIMUM_CONCURRENT_PERIOD_SEARCHES = 2
 
 # The whole-catalog answers (per-target counts, class counts, a class's
 # stars) each read every star's summary, which takes seconds on a large
-# library. They are kept until the library's star write counter
-# (`get_library_data_version` for the ``"stars"`` kind) says a write has
-# happened, not on a timer. The counter lives in the
-# database, so it sees a write by another program too. This is only the
+# library. They are kept until the star catalog's data version
+# (`star_catalog_version`, the library's ``stars.get_data_version``) says a
+# write has happened, not on a timer. The version comes from a counter in
+# the database, so it sees a write by another program too. This is only the
 # fallback: how long an answer may be served for a version already confirmed
 # current, in case a write was made by raw SQL that did not count itself.
 _CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS = 300.0
@@ -71,8 +70,51 @@ _PHOTOMETRY_FILTERS = ("with photometry", "photometry", "hasphotometry")
 # Most stars one Astronomy Manager page lists, also when it asks for all.
 _LISTING_PAGE_CAP = 500
 
-# The library's write-counter kind of the star catalog.
-_STARS_DATA_KIND = "stars"
+
+def star_catalog_version(astrometrics: Astrometrics) -> str | None:
+    """Read the library's opaque version of the star catalog.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library.
+
+    Returns
+    -------
+    version : `str` or `None`
+        The text (``stars.get_data_version``), or `None` when the library
+        cannot be read, so no answer is kept.
+    """
+    try:
+        return astrometrics.stars.get_data_version()
+    except AstrometricsError:
+        logger.warning("Could not read the data version of the star catalog.", exc_info=True)
+        return None
+
+
+def library_version(astrometrics: Astrometrics) -> tuple[str, str, str] | None:
+    """Read the library's opaque versions of its targets, quality and stars.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The science library.
+
+    Returns
+    -------
+    version : `tuple` [`str`, `str`, `str`] or `None`
+        The three texts, or `None` when the library cannot be read, so no
+        answer is kept. A write of any of the three changes one of them.
+    """
+    try:
+        return (
+            astrometrics.targets.get_data_version(),
+            astrometrics.quality.records.get_data_version(),
+            astrometrics.stars.get_data_version(),
+        )
+    except AstrometricsError:
+        logger.warning("Could not read the data versions of the library.", exc_info=True)
+        return None
 
 
 def _rounded(value: Any, digits: int) -> Any:
@@ -255,7 +297,7 @@ class StellarService:
                 retryable=True,
             )
         try:
-            current_version = get_library_data_version(self.config, kinds=(_STARS_DATA_KIND,))
+            current_version = star_catalog_version(self.astrometrics)
             now = time.monotonic()
             with self._catalog_answers_lock:
                 cached = self._catalog_answers.get(key)
@@ -339,7 +381,7 @@ class StellarService:
 
         Working out the overlay for a target with tens of thousands of
         stars takes seconds. The answer only changes when the library
-        data (see `astrometricslib.drivers.get_library_data_version`) or the
+        data (see `library_version`) or the
         image changes, so it is kept in a `VersionedCache` (the 64 most
         recent) and reused until one of them does.
 
@@ -380,7 +422,7 @@ class StellarService:
         # the targets or the quality rows.
         return self._overlay_cache.get_or_build(
             key,
-            lambda: get_library_data_version(self.config),
+            lambda: library_version(self.astrometrics),
             lambda: self._compute_overlay(target_id, limit, checked_path),
         )
 

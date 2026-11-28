@@ -221,7 +221,9 @@ class QualityMeasurements(MovedNames):
         version : `str`
             The text. It changes when a row of the metric, level and target
             is added, removed or replaced (or a frame of the target moves to
-            another target), and stays the same otherwise.
+            another target), and stays the same otherwise. With no filter,
+            any write to the quality store (rows, capture settings or
+            calibration records) changes it.
 
         Notes
         -----

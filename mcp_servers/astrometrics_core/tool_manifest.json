@@ -429,6 +429,13 @@
       "interim_block": "",
       "note": "Reads one star's full record by id. Writes nothing."
     },
+    "star_get_data_version": {
+      "tool_class": "observe",
+      "category": "stars",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#182). Gives an opaque text that changes on any write to the star catalog, so a cache knows when to work out again. Of no use to an AI client."
+    },
     "star_get_spectrum": {
       "tool_class": "observe",
       "category": "stars",

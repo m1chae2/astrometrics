@@ -17,6 +17,7 @@ import pytest
 
 from astrometricslib import Target
 from astrometricslib._internal.catalog import OverlayStar, StarOverlay
+from astrometricslib._internal.testing import data_version_calls
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.storage.data_versions import bump_data_version
@@ -90,12 +91,16 @@ def _service_with_counting_overlay(library_path: Path) -> tuple[StellarService, 
     service = StellarService.__new__(StellarService)
     service.config = SimpleNamespace(get_library_path=lambda: library_path)
     service._overlay_cache = VersionedCache()
+    versions = data_version_calls(service.config)
     service.astrometrics = SimpleNamespace(
         targets=SimpleNamespace(
             get=lambda target_id: SimpleNamespace(
                 stacking=SimpleNamespace(stacked_image=None, processed_image=None)
-            )
-        )
+            ),
+            get_data_version=versions.targets.get_data_version,
+        ),
+        quality=SimpleNamespace(records=versions.records),
+        stars=versions.stars,
     )
     calls: list[str] = []
 

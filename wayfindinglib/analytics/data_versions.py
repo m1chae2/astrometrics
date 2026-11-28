@@ -10,16 +10,18 @@ and of a target report.
 The wayfinding records use the same write counter as the science library:
 each write adds one to a counter in the ``data_versions`` table of
 ``wayfinding.db`` inside the write's own transaction (see
-`astrometricslib.drivers.bump_data_version`). An update in place, a delete,
-and a row number used again all change the counter, which row counts could
-miss.
+`astrometricslib.drivers.bump_data_version`). An update in place, a
+delete, and a row number used again all change the counter, which row
+counts could miss. The science library's own counters are read only as
+opaque texts (`whole_library_version`).
 
 A night review (`review_data_version`) watches the counters of the guiding
-samples, the guiding runs, the Ekos sessions and the site, plus the library
-counters, the equipment and the configuration sections.
+samples, the guiding runs, the Ekos sessions and the site, plus the science
+library's versions of all its data, the equipment and the configuration
+sections.
 
 The guiding baselines of the nights (`guiding_baseline_data_version`) read
-only wayfinding records, so they do not watch the library counters. They
+only wayfinding records, so they do not watch the science library. They
 watch the counters of the Ekos session records, the guiding runs and the
 guide log syncs, and the row number of the newest guide sample. The stored
 Ekos session records and guiding runs themselves are kept until their two
@@ -56,9 +58,9 @@ of the night in progress holds tonight's frames, sessions and background
 rows. Both include the equipment and configuration signs. A change of the
 equipment or the configuration rebuilds both parts.
 
-Every version of science-library data that is narrower than the library
-counters (one target, the cameras of a target, a group of frames, the stack
-data) is an opaque text that the science library's public objects give
+Every version of science-library data (all of one kind of data, one target,
+the cameras of a target, a group of frames, the stack data) is an opaque
+text that the science library's public objects give
 (``targets.get_data_version``, ``quality.records.get_camera_data_version``,
 ``quality.records.get_data_version`` and ``quality.stacks.get_data_version``).
 They hold no counts or row numbers, so this library depends on nothing about
@@ -76,7 +78,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from astrometricslib import Target
 from astrometricslib.arguments import observing_night_id
-from astrometricslib.drivers import get_library_data_version
 from astrometricslib.exceptions import AstrometricsError
 from wayfindinglib.analytics.capture_history import BACKGROUND_METRIC
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -104,9 +105,6 @@ It does not read the observation sessions, so they are not listed.
 NIGHT_LIST_TABLES = ("guiding_runs", "ekos_session_contexts")
 """The ``wayfinding.db`` tables the list of nights reads; all writes count."""
 
-NIGHT_LIST_LIBRARY_KINDS = ("targets",)
-"""The science library data the list of nights reads: the target documents,
-which hold the frame records."""
 
 REPORT_COARSE_TABLE = "guiding_samples"
 """The table written every few seconds during a night, counted coarsely."""
@@ -150,6 +148,36 @@ def library_data_version(read: Callable[[], str], what: str) -> str | None:
     except AstrometricsError as error:
         logger.warning("Could not read the data version of %s: %s", what, error)
         return None
+
+
+def whole_library_version(astrometrics: Any) -> tuple[str, str, str] | None:
+    """Read the science library's opaque versions of all of its data.
+
+    A result that reads the targets, the quality records and the stars can
+    keep its answer while these three texts stay the same
+    (``targets.get_data_version()``, ``quality.records.get_data_version()``
+    and ``stars.get_data_version()``, each with no filter). Any write of
+    any of them changes one.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+
+    Returns
+    -------
+    version : `tuple` [`str`, `str`, `str`] or `None`
+        The three texts, or `None` when the library could not be read.
+    """
+    parts = (
+        library_data_version(lambda: astrometrics.targets.get_data_version(), "the target records"),
+        library_data_version(lambda: astrometrics.quality.records.get_data_version(), "the quality records"),
+        library_data_version(lambda: astrometrics.stars.get_data_version(), "the star catalog"),
+    )
+    targets, quality, stars = parts
+    if targets is None or quality is None or stars is None:
+        return None
+    return (targets, quality, stars)
 
 
 def config_signs(config: Any) -> str:
@@ -211,7 +239,8 @@ def report_context_version(config: Any, butler: Any) -> Hashable | None:
 
     These are the wayfinding records, the coarse guiding count, the active
     equipment and site, and the configuration sections (see the module
-    description). `report_data_version` adds the library counters to them.
+    description). `report_data_version` adds the science library's
+    versions to them.
 
     Parameters
     ----------
@@ -245,7 +274,7 @@ def report_context_version(config: Any, butler: Any) -> Hashable | None:
         return None
 
 
-def report_data_version(config: Any, butler: Any) -> Hashable | None:
+def report_data_version(config: Any, butler: Any, astrometrics: Any) -> Hashable | None:
     """Work out the version of every input of a target report.
 
     A target report reads the library, the equipment, site and configuration,
@@ -259,6 +288,9 @@ def report_data_version(config: Any, butler: Any) -> Hashable | None:
         The application settings.
     butler : `DiskButler`
         The record store. It gives the wayfinding records.
+    astrometrics : `Any`
+        The science library's high-level interface, whose opaque versions
+        of all its data are read (`whole_library_version`).
 
     Returns
     -------
@@ -268,7 +300,7 @@ def report_data_version(config: Any, butler: Any) -> Hashable | None:
         case the caller must not keep a result.
     """
     context = report_context_version(config, butler)
-    library = get_library_data_version(config)
+    library = whole_library_version(astrometrics)
     if context is None or library is None:
         return None
     return (context, library)
@@ -281,7 +313,7 @@ def depth_goal_data_version(
 
     The depth goal reads the target's frames, stacks and measurements, the
     chosen level, and the same context as a target report. Unlike
-    `report_data_version` it does not watch the library counters, which a
+    `report_data_version` it does not watch the whole library, which a
     new frame of any target changes. It watches the one target's own data
     (``targets.get_data_version``). The forecast also reads the frames,
     stacks and calibration records of the same camera from other targets
@@ -359,7 +391,9 @@ def nights_index_version(context: Any, tonight: str, signs: Hashable) -> Hashabl
     """
     try:
         wayfinding = context.records.data_versions(NIGHT_LIST_TABLES)
-        targets = get_library_data_version(context.config, NIGHT_LIST_LIBRARY_KINDS)
+        targets = library_data_version(
+            lambda: context.astrometrics.targets.get_data_version(), "the target records"
+        )
         if wayfinding is None or targets is None:
             return None
         return (tuple(sorted(wayfinding.items())), targets, tonight, signs)
@@ -568,7 +602,7 @@ def review_data_version(context: Any) -> Hashable | None:
         wayfinding = context.records.data_versions(RECORD_VERSION_TABLES)
         if wayfinding is None:
             return None
-        library = get_library_data_version(context.config)
+        library = whole_library_version(context.astrometrics)
         if library is None:
             return None
         return (

@@ -128,14 +128,19 @@ def data_version_calls(config: AppConfiguration) -> SimpleNamespace:
     calls : `types.SimpleNamespace`
         ``targets`` (``get_data_version``, ``get_record_versions``),
         ``records`` (``get_data_version``, ``get_camera_data_version``) and
-        ``stacks`` (``get_data_version``), each as on `Astrometrics`.
+        ``stacks`` and ``stars`` (``get_data_version``), each as on
+        `Astrometrics`.
     """
     from astrometricslib.pipelines.shared import data_version_texts
     from astrometricslib.pipelines.shared.quality import stored_measurements
 
     return SimpleNamespace(
         targets=SimpleNamespace(
-            get_data_version=lambda target: data_version_texts.get_target_data_version(config, target),
+            get_data_version=lambda target=None: (
+                data_version_texts.get_kind_data_version(config, "targets")
+                if target is None
+                else data_version_texts.get_target_data_version(config, target)
+            ),
             get_record_versions=lambda: data_version_texts.get_target_record_versions(config),
         ),
         records=SimpleNamespace(
@@ -145,4 +150,7 @@ def data_version_calls(config: AppConfiguration) -> SimpleNamespace:
             ),
         ),
         stacks=SimpleNamespace(get_data_version=lambda: data_version_texts.get_stack_data_version(config)),
+        stars=SimpleNamespace(
+            get_data_version=lambda: data_version_texts.get_kind_data_version(config, "stars")
+        ),
     )

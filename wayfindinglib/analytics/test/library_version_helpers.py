@@ -37,7 +37,7 @@ def attach_library_versions(library: Any, config: Any) -> Any:
     ----------
     library : `Any`
         The stand-in, with ``quality`` (and ``quality.records``). It gains
-        ``targets`` when it had none.
+        ``targets`` and ``stars`` when it had none.
     config : `AppConfiguration`
         The settings that name the library folder.
 
@@ -56,4 +56,7 @@ def attach_library_versions(library: Any, config: Any) -> Any:
     if not hasattr(library.quality, "stacks"):
         library.quality.stacks = SimpleNamespace()
     _attach(library.quality.stacks, calls.stacks)
+    if not hasattr(library, "stars"):
+        library.stars = SimpleNamespace()
+    _attach(library.stars, calls.stars)
     return library

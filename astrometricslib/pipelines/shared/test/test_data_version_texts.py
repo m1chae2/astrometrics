@@ -114,6 +114,7 @@ def _storage_versions(config: AppConfiguration, tonight: str, groups: tuple[froz
         data_versions.get_stack_quality_data_version(config),
         data_versions.get_frame_metric_signs(config, METRIC, groups),
         data_versions.get_target_document_signs(config),
+        tuple(data_versions.get_library_data_version(config, (kind,)) for kind in data_versions.ALL_KINDS),
     )
 
 
@@ -140,6 +141,11 @@ def _texts(astrometrics: Astrometrics, tonight: str, groups: tuple[frozenset[str
         astrometrics.quality.stacks.get_data_version(),
         tuple(records.get_data_version(metric=METRIC, subject_ids=group) for group in groups),
         astrometrics.targets.get_record_versions().versions,
+        (
+            records.get_data_version(),
+            astrometrics.stars.get_data_version(),
+            astrometrics.targets.get_data_version(),
+        ),
     )
 
 
@@ -225,7 +231,7 @@ def test_each_text_changes_exactly_when_its_storage_version_does(config: AppConf
             if not same_storage:
                 changed_parts.add(key[0])
         before_storage, before_texts = storage, texts
-    assert changed_parts == set(range(6))
+    assert changed_parts == set(range(7))
 
 
 def test_the_texts_hold_no_storage_details(config: AppConfiguration) -> None:
@@ -238,6 +244,9 @@ def test_the_texts_hold_no_storage_details(config: AppConfiguration) -> None:
         astrometrics.quality.records.get_camera_data_version(target=target),
         astrometrics.quality.stacks.get_data_version(),
         astrometrics.quality.records.get_data_version(metric=METRIC, subject_ids=["M 31/a"]),
+        astrometrics.quality.records.get_data_version(),
+        astrometrics.stars.get_data_version(),
+        astrometrics.targets.get_data_version(),
     ]
     assert all(isinstance(text, str) and len(text) == 32 for text in texts)
     assert astrometrics.targets.get_record_versions().versions == {}
@@ -276,6 +285,7 @@ def test_an_unreadable_library_raises_a_storage_error(config: AppConfiguration) 
         "get_stack_quality_data_version",
         "get_target_camera_names",
         "get_frame_metric_data_versions",
+        "get_library_data_version",
     ],
 )
 def test_the_old_storage_helpers_say_where_they_moved(name: str) -> None:

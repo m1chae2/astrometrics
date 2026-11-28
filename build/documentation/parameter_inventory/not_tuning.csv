@@ -423,8 +423,6 @@ astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_GA
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_HALO_FILL_MINIMUM_WEIGHT,Least share of outside pixels below which a halo is left gray; numerics.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_LIGHTNESS_OFFSET,Keeps a ratio of lightnesses finite on black pixels; numerics.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MINIMUM_SKY_SHARE,Fewest sky pixels needed to measure the sky tint; a sanity guard.
-astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_MOVING_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
-astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_REFERENCE_STAR_COUNT,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_SIMBAD_ROW_LIMIT,"Row cap of one stored SIMBAD tile, shared with the star identifier so both read the same answers; plumbing."
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,_WIDE_HALO_SAMPLING_PIXELS,Coarse-grid spacing of a wide blur; plumbing of a faster Gaussian.
 astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py,extended_color.halo_radius_px,Default that turns the halo fill off for callers without star footprints; not a tuning value.
@@ -455,18 +453,6 @@ astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_MINIMUM_VA
 astrometricslib/pipelines/stacking/post_processing/masked_stretch.py,_SLOPE_SPAN,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/normalization_scale.py,EXPOSURE_MATCH_FRACTION,exposure equality check; the code says it is not tuned
 astrometricslib/pipelines/stacking/post_processing/odd_even_apertures.py,APERTURE_RECORD_VERSION,software plumbing
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_BACKGROUND_BIN,Binning of the coarse sky background removed before star finding; plumbing.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_BACKGROUND_FILTER_BINS,Width of the coarse sky background filter before star finding; plumbing.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_CLIP_PASSES,Same clipping passes as the frame registration; not tuned here.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_CLIP_SIGMAS,Same clipping as the frame registration; not tuned here.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_EDGE_PIXELS,Margin that keeps cut stars at a stack edge out of the alignment; plumbing.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_MINIMUM_PAIRS,Same fewest-pairs choice as the frame registration; not tuned here.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_FINDER_FACTORS,Template widths the star finder tries before the star width is measured; plumbing of the width measurement.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_ISOLATION_PIXELS,Distance to the nearest other star for a star whose width is measured; plumbing.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_LIMITS,Sanity guard on the measured star width; not tuned.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_SATURATED_SHARE,Share of the picture's top above which a peak is a burnt-out core; plumbing of a half-maximum width.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WIDTH_STARS,Cap on how many stars the star width is measured on; more only costs time.
-astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,align_with_stars.star_count,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/preview_cosmic_clarity.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/preview_graxpert.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
@@ -487,6 +473,11 @@ astrometricslib/pipelines/stacking/post_processing/sky_plane.py,SKY_CLIP_ROUNDS,
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,SKY_CLIP_SPREADS,Statistical cut of the sky clip (2 spreads above the plane keeps about 98% of a clean Gaussian sky). Partly measured STK-61.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,_OUTER_RING_RANGES,Definition of the two outer rings of the 64 by 64 grid in r squared (0.64 to 1 and 1 to 2); geometry of the frame.
 astrometricslib/pipelines/stacking/post_processing/sky_plane.py,choose_background_method.graxpert.sky_bins,Count of sky bins; zero when no bins were measured.
+astrometricslib/pipelines/stacking/post_processing/solution_alignment.py,_INVERSE_MAXIMUM_ITERATIONS,Iteration cap of the inverse of the SIP terms; plumbing, not tuned.
+astrometricslib/pipelines/stacking/post_processing/solution_alignment.py,_INVERSE_TOLERANCE_PIXELS,Stopping size of the inverse of the SIP terms; numerical accuracy far below a pixel; not tuned.
+astrometricslib/pipelines/stacking/post_processing/solution_alignment.py,_MAP_STEP_PIXELS,Spacing of the nodes of the sky map between two grids; the map is smooth over it; numerical accuracy; not tuned.
+astrometricslib/pipelines/stacking/post_processing/solution_alignment.py,_OFFSET_TOLERANCE_PIXELS,How far a picture cut from its stack may sit from a whole-pixel offset; rounding of header numbers; not tuned.
+astrometricslib/pipelines/stacking/post_processing/solution_alignment.py,_OUTSIDE_PIXELS,Marker position far outside the image for a node that could not be traced; plumbing.
 astrometricslib/pipelines/stacking/post_processing/stack_blank_tuning.py,PERCENT_PER_FRACTION,Unit conversion
 astrometricslib/pipelines/stacking/post_processing/stack_comparison.py,_sentence.scale,Unit scale; 1 means unchanged
 astrometricslib/pipelines/stacking/post_processing/stack_image.py,MAD_SIGMA_ERROR_FACTOR,Statistical constant

@@ -1,14 +1,12 @@
 """Tests for the color picture of a monochrome stack, colored by another stack.
 
 Each test builds small synthetic pictures with Gaussian stars and a plate
-solution (WCS). The alignment must recover a move that differs in scale,
-turn and position, and a small error in the plate solution. A star's color,
-measured on a wide red star of the color stack, must be painted only inside
-the narrow monochrome star. The alignment must also work when the
-monochrome stars are twice as wide as expected, the plate solutions disagree
-by more than the pairing radius, and the monochrome frame lies off the center
-of a wide color frame over a bright nebula (the M 42 and M 45 failure). The
-extended color must lose a tinted sky, under a nebula or galaxy too, and
+solution (WCS). A star's color, measured on a wide red star of the color
+stack, must be painted only inside the narrow monochrome star. The plate
+solves are faked (Siril is not run); the alignment itself is tested in
+`test_solution_alignment`. The step must report, as a failure with the
+reason, a stack that Siril cannot solve. The extended color must lose a
+tinted sky, under a nebula or galaxy too, and
 the red skirts StarNet leaves around stars, and keep the object's own color.
 Where little sky lies near, the frame-wide tint is taken away. The step
 must be skipped, with a reason, when there is no color stack or the color
@@ -41,10 +39,7 @@ from astrometricslib.pipelines.stacking.post_processing.color_from_other_stack i
     neutralize_sky,
     write_color_preview,
 )
-from astrometricslib.pipelines.stacking.post_processing.other_stack_alignment import (
-    align_with_stars,
-    find_bright_stars,
-)
+from astrometricslib.pipelines.stacking.post_processing.solution_alignment import SolvedStack
 from astrometricslib.pipelines.stacking.post_processing.star_color_measurement import (
     SOURCE_NAMES,
     chroma_per_lightness,
@@ -152,70 +147,6 @@ def render(
             picture[box] += peak * np.exp(-((yy[box] - row) ** 2 + (xx[box] - column) ** 2) / (2 * sigma**2))
     picture += noise * np.random.default_rng(seed).standard_normal(shape)
     return picture.astype(np.float32)
-
-
-def test_alignment_recovers_scale_turn_and_a_plate_solution_error() -> None:
-    """The fitted move puts the color stars on the monochrome stars closely."""
-    stars = sky_stars(400, seed=1)
-    reference_shape = (500, 500)
-    reference_wcs = make_wcs(reference_shape, 1.5, 0.0)
-    reference = render(reference_shape, reference_wcs, stars, 1.5, 0.003, seed=2)
-    moving_shape = (420, 460)
-    true_moving_wcs = make_wcs(moving_shape, 2.0, 12.0, shift=(10.0, -6.0))
-    moving = render(moving_shape, true_moving_wcs, stars, 2.0, 0.003, seed=3)
-    # The moving picture's plate solution is off by 1.5 pixels.
-    stated_moving_wcs = make_wcs(moving_shape, 2.0, 12.0, shift=(11.5, -6.0))
-
-    reference_stars = find_bright_stars(reference, 3000, 3.5)
-    fit = align_with_stars(reference_stars, reference_wcs, moving, stated_moving_wcs, 4.7)
-
-    assert fit is not None
-    assert fit.residual_pixels < 0.1
-    assert fit.transform.scale == pytest.approx(2.0 / 1.5, rel=1e-3)
-    columns, rows = true_moving_wcs.world_to_pixel_values(stars[:50, 0], stars[:50, 1])
-    expected_columns, expected_rows = reference_wcs.world_to_pixel_values(stars[:50, 0], stars[:50, 1])
-    inside = (rows > 20) & (rows < 400) & (columns > 20) & (columns < 440)
-    mapped_rows, mapped_columns = fit.transform.map_points(rows[inside], columns[inside])
-    assert (
-        np.max(np.hypot(mapped_rows - expected_rows[inside], mapped_columns - expected_columns[inside])) < 0.1
-    )
-
-
-def test_alignment_survives_wide_stars_a_large_plate_solution_error_and_an_off_center_overlap() -> None:
-    """Wide stars, a 10-pixel plate error and an off-center field still align.
-
-    This is the M 42 and M 45 case: the monochrome stars are about 7 pixels
-    wide (the finder's starting width is 3.5), a bright nebula fills the
-    field, the color frame is 1.42 times coarser and much wider, with the
-    monochrome field on its left side, and the two plate solutions disagree
-    by about 10 pixels, more than the first pairing radius.
-    """
-    stars = sky_stars(1500, seed=11, radius_degrees=0.3)
-    reference_shape = (500, 500)
-    reference_wcs = make_wcs(reference_shape, 1.9, 0.0)
-    reference = render(reference_shape, reference_wcs, stars, 3.0, 0.003, seed=12)
-    yy, xx = np.mgrid[0 : reference_shape[0], 0 : reference_shape[1]]
-    reference += (0.5 * np.exp(-((yy - 250) ** 2 + (xx - 220) ** 2) / (2 * 60.0**2))).astype(np.float32)
-    moving_shape = (500, 900)
-    # The monochrome field sits about 250 columns left of the color center.
-    true_moving_wcs = make_wcs(moving_shape, 1.9 * 1.42, 6.0, shift=(-250.0, 0.0))
-    moving = render(moving_shape, true_moving_wcs, stars, 2.0, 0.003, seed=13)
-    stated_moving_wcs = make_wcs(moving_shape, 1.9 * 1.42, 6.0, shift=(-243.0, -5.0))
-
-    reference_stars = find_bright_stars(reference, 3000, 3.5)
-    assert len(reference_stars) > 100
-    fit = align_with_stars(reference_stars, reference_wcs, moving, stated_moving_wcs, 4.7)
-
-    assert fit is not None
-    assert fit.plate_solution_offset_pixels > 8.0
-    assert fit.residual_pixels < 0.3
-    assert fit.model == "polynomial"
-    columns, rows = true_moving_wcs.world_to_pixel_values(stars[:, 0], stars[:, 1])
-    expected_columns, expected_rows = reference_wcs.world_to_pixel_values(stars[:, 0], stars[:, 1])
-    inside = (expected_rows > 40) & (expected_rows < 460) & (expected_columns > 40) & (expected_columns < 460)
-    mapped_rows, mapped_columns = fit.transform.map_points(rows[inside], columns[inside])
-    distance = np.hypot(mapped_rows - expected_rows[inside], mapped_columns - expected_columns[inside])
-    assert np.median(distance) < 0.3
 
 
 def test_extended_color_drops_a_tinted_sky_and_red_star_skirts_but_keeps_the_nebula() -> None:
@@ -607,7 +538,7 @@ def test_nearest_focal_length_is_chosen(tmp_path: Path) -> None:
     assert choice is not None and choice.configuration_key == "Nikon@405mm"
 
 
-def test_poor_coverage_is_a_skip_and_writes_nothing(tmp_path: Path) -> None:
+def test_poor_coverage_is_a_skip_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A color stack covering part of the frame gives no picture."""
     stars = sky_stars(500, seed=5, radius_degrees=0.15)
     mono_shape = (400, 400)
@@ -628,11 +559,50 @@ def test_poor_coverage_is_a_skip_and_writes_nothing(tmp_path: Path) -> None:
     )
     choice = ColorStackChoice(str(color), processed_fits_path_for(str(color)), "Nikon@405mm", "Nikon", 405.0)
 
+    wcs_by_path = {str(mono): mono_wcs, str(color): color_wcs}
+    monkeypatch.setattr(
+        color_from_other_stack,
+        "solve_stack",
+        lambda path, executable: (SolvedStack(wcs_by_path[path], 400, 0.1, 1.5), ""),
+    )
+
     outcome = write_color_preview(str(mono), choice, "siril-not-used")
 
     assert not outcome.made and not outcome.failed
     assert "covers" in outcome.reason
     assert outcome.record["coverage_fraction"] < 0.95
+    assert not Path(color_preview_path_for(str(mono))).exists()
+
+
+def test_a_stack_siril_cannot_solve_is_a_failure_with_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no solution for a stack, nothing is aligned and the job is told."""
+    shape = (200, 200)
+    wcs = make_wcs(shape, 1.5, 0.0)
+    mono = tmp_path / "mono.fits"
+    fits.PrimaryHDU(np.zeros(shape, dtype=np.float32), header=wcs.to_header()).writeto(mono)
+    fits.PrimaryHDU(np.zeros(shape, dtype=np.float32), header=wcs.to_header()).writeto(
+        processed_fits_path_for(str(mono))
+    )
+    color = tmp_path / "color.fits"
+    cube = np.zeros((3, *shape), dtype=np.float32)
+    fits.PrimaryHDU(cube, header=wcs.to_header()).writeto(color)
+    fits.PrimaryHDU(cube, header=wcs.to_header()).writeto(processed_fits_path_for(str(color)))
+    choice = ColorStackChoice(str(color), processed_fits_path_for(str(color)), "Nikon@405mm", "Nikon", 405.0)
+    solved = SolvedStack(wcs, 400, 0.1, 1.5)
+    monkeypatch.setattr(
+        color_from_other_stack,
+        "solve_stack",
+        lambda path, executable: (
+            (solved, "") if path == str(mono) else (None, "Siril could not solve the stack")
+        ),
+    )
+
+    outcome = write_color_preview(str(mono), choice, "siril-not-used")
+
+    assert not outcome.made and outcome.failed
+    assert "not aligned" in outcome.reason and "Siril could not solve" in outcome.reason
     assert not Path(color_preview_path_for(str(mono))).exists()
 
 

@@ -19,7 +19,11 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
-from astrometricslib.utilities.robust_statistics import MAD_TO_SIGMA, robust_sigma, sigma_clipped_values
+from astrometricslib.utilities.robust_statistics import (
+    MAD_TO_SIGMA,
+    sigma_clipped_values,
+    smooth_median_and_sigma,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +250,12 @@ def _sky_level_and_spread(values: np.ndarray) -> tuple[float, float] | None:
 
     The clipping is the library's one loop, `sigma_clipped_values`. The
     middle is the median of the kept values and the spread is their robust
-    sigma (the scaled median absolute deviation).
+    sigma (the scaled median absolute deviation). Raw camera pixels sit on a
+    grid (steps of 4 ADU on a 14-bit sensor stored in 16 bits), where an
+    ordinary median and MAD can only land on the grid, so
+    `smooth_median_and_sigma` reads both from the grid-cell-smoothed
+    distribution instead. It equals the ordinary median and MAD for values
+    that are not on a grid.
 
     Parameters
     ----------
@@ -267,10 +276,10 @@ def _sky_level_and_spread(values: np.ndarray) -> tuple[float, float] | None:
     )
     if kept is None:
         return None
-    sigma = float(robust_sigma(kept))
+    middle, sigma = smooth_median_and_sigma(kept)
     if not sigma > 0.0:
         return None
-    return float(np.median(kept)), sigma
+    return float(middle), float(sigma)
 
 
 def _sky_sample(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:

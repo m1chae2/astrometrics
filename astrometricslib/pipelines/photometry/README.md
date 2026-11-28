@@ -112,6 +112,8 @@ Each session keeps a record in `sessionScintillation`: Young's prediction, the `
 
 On the M 57 field the term brought the bright stars' errors to their measured scatter (a ratio of 1.0 for a 60 s session and 0.8 to 0.95 for a 30 s session on the fallback; partly measured; see [PHO-17](../../../documentation/library_design/validation/photometry.md#pho-17)). The minimums and the range are design estimates (see [PHO-D38](../../../documentation/library_design/validation/photometry.md#design-estimates)).
 
+**Checked against Siril.** On one M 13 session, Siril's aperture photometry with the same circle, ring and gain gave the same fluxes and the same bright-star scatter, and the faint stars scattered about 16% more than their errors predict (partly measured; see [PHO-23](../../../documentation/library_design/validation/photometry.md#pho-23)). The star positions from the drift tracking agreed with those of per-frame plate solutions (partly measured; see [PHO-24](../../../documentation/library_design/validation/photometry.md#pho-24)).
+
 The noise-model record (`photometry.model_noise_*`) works out the sky term from the saved errors. It takes the scintillation term out first, so scintillation is counted once. The variability indices use the larger errors as the floor of the expected scatter, so a bright constant star is less likely to be flagged. The expected scatter is the larger of the field's noise curve and the star's errors, so nothing is counted twice.
 
 A light curve stored without errors has empty error lists, and the searches then run without error weights (see [Looking for repeating patterns](processing/README.md#looking-for-repeating-patterns)).

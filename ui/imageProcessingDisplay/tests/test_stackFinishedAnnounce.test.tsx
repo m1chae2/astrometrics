@@ -9,6 +9,7 @@ import { useStackingJob } from '../hooks/useStackingJob';
 import { useViewerState } from '../hooks/useViewerState';
 import { resetAnnouncedStackJobs } from '../utils/announceFinishedStack';
 import { on } from '../../common/utils/eventBus';
+import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 
 const fetchJobMock = vi.fn();
 const callBackendMock = vi.fn();
@@ -37,7 +38,7 @@ vi.mock('../../common/services/imaging/processingService', () => ({
     streamJobLog: vi.fn(async () => vi.fn()),
     openSiril: vi.fn(),
 }));
-vi.mock('../../common/services/targetService', () => ({ fetchFrameStatsGrouped: vi.fn(async () => []) }));
+vi.mock('../../common/services/targetService', () => ({ requestFrameStatsGrouped: vi.fn(async () => []) }));
 vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 vi.mock('../../common/utils/reportError', () => ({ reportError: vi.fn() }));
 const invalidateStable = vi.fn();
@@ -68,7 +69,7 @@ describe('a stacking job that ends', () => {
     /** A completed job announces its stack once. */
     it('announces the stack path once when the job completed', async () => {
         fetchJobMock.mockResolvedValue(jobWith('completed'));
-        const { result } = renderHook(() => useStackingJob('M 81', true, false));
+        const { result } = renderHook(() => useStackingJob('M 81', true, false), { wrapper: createQueryClientTestWrapper().wrapper });
         await act(async () => { await result.current.startProcessing(); });
         await waitFor(() => expect(remade).toHaveLength(1));
         expect(remade[0]).toEqual({ targetId: 'M 81', stackPath: '/s/M_81_Stacked.fits' });
@@ -78,7 +79,7 @@ describe('a stacking job that ends', () => {
     /** A failed job announces nothing. */
     it('announces nothing when the job failed', async () => {
         fetchJobMock.mockResolvedValue(jobWith('failed'));
-        const { result } = renderHook(() => useStackingJob('M 81', true, false));
+        const { result } = renderHook(() => useStackingJob('M 81', true, false), { wrapper: createQueryClientTestWrapper().wrapper });
         await act(async () => { await result.current.startProcessing(); });
         await waitFor(() => expect(result.current.isProcessing).toBe(false));
         expect(remade).toHaveLength(0);

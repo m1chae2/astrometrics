@@ -235,10 +235,7 @@ def test_real_asi_frame_and_stack_agree_on_the_bright_stars() -> None:
     """Bright stars of a real frame land on stack stars within 2 pixels."""
     from scipy.ndimage import gaussian_filter, maximum_filter
 
-    config = SimpleNamespace(
-        get_library_path=lambda: str(REAL_LIBRARY), get_stacks_path=lambda: str(REAL_LIBRARY / "stacks")
-    )
-    mapper = QualityRecords(config, storage=None)  # type: ignore[arg-type]
+    mapper = _service(REAL_LIBRARY)
 
     def bright_stars(path: Path, count: int) -> np.ndarray:
         """Find the brightest smoothed peaks, as 1-based (x, y) pairs.
@@ -259,8 +256,8 @@ def test_real_asi_frame_and_stack_agree_on_the_bright_stars() -> None:
     frame_stars, stack_stars = bright_stars(REAL_FRAME, 40), bright_stars(REAL_STACK, 200)
     for x, y in frame_stars:
         mapped = mapper.map_position(str(REAL_FRAME), float(x), float(y), str(REAL_STACK))
-        assert mapped.method == "stack alignment"
-        assert np.hypot(stack_stars[:, 0] - mapped.x, stack_stars[:, 1] - mapped.y).min() < 2.0
+        assert mapped["method"] == "stack alignment"
+        assert np.hypot(stack_stars[:, 0] - mapped["x"], stack_stars[:, 1] - mapped["y"]).min() < 2.0
     for x, y in stack_stars[:30]:
         mapped = mapper.map_position(str(REAL_STACK), float(x), float(y), str(REAL_FRAME))
-        assert np.hypot(frame_stars[:, 0] - mapped.x, frame_stars[:, 1] - mapped.y).min() < 2.0
+        assert np.hypot(frame_stars[:, 0] - mapped["x"], frame_stars[:, 1] - mapped["y"]).min() < 2.0

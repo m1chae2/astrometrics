@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import threading
+from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -701,8 +702,37 @@ def is_truncated_fits(hdu_list: Any, image_file: str) -> bool:
     return int(file_info["datLoc"]) + int(file_info["datSpan"]) > os.path.getsize(image_file)
 
 
+_DARK_TEMPERATURE_CACHE_SIZE = 4096
+"""The most dark frames whose header temperatures are kept in memory.
+
+A library holds a few thousand darks at most, and each kept entry is a path
+and two numbers, so this covers a whole library in well under a megabyte.
+"""
+
+_dark_temperature_cache: OrderedDict[tuple[str, int, int], float | None] = OrderedDict()
+_dark_temperature_cache_lock = threading.Lock()
+
+
+def clear_dark_temperature_cache() -> None:
+    """Forget every kept dark temperature, so the next read opens the files."""
+    with _dark_temperature_cache_lock:
+        _dark_temperature_cache.clear()
+
+
 def _read_dark_temperature(path: str) -> float | None:
     """Read the sensor temperature a dark frame was taken at.
+
+    A file's header temperature changes only when the file does, so each
+    answer is kept in memory under the file's absolute path, modification
+    time and size. Picking darks for many groups of lights reads the same
+    darks again and again, and a kept answer needs only a ``stat`` call
+    instead of opening the file. A file that cannot be read is not kept, so
+    it is tried again next time.
+
+    Parameters
+    ----------
+    path : `str`
+        The dark frame.
 
     Returns
     -------
@@ -711,9 +741,24 @@ def _read_dark_temperature(path: str) -> float | None:
         or `None` if the file cannot be read or records none.
     """
     try:
-        return header_temperature_c(read_header(path, first_hdu_only=True))
+        status = os.stat(path)
+    except OSError:
+        return None
+    key = (os.path.abspath(path), status.st_mtime_ns, status.st_size)
+    with _dark_temperature_cache_lock:
+        if key in _dark_temperature_cache:
+            _dark_temperature_cache.move_to_end(key)
+            return _dark_temperature_cache[key]
+    try:
+        temperature_c = header_temperature_c(read_header(path, first_hdu_only=True))
     except FITS_READ_ERRORS:
         return None
+    with _dark_temperature_cache_lock:
+        _dark_temperature_cache[key] = temperature_c
+        _dark_temperature_cache.move_to_end(key)
+        while len(_dark_temperature_cache) > _DARK_TEMPERATURE_CACHE_SIZE:
+            _dark_temperature_cache.popitem(last=False)
+    return temperature_c
 
 
 def dark_temperature_flag(

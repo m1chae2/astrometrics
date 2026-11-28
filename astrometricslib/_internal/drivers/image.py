@@ -11,12 +11,94 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.filter_detection import get_filter_type
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, choose_pixel_hdu, collapse_to_2d
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+
+def read_header_with_fixes(path: str) -> fits.Header | None:
+    """Read a frame's header and fix old-style keywords in memory only.
+
+    The header comes from the HDU that holds the image (`choose_pixel_hdu`),
+    and the pixels are not read. Some older files use the deprecated
+    ``RADECSYS`` keyword or give ``DATE-OBS`` without ``MJD-OBS``. Astropy
+    warns about these. This function returns a header with ``RADESYS`` and
+    ``MJD-OBS`` filled in. It never writes to the file. A raw frame may sit
+    on a network drive that backups and snapshots watch, and a read must
+    not change it.
+
+    Parameters
+    ----------
+    path : `str`
+        Path to the FITS file.
+
+    Returns
+    -------
+    header : `astropy.io.fits.Header` or `None`
+        The header, with the fixes applied, so callers can reuse it
+        instead of opening the file again. `None` if reading the file
+        failed.
+    """
+    try:
+        import warnings
+
+        from astropy.time import Time
+
+        with warnings.catch_warnings():
+            # Old files make astropy warn on every open. The fixes below
+            # cover what the warnings are about.
+            warnings.simplefilter("ignore")
+            with fits.open(path, memmap=False) as hdul:
+                if len(hdul) == 0:
+                    return None
+                hdu = choose_pixel_hdu(hdul)
+                header = hdu.header.copy()
+
+        if "RADECSYS" in header:
+            value = header["RADECSYS"]
+            del header["RADECSYS"]
+            header["RADESYS"] = value
+            header["RADESYSa"] = value
+
+        if "DATE-OBS" in header and "MJD-OBS" not in header:
+            try:
+                header["MJD-OBS"] = (Time(header["DATE-OBS"]).mjd, "MJD of observation")
+            except (ValueError, TypeError) as exc:
+                logger.debug("Could not derive MJD-OBS from DATE-OBS: %s", exc)
+
+        return header
+    except FITS_READ_ERRORS as e:
+        logger.debug("Failed to read FITS header %s: %s", path, e)
+        return None
+
+
+def timestamp_from_header(header: fits.Header) -> float | None:
+    """Read the capture time from a header as a Unix timestamp.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The frame's header.
+
+    Returns
+    -------
+    timestamp : `float` or `None`
+        The time in ``DATE-OBS`` (or ``DATE``) in seconds since 1970, or
+        `None` if the header gives no date that can be read.
+    """
+    from astropy.time import Time
+
+    date_text = header.get("DATE-OBS", header.get("DATE", ""))
+    if not date_text:
+        return None
+    try:
+        return float(Time(date_text).unix)
+    except (ValueError, TypeError) as error:
+        logger.debug("Failed to parse DATE-OBS '%s': %s", date_text, error)
+        return None
 
 
 class AstrometricsImage:
@@ -44,50 +126,14 @@ class AstrometricsImage:
     def _read_header_with_fixes(self) -> fits.Header | None:
         """Read the header and fix old-style keywords in memory only.
 
-        Some older files use the deprecated ``RADECSYS`` keyword or give
-        ``DATE-OBS`` without ``MJD-OBS``. Astropy warns about these. This
-        method returns a header with ``RADESYS`` and ``MJD-OBS`` filled in.
-        It never writes to the file. A raw frame may sit on a network drive
-        that backups and snapshots watch, and a read must not change it.
+        See `read_header_with_fixes`, which does the work.
 
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The header, with the fixes applied, so callers can reuse it
-            instead of opening the file again. `None` if reading the file
-            failed.
+            The fixed header, or `None` if reading the file failed.
         """
-        try:
-            import warnings
-
-            from astropy.time import Time
-
-            with warnings.catch_warnings():
-                # Old files make astropy warn on every open. The fixes below
-                # cover what the warnings are about.
-                warnings.simplefilter("ignore")
-                with fits.open(self.path, memmap=False) as hdul:
-                    if len(hdul) == 0:
-                        return None
-                    hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
-                    header = hdu.header.copy()
-
-            if "RADECSYS" in header:
-                value = header["RADECSYS"]
-                del header["RADECSYS"]
-                header["RADESYS"] = value
-                header["RADESYSa"] = value
-
-            if "DATE-OBS" in header and "MJD-OBS" not in header:
-                try:
-                    header["MJD-OBS"] = (Time(header["DATE-OBS"]).mjd, "MJD of observation")
-                except (ValueError, TypeError) as exc:
-                    logger.debug("Could not derive MJD-OBS from DATE-OBS: %s", exc)
-
-            return header
-        except FITS_READ_ERRORS as e:
-            logger.debug("Failed to read FITS header %s: %s", self.path, e)
-            return None
+        return read_header_with_fixes(self.path)
 
     def _load_header(self) -> None:
         """Load the FITS header into `self._header` if not already loaded.
@@ -119,7 +165,7 @@ class AstrometricsImage:
                     if len(hdul) > 0:
                         # Some FITS files have data in hdul[1] if
                         # hdul[0] is just a header
-                        hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
+                        hdu = choose_pixel_hdu(hdul)
                         self._header = hdu.header.copy()
                     else:
                         raise StorageError(f"FITS file {self.path} is empty")
@@ -152,7 +198,7 @@ class AstrometricsImage:
 
         try:
             with fits.open(self.path, memmap=False) as hdul:
-                hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
+                hdu = choose_pixel_hdu(hdul)
                 try:
                     raw_data = hdu.data
                 except FITS_READ_ERRORS as read_err:
@@ -207,19 +253,7 @@ class AstrometricsImage:
         Extracted from the FITS header (``DATE-OBS`` or ``DATE``).
         `None` if no date could be parsed.
         """
-        from astropy.time import Time
-
-        header = self.header
-        date_str = header.get("DATE-OBS", header.get("DATE", ""))
-        if not date_str:
-            return None
-
-        try:
-            t = Time(date_str)
-            return float(t.unix)
-        except (ValueError, TypeError) as e:
-            logger.debug("Failed to parse DATE-OBS '%s': %s", date_str, e)
-            return None
+        return timestamp_from_header(self.header)
 
     @property
     def filter_type(self) -> FilterType:

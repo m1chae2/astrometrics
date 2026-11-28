@@ -76,7 +76,13 @@ def library(control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch) -> Lib
         night_index,
         "read_night_frames",
         lambda context: [
-            night_index.NightFrame(capture_history.night_of(frame), frame.target_id, frame.path)
+            night_index.NightFrame(
+                capture_history.night_of(frame),
+                frame.target_id,
+                frame.path,
+                frame.exposure_s,
+                frame.is_spectral,
+            )
             for frame in synthetic.frames
         ],
     )

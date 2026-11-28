@@ -62,7 +62,7 @@ export function useTargetActions() {
             if (newId !== activeTarget) {
                 setSelectedTarget(newId);
             }
-            invalidate('targets');
+            invalidate('targets', [activeTarget, String(newId)]);
         } catch (err) {
             reportError(err, 'saveTarget');
         }
@@ -77,7 +77,7 @@ export function useTargetActions() {
             await deleteObject(activeTarget);
             setSelectedTarget('');
             setPendingTarget('');
-            invalidate('targets');
+            invalidate('targets', [activeTarget]);
         } catch (err) {
             reportError(err, 'deleteTarget');
         }

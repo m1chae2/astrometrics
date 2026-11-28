@@ -51,6 +51,21 @@ export const targetListId = (target: TargetListEntry): string =>
     String(target.id || target.name || '');
 
 /**
+ * Tells whether a target is in the library's target list, that is, whether it has frames on this
+ * computer. Spaces, underscores and letter case are ignored, so "M_81" matches "m 81".
+ *
+ * @param {readonly (TargetListEntry | string)[]} targets - The target list.
+ * @param {string} targetId - The target to look for.
+ * @return {boolean} True when the target is in the list.
+ */
+export const isTargetInList = (targets: readonly (TargetListEntry | string)[], targetId: string): boolean => {
+    if (!targetId) return false;
+    const normalize = (name: string) => name.replace(/[_\s]/g, '').toLowerCase();
+    const wanted = normalize(targetId);
+    return targets.some((target) => normalize(typeof target === 'string' ? target : targetListId(target)) === wanted);
+};
+
+/**
  * Tells whether a target has a processed or stacked image.
  *
  * @param {TargetListEntry} target - The target.

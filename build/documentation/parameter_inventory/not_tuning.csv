@@ -9,6 +9,7 @@ astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,E_BP_RP_PE
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,GAIA_BATCH_SIZE,"Network retry, timeout or physical ratio; affects only failure handling"
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,GAIA_BATCH_TIMEOUT_SECONDS,Network timeout; affects only failure handling
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,GAIA_QUERY_TIMEOUT_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/calibration_library.py,_DARK_TEMPERATURE_CACHE_SIZE,"Memory cap of the dark-temperature cache; speed only, the temperature read is the same"
 astrometricslib/_internal/drivers/camera_profile_store.py,MAXIMUM_CONFIG_BACKUPS,"Plumbing: backups, geometry margin, progress, timeouts"
 astrometricslib/_internal/drivers/catalog_access.py,AbstractCatalogAccess.query_star_summary_page.offset,Pagination start; 0 means from the first row
 astrometricslib/_internal/drivers/catalog_access.py,CatalogAccess.query_star_summary_page.offset,Pagination start; 0 means from the first row
@@ -242,10 +243,13 @@ astrometricslib/pipelines/shared/image_conversions.py,DEFAULT_MAX_DIMENSIONS,Dis
 astrometricslib/pipelines/shared/image_conversions.py,LARGEST_MAX_DIMENSIONS,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_conversions.py,SMALLEST_CROP_SIDE_PX,Smallest zoomed piece of a picture; display only
 astrometricslib/pipelines/shared/image_conversions.py,SMALLEST_MAX_DIMENSIONS,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,_PNG_CACHE_MOST_PICTURES,Memory cap of the picture cache; display only
 astrometricslib/pipelines/shared/image_scaling.py,PREVIEW_SAMPLE_SEED,software plumbing
 astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,Sampling size for sky median
 astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_16_BIT,Largest value of a 16-bit integer image (data format)
 astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_8_BIT,Largest value of an 8-bit integer image (data format)
+astrometricslib/pipelines/shared/image_scaling.py,_HISTOGRAM_MOST_LEVELS,Memory cap for counting the median as a histogram; the result is exact either way
+astrometricslib/pipelines/shared/image_scaling.py,_HISTOGRAM_PROBE_STRIDE,Speed stride for spotting a non-whole-number image; the result is exact either way
 astrometricslib/pipelines/shared/image_scaling.py,_PERCENTILE_SAMPLE_COUNT,"Sample size for display percentiles, seeded"
 astrometricslib/pipelines/shared/image_scaling.py,_SCALING_BLOCK_PIXELS,Memory block size
 astrometricslib/pipelines/shared/image_scaling.py,_SKY_MAXIMUM_CLIP_ROUNDS,Round cap of an iterative clip that settles in fewer rounds
@@ -291,6 +295,7 @@ astrometricslib/pipelines/shared/star_analysis.py,_round.digits,Rounding digits 
 astrometricslib/pipelines/shared/star_catalog_queries.py,query_stars.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
 astrometricslib/pipelines/shared/target_overview.py,query_targets.offset,Pagination start; 0 means from the first row
+astrometricslib/pipelines/shared/target_records.py,_MOST_DOCUMENTS_CHANGED_FRACTION,"Share of changed targets above which the list is read in full; speed only, the result is identical"
 astrometricslib/pipelines/shared/target_sessions.py,SESSION_NIGHT_BOUNDARY_HOUR,Noon night boundary convention; duplicates item 193
 astrometricslib/pipelines/shared/variable_star_catalogs.py,FIELD_QUERY_TIMEOUT_SECONDS,Network deadline for one VizieR request; does not change any result
 astrometricslib/pipelines/shared/variable_star_catalogs.py,FIELD_RADIUS_DEGREES,Request size only; stars are matched the same way whatever the grouping
@@ -507,6 +512,7 @@ astrometricslib/pipelines/stacking/pre_processing/blink_pair.py,REFERENCE_STAR_C
 astrometricslib/pipelines/stacking/pre_processing/calibration_assessment.py,MAXIMUM_FRAMES_OF_CONCERN,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,MEASUREMENT_THREADS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py,WARN_QUARANTINED_FRACTION,Share of a session set aside above which a warning is added; it blocks nothing (STK-03)
+astrometricslib/pipelines/stacking/pre_processing/set_aside_listing.py,_SNAPSHOT_CACHE_SIZE,"Memory cap of the set-aside folder cache; speed only, the listing is the same"
 astrometricslib/pipelines/stacking/pre_processing/stack_calibration_health.py,_BATCH_EXPOSURE_DECIMALS,software plumbing
 astrometricslib/pipelines/stacking/pre_processing/stack_inputs.py,STACKING_ALGORITHM_VERSION,software plumbing
 astrometricslib/pipelines/stacking/processing/group_alignment.py,EXTENDED_TARGET_RIVAL_WINDOW_FACTOR,Fixed multiple of the zero-order search window; relative

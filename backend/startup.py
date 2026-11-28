@@ -13,12 +13,19 @@ functions. They:
   screen up until it is set;
 * build the depth goal status of the targets most likely to be opened first,
   so the first Image Processing visit finds it kept (`warm_depth_goals`);
+* read the star-shape review, the frame states and the grouped frame list of
+  those same targets, so the Image Processing panels of the first target
+  open from warm caches (`warm_target_reviews`);
 * build the three most recent night reviews once the screens are ready, so
-  the Observatory Manager opens at once (`warm_night_reviews`).
+  the Observatory Manager opens at once (`warm_night_reviews`);
+* read those Image Processing reviews again in the background after a
+  target's data changes during the night (`keep_target_reviews_warm`).
 """
 
 import asyncio
+import contextlib
 import ctypes
+import functools
 import logging
 import sys
 import threading
@@ -96,7 +103,10 @@ def warm_start_up_caches() -> None:
       request would otherwise load while the user waits on an empty sky;
     * astropy's Earth-orientation table, read by the first altitude/azimuth
       conversion;
-    * the Astronomy Manager's stellar summary cache.
+    * the Astronomy Manager's stellar summary cache;
+    * the list of quality metrics. Building it imports every pipeline's
+      metric list and SciPy's statistics module, which otherwise costs about
+      half a second on the first star-shape or quality request.
 
     Each step logs its own failure and never stops the others.
     `sky_catalog_warmup_finished` is set when all of them are done.
@@ -134,10 +144,21 @@ def warm_start_up_caches() -> None:
                 "Stellar summary warm-up failed; first Astronomy Manager load will be slow", exc_info=True
             )
 
+    def warm_quality_metrics() -> None:
+        """Build the list of quality metrics once, through the public API."""
+        try:
+            metrics_started_at = time.monotonic()
+            container.astrometrics.quality.records.get_metrics()
+            logger.info("Quality metric list loaded in %.1fs", time.monotonic() - metrics_started_at)
+        except Exception:
+            # Only the first quality request gets slower, so this is not a
+            # warning the user needs.
+            logger.debug("Quality metric list not loaded at start-up", exc_info=True)
+
     try:
         steps = [
             threading.Thread(target=step, name=step.__name__, daemon=True)
-            for step in (warm_sky, warm_earth_orientation, warm_stellar_summaries)
+            for step in (warm_sky, warm_earth_orientation, warm_stellar_summaries, warm_quality_metrics)
         ]
         for step_thread in steps:
             step_thread.start()
@@ -249,7 +270,7 @@ def _depth_goal_warmup_targets(count: int) -> list[str]:
     return chosen[:count]
 
 
-def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> None:
+def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> list[str]:
     """Build the depth goal status of the likely first targets, one at a time.
 
     This runs after the other warm-ups, so it never competes with them. It
@@ -262,6 +283,12 @@ def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> None:
     ----------
     target_count : `int`, optional
         The most targets to build. Defaults to `DEPTH_GOAL_WARMUP_COUNT`.
+
+    Returns
+    -------
+    targets : `list` [`str`]
+        The targets it chose, in order, so `warm_target_reviews` can warm
+        the same ones. Empty when no target could be chosen.
     """
     with background_log_context("depth-goal-warmup"):
         started_at = time.monotonic()
@@ -269,7 +296,7 @@ def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> None:
             targets = _depth_goal_warmup_targets(target_count)
         except Exception:
             logger.debug("Depth goal warm-up could not choose targets", exc_info=True)
-            return
+            return []
         built = 0
         for target_id in targets:
             try:
@@ -283,6 +310,73 @@ def warm_depth_goals(target_count: int = DEPTH_GOAL_WARMUP_COUNT) -> None:
             len(targets),
             time.monotonic() - started_at,
         )
+        return targets
+
+
+def warm_target_reviews(target_id: str, log_level: int = logging.INFO) -> None:
+    """Read one target's Image Processing reviews so their caches are warm.
+
+    This runs after `warm_depth_goals`, once for each target it chose, and
+    again after a target's data changes (`keep_target_reviews_warm`). Each
+    target is its own step in the heavy lane, so a user's request waits for
+    at most one target. It makes the same three calls the Image Processing
+    screen makes when it opens a target:
+
+    * the star-shape review (``advisory:star_shapes``), which loads the
+      roundness limit and the per-frame star-shape rows;
+    * the frame states (``target:get_frame_statuses``), which lists the
+      frames that were set aside;
+    * the frames grouped by filter (``target:get_frames_grouped``), which
+      fills the dark-frame temperature cache.
+
+    It only reads. A call that fails is logged at debug level and the others
+    still run, since the only cost is a slower first visit. The reads are
+    marked as background reads, so they do not count as the app asking about
+    the target (`TargetReviewRewarmer.note_requested`).
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's id.
+    log_level : `int`, optional
+        The level of the "warmed" line. The night-time re-reads log it at
+        debug level, so they do not fill the log.
+    """
+    rewarmer = container.target_review_rewarmer
+    background = rewarmer.background_reads() if rewarmer is not None else contextlib.nullcontext()
+    with background_log_context("target-review-warmup"), background:
+        started_at = time.monotonic()
+        calls = (
+            ("star shapes", lambda: container.advisory_service.get_star_shape_review(target_id)),
+            ("frame states", lambda: container.target_service.get_frame_statuses(target_id)),
+            ("grouped frames", lambda: container.target_service.get_frame_stats_grouped(target_id)),
+        )
+        for name, call in calls:
+            try:
+                call()
+            except Exception:
+                logger.debug("Target review warm-up skipped the %s of %s", name, target_id, exc_info=True)
+        elapsed = time.monotonic() - started_at
+        logger.log(log_level, "Target reviews warmed for %s in %.1fs", target_id, elapsed)
+
+
+async def keep_target_reviews_warm() -> None:
+    """Run the night-time re-reads of the target reviews until cancelled.
+
+    The services tell the container's `TargetReviewRewarmer` when a target's
+    data changes (new frames, new quality rows, a finished stack, frames put
+    back). This runs its loop, which waits for `sky_catalog_warmup_finished`
+    and then calls `warm_target_reviews` for each changed target, one target
+    per heavy-lane step and only when the lane is free. The app's lifespan
+    starts it and cancels it at shutdown. Without a rewarmer (a container
+    that was not built) it returns at once.
+    """
+    rewarmer = container.target_review_rewarmer
+    if rewarmer is None:
+        return
+    await rewarmer.run(
+        functools.partial(warm_target_reviews, log_level=logging.DEBUG), sky_catalog_warmup_finished
+    )
 
 
 # Windows job object limit flag: end every process in the job when the last

@@ -96,6 +96,11 @@ class QualityMeasurementService:
         Called with the target id after rows are announced, so the package
         suggestions can be refreshed. It must not raise; a failure is logged
         and ignored here too.
+    review_trigger : `Callable` [[`list` [`str`]], `None`], optional
+        Called with the target id after rows are announced, so the target's
+        Image Processing reviews are read again in the background
+        (`TargetReviewRewarmer.request`). It must not raise; a failure is
+        logged at debug level and ignored here too.
     """
 
     def __init__(
@@ -103,11 +108,14 @@ class QualityMeasurementService:
         astrometrics: Any,
         socket_manager: Any = None,
         suggestion_trigger: Callable[[list[str]], None] | None = None,
+        review_trigger: Callable[[list[str]], None] | None = None,
     ) -> None:
+        """Keep the library, the event sender and the change triggers."""
         self._astrometrics = astrometrics
         self._subjects = SubjectResolver(astrometrics)
         self._socket_manager = socket_manager
         self._suggestion_trigger = suggestion_trigger
+        self._review_trigger = review_trigger
 
     def query_measurements(
         self,
@@ -518,3 +526,8 @@ class QualityMeasurementService:
                 self._suggestion_trigger([target_id])
             except Exception:  # a refresh trigger must never fail an announcement: log it
                 logger.exception("Could not ask for a suggestion refresh after measuring %s", target_id)
+        if self._review_trigger is not None:
+            try:
+                self._review_trigger([target_id])
+            except Exception:  # background re-read only: a failure means a slower visit
+                logger.debug("Could not ask for a review re-read of %s", target_id, exc_info=True)

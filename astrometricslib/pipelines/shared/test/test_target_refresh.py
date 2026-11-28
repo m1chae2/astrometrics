@@ -3,9 +3,10 @@
 `TargetCatalog.list` and `TargetCatalog.get` read what other
 programs saved. They skip the read when the library's write counter shows
 nothing was written, and read only one row when the caller wants one target.
-These tests check that the answers are the same as a full read would give,
-that unsaved edits in memory are kept, that the reads are really skipped, and
-that several threads can refresh together.
+After a write, `list` reads only the target documents whose stored sign
+changed. These tests check that the answers are the same as a full read would
+give, in the same order, that unsaved edits in memory are kept, that the reads
+are really skipped, and that several threads can refresh together.
 """
 
 import threading
@@ -47,6 +48,7 @@ class _CountingAccess(CatalogAccess):
         super().__init__(config=config)
         self.full_reads = 0
         self.row_reads = 0
+        self.read_ids: list[str] = []
 
     def get(self, dataset_type: str, selector: dict) -> Any:
         """Count a read of the whole catalog, then read it.
@@ -69,6 +71,7 @@ class _CountingAccess(CatalogAccess):
             What `CatalogAccess.get_by_ids` gives.
         """
         self.row_reads += 1
+        self.read_ids.extend(ids)
         return super().get_by_ids(dataset_type, ids)
 
 
@@ -268,3 +271,160 @@ def test_several_threads_can_refresh_together(config: AppConfiguration) -> None:
     ids = [target.id for target in catalog.query(include_empty=True).items]
     assert sorted(ids) == ["M 1", "M 2"]
     assert catalog.get("M 2").common_name == "v9"
+
+
+def _many_targets(count: int) -> list[Target]:
+    """Make targets that each hold a few frames.
+
+    Parameters
+    ----------
+    count : `int`
+        How many targets to make.
+
+    Returns
+    -------
+    targets : `list` [`Target`]
+        Targets named ``"T 0"``, ``"T 1"`` and so on.
+    """
+    return [
+        Target(id=f"T {index}", frames=[FrameRecord(path=f"/t/{index}/{frame}.fits") for frame in range(3)])
+        for index in range(count)
+    ]
+
+
+def _seeded_library(config: AppConfiguration) -> tuple[TargetCatalog, _CountingAccess, CatalogAccess]:
+    """Build a library of ten targets whose signs the catalog has recorded.
+
+    The catalog reads every target once at start-up, without signs. One
+    write and one list make it record the sign of every document, so the
+    next list after a write takes the path that reads only changed
+    documents.
+
+    Returns
+    -------
+    catalog, access, other_program : `tuple`
+        The catalog under test, its counting storage, and a second storage on
+        the same library that stands for another program.
+    """
+    other_program = CatalogAccess(config=config)
+    other_program.put(_many_targets(10), "target_catalog", {})
+    access = _CountingAccess(config)
+    catalog = TargetCatalog(config, access)
+    seed = [Target(id="T 0", common_name="Seed")]
+    other_program.merge_and_record("target_catalog", seed, lambda _old, new: new)
+    catalog.query(include_empty=True)
+    access.full_reads = 0
+    access.row_reads = 0
+    access.read_ids = []
+    return catalog, access, other_program
+
+
+def _full_listing(config: AppConfiguration) -> list[str]:
+    """List the stored targets the way a newly started catalog reads them.
+
+    Returns
+    -------
+    documents : `list` [`str`]
+        Each target's contents as JSON text, in the listed order.
+    """
+    fresh = TargetCatalog(config, CatalogAccess(config=config))
+    return [target.model_dump_json() for target in fresh.query(include_empty=True).items]
+
+
+def test_one_write_reads_only_that_document(config: AppConfiguration) -> None:
+    """After one target is saved, only its document is read again."""
+    catalog, access, other = _seeded_library(config)
+    before = {target.id: target for target in catalog.query(include_empty=True).items}
+    other.merge_and_record(
+        "target_catalog",
+        [Target(id="T 4", common_name="Written", frames=[FrameRecord(path="/t/4/new.fits")])],
+        lambda _old, new: new,
+    )
+
+    listed = catalog.query(include_empty=True).items
+
+    assert access.full_reads == 0
+    assert access.read_ids == ["T 4"]
+    assert [target.model_dump_json() for target in listed] == _full_listing(config)
+    # The written row moved to the end of the table, and the list follows it.
+    assert listed[-1].id == "T 4"
+    for target in listed:
+        assert target is before[target.id]
+
+
+def test_added_and_deleted_targets_are_handled(config: AppConfiguration) -> None:
+    """A target added elsewhere is read alone; a deleted one is dropped."""
+    catalog, access, other = _seeded_library(config)
+    other.merge_and_record("target_catalog", [Target(id="T 99")], lambda _old, new: new)
+    other.delete_by_ids("target_catalog", ["T 2"])
+
+    listed = catalog.query(include_empty=True).items
+
+    assert access.full_reads == 0
+    assert access.read_ids == ["T 99"]
+    assert "T 2" not in [target.id for target in listed]
+    assert [target.model_dump_json() for target in listed] == _full_listing(config)
+
+
+def test_unsaved_edits_are_kept_by_the_changed_documents_path(config: AppConfiguration) -> None:
+    """An edit is kept while held; once undone, the stored change arrives.
+
+    The held target is edited, and another program saves a change to it.
+    The list keeps the edit. When the edit is undone, the held target no
+    longer has unsaved edits, so the next list takes on the stored change,
+    as a full read would.
+    """
+    catalog, _access, other = _seeded_library(config)
+    held = catalog.get("T 3")
+    original_name = held.common_name
+    held.common_name = "My edit"
+    other.merge_and_record(
+        "target_catalog", [Target(id="T 3", common_name="Elsewhere")], lambda _old, new: new
+    )
+
+    catalog.query(include_empty=True)
+    assert held.common_name == "My edit"
+
+    held.common_name = original_name
+    other.merge_and_record("target_catalog", [Target(id="T 7", common_name="Other")], lambda _o, new: new)
+    catalog.query(include_empty=True)
+    assert held.common_name == "Elsewhere"
+    assert held.frames == []
+
+
+def test_a_whole_catalog_rewrite_reads_everything(config: AppConfiguration) -> None:
+    """When most documents changed, one full read is made instead."""
+    catalog, access, other = _seeded_library(config)
+    rewritten = _many_targets(10)
+    for target in rewritten:
+        target.common_name = "Rewritten"
+    other.put(rewritten, "target_catalog", {})
+
+    listed = catalog.query(include_empty=True).items
+
+    assert access.full_reads == 1
+    assert access.row_reads == 0
+    assert [target.model_dump_json() for target in listed] == _full_listing(config)
+
+
+def test_the_first_list_after_start_up_reads_everything(config: AppConfiguration) -> None:
+    """The start-up read keeps no signs, so the next changed list reads all."""
+    catalog, access, other = _library(config)
+    other.merge_and_record("target_catalog", [Target(id="M 1", common_name="New")], lambda _o, new: new)
+
+    catalog.query(include_empty=True)
+
+    assert access.full_reads == 2
+    assert access.row_reads == 0
+
+
+def test_a_document_gone_while_reading_falls_back_to_a_full_read(config: AppConfiguration) -> None:
+    """A changed document missing when read by id makes the list read all."""
+    catalog, access, other = _seeded_library(config)
+    other.merge_and_record("target_catalog", [Target(id="T 5", common_name="New")], lambda _o, new: new)
+    access.get_by_ids = lambda _dataset_type, _ids: []
+
+    listed = catalog.query(include_empty=True).items
+
+    assert access.full_reads == 1
+    assert [target.model_dump_json() for target in listed] == _full_listing(config)

@@ -10,6 +10,7 @@ import logging
 import os
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -58,7 +59,10 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.Mon
     monkeypatch.setattr(startup, "periodic_telemetry_loop", idle_loop)
     monkeypatch.setattr(startup, "warm_start_up_caches", lambda: calls.append("warm"))
     monkeypatch.setattr(startup, "warm_night_reviews", lambda: calls.append("warm_nights"))
-    monkeypatch.setattr(startup, "warm_depth_goals", lambda: calls.append("warm_depth"))
+    monkeypatch.setattr(startup, "warm_depth_goals", lambda: calls.append("warm_depth") or ["M 31"])
+    monkeypatch.setattr(
+        startup, "warm_target_reviews", lambda target_id: calls.append(f"warm_reviews {target_id}")
+    )
     # The lifespan also touches the shared settings, the job database and the
     # storage mount. Those depend on what earlier tests left behind (settings
     # paths, locked or removed folders), so they are stood in for here.
@@ -71,10 +75,12 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.Mon
         assert "shutdown" not in calls
 
     # The warm-up steps run on worker threads and may finish after shutdown.
-    # The depth goals must come before the night reviews.
+    # The depth goals, then the target reviews, must come before the night
+    # reviews.
     warm_calls = [call for call in calls if call.startswith("warm")]
+    order = ["warm", "warm_depth", "warm_reviews M 31", "warm_nights"]
     # Leaving the app cancels the warm-up, so it may have run only part way.
-    assert warm_calls in ([], ["warm"], ["warm", "warm_depth"], ["warm", "warm_depth", "warm_nights"])
+    assert warm_calls in [order[:count] for count in range(len(order) + 1)]
     stopping = [call for call in calls if call in ("detach", "shutdown")]
     assert stopping == ["detach", "shutdown"]
 
@@ -241,6 +247,57 @@ def test_depth_goal_warm_up_skips_a_pointed_name_that_is_not_a_library_target(
     assert asked == ["A"]
 
 
+def test_depth_goal_warm_up_returns_the_targets_it_chose(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The chosen targets come back, so the reviews warm the same ones."""
+    fake_container = _depth_goal_container(None, {"M 31": 3.0, "M 81": 2.0}, {"M 31", "M 81"})
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    assert startup.warm_depth_goals() == ["M 31", "M 81"]
+
+    fake_container.target_service.get_camera_index.side_effect = RuntimeError("library closed")
+    assert startup.warm_depth_goals() == []
+
+
+def test_target_review_warm_up_makes_the_image_processing_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The target's star shapes, frame states and grouped frames are read."""
+    fake_container = MagicMock()
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    startup.warm_target_reviews("M 31")
+
+    fake_container.advisory_service.get_star_shape_review.assert_called_once_with("M 31")
+    fake_container.target_service.get_frame_statuses.assert_called_once_with("M 31")
+    fake_container.target_service.get_frame_stats_grouped.assert_called_once_with("M 31")
+
+
+def test_target_review_warm_up_swallows_failures_quietly(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failing call is skipped, the others run, and nothing warns."""
+    fake_container = MagicMock()
+    fake_container.advisory_service.get_star_shape_review.side_effect = RuntimeError("no frames")
+    fake_container.target_service.get_frame_statuses.side_effect = RuntimeError("drive not mounted")
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    with caplog.at_level("DEBUG"):
+        startup.warm_target_reviews("M 31")
+
+    fake_container.target_service.get_frame_stats_grouped.assert_called_once_with("M 31")
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_start_up_warm_up_loads_the_quality_metric_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The start-up warm-up builds the quality metric list (public API)."""
+    fake_container = MagicMock()
+    monkeypatch.setattr(startup, "container", fake_container)
+    monkeypatch.setattr(startup, "warm_earth_orientation_data", MagicMock(return_value=0.1))
+
+    startup.warm_start_up_caches()
+
+    fake_container.astrometrics.quality.records.get_metrics.assert_called_once_with()
+    assert startup.sky_catalog_warmup_finished.is_set()
+
+
 def test_the_cache_warm_ups_log_a_failure_as_a_warning(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -267,11 +324,20 @@ def test_the_lifespan_cancels_the_warm_up_task_and_runs_it_in_the_heavy_lane(
     """Warm-up steps go through `run_heavy`, and shutdown cancels the task."""
     lane_calls: list[str] = []
 
-    async def fake_run_heavy(function: object, *args: object, **kwargs: object) -> None:
-        """Note the step and, for the last one, wait until cancelled."""
-        lane_calls.append(function.__name__)
+    async def fake_run_heavy(function: object, *args: object, **kwargs: object) -> object:
+        """Note the step and, for the last one, wait until cancelled.
+
+        Returns
+        -------
+        answer : `object`
+            Two chosen targets for the depth goal step, else `None`.
+        """
+        lane_calls.append(" ".join([function.__name__, *map(str, args)]))
         if function.__name__ == "warm_night_reviews":
             await asyncio.sleep(60)
+        if function.__name__ == "warm_depth_goals":
+            return ["M 31", "M 81"]
+        return None
 
     monkeypatch.setattr(main_backend, "run_heavy", fake_run_heavy)
     fake_container = MagicMock()
@@ -293,7 +359,80 @@ def test_the_lifespan_cancels_the_warm_up_task_and_runs_it_in_the_heavy_lane(
         assert not task.done()
 
     assert task.cancelled()
-    assert lane_calls == ["warm_start_up_caches", "warm_depth_goals", "warm_night_reviews"]
+    # Each target's reviews are their own heavy-lane step, after the depth
+    # goals and before the night reviews.
+    assert lane_calls == [
+        "warm_start_up_caches",
+        "warm_depth_goals",
+        "warm_target_reviews M 31",
+        "warm_target_reviews M 81",
+        "warm_night_reviews",
+    ]
+
+
+def test_the_lifespan_starts_the_review_re_reads_and_cancels_them_at_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The re-read loop runs while the app runs and is cancelled after."""
+    started = threading.Event()
+
+    async def endless_re_reads() -> None:
+        """Stand in for the re-read loop: note the start, then wait."""
+        started.set()
+        await asyncio.sleep(60)
+
+    async def idle_loop() -> None:
+        """Stand in for the telemetry loop and the warm-up."""
+
+    monkeypatch.setattr(main_backend, "container", MagicMock())
+    monkeypatch.setattr(main_backend, "attach_log_handlers", lambda: None)
+    monkeypatch.setattr(main_backend, "detach_log_handlers", lambda: None)
+    monkeypatch.setattr(main_backend, "_warm_up_in_order", idle_loop)
+    monkeypatch.setattr(startup, "periodic_telemetry_loop", idle_loop)
+    monkeypatch.setattr(startup, "keep_target_reviews_warm", endless_re_reads)
+    monkeypatch.setattr(main_backend, "close_interrupted_jobs", lambda configuration: None)
+    monkeypatch.setattr(main_backend, "require_mounted_storage", lambda *arguments: None)
+    monkeypatch.setattr(main_backend.app_configuration, "watch_for_changes", lambda: None)
+
+    with TestClient(main_backend.app):
+        time.sleep(0.2)
+        task = main_backend.app.state.review_rewarm_task
+        assert started.is_set()
+        assert not task.done()
+
+    assert task.cancelled()
+
+
+def test_the_review_re_read_loop_waits_for_the_start_up_warm_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The loop gets the quiet target warm-up and the start-up flag."""
+    fake_container = MagicMock()
+    calls: list[tuple[object, object]] = []
+
+    async def fake_run(warm_target: object, ready: object) -> None:
+        """Record what the loop was given."""
+        calls.append((warm_target, ready))
+        await asyncio.sleep(0)
+
+    fake_container.target_review_rewarmer.run = fake_run
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    asyncio.run(startup.keep_target_reviews_warm())
+
+    [(warm_target, ready)] = calls
+    assert ready is startup.sky_catalog_warmup_finished
+    assert warm_target.func is startup.warm_target_reviews
+    assert warm_target.keywords == {"log_level": logging.DEBUG}
+
+
+def test_the_review_re_read_loop_does_nothing_without_a_built_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A container that was never built has no rewarmer: the loop returns."""
+    fake_container = MagicMock()
+    fake_container.target_review_rewarmer = None
+    monkeypatch.setattr(startup, "container", fake_container)
+
+    asyncio.run(startup.keep_target_reviews_warm())
 
 
 def test_binding_helper_programs_does_nothing_off_windows() -> None:

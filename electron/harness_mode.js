@@ -1,12 +1,14 @@
 /**
  * @fileoverview Options that apply only when the technical performance measures (TPM) harness runs the app.
  *
- * The harness (`build/tpm/`) starts the real Electron app and sets `ASTROMETRICS_TPM_HARNESS=1`. Two things change
+ * The harness (`build/tpm/`) starts the real Electron app and sets `ASTROMETRICS_TPM_HARNESS=1`. Three things change
  * then, and nothing changes in a normal run:
  *  - the window's page is not throttled when it is hidden or covered (`backgroundThrottling: false`), so timers and
  *    animation frames run at full speed and a measurement is not slowed by another window;
  *  - the main window is shown without taking focus (`showInactive`), so a run on the real display does not steal
- *    the keyboard from what the user is doing.
+ *    the keyboard from what the user is doing;
+ *  - while waiting for the backend, the app does not read `.run_pids/backend.pid` (see `backend_manager.js`). That
+ *    file names the user's real backend, not the one the harness started, so an old file must not stop the run.
  * The window is deliberately not moved off screen: a window that is fully covered or off screen can be skipped by
  * the window system's compositor, which changes what gets drawn. The default harness run uses an invisible screen
  * (xvfb), where no window reaches the desktop at all.

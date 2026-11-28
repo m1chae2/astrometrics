@@ -14,7 +14,8 @@ import { JobHistoryList } from './JobHistoryList';
 import { StarShapesSummary } from './StarShapesSummary';
 
 import { useImageProcessingContext } from '../context/ImageProcessingContext';
-import { fetchFrameStatsGrouped, refreshTarget, updateTargetById } from '../../common/services/targetService';
+import { refreshTarget, updateTargetById } from '../../common/services/targetService';
+import { useGroupedFrameStats } from '../hooks/useGroupedFrameStats';
 import { chooseCalibrationScope } from '../utils/calibrationLine';
 import { FrameStatusReport, GroupedFrameStat, StackChoice, StackConfigurationRef, StarShapeReview } from '../../common/types/backendTypes';
 import type { FrameStatusInfo } from '../utils/frameStatus';
@@ -77,7 +78,7 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
 }) => {
   const {
     selectedTarget, commonName, catalogId,
-    setPendingTarget, forceReload,
+    setPendingTarget, forceReload, invalidate,
     reloadKey
   } = useTargetContext();
 
@@ -111,18 +112,10 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
   useEffect(() => {
     if (activeAnalysisTab === 'analysis') requestJobHistory?.();
   }, [activeAnalysisTab, requestJobHistory]);
-  const [lightStats, setLightStats] = useState<GroupedFrameStat[]>([]);
-
-  // Fetch grouped stats from backend
-  useEffect(() => {
-    if (!selectedTarget) {
-      setLightStats([]);
-      return;
-    }
-    fetchFrameStatsGrouped(selectedTarget)
-      .then(setLightStats)
-      .catch(err => console.error("Failed to fetch grouped stats", err));
-  }, [selectedTarget, reloadKey]);
+  // The grouped light frames for the calibration line. They share the stacking panel's kept answer,
+  // so showing the display again or going back to a target does not ask the backend again.
+  const groupedFrames = useGroupedFrameStats(selectedTarget);
+  const lightStats = useMemo<GroupedFrameStat[]>(() => groupedFrames.groups ?? [], [groupedFrames.groups]);
 
   // Calibration follows the one camera and optic a stack or analysis uses.
   const calibrationScope = useMemo(
@@ -330,13 +323,13 @@ export const FrameAnalysisPanel: React.FC<FrameAnalysisPanelProps> = ({
           }}
           onReindex={selectedTarget ? async () => {
             await refreshTarget(selectedTarget, true);
-            forceReload();
+            invalidate('targets', [selectedTarget]);
           } : undefined}
           onSetStackedProperty={async (property, filePath) => {
             if (selectedTarget && filePath) {
               try {
                 await updateTargetById(selectedTarget, { [property]: filePath });
-                forceReload();
+                invalidate('targets', [selectedTarget]);
               } catch (err) {
                 console.error("Failed to set stacked property", err);
               }

@@ -100,8 +100,10 @@ describe('IngestionJobsProvider', () => {
     });
     expect(current().jobs[OBSERVATORY_INGESTION_CHANNEL].status).toBe('completed');
     expect(createTargetMock).toHaveBeenCalledWith('M 13');
-    expect(forceReloadMock).toHaveBeenCalledTimes(1);
+    // The event names the target, so only its kept reads are read again.
     expect(targetsUpdated).toHaveBeenCalledTimes(1);
+    expect(targetsUpdated).toHaveBeenCalledWith({ id: 'M 13' });
+    expect(forceReloadMock).not.toHaveBeenCalled();
     expect(setSelectedTargetMock).toHaveBeenCalledWith('M 13');
     expect(setPendingTargetMock).toHaveBeenCalledWith('M 13');
 
@@ -109,7 +111,7 @@ describe('IngestionJobsProvider', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(forceReloadMock).toHaveBeenCalledTimes(1);
+    expect(targetsUpdated).toHaveBeenCalledTimes(1);
     detach();
   });
 

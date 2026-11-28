@@ -11,6 +11,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from astrometricslib import StellarObject
 from astrometricslib._internal.drivers import CatalogAccess
 from astrometricslib._internal.drivers.catalog_access import stellar_storage_payload
@@ -185,3 +187,41 @@ def test_a_star_is_found_by_an_alias_when_no_id_or_name_matches(tmp_path: Path) 
     assert catalog_access.find_star_ids_by_name("hd 183912") == [star.id]
     assert catalog_access.find_star_ids_by_name("Albireo") == [star.id]
     assert catalog_access.find_star_ids_by_name("HD 1") == []
+
+
+def test_a_number_saved_as_blank_text_reads_back_as_not_known(tmp_path: Path) -> None:
+    """Check a magnitude saved as blank text reads back as `None`.
+
+    Older versions saved ``"magnitude": ""`` for an unknown magnitude. The
+    Planetarium's sky sources need a number or `None` for the magnitude, so
+    a blank stored value must not reach them as text. Both full reads and
+    reads without light curves are checked.
+    """
+    catalog_access = _make_catalog_access_in(tmp_path)
+    catalog_access.put([_measured_star()], "stellar_catalog", {})
+    star_id = "FIELD_J072.0604+38.5236"
+    database_path = Path(catalog_access.config.get_library_path()) / "astrometrics.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "INSERT INTO stellar_objects (id, target_id, name, ra, dec, magnitude, data_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                star_id,
+                "M 1",
+                star_id,
+                72.0604,
+                38.5236,
+                None,
+                json.dumps({"magnitude": "", "flux": 0.5, "bMinusV": " ", "starData": {"id": 7}}),
+            ),
+        )
+
+    (read_back,) = catalog_access.get_by_ids("stellar_catalog", [star_id])
+    (light_read,) = catalog_access.get_stars_without_light_curves([star_id])
+
+    for star in (read_back, light_read):
+        assert star.magnitude is None
+        assert star.b_minus_v is None
+        assert star.flux == pytest.approx(0.5)
+        assert star.right_ascension == pytest.approx(72.0604)
+        assert not star.has_catalog_magnitude

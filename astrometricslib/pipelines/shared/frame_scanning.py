@@ -245,6 +245,63 @@ def capture_time_from_file_name(file_name: str) -> str:
     return f"{day} {hour}:{minute}:{second}"
 
 
+def header_camera_text(header: Any) -> str:
+    """Read the camera name as the header writes it.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header`
+        The frame's header.
+
+    Returns
+    -------
+    camera_text : `str`
+        The ``INSTRUME`` card, else the ``CAMERA`` card, else ``"Unknown"``.
+    """
+    return str(header.get("INSTRUME", header.get("CAMERA", "Unknown")))
+
+
+def frame_camera_name(camera_text: str, config: Any) -> str:
+    """Give the camera name a frame record shows.
+
+    Parameters
+    ----------
+    camera_text : `str`
+        The camera as the header writes it (see `header_camera_text`).
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    camera_name : `str`
+        The record spelling of the camera; see `_record_camera_name` for the
+        case where the header names no camera.
+    """
+    return _record_camera_name(camera_text, config)
+
+
+def frame_capture_date(timestamp: float | None, file_name: str) -> str:
+    """Give the capture time a frame record shows.
+
+    Parameters
+    ----------
+    timestamp : `float` or `None`
+        The capture time from the header, in seconds since 1970 (see
+        `astrometricslib._internal.drivers.image.timestamp_from_header`).
+    file_name : `str`
+        The frame's file name, used when the header gives no time.
+
+    Returns
+    -------
+    date : `str`
+        The local time as ``YYYY-MM-DD HH:MM:SS``, or the time found in the
+        file name, or an empty string when neither gives one.
+    """
+    if timestamp:
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    return capture_time_from_file_name(file_name)
+
+
 def create_frame_record_from_fits(path: str, camera: str | None = None, config: Any = None) -> FrameRecord:
     """Read an image file and create a record for it.
 
@@ -292,17 +349,11 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
         exposure_s = _coerce_header_number(header.get("EXPTIME"), float)
         record.exposure_s = 1.0 if exposure_s is None else exposure_s
         record.timestamp = image.timestamp
-
-        if image.timestamp:
-            record.date = datetime.fromtimestamp(image.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            # Fallback to filename date extraction if timestamp is missing
-            record.date = capture_time_from_file_name(filename) or record.date
+        # The file name gives the time when the header has none.
+        record.date = frame_capture_date(record.timestamp, filename) or record.date
 
         if not camera:
-            record.camera = _record_camera_name(
-                str(header.get("INSTRUME", header.get("CAMERA", "Unknown"))), config
-            )
+            record.camera = frame_camera_name(header_camera_text(header), config)
 
         gain = setting_number(read_iso_or_gain(header, record.camera, config, PLACEHOLDER_RECORD_ISO))
         record.gain = int(PLACEHOLDER_RECORD_ISO) if gain is None else gain

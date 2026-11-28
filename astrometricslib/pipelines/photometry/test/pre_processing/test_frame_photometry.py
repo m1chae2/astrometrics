@@ -1,8 +1,9 @@
 """Unit tests for the per-frame photometry helpers in `frame_photometry`.
 
-Covers aperture flux measurement, star centroid re-location, and
-frame-to-frame offset calculation -- the stateless, per-frame steps
-extracted from `variability_analyzer`.
+Covers aperture flux measurement and star centroid re-location -- the
+stateless, per-frame steps extracted from `variability_analyzer`. The map
+that places each star through a frame's plate solution is tested in
+`test_frame_mapping.py`.
 
 Two groups of tests use synthetic frames whose true answer is known
 (`astrometricslib.test.synthetic`):
@@ -14,9 +15,6 @@ Two groups of tests use synthetic frames whose true answer is known
   ``DATE-OBS`` must be rejected with a reason. A readable one must come
   back as the right UTC instant, whether it has no suffix (INDI and Ekos),
   a ``Z``, or a UTC offset. Neither case may use the wall clock.
-
-The alignment anchors are tested on a sparse field, where
-the detections ranked 50 to 100 are noise.
 """
 
 import math
@@ -27,26 +25,25 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
+from astrometricslib.pipelines.photometry.pre_processing.frame_mapping import (
+    FrameMapping,
+    wcs_from_solved_header,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
-    ANCHOR_RULE_RANK_BAND,
-    ANCHOR_RULE_SIGNAL_TO_NOISE,
     FrameRejection,
     ObservationTimeError,
     StarPosition,
     _measure_aperture_flux,
     _process_single_frame_worker,
-    calculate_frame_alignment,
-    locate_star_centroid,
     measure_aperture_photometry,
     parse_observation_time,
     read_observation_time,
     refine_star_centroid,
-    select_alignment_anchors,
 )
 from astrometricslib.test.synthetic import (
     SyntheticStar,
+    drifted_frame_solves,
     drifted_stars,
     make_drifted_sequence,
     make_photometry_fits,
@@ -66,9 +63,7 @@ TEST_FWHM_PX = 3.5
 WIDE_APERTURE_RADIUS_PX = 3.0 * TEST_FWHM_PX
 
 # Frame shape and star layout for the drifting-sequence tests. The stars
-# are more than 100 px apart so the alignment step's 81 px search windows
-# never overlap a neighbor, and there are more than the 5 stars the
-# alignment step needs.
+# are more than 100 px apart, so no star's box reaches a neighbor.
 SEQUENCE_SHAPE = (340, 480)
 SEQUENCE_STAR_FLUX_ADU = 30000.0
 SEQUENCE_DRIFT_PX = (0.3, -0.2)
@@ -94,6 +89,33 @@ def _sequence_stars() -> list[SyntheticStar]:
     return [SyntheticStar(x, y, SEQUENCE_STAR_FLUX_ADU, TEST_FWHM_PX) for x, y in positions]
 
 
+def _frame_mappings(
+    paths: list[str], shape: tuple[int, int], drift_px_per_frame: tuple[float, float] = (0.0, 0.0)
+) -> dict[str, FrameMapping]:
+    """Build the exact mapping of every frame of a drifting sequence.
+
+    Parameters
+    ----------
+    paths : `list` [`str`]
+        The frame files, the first being the reference frame.
+    shape : `tuple` [`int`, `int`]
+        The frame shape ``(ny, nx)``.
+    drift_px_per_frame : `tuple` [`float`, `float`], optional
+        The shift added for each frame, in pixels.
+
+    Returns
+    -------
+    mappings : `dict` [`str`, `FrameMapping`]
+        The mapping from the reference frame to each frame, keyed by path.
+    """
+    solves = drifted_frame_solves(paths, shape, drift_px_per_frame)
+    reference_wcs = wcs_from_solved_header(solves[paths[0]].header)
+    return {
+        path: FrameMapping.from_solutions(reference_wcs, wcs_from_solved_header(solves[path].header), shape)
+        for path in paths
+    }
+
+
 def _measure_sequence(
     tmp_path: Path, frames: list[np.ndarray], stars: list[SyntheticStar]
 ) -> tuple[np.ndarray, list[list[StarPosition]]]:
@@ -116,19 +138,20 @@ def _measure_sequence(
         For each frame, where each star's aperture sat.
     """
     reference = [(f"star{i}", star.x, star.y) for i, star in enumerate(stars)]
-    alignment = [(star.x, star.y, 0.0) for star in stars]
+    paths = [str(tmp_path / f"frame_{index:02d}.fits") for index in range(len(frames))]
+    mappings = _frame_mappings(paths, SEQUENCE_SHAPE, SEQUENCE_DRIFT_PX)
     fluxes = np.zeros((len(frames), len(stars)))
     positions = []
     for index, frame in enumerate(frames):
-        path = tmp_path / f"frame_{index:02d}.fits"
+        path = paths[index]
         header = fits.PrimaryHDU(frame)
         header.header["DATE-OBS"] = f"2026-05-24T04:{index:02d}:30.570"
         header.header["EXPTIME"] = 1.0
         header.writeto(path)
         _, result = _process_single_frame_worker((
-            str(path),
+            path,
             reference,
-            alignment,
+            mappings[path],
             SATURATION_ADU,
             DetectorNoise(),
         ))
@@ -252,71 +275,6 @@ def test_default_edge_margin_is_one_pixel_beyond_the_sky_ring() -> None:
     assert inside.net_flux_adu > 0.0
     assert (outside.net_flux_adu, outside.flux_error_adu) == (0.0, 0.0)
     assert (explicit.net_flux_adu, explicit.flux_error_adu) == (0.0, 0.0)
-
-
-def test_locate_star_centroid_finds_shifted_star() -> None:
-    """Verifies a star shifted from its expected position is re-located."""
-    data = np.full((200, 200), 500.0)
-    data[63:68, 73:78] += 4000.0  # true centroid near (75, 65)
-
-    located = locate_star_centroid(data, expected_x=70.0, expected_y=60.0)
-    assert located is not None
-    located_x, located_y = located
-    assert abs(located_x - 75.0) < 1.0
-    assert abs(located_y - 65.0) < 1.0
-
-
-def test_locate_star_centroid_returns_none_outside_frame() -> None:
-    """Verifies a search window falling off the frame edge returns None."""
-    data = np.full((50, 50), 500.0)
-    assert locate_star_centroid(data, expected_x=5.0, expected_y=5.0) is None
-
-
-def test_locate_star_centroid_returns_none_with_no_signal() -> None:
-    """Verifies a flat, background-only window returns None."""
-    data = np.full((200, 200), 500.0)
-    assert locate_star_centroid(data, expected_x=100.0, expected_y=100.0) is None
-
-
-def test_calculate_frame_alignment_recovers_uniform_shift() -> None:
-    """Verifies the median offset matches a known shift across many stars.
-
-    Uses a known uniform frame-to-frame shift applied to every star.
-    """
-    data = np.full((600, 600), 500.0)
-    true_shift_x, true_shift_y = 3.0, -2.0
-    # Well-separated (>100px apart) so each star's search window
-    # (default half-width 40) never overlaps another's injected signal.
-    reference_positions = [
-        (100.0, 100.0, 0.0),
-        (300.0, 100.0, 0.0),
-        (500.0, 100.0, 0.0),
-        (100.0, 300.0, 0.0),
-        (300.0, 300.0, 0.0),
-        (500.0, 500.0, 0.0),
-    ]
-    for reference_x, reference_y, _ in reference_positions:
-        x_center = round(reference_x + true_shift_x)
-        y_center = round(reference_y + true_shift_y)
-        data[y_center - 2 : y_center + 3, x_center - 2 : x_center + 3] += 4000.0
-
-    alignment = calculate_frame_alignment(data, reference_positions)
-    delta_x, delta_y = alignment.shift_x, alignment.shift_y
-    assert abs(delta_x - true_shift_x) < 0.5
-    assert abs(delta_y - true_shift_y) < 0.5
-
-
-def test_calculate_frame_alignment_is_zero_when_too_few_stars_located() -> None:
-    """Verifies the offset defaults to (0, 0) when too few stars are located.
-
-    Fewer than 5 reference stars re-located (e.g. all fell on empty
-    background) should not produce a spurious shift estimate.
-    """
-    data = np.full((100, 100), 500.0)
-    reference_positions = [(20.0, 20.0, 0.0), (40.0, 40.0, 0.0)]
-    alignment = calculate_frame_alignment(data, reference_positions)
-    assert (alignment.shift_x, alignment.shift_y) == (0.0, 0.0)
-    assert not alignment.includes_similarity
 
 
 # --- Sub-pixel centering: the aperture follows the star ---
@@ -517,39 +475,6 @@ def test_drifting_sequence_with_noise_shows_photon_noise_and_no_drift_trend(tmp_
     assert all(position.is_refined for frame_positions in positions for position in frame_positions)
 
 
-def test_noisy_global_shift_is_not_pulled_toward_zero(tmp_path: Path) -> None:
-    """Verifies the frame's global shift stays accurate on a noisy frame.
-
-    Counting every pixel above the sky median as light makes the shift too
-    small on a noisy frame, because noise alone lifts half the pixels above
-    the median. The shift here is 2.7 px in x and -1.8 px in y. The measured
-    shift must be within 0.15 px of that.
-    """
-    stars = _sequence_stars()
-    frames = make_drifted_sequence(
-        stars, SEQUENCE_FRAME_COUNT, SEQUENCE_DRIFT_PX, shape=SEQUENCE_SHAPE, seed=3
-    )
-    path = tmp_path / "last.fits"
-    header = fits.PrimaryHDU(frames[-1])
-    header.header["DATE-OBS"] = "2026-05-24T04:58:30.570"
-    header.writeto(path)
-    reference = [(f"star{i}", star.x, star.y) for i, star in enumerate(stars)]
-    alignment = [(star.x, star.y, 0.0) for star in stars]
-
-    _, result = _process_single_frame_worker((
-        str(path),
-        reference,
-        alignment,
-        SATURATION_ADU,
-        DetectorNoise(),
-    ))
-
-    assert isinstance(result, tuple)
-    _, _, shift_x, shift_y, _, _, _, _, _, _ = result
-    assert shift_x == pytest.approx(2.7, abs=0.15)
-    assert shift_y == pytest.approx(-1.8, abs=0.15)
-
-
 # --- S5: a frame without a readable DATE-OBS is rejected --------------------
 
 
@@ -602,7 +527,8 @@ def _worker_result_for_file(path: Path) -> object:
         What the worker returned for the file, without the path.
     """
     reference = [("star0", 100.0, 100.0)]
-    _, result = _process_single_frame_worker((str(path), reference, [], SATURATION_ADU, DetectorNoise()))
+    mapping = _frame_mappings([str(path)], fits.getdata(path).shape)[str(path)]
+    _, result = _process_single_frame_worker((str(path), reference, mapping, SATURATION_ADU, DetectorNoise()))
     return result
 
 
@@ -692,114 +618,3 @@ def test_worker_stamps_a_date_with_an_offset_as_utc(tmp_path: Path) -> None:
 
     assert isinstance(result, tuple)
     assert result[0] == datetime(2026, 5, 24, 4, 58, 30, 570000)
-
-
-# --- Alignment anchors are real stars, not noise peaks ------------------
-
-SPARSE_FIELD_SHAPE = (600, 600)
-SPARSE_FIELD_STAR_COUNT = 12
-INJECTED_SHIFT_PX = (2.7, -1.3)
-
-
-def _sparse_field_stars(shift: tuple[float, float]) -> list[SyntheticStar]:
-    """Build a sparse field of 12 stars, moved by a shift.
-
-    Parameters
-    ----------
-    shift : `tuple` [`float`, `float`]
-        The shift in x and y, in pixels, added to every star.
-
-    Returns
-    -------
-    stars : `list` [`SyntheticStar`]
-        Twelve stars at least 80 px apart, with fluxes from 8000 to 60000 ADU.
-        The same call always returns the same field.
-    """
-    rng = np.random.default_rng(4)
-    positions: list[np.ndarray] = []
-    while len(positions) < SPARSE_FIELD_STAR_COUNT:
-        candidate = rng.uniform(60, 540, 2)
-        if all(np.hypot(*(candidate - other)) > 80 for other in positions):
-            positions.append(candidate)
-    fluxes = rng.uniform(8000, 60000, SPARSE_FIELD_STAR_COUNT)
-    return [
-        SyntheticStar(float(x) + shift[0], float(y) + shift[1], float(flux), TEST_FWHM_PX)
-        for (x, y), flux in zip(positions, fluxes, strict=True)
-    ]
-
-
-def test_sparse_field_anchors_recover_an_injected_shift_where_the_old_rule_fails() -> None:
-    """Verifies the signal-to-noise anchors measure a (2.7, -1.3) px shift.
-
-    The field has 12 real stars on a noisy sky, so the detector also reports
-    many noise peaks. The older rule took the detections ranked 50 to 100,
-    which here are noise peaks, and gave a shift that was far off. The new rule
-    keeps the 12 stars and recovers the shift to 0.05 px.
-    """
-    noise_kwargs = {"shape": SPARSE_FIELD_SHAPE, "sky_adu": 200.0, "read_noise_adu": 5.0}
-    reference = make_photometry_frame(_sparse_field_stars((0.0, 0.0)), seed=1, **noise_kwargs)
-    shifted = make_photometry_frame(_sparse_field_stars(INJECTED_SHIFT_PX), seed=2, **noise_kwargs)
-    detections = SourceDetector(fwhm=4.0, threshold_sigma=3.0).detect(reference)
-
-    anchors = select_alignment_anchors(reference, detections, saturation_threshold_adu=SATURATION_ADU)
-    old_band = [(row["x_centroid"], row["y_centroid"], row["flux"]) for row in detections[50:100]]
-    old_alignment = calculate_frame_alignment(shifted, old_band)
-    new_alignment = calculate_frame_alignment(shifted, list(anchors.stars))
-    old_shift = (old_alignment.shift_x, old_alignment.shift_y)
-    new_shift = (new_alignment.shift_x, new_alignment.shift_y)
-
-    assert len(detections) > 50, "the test needs noise peaks for the old rule to pick up"
-    assert anchors.rule == ANCHOR_RULE_SIGNAL_TO_NOISE
-    assert len(anchors.stars) == SPARSE_FIELD_STAR_COUNT
-    assert new_shift[0] == pytest.approx(INJECTED_SHIFT_PX[0], abs=0.05)
-    assert new_shift[1] == pytest.approx(INJECTED_SHIFT_PX[1], abs=0.05)
-    assert abs(old_shift[0] - INJECTED_SHIFT_PX[0]) > 0.5
-
-
-def test_anchor_rule_falls_back_to_the_rank_band_when_few_stars_qualify() -> None:
-    """Verifies fewer than 10 qualifying stars gives the older, named rule.
-
-    Only six stars are in the field, so the signal-to-noise rule cannot reach
-    10 anchors. The result then holds the detections ranked 50 to 100 and
-    records the rule that chose them.
-    """
-    stars = _sparse_field_stars((0.0, 0.0))[:6]
-    frame = make_photometry_frame(stars, shape=SPARSE_FIELD_SHAPE, sky_adu=200.0, read_noise_adu=5.0, seed=1)
-    detections = SourceDetector(fwhm=4.0, threshold_sigma=3.0).detect(frame)
-
-    anchors = select_alignment_anchors(frame, detections, saturation_threshold_adu=SATURATION_ADU)
-
-    assert anchors.rule == ANCHOR_RULE_RANK_BAND
-    assert len(anchors.stars) == len(detections[50:100])
-
-
-def test_saturated_stars_are_not_anchors() -> None:
-    """Verifies a detection with a saturated pixel beside it is left out.
-
-    Two bright stars are driven past the saturation level while ten fainter
-    ones stay below it. The anchors must be the ten fainter stars.
-    """
-    stars = _sparse_field_stars((0.0, 0.0))
-    stars = [
-        SyntheticStar(star.x, star.y, 2.0e6 if index < 2 else 20000.0, TEST_FWHM_PX)
-        for index, star in enumerate(stars)
-    ]
-    frame = make_photometry_frame(
-        stars,
-        shape=SPARSE_FIELD_SHAPE,
-        sky_adu=200.0,
-        read_noise_adu=5.0,
-        seed=1,
-        saturation_adu=SATURATION_ADU,
-    )
-    detections = SourceDetector(fwhm=4.0, threshold_sigma=3.0).detect(frame)
-
-    anchors = select_alignment_anchors(frame, detections, saturation_threshold_adu=SATURATION_ADU)
-
-    assert anchors.rule == ANCHOR_RULE_SIGNAL_TO_NOISE
-    anchor_positions = {(round(x), round(y)) for x, y, _ in anchors.stars}
-    for saturated_star in stars[:2]:
-        assert not any(
-            math.hypot(x - saturated_star.x, y - saturated_star.y) < 3 for x, y in anchor_positions
-        )
-    assert len(anchors.stars) == SPARSE_FIELD_STAR_COUNT - 2

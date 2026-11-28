@@ -295,10 +295,10 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
         The imported script module.
     """
     monkeypatch.setenv("HEADLESS", "0")
-    from astrometricslib._internal.drivers import siril_interface
+    from astrometricslib._internal.drivers.siril import stacking as siril_stacking
     from astrometricslib.scripts import run_all_target_processing
 
-    monkeypatch.setattr(siril_interface, "purge_stale_work_directories", lambda *args, **kwargs: (0, 0))
+    monkeypatch.setattr(siril_stacking, "purge_stale_work_directories", lambda *args, **kwargs: (0, 0))
     # The stand-in targets hold one frame per camera. The tests that are not
     # about the smallest stack let one frame through; the skip tests below
     # put the real limit back.
@@ -639,7 +639,7 @@ def test_the_review_list_has_one_row_per_target_with_what_was_recorded(
 ) -> None:
     """Check the CSV rows hold what the run recorded."""
     from astrometricslib.pipelines.stacking.metrics import (
-        FRAME_QUARANTINE_ROUNDNESS,
+        FRAME_SET_ASIDE_ROUNDNESS,
         STACKING_APERTURE_SET_NUMBER,
         STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
         STACKING_FRAME_WEIGHT,
@@ -661,7 +661,7 @@ def test_the_review_list_has_one_row_per_target_with_what_was_recorded(
         f"Both|{STACKING_FRAME_WEIGHT}": rows_for(1.0, 0.8),
         f"Both|{STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT}": rows_for(2.0e-3),
         f"Both|{STACKING_APERTURE_SET_NUMBER}": rows_for(3.0),
-        f"Both|{FRAME_QUARANTINE_ROUNDNESS}": [moved, kept],
+        f"Both|{FRAME_SET_ASIDE_ROUNDNESS}": [moved, kept],
         f"AsiOnly|{STACKING_FRAME_WEIGHT}": rows_for(1.0, status="assumed"),
     }
     progress_path = tmp_path / "progress.jsonl"

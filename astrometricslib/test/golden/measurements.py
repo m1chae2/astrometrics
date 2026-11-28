@@ -6,8 +6,8 @@ tests compare those numbers with ``golden_values.json``; the
 ``--update-golden`` option writes them there.
 
 Only code that runs in pure Python is measured here. Anything that needs
-Siril (stacking) or astrometry.net (plate solving) is left out, because
-neither program is installed on the machines that run this suite.
+Siril (stacking and plate solving) is left out, because
+Siril is not installed on the machines that run this suite.
 
 This module also holds the tolerance rules (`tolerance_for`), so a new
 pinned number gets a sensible tolerance without anyone typing it by hand.
@@ -29,6 +29,7 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import resolve_detector_noise
+from astrometricslib.pipelines.photometry.pre_processing.frame_mapping import FrameMapping
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     _measure_aperture_flux,
     _process_single_frame_worker,
@@ -42,6 +43,7 @@ from astrometricslib.pipelines.shared.quality.raw_frame_check import check_raw_f
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import analyze_spectral_frame
 from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
+from astrometricslib.test.synthetic.sky_map import tan_sky_map
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 SAMPLE_FOLDER = (
@@ -76,7 +78,7 @@ FWHM_STAR_COUNT = 5
 """How many of the brightest stars the FWHM fit uses."""
 
 SEQUENCE_REFERENCE_FRAME = LUMINANCE_FRAMES[0]
-"""The first light, which gives the star list and the alignment anchors."""
+"""The first light, which gives the star list."""
 
 SEQUENCE_MEASURED_RANKS = (10, 70)
 """Detections ranked 10 up to (not including) 70 are the measured stars.
@@ -85,7 +87,18 @@ The ten brightest are skipped because they come closest to saturating. This
 slice is a fixed choice of this test. The pipeline's own star list
 (``VariabilityAnalyzer``) starts at the brightest detection."""
 
-SEQUENCE_ANCHOR_RANKS = (50, 100)
+# The shift of the middle of each later light from light 019, in pixels. The
+# pipeline gets each light's own plate solution from Siril, which is not
+# installed on the machines that run this suite, so the test builds a plain
+# shift solution from these values. They are the shifts the earlier drift
+# tracking measured on 2026-11-27 (and the pins of the first version of this
+# test); the worker is pinned on fixed solutions, not on Siril's.
+SEQUENCE_SHIFTS_PX = {
+    "020": (-0.617944416, -0.107647187),
+    "021": (-1.04486467, 0.0749118311),
+    "022": (-1.25239079, 0.121033266),
+    "023": (-0.059673596, 0.195236417),
+}
 """Detections ranked 50 up to (not including) 100 are the alignment anchors.
 
 This slice is a fixed choice of this test, handed to the worker as
@@ -486,13 +499,13 @@ def measure_photometry_sequence() -> dict[str, float]:
     """Run the photometry worker over the five luminance lights.
 
     The steps follow ``VariabilityAnalyzer.process_sequence``, except that the
-    measured stars and the anchors are fixed rank slices chosen by this test
-    (the pipeline picks anchors with ``select_alignment_anchors``). The first
+    measured stars are a fixed rank slice chosen by this test and each later
+    light's plate solution is a plain shift (`SEQUENCE_SHIFTS_PX`), because
+    Siril is not installed here. The first
     light is searched for stars with ``SourceDetector`` (3 sigma, FWHM 4 px,
     the analyzer's first setting). Detections in `SEQUENCE_MEASURED_RANKS` that
     sit at least `SEQUENCE_EDGE_MARGIN_PX` from every edge are the measured
-    stars. Detections in `SEQUENCE_ANCHOR_RANKS` become the ``(x, y, flux)``
-    anchors that line the later lights up with the first. The first light is
+    stars. The first light is
     measured in this process, as the analyzer does. Lights 020 to 023 go
     through ``_process_single_frame_worker``, one after the other.
 
@@ -525,10 +538,6 @@ def measure_photometry_sequence() -> dict[str, float]:
         and margin <= source["x_centroid"] < width - margin
         and margin <= source["y_centroid"] < height - margin
     ]
-    anchors = [
-        (float(source["x_centroid"]), float(source["y_centroid"]), float(source["flux"]))
-        for source in sources[slice(*SEQUENCE_ANCHOR_RANKS)]
-    ]
     exposure_s = _read_exposure_seconds(header)
     fluxes = [[], [], [], [], []]
     saturated = [[], [], [], [], []]
@@ -538,9 +547,36 @@ def measure_photometry_sequence() -> dict[str, float]:
         )
         fluxes[0].append(measurement.net_flux_adu / exposure_s)
         saturated[0].append(measurement.is_saturated)
+    reference_wcs = tan_sky_map(250.0, 36.0, (width / 2.0 + 0.5, height / 2.0 + 0.5), 2.0 / 3600.0)
+
+    def mapping_of(name: str) -> FrameMapping:
+        """Build the mapping of a light whose field moved by its known shift.
+
+        Parameters
+        ----------
+        name : `str`
+            The light's name.
+
+        Returns
+        -------
+        mapping : `FrameMapping`
+            The mapping from light 019.
+        """
+        shift_x, shift_y = SEQUENCE_SHIFTS_PX[name[-3:]]
+        moved_wcs = tan_sky_map(
+            250.0, 36.0, (width / 2.0 + 0.5 + shift_x, height / 2.0 + 0.5 + shift_y), 2.0 / 3600.0
+        )
+        return FrameMapping.from_solutions(reference_wcs, moved_wcs, (height, width))
+
     values: dict[str, float] = {}
     for index, name in enumerate(LUMINANCE_FRAMES[1:], start=1):
-        _, result = _process_single_frame_worker((str(frame_path(name)), stars, anchors, threshold, noise))
+        _, result = _process_single_frame_worker((
+            str(frame_path(name)),
+            stars,
+            mapping_of(name),
+            threshold,
+            noise,
+        ))
         if not isinstance(result, tuple):
             raise RuntimeError(f"The photometry worker returned no measurement for {name}: {result!r}")
         star_fluxes, shift_x, shift_y = result[1], result[2], result[3]

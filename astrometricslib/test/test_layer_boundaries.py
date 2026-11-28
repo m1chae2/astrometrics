@@ -60,7 +60,7 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "_internal/drivers/calibration_library.py",
     "_internal/drivers/fits_access.py",
     "_internal/drivers/image.py",
-    "_internal/drivers/astrometry_net_driver.py",
+    "_internal/drivers/astrometry_net_client.py",
     # Reads pixels on its own on purpose: it re-measures saved numbers by
     # a path independent of the pipeline's FITS access.
     "scripts/recompute_headline_numbers.py",
@@ -157,9 +157,9 @@ KNOWN_WALL_CLOCK_SITES = frozenset({
     # Measures how long an unfinished job has gone without an update, to say
     # whether its program died. It dates job bookkeeping, not an observation.
     "pipelines/shared/job_history.py",
-    # Writes the time a rejected frame was moved into quarantine, in the
+    # Writes the time a rejected frame was moved aside, in the
     # move log. It dates the move itself, not any frame's observation.
-    "pipelines/stacking/pre_processing/frame_quarantine.py",
+    "pipelines/stacking/pre_processing/frame_set_aside.py",
     # Writes when a preview picture was made, in its settings record. It dates
     # the picture, not any frame's observation.
     "pipelines/stacking/post_processing/preview_settings.py",
@@ -594,11 +594,11 @@ def test_the_upward_import_scan_recognizes_each_rule() -> None:
     """Verify the scan flags each upward import and allows downward ones."""
     upward = [
         (
-            "_internal/drivers/siril_interface/imaging_stacker.py",
+            "_internal/drivers/siril/stacking/imaging_stacker.py",
             "astrometricslib.pipelines.stacking.stack_runner",
         ),
-        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib.api.processing"),
-        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib"),
+        ("_internal/drivers/siril/stacking/imaging_stacker.py", "astrometricslib.api.processing"),
+        ("_internal/drivers/siril/stacking/imaging_stacker.py", "astrometricslib"),
         ("pipelines/stacking/stage.py", "astrometricslib.api"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib"),
@@ -615,10 +615,10 @@ def test_the_upward_import_scan_recognizes_each_rule() -> None:
     ]
     downward = [
         (
-            "_internal/drivers/siril_interface/imaging_stacker.py",
+            "_internal/drivers/siril/stacking/imaging_stacker.py",
             "astrometricslib._internal.drivers.fits_access",
         ),
-        ("_internal/drivers/siril_interface/imaging_stacker.py", "astrometricslib.foundation.errors"),
+        ("_internal/drivers/siril/stacking/imaging_stacker.py", "astrometricslib.foundation.errors"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.spectroscopy.runner"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.stacking.stage"),
         ("pipelines/stacking/stage.py", "astrometricslib.pipelines.shared.frame_scanning"),

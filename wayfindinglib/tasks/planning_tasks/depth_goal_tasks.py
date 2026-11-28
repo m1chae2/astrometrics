@@ -608,7 +608,7 @@ def cached_depth_goal_status(
         version : `Any`
             The version, or `None` when it cannot be worked out.
         """
-        found = depth_goal_data_version(config, butler, target_id)
+        found = depth_goal_data_version(config, butler, astrometrics, target_id)
         if found is None:
             return None
         return (found, read_chosen_level(butler, target_id))

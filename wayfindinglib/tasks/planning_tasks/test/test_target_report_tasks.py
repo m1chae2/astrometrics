@@ -5,7 +5,7 @@ nights, two of them set aside, one stack, an empty calibration library) behind
 fakes of the science library, and checks the report as a whole: the summary of
 the capture setting, the plain-rule statement for the stack (which needs the
 stack tied to its setting through the frame weights), the frames-lost warning
-with its quarantine evidence, the cost of low altitude, the missing calibration
+with its set-aside evidence, the cost of low altitude, the missing calibration
 frames, "take N more", the explicit missing-data statements, the checklist
 return, the starting point for a target with no frames, and that nothing is
 stored.
@@ -30,6 +30,7 @@ from astrometricslib.reports import (
     SetAsideFrame,
     SubjectLevel,
 )
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.target_report import (
     ForecastBasis,
@@ -347,7 +348,7 @@ class _Library:
         return Target(id="T", ra="09:55:33", dec="+69:03:55", frames=frames)
 
     def _set_aside_frames(self) -> list[SetAsideFrame]:
-        """Make the two set-aside frames and their quarantine rows.
+        """Make the two set-aside frames and their set-aside rows.
 
         Returns
         -------
@@ -358,8 +359,8 @@ class _Library:
         for index in (30, 31):
             subject_id = frame_subject_id(self._path(index), "T")
             for metric, value in (
-                ("frame.quarantine_roundness", 0.9),
-                ("frame.quarantine_sky_median_adu", 900.0),
+                ("frame.set_aside_roundness", 0.9),
+                ("frame.set_aside_sky_median_adu", 900.0),
                 ("frame.detected_region_count", 3.0),
             ):
                 self.rows.append(
@@ -368,7 +369,7 @@ class _Library:
                         value,
                         subject_id,
                         night="2026-10-03",
-                        action_taken=MOVED if metric == "frame.quarantine_roundness" else None,
+                        action_taken=MOVED if metric == "frame.set_aside_roundness" else None,
                     )
                 )
             moved.append(
@@ -455,7 +456,11 @@ def _report(library: _Library, butler: DiskButler) -> Any:
         The report.
     """
     return build_target_dataset_report(
-        library.target, astrometrics=library, butler=butler, config=butler.config, at=NOW
+        library.target,
+        astrometrics=attach_library_versions(library, butler.config),
+        butler=butler,
+        config=butler.config,
+        at=NOW,
     )
 
 
@@ -620,22 +625,22 @@ def test_the_stack_is_tied_to_its_setting_through_its_frame_weights(isolated_but
     assert report.needs_attention.worst_severity == Severity.WARNING
 
 
-def test_frames_lost_cites_the_quarantine_rows(isolated_butler: DiskButler) -> None:
-    """Two of 32 frames is 6%: the warning cites the quarantine rows."""
+def test_frames_lost_cites_the_set_aside_rows(isolated_butler: DiskButler) -> None:
+    """Two of 32 frames is 6%: the warning cites the set-aside rows."""
     library = _Library()
     report = _report(library, isolated_butler)
     lost = _of_rule(report, "frames_lost")
     assert len(lost) == 1
     assert lost[0].message == "2 of 32 frames were set aside (frame moved to _excluded/ 2)."
     moved_ids = {frame_subject_id(library._path(index), "T") for index in (30, 31)}
-    quarantine_ids = {
+    set_aside_ids = {
         row.row_id
         for row in library.rows
-        if row.metric.startswith("frame.quarantine")
+        if row.metric.startswith("frame.set_aside")
         or row.metric == "frame.detected_region_count"
         or (row.metric == "frame.star_elongation" and row.subject.subject_id in moved_ids)
     }
-    assert {reference.row_id for reference in lost[0].evidence} == quarantine_ids
+    assert {reference.row_id for reference in lost[0].evidence} == set_aside_ids
 
 
 def test_low_frames_make_an_altitude_cost_statement(isolated_butler: DiskButler) -> None:
@@ -726,7 +731,7 @@ def test_a_lower_target_noise_ratio_asks_for_more_frames(
     (default,) = _of_rule(_report(library, isolated_butler), "more_frames")
     deeper = build_target_dataset_report(
         library.target,
-        astrometrics=library,
+        astrometrics=attach_library_versions(library, isolated_butler.config),
         butler=isolated_butler,
         config=isolated_butler.config,
         at=NOW,
@@ -1071,7 +1076,11 @@ def test_the_starting_point_follows_the_equipments_own_sky_and_read_noise(
     library.set_aside = []
     new_target = Target(id="NEW", ra="09:55:33", dec="+69:03:55")
     report = build_target_dataset_report(
-        new_target, astrometrics=library, butler=isolated_butler, config=isolated_butler.config, at=NOW
+        new_target,
+        astrometrics=attach_library_versions(library, isolated_butler.config),
+        butler=isolated_butler,
+        config=isolated_butler.config,
+        at=NOW,
     )
     point = report.starting_point
     assert point is not None

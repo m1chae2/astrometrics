@@ -16,9 +16,9 @@ tools every driver uses to read and write FITS image files (`fits_access.py`,
 Pure image-quality measurement (FWHM, saturation, background level, per-target
 frame statistics) doesn't belong here: it doesn't manage an external resource
 (a subprocess, a database connection) the way these tools do, so it lives in
-`pipelines/shared/quality/` instead, alongside the Siril-output text parsers in
-`siril_output_parsing.py` that are specific to Siril's own file formats rather
-than a generic quality measurement.
+`pipelines/shared/quality/` instead. The parsers of Siril's own output and file
+formats are not quality measurements; they live in the Siril driver
+(`siril/core/output_parsing.py`).
 """
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess, CatalogAccess
@@ -31,7 +31,7 @@ from astrometricslib._internal.drivers.interfaces.stacking_driver import (
     StackRunResult,
     StackSettings,
 )
-from astrometricslib._internal.drivers.siril_interface import ImageProcessing
+from astrometricslib._internal.drivers.siril.stacking import ImageProcessing
 
 __all__ = [
     "AbstractCatalogAccess",

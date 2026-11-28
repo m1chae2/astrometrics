@@ -22,8 +22,8 @@ const CHECK_FRAMES_ID = 'check-frames';
 /** The stages in the Analyze Target menu. The short text is only the tooltip of an available stage. */
 const ANALYSIS_STAGE_MENU: { id: AnalysisStage; label: string; detail: string }[] = [
   { id: 'astrometry', label: 'Astrometry', detail: 'Solve the stack to find where the stars are' },
-  { id: 'photometry', label: 'Photometry', detail: 'Runs astrometry first when needed' },
-  { id: 'spectroscopy', label: 'Spectroscopy', detail: 'Runs astrometry first when needed' },
+  { id: 'photometry', label: 'Photometry', detail: 'Needs a solved stack: run Astrometry first' },
+  { id: 'spectroscopy', label: 'Spectroscopy', detail: 'Needs a solved stack: run Astrometry first' },
   {
     id: 'spectral_variation',
     label: 'Spectral Variation',

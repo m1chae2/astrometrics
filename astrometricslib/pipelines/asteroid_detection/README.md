@@ -135,7 +135,7 @@ A passing track also stores `residual_rms_right_ascension_arcsec`, `residual_rms
 - `rmsRA` and `rmsDec` (arcsec on the sky, each frame's measured error on that axis), `rmsCorr` (the correlation of the two);
 - `astCat` (the catalog the positions are tied to).
 
-**The catalog field.** `astCat` is left empty unless the caller says, because the writer cannot know. When the run's `astrometry_flags` holds `wcs_refined_against_gaia`, a frame's positions are tied to Gaia DR3 (`Gaia3`; the European Space Agency's Gaia star catalog, third data release). The Gaia refit of the plate solution does this (see the [astrometry README](../astrometry/README.md#refitting-the-solution-to-gaia)).
+**The catalog field.** `astCat` is left empty unless the caller says, because the writer cannot know.
 
 **Uncertainties.** A frame with no measured error gets the caller's assumed uncertainty and no correlation. The result counts those rows (`assumed_error_rows`) so the caller can say so. The uncertainties are the scatter of the frame's field stars after the pointing correction plus the centroid error. They do not include the error of the pointing correction itself or of the reference stack's own solution, so they are lower limits on the error of an absolute position.
 

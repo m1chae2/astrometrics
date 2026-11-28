@@ -9,6 +9,7 @@ iteration and fits tonight's polar alignment error. Each command needs
 raises when it fails. The work is done in `tasks.control_tasks`.
 """
 
+import time
 from typing import Any
 
 from astrometricslib import SkyPosition, StellarObject, Target
@@ -309,10 +310,15 @@ class MountControl(ControlChild):
             self._context.correction_config,
             pointing_model=pointing_model,
             latitude_deg=self._context.observer_latitude_deg(),
+            longitude_deg=self._context.observer_longitude_deg(),
+            timestamp=time.time(),
         )
 
     def _run_polar_alignment_assist(
-        self, attempts: list[dict[str, Any]], latitude_deg: float | None = None
+        self,
+        attempts: list[dict[str, Any]],
+        latitude_deg: float | None = None,
+        longitude_deg: float | None = None,
     ) -> MountPointingModel:
         """Fit tonight's polar alignment error from this session's solves.
 
@@ -326,6 +332,9 @@ class MountControl(ControlChild):
         latitude_deg : `float`, optional
             Observer latitude in degrees. Taken from the observer location
             when omitted.
+        longitude_deg : `float`, optional
+            Observer longitude in degrees, east positive. Taken from the
+            observer location when omitted.
 
         Returns
         -------
@@ -338,4 +347,6 @@ class MountControl(ControlChild):
 
         if latitude_deg is None:
             latitude_deg = self._context.observer_latitude_deg()
-        return polar_alignment_assist(attempts, latitude_deg=latitude_deg)
+        if longitude_deg is None:
+            longitude_deg = self._context.observer_longitude_deg()
+        return polar_alignment_assist(attempts, latitude_deg=latitude_deg, longitude_deg=longitude_deg)

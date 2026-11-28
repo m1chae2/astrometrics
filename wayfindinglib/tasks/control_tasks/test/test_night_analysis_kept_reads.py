@@ -7,22 +7,26 @@ night's guiding baseline (`_night_baseline_provider`). These tests use a
 real quality store and a real record store on temporary databases, change
 the data the way a live night does, and check that each kept answer equals
 a fresh full read, that only the changed part is read again, and that a
-deleted or replaced record makes it read everything again.
+deleted or replaced record makes it read everything again. The frame
+measurements are kept with the science library's opaque data version; the
+science library itself reads only the rows written since.
 """
 
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
+from astrometricslib._internal.drivers import quality_store
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.api.quality import QualityMeasurements
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache, bump_data_version
+from astrometricslib.exceptions import StorageError
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics import capture_history, envelope_assembly
 from wayfindinglib.analytics.capture_history import STAR_ELONGATION_METRIC, STAR_WIDTH_METRIC
@@ -98,63 +102,100 @@ def measured_library(tmp_path: Path) -> tuple[Any, QualityStore]:
 
 
 def _count_full_reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """Count the full reads of the frame measurement table.
+    """Count the reads of every frame's stored measurements.
 
     Returns
     -------
     reads : `list` [`int`]
-        Gets one entry per full read.
+        Gets one entry per read.
     """
     reads: list[int] = []
-    real = capture_history.read_frame_measurement_table
+    real = capture_history.read_frame_measurements
 
     def counted(*arguments: Any) -> Any:
         """Count, then read.
 
         Returns
         -------
-        measurements : `FrameMeasurements`
-            The full read.
+        measurements : `dict`
+            The read.
         """
         reads.append(1)
         return real(*arguments)
 
-    monkeypatch.setattr(capture_history, "read_frame_measurement_table", counted)
+    monkeypatch.setattr(capture_history, "read_frame_measurements", counted)
     return reads
 
 
-def test_kept_frame_measurements_read_only_added_rows(
+def _fresh(context: Any) -> dict[str, Any]:
+    """Read every frame's numbers with nothing kept by the science library.
+
+    Returns
+    -------
+    measurements : `dict`
+        A full read.
+    """
+    quality_store._LATEST_READS.clear()
+    return capture_history.read_frame_measurements(context.astrometrics)
+
+
+def test_kept_frame_measurements_are_read_again_only_when_their_rows_change(
     measured_library: tuple[Any, QualityStore], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A newly measured frame is merged in; the answer equals a full read."""
+    """An unchanged library reads nothing; a measured frame is read again.
+
+    The answer after the new frame equals a full read with nothing kept.
+    """
     context, store = measured_library
     reads = _count_full_reads(monkeypatch)
 
     first = night_analysis.kept_frame_measurements(context)
     assert night_analysis.kept_frame_measurements(context) is first
+    assert len(reads) == 1
     store.write_measurements(_measured_frame("M 13/new.fits", 60))
     updated = night_analysis.kept_frame_measurements(context)
 
-    assert len(reads) == 1
-    assert updated.values == capture_history.read_frame_measurements(context.astrometrics)
-    assert "M 13/new.fits" in updated.values
+    assert len(reads) == 2
+    assert updated == _fresh(context)
+    assert "M 13/new.fits" in updated
 
 
-def test_kept_frame_measurements_read_everything_after_a_deleted_frame(
-    measured_library: tuple[Any, QualityStore], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Rows removed with a deleted frame make the next call read in full."""
+def test_kept_frame_measurements_follow_a_deleted_frame(measured_library: tuple[Any, QualityStore]) -> None:
+    """Rows removed with a deleted frame are gone from the next answer."""
     context, store = measured_library
-    reads = _count_full_reads(monkeypatch)
     night_analysis.kept_frame_measurements(context)
 
     store.delete_frame_measurements(["M 13/1.fits"])
     store.write_measurements(_measured_frame("M 13/new.fits", 60))
     kept = night_analysis.kept_frame_measurements(context)
 
+    assert kept == _fresh(context)
+    assert "M 13/1.fits" not in kept
+
+
+def test_kept_frame_measurements_are_not_kept_without_a_version(
+    measured_library: tuple[Any, QualityStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the science library cannot give a version, nothing is kept."""
+    context, _ = measured_library
+    reads = _count_full_reads(monkeypatch)
+
+    def unreadable(**_arguments: Any) -> NoReturn:
+        """Fail as an unreadable library does.
+
+        Raises
+        ------
+        StorageError
+            Always.
+        """
+        raise StorageError("The quality database could not be read.")
+
+    monkeypatch.setattr(context.astrometrics.quality.records, "get_data_version", unreadable)
+    assert night_analysis.frame_measurement_version(context) is None
+    night_analysis.kept_frame_measurements(context)
+    night_analysis.kept_frame_measurements(context)
+
     assert len(reads) == 2
-    assert kept.values == capture_history.read_frame_measurements(context.astrometrics)
-    assert "M 13/1.fits" not in kept.values
 
 
 def test_the_capture_library_uses_the_kept_measurements(
@@ -173,7 +214,7 @@ def test_the_capture_library_uses_the_kept_measurements(
 
     night_analysis.capture_library(context, "Scope", "Camera", {})
 
-    assert seen == [night_analysis.kept_frame_measurements(context).values]
+    assert seen == [night_analysis.kept_frame_measurements(context)]
 
 
 class _Butler:

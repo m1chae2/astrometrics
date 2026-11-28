@@ -51,7 +51,11 @@ from astrometricslib.models.quality.metric_spec import (
     MetricSpec,
     UncertaintyKind,
 )
-from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
+from astrometricslib.pipelines.shared.quality.notices import (
+    camera_without_profile_spec,
+    needs_astrometry_spec,
+    notice_spec,
+)
 
 # ---- Run totals from the summary -----------------------------------------
 
@@ -1300,6 +1304,7 @@ SPECTROSCOPY_METRICS: tuple[MetricSpec, ...] = (
         computed_by=f"{_GAIA_XP_MODULE}.gaia_xp_gate",
     ),
     camera_without_profile_spec("spectroscopy"),
+    needs_astrometry_spec("spectroscopy"),
     below_feature_limit_notice_spec(),
     gaia_xp_download_failed_notice_spec(),
     reddening_lookup_failed_notice_spec(),

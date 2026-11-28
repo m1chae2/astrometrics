@@ -37,6 +37,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
     group_coefficients,
 )
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedCandidate, RankedUse
@@ -517,7 +518,8 @@ def test_ranking_never_stores_a_site_and_says_where_its_site_came_from(
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
     butler = DiskButler(app_config=config)
 
-    ranking = tr.rank_tonight(TONIGHT, astrometrics=_library(), butler=butler, config=config)
+    library = attach_library_versions(_library(), config)
+    ranking = tr.rank_tonight(TONIGHT, astrometrics=library, butler=butler, config=config)
 
     assert butler.get_all("site_profile") == []
     assert any("No observing site is stored" in note for note in ranking.notes)

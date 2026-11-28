@@ -121,12 +121,6 @@ def aperture_identity_from_number(number: float) -> str:
 # the two chosen by plate solve (M 13, M 101) were 0.1 to 0.9 arcsec off.
 PLATE_SOLVE_WCS_SOURCE = "plate solve of the stack"
 
-# The two ways a stack's own plate solve is now recorded. Both start with
-# `PLATE_SOLVE_WCS_SOURCE`, so older files and `is_plate_solve_wcs_source`
-# still recognize them. The refit reads cached Gaia stars only.
-PLATE_SOLVE_REFIT_WCS_SOURCE = f"{PLATE_SOLVE_WCS_SOURCE}, refit to cached Gaia"
-PLATE_SOLVE_UNREFINED_WCS_SOURCE = f"{PLATE_SOLVE_WCS_SOURCE}, not refit"
-
 
 def is_plate_solve_wcs_source(wcs_source: str) -> bool:
     """Say whether a stored ``wcs_source`` names a plate solve of the stack.
@@ -139,9 +133,8 @@ def is_plate_solve_wcs_source(wcs_source: str) -> bool:
     Returns
     -------
     is_plate_solve : `bool`
-        True for `PLATE_SOLVE_WCS_SOURCE` (written by older code, after a
-        refit to Gaia) and for the refit and not-refit values that begin
-        with it.
+        True for `PLATE_SOLVE_WCS_SOURCE` and for the values older code
+        wrote after it (", refit to cached Gaia" and ", not refit").
     """
     return str(wcs_source).startswith(PLATE_SOLVE_WCS_SOURCE)
 
@@ -274,9 +267,8 @@ class ApertureSet:
     wcs_source : `str`
         Where the coordinate solution came from when the set was chosen:
         ``"stack header"``, ``"registration reference frame"``, a member frame
-        or a plate solve of the stack (`PLATE_SOLVE_REFIT_WCS_SOURCE` or
-        `PLATE_SOLVE_UNREFINED_WCS_SOURCE`; older files hold
-        `PLATE_SOLVE_WCS_SOURCE`).
+        or a plate solve of the stack (`PLATE_SOLVE_WCS_SOURCE`; files written
+        by older code carry a longer text that begins with it).
     pixel_scale_arcsec : `float`
         The pixel scale of the stack the set was chosen on.
     created_from : `str`
@@ -606,8 +598,6 @@ def is_much_deeper(depth: StackDepth | None, aperture_set: ApertureSet) -> bool:
 
 
 __all__ = [
-    "PLATE_SOLVE_REFIT_WCS_SOURCE",
-    "PLATE_SOLVE_UNREFINED_WCS_SOURCE",
     "PLATE_SOLVE_WCS_SOURCE",
     "ApertureSet",
     "ApertureSetMismatchError",

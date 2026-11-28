@@ -2067,7 +2067,7 @@ export interface StackingPipelineQualityMetrics {
   framesAccepted?: number | null;
   framesExcludedForGain?: number;
   framesExcludedForBackground?: number;
-  framesQuarantined?: number;
+  framesSetAside?: number;
   stackCropReason?: string | null;
   stackCropAreaFraction?: number | null;
   rejectedPixelFraction?: number | null;
@@ -2139,10 +2139,8 @@ export interface AstrometryPipelineQualityMetrics {
   catalogMatchSeparationRmsArcsec?: number | null;
   plateSolveFitResidualRmsArcsec?: number | null;
   plateSolveMatchedStarCount?: number | null;
-  gaiaFitRmsArcsec?: number | null;
-  gaiaFitRmsBeforeArcsec?: number | null;
-  gaiaFitStarCount?: number | null;
-  wcsRefinementShiftArcsec?: number | null;
+  gaiaMatchRmsArcsec?: number | null;
+  gaiaMatchStarCount?: number | null;
   astrometryFlags?: string[];
   gaiaTilesCount?: number;
   gaiaTilesMissingCount?: number;
@@ -5722,9 +5720,9 @@ export interface ShapeVerdict {
 }
 
 /**
- * A frame the stacker's quarantine set aside for stretched stars.
+ * A frame the stacker's set-aside check set aside for stretched stars.
  *
- * The review lists it as the quarantine decided; it does not judge the
+ * The review lists it as the set-aside check decided; it does not judge the
  * frame again.
  *
  * Parameters
@@ -5737,7 +5735,7 @@ export interface ShapeVerdict {
  * elongation : `float` or `None`
  * The frame's stored elongation, when there is one.
  * reason : `str`
- * The quarantine's sentence saying what it measured.
+ * The set-aside check's sentence saying what it measured.
  */
 export interface StandoutFrame {
   path: string;

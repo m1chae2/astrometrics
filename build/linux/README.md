@@ -82,3 +82,48 @@ The launcher calls `node electron/gpu_choice.js shell-plan`, which prints the en
 The user is present when the main window has focus and is not minimized, the screen is not locked, the computer is not asleep, and the keyboard or mouse was touched in the last 120 seconds (`IDLE_THRESHOLD_SECONDS`). The idle time is checked every 10 seconds. Window focus is the main signal, because a covered window can still report that it is visible. On Wayland and XWayland only the app's own window focus is known, which is enough.
 
 The page reads the answer through `window.astrometrics.app.getPresence()` and `onPresenceChange()`. A notification marked `notify: true` goes to the desktop only when the user is away. It stays until dismissed, and the main process closes it when the user returns. In a plain browser the page falls back to focus and visibility. See `ui/common/utils/README.md`.
+
+## setup_siril_catalog.sh: Siril's Gaia star catalog
+
+`setup_siril_catalog.sh` sets up the Gaia astrometry catalog that Siril's plate solver reads from the disk, a file of about 1.5 GB. It downloads Siril's catalog from Zenodo (the record Siril's own installer uses), decompresses it as it arrives and checks the size and the SHA-256 checksum of the decompressed file against the pinned ones in `astrometricslib/_internal/drivers/siril/core/catalog_setup.py`. A file that does not match is refused and deleted. The catalog goes in `~/.local/share/astrometrics/siril`. A matching catalog that Siril's own installer made is kept. It changes only files in your home folder, so run it as your own user, not with `sudo`.
+
+```bash
+build/linux/setup_siril_catalog.sh --check   # report whether the catalog is installed and matches; change nothing
+build/linux/setup_siril_catalog.sh           # download and set it up if it is missing
+```
+
+The Python module behind it, `astrometricslib.scripts.set_up_siril_catalog`, is the same on Windows, where `setup_windows.ps1` runs it.
+
+## setup_siril_gpu.sh: Siril's tools on the graphics card
+
+`setup_siril_gpu.sh` makes the Flatpak Siril's GPU tools use an NVIDIA graphics card (GPU): GraXpert, StarNet2, and the Python scripts Siril runs, such as GraXpert-AI and Cosmic Clarity. Each tool needs several pieces in place. The script puts each piece in place from pinned versions, so the setup is the same on every machine. It changes only files in your home folder, so run it as your own user, not with `sudo`.
+
+```bash
+build/linux/setup_siril_gpu.sh --check     # report each piece, change nothing
+build/linux/setup_siril_gpu.sh --dry-run   # report, then print what a run would do
+build/linux/setup_siril_gpu.sh             # set up what is missing
+```
+
+The script handles seven parts, in this order. `--parts` picks some of them, for example `--parts=wrappers,config`.
+
+1. `overrides`: the Flatpak permission overrides for `org.siril.Siril`. The script shares `~/cuda_libs` read-only, hides `~/.astropy`, allows all devices, and sets `LD_LIBRARY_PATH`, `TMPDIR` and `TF_FORCE_GPU_ALLOW_GROWTH`. It adds only the settings that are missing, with one `flatpak override --user` command. A setting that is already there with another value is reported as a conflict and left alone. The script never removes a setting. It also notes settings that have no effect, such as folders under `/usr`, which Flatpak never shares.
+2. `cuda-libs`: `~/cuda_libs`, the CUDA 12 runtime, cuBLAS, cuFFT, cuRAND, NVRTC and cuDNN 9. CUDA is NVIDIA's toolkit for running programs on the graphics card. Siril's Python and StarNet2 use these files.
+3. `starnet-ort`: `~/.local/share/StarNetGPU/ort-gpu-1.26`, the GPU build of ONNX Runtime 1.26 for StarNet2. ONNX Runtime is the library that runs the AI models.
+4. `graxpert-cudnn`: `~/.local/share/GraXpert/cudnn13`, cuDNN built for CUDA 13, for GraXpert 4. The script also checks for the system CUDA 13 runtime and cuBLAS in `/usr/local/cuda`. They come from NVIDIA's package repository and need `sudo`, so it only reports them.
+5. `siril-python`: the GPU build of ONNX Runtime and the packages it needs, at exact versions, in Siril's own Python environment. The script runs that Python inside the sandbox with `flatpak run --command=...`. It also reports a CPU-only `onnxruntime` package, which hides the GPU build.
+6. `wrappers`: `graxpert-gpu.sh` and `starnet-gpu.sh`, made from the templates in `siril_gpu/templates/`. Inside the sandbox each wrapper starts its program on the host with `flatpak-spawn --host`. `--graxpert` and `--starnet` name the programs when they are not in `~/Applications`.
+7. `config`: the wrapper paths. The script writes `graxpert_executable` in `astrometrics.config.toml`, and `starnet_exe` and `graxpert_path` in Siril's own settings file, only where they are empty. It skips Siril's settings while Siril is open, because Siril rewrites them when it closes. It keeps the old file as `.bak-<time>`.
+
+**Pins and checks.** `siril_gpu/siril_gpu_pins.py` lists every pinned piece. Each library comes from one pinned Python wheel (a package file) on PyPI. `pip download` fetches the wheel into a work folder in Siril's cache on disk, not into the RAM-backed `/tmp`. The script checks each file it takes out of the wheel against the SHA-256 checksum and size in the wheel's own `RECORD` file. It refuses a file that does not match, and the file it would have replaced stays in place. To move to a newer version, change the wheel's version and every checksum and size together.
+
+**NVIDIA's licenses.** The CUDA and cuDNN wheels are NVIDIA's software, under the [CUDA Toolkit End User License Agreement](https://docs.nvidia.com/cuda/eula/index.html) and the [cuDNN Software License Agreement](https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html). Neither is open source. Before a run downloads the first NVIDIA wheel, the script prints both addresses and asks you to accept them (`y/N`). It downloads nothing from NVIDIA unless you answer yes. Without a terminal to ask on, pass `--accept-nvidia-license` to accept them. `--check` and `--dry-run` only say that a run would ask. The other licenses are listed in [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
+
+**Hand-built copies.** Some working copies of libraries were copied by hand from other sources: cuBLAS from the Ollama CUDA 12 bundle, cuRAND from the CUDA 13 toolkit, and the ONNX Runtime CUDA library from a wheel for another Python version. The pins list their checksums. `--check` reports them as `accepted`, and a run leaves them in place. `--force` replaces them, and any other file that differs from its pin, and keeps the old file as `.bak-<time>`.
+
+**No GPU, no Flatpak Siril.** Without an NVIDIA card with a working driver (`nvidia-smi -L`), or without the Flatpak Siril, the script says so and exits without error. Siril, GraXpert and StarNet2 still work on the processor. Siril must have been opened once, and must have run one script, before Siril's Python environment and settings file exist. Until then the script skips those parts and says why.
+
+**Exit status.** The script exits with 0 when every part is ready, set up or skipped. It exits with 1 when a part failed during a run, such as a refused checksum, after it has tried the other parts.
+
+Windows needs none of this. There is no Flatpak sandbox on Windows, so Siril's normal installer needs no overrides or wrappers, and GraXpert uses the graphics card through DirectML.
+
+The tests are in `siril_gpu/test/`. They run the program in a temporary home folder with stand-in `flatpak` and `nvidia-smi` commands. Run them with `.venv/bin/pytest build/linux/siril_gpu/test -q`. For exact behavior, read the code.

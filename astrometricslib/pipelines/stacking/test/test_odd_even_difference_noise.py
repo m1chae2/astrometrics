@@ -16,6 +16,7 @@ synthetic frames with unequal noise and weights, that the implied noise of the
 library stack follows the formulas.
 """
 
+import functools
 import json
 import math
 from datetime import UTC, datetime
@@ -74,6 +75,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_image import signe
 from astrometricslib.pipelines.stacking.post_processing.stack_membership import effective_frame_count
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import measure_stack_noise
 from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard
+from astrometricslib.test.synthetic.point_stars import add_gaussian_star
 
 PATTERN_METRICS = PATTERN_ROW_NAMES
 NINE_METRICS = (
@@ -118,6 +120,7 @@ def _header() -> fits.Header:
     return header
 
 
+@functools.cache
 def _shared_structure(*, texture: bool = True) -> np.ndarray:
     """Build what every frame shares: sky, round stars and smooth texture.
 
@@ -133,18 +136,21 @@ def _shared_structure(*, texture: bool = True) -> np.ndarray:
     Returns
     -------
     image : `numpy.ndarray`
-        The structure, the same on every call.
+        The structure, the same on every call. It is built once and kept,
+        so it is read-only: a caller adds to a copy.
     """
     generator = np.random.default_rng(2026)
-    rows, columns = np.mgrid[0:SIZE, 0:SIZE]
     image = np.full((SIZE, SIZE), SKY_LEVEL)
     amplitudes = np.linspace(0.3, 1.0, len(STAR_POSITIONS)) * 2000.0
     for (x, y), amplitude in zip(STAR_POSITIONS, amplitudes, strict=True):
-        image += amplitude * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * 2.0**2))
+        add_gaussian_star(image, x, y, amplitude, 2.0)
     if not texture:
+        image.setflags(write=False)
         return image
     smooth = gaussian_filter(generator.normal(0.0, 1.0, (SIZE, SIZE)), 3.0)
-    return image + TEXTURE_AMPLITUDE * smooth / smooth.std()
+    structure = image + TEXTURE_AMPLITUDE * smooth / smooth.std()
+    structure.setflags(write=False)
+    return structure
 
 
 def _write(path: str, noise_sigma: float, seed: int, *, texture: bool = True) -> None:

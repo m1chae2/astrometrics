@@ -6,7 +6,8 @@
     Creates `.venv-win` (not `.venv`, which the Ubuntu/WSL side of this checkout may already use),
     installs the project into it, seeds the local config file, sets up Siril and GraXpert
     (the stacking and gradient-removal programs, each downloaded from its own project and checked
-    against a pinned checksum), runs `npm install`, and builds the UI MCP server in ui\mcp.
+    against a pinned checksum), downloads Siril's Gaia astrometry catalog (about 1.5 GB, checked the
+    same way), runs `npm install`, and builds the UI MCP server in ui\mcp.
     At the end it warns when Windows long paths are turned off, and says how to turn them on.
     Astrometrics needs Python 3.14 or newer. Run it from anywhere:
 
@@ -62,6 +63,12 @@ Write-Host "Setting up Siril and GraXpert..." -ForegroundColor Yellow
 $env:PYTHONPATH = $ProjectRoot
 & $VenvPython -m astrometricslib.scripts.set_up_programs
 if ($LASTEXITCODE -ne 0) { throw "Setting up Siril or GraXpert failed." }
+
+# 5b. Siril's Gaia astrometry catalog (about 1.5 GB), which its plate solver reads: downloaded,
+# decompressed and checked against a pinned size and checksum. Already installed and matching: kept.
+Write-Host "Setting up Siril's Gaia astrometry catalog (about 1.5 GB)..." -ForegroundColor Yellow
+& $VenvPython -m astrometricslib.scripts.set_up_siril_catalog
+if ($LASTEXITCODE -ne 0) { throw "Setting up Siril's Gaia astrometry catalog failed." }
 
 # 6. Node packages.
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {

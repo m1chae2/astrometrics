@@ -233,6 +233,26 @@ class StellarCatalog(MovedNames):
             self._catalog_access, filters, order_by=order_by, include=include, limit=limit, offset=offset
         )
 
+    def get_data_version(self) -> str:
+        """Give a short text that changes whenever the star catalog does.
+
+        Owner:
+            astrometricslib.pipelines.shared.data_version_texts.get_kind_data_version
+
+        Any write to a stored star (a new star, an update, a delete, new
+        photometry) changes it, whichever program made it. A result built
+        from the catalog can keep its answer while this text stays the same.
+        The text is opaque: compare it with an earlier one.
+
+        Returns
+        -------
+        version : `str`
+            The text.
+        """
+        from astrometricslib.pipelines.shared.data_version_texts import get_kind_data_version
+
+        return get_kind_data_version(self._config, "stars")
+
     def count_by_class(
         self, *, target: Target | None = None, include_unresolved: bool = False
     ) -> Page[SpectralClassCount]:

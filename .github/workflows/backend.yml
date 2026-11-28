@@ -73,6 +73,12 @@ jobs:
           PYTHONPATH: .
           ASTROMETRICS_TESTING: "1"
           ASTROMETRICS_FAST_TEST: "1"
+          # Run the tests in parallel, one pytest-xdist worker per CPU core
+          # of the runner (run_tests.sh passes this to pytest as -n). Each
+          # worker gets its own temporary library and settings from the root
+          # conftest.py, and pytest-cov merges the workers' coverage into the
+          # one .coverage file and coverage.xml that the comment step reads.
+          PYTEST_WORKERS: auto
         run: |
           COVERAGE=1 ./build/linux/run_tests.sh backend
 

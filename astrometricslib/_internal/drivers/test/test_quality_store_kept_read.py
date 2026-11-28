@@ -1,12 +1,16 @@
-"""Tests for the kept read of a target's newest quality rows.
+"""Tests for the kept read of the newest quality rows, and the data version.
 
-A read of one target's newest rows is kept and brought up to date by reading
-only what was written since (`QualityStore.query`). These tests check that the
-kept read always equals a full read, after new frames, a re-measured frame,
-a frame that moved to another target, a deleted frame, a deleted newest row
-whose row number is used again, and a database file that was replaced.
+A read of one target's newest rows, or of one metric's newest rows over the
+whole library, is kept and brought up to date by reading only what was
+written since (`QualityStore.query`). These tests check that the kept read
+always equals a full read, after new frames, a re-measured frame, a frame
+that moved to another target, a deleted frame, a deleted newest row whose row
+number is used again, a row put in below the last row seen, and a database
+file that was replaced. They also check that `QualityStore.data_version`
+changes exactly when the rows of its question change.
 """
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -282,3 +286,186 @@ def test_random_changes_always_match_a_full_read(
         for target in (TARGET, "M13"):
             assert store.query(target_id=target, library_only=True) == full_read(store, target), (seed, step)
     assert any(incremental_reads), "the incremental path was never used"
+
+
+def full_metric_read(store: QualityStore, metric: str) -> list[QualityMeasurement]:
+    """Read one metric's newest frame rows the slow way, without the kept read.
+
+    Parameters
+    ----------
+    store : `QualityStore`
+        The store.
+    metric : `str`
+        The metric.
+
+    Returns
+    -------
+    rows : `list` [`QualityMeasurement`]
+        The newest frame rows of the metric over the whole library: a read
+        of every newest row (which is never kept), cut to the metric.
+    """
+    return [row for row in store.query() if row.metric == metric and row.subject.level == SubjectLevel.FRAME]
+
+
+def test_a_whole_library_read_of_one_metric_is_kept_and_follows_new_frames(
+    store: QualityStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read of one metric over every target is brought up to date too.
+
+    The capture history reads a few metrics of every frame of the library.
+    After the first read, the next ones read only the subjects written
+    since, and each equals a full read.
+    """
+    metric = METRICS[0]
+    store.write_measurements([
+        *frame_rows("M31/a.fits", TARGET, "r1", 0),
+        *frame_rows("M13/b.fits", "M13", "r1", 1),
+    ])
+    assert store.query(metric=metric, level=SubjectLevel.FRAME) == full_metric_read(store, metric)
+    calls = []
+    original = QualityStore._changed_subjects
+
+    def spy(self: QualityStore, connection: object, kept: object) -> set[str] | None:
+        """Record what the check for changed subjects found.
+
+        Returns
+        -------
+        changed : `set` [`str`] or `None`
+            What the real check found.
+        """
+        found = original(self, connection, kept)  # type: ignore[arg-type]
+        calls.append(found)
+        return found
+
+    monkeypatch.setattr(QualityStore, "_changed_subjects", spy)
+    store.write_measurements(frame_rows("M13/c.fits", "M13", "r2", 5))
+    assert store.query(metric=metric, level=SubjectLevel.FRAME) == full_metric_read(store, metric)
+    assert calls == [{"M13/c.fits"}]
+
+
+def test_a_row_put_in_below_the_mark_is_noticed_by_the_row_number_sum(store: QualityStore) -> None:
+    """A row deleted and another put in below the mark gives a full read.
+
+    The count of rows up to the mark stays the same, and so does the row at
+    the mark; only the sum of the row numbers shows the change. A program
+    that writes raw SQL could do this.
+    """
+    metric = METRICS[0]
+    for index, frame in enumerate(["a", "b", "c", "d"]):
+        store.write_measurements(frame_rows(f"M31/{frame}.fits", TARGET, f"r{index}", index))
+    store.delete_frame_measurements(["M31/b.fits"])
+    assert store.query(metric=metric, level=SubjectLevel.FRAME) == full_metric_read(store, metric)
+    with sqlite3.connect(store.db_path) as connection:
+        row_id = connection.execute(
+            "SELECT row_id FROM quality_measurements WHERE subject_id = 'M31/c.fits' AND metric = ?",
+            (metric,),
+        ).fetchone()[0]
+        connection.execute("DELETE FROM quality_measurements WHERE row_id = ?", (row_id,))
+        connection.execute(
+            "INSERT INTO quality_measurements (row_id, metric, definition_version, subject_level, "
+            "subject_id, target_id, channel, status, value, reason, origin, run_id, measured_at) "
+            "VALUES (?, ?, 1, 'frame', 'M31/e.fits', ?, '', 'measured', 9.0, '', 'measured', 'raw', ?)",
+            (row_id - 3, metric, TARGET, (BASE_TIME + timedelta(minutes=50)).isoformat()),
+        )
+    connection.close()
+    result = store.query(metric=metric, level=SubjectLevel.FRAME)
+    assert result == full_metric_read(store, metric)
+    assert {row.subject.subject_id for row in result} == {"M31/a.fits", "M31/d.fits", "M31/e.fits"}
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_random_changes_keep_the_whole_library_read_and_its_version_exact(
+    store: QualityStore, seed: int
+) -> None:
+    """After each mixed change the library-wide read equals a full read.
+
+    The data version of the metric changes exactly when the metric's frame
+    rows changed, so a result kept with it is never stale.
+    """
+    metric = METRICS[0]
+    generator = np.random.default_rng(seed)
+    frames: list[str] = []
+    version = store.data_version(metric=metric, level=SubjectLevel.FRAME)
+    for step in range(30):
+        before = full_metric_read(store, metric)
+        all_rows_before = store.query(metric=metric, level=SubjectLevel.FRAME, latest_only=False)
+        action = str(generator.choice(["new", "new", "again", "older", "stack", "delete"]))
+        if action == "new" or not frames:
+            frame = f"{generator.choice(['M31', 'M13'])}/f{step}.fits"
+            frames.append(frame)
+            store.write_measurements(frame_rows(frame, frame.split("/")[0], f"r{step}", step))
+        elif action == "stack":
+            stack = QualityMeasurement(
+                metric=metric,
+                definition_version=1,
+                subject=QualitySubject(
+                    level=SubjectLevel.STACK, subject_id=f"M31/s{step}.fits", target_id=TARGET
+                ),
+                status=MeasurementStatus.MEASURED,
+                value=1.0,
+                origin=MeasurementOrigin.MEASURED,
+                run_id=f"r{step}",
+                measured_at=BASE_TIME + timedelta(minutes=step),
+            )
+            store.write_measurements([stack])
+        elif action == "delete":
+            frame = str(generator.choice(frames))
+            store.delete_frame_measurements([frame])
+            frames.remove(frame)
+        else:
+            frame = str(generator.choice(frames))
+            minutes = step + 100 if action == "again" else -step
+            store.write_measurements(frame_rows(frame, frame.split("/")[0], f"r{step}", minutes, float(step)))
+        after = store.query(metric=metric, level=SubjectLevel.FRAME)
+        assert after == full_metric_read(store, metric), (seed, step)
+        new_version = store.data_version(metric=metric, level=SubjectLevel.FRAME)
+        changed = store.query(metric=metric, level=SubjectLevel.FRAME, latest_only=False) != all_rows_before
+        assert (new_version != version) == changed, (seed, step, action)
+        assert changed or after == before
+        version = new_version
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_an_unchanged_target_version_means_an_unchanged_target_read(store: QualityStore, seed: int) -> None:
+    """Equal target versions always come with equal newest rows of the target.
+
+    The changes include frames moved to another target, whose newer rows
+    hide the older rows from the first target's newest rows without naming
+    it, so the version must see them too.
+    """
+    generator = np.random.default_rng(seed)
+    owner: dict[str, str] = {}
+    seen: dict[str, list[QualityMeasurement]] = {}
+    for step in range(30):
+        action = str(generator.choice(["new", "other", "again", "move", "delete"]))
+        if action == "new" or not owner:
+            frame = f"M31/f{step}.fits"
+            owner[frame] = TARGET
+            store.write_measurements(frame_rows(frame, TARGET, f"r{step}", step))
+        elif action == "other":
+            store.write_measurements(frame_rows(f"M13/f{step}.fits", "M13", f"r{step}", step))
+        elif action == "delete":
+            frame = str(generator.choice(sorted(owner)))
+            store.delete_frame_measurements([frame])
+            del owner[frame]
+        else:
+            frame = str(generator.choice(sorted(owner)))
+            if action == "move":
+                owner[frame] = "M13" if owner[frame] == TARGET else TARGET
+            store.write_measurements(frame_rows(frame, owner[frame], f"r{step}", step + 100, float(step)))
+        for metric in (None, METRICS[0]):
+            version = store.data_version(metric=metric, target_id=TARGET)
+            answer = store.query(metric=metric, target_id=TARGET)
+            if version in seen:
+                assert seen[version] == answer, (seed, step, action)
+            seen[version] = answer
+
+
+def test_a_frame_moved_to_another_target_changes_the_first_targets_version(store: QualityStore) -> None:
+    """A newer row of the target's frame that names another target counts."""
+    store.write_measurements(frame_rows("M31/a.fits", TARGET, "r1", 0))
+    before = store.data_version(target_id=TARGET)
+    store.write_measurements(frame_rows("M31/a.fits", "M13", "r2", 10))
+
+    assert store.data_version(target_id=TARGET) != before
+    assert store.query(target_id=TARGET) == []

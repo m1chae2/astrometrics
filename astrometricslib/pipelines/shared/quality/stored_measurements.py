@@ -8,6 +8,8 @@ database file or table is created by asking.
 * `query_measurements` reads the stored rows that match some filters, as a
   `Page`.
 * `get_measurement` reads one stored row by its id.
+* `get_data_version` gives a short opaque text that changes whenever the
+  rows of a query change, so a caller can keep what it works out from them.
 * `find_row_paths` finds the frame or stack file behind each stored row.
 * `list_metrics` and `get_metric_spec` read the declared metrics.
 * `read_capture_settings` and `read_calibration_identities` read the capture
@@ -15,7 +17,7 @@ database file or table is created by asking.
 """
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from datetime import UTC, datetime
 
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
@@ -33,6 +35,7 @@ from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_
 
 __all__ = [
     "find_row_paths",
+    "get_data_version",
     "get_measurement",
     "get_metric_spec",
     "list_metrics",
@@ -185,6 +188,80 @@ def query_measurements(
     if until_time is not None:
         rows = [row for row in rows if row.measured_at <= until_time]
     return Page.of(_with_units(rows), offset=offset, limit=limit)
+
+
+def get_data_version(
+    config: AppConfiguration,
+    *,
+    metric: str | None = None,
+    level: str | None = None,
+    target: Target | None = None,
+    subject_ids: Collection[str] | None = None,
+) -> str:
+    """Give a short text that changes whenever the matching rows change.
+
+    A caller that works something out from the rows `query_measurements`
+    gives (for example the star widths of every frame) can keep its answer
+    while this text stays the same. Asking costs one short query and reads
+    no rows. The text is opaque: compare it with an earlier one, and read
+    nothing else into it. Any added, removed or replaced row of the metric,
+    level and target changes it, whether it is the newest row of its subject
+    or not, and so does a newer row of one of the target's frames that names
+    another target (the frame moved). A row of another metric, level or
+    target does not. With no filter at all, it covers everything the quality
+    store holds (the rows, the capture settings and the calibration
+    records), and any write to it changes the text.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The settings, which give the library folder.
+    metric : `str`, optional
+        Only this metric.
+    level : `str`, optional
+        Only subjects of this level (a `SubjectLevel` value).
+    target : `Target`, optional
+        Only this target.
+    subject_ids : `~collections.abc.Collection` [`str`], optional
+        Only the frame-level rows of the metric about these frames (their
+        subject ids, see `Target.frame_subject_id`). It needs ``metric``,
+        and cannot be combined with ``target`` or a level other than
+        ``"frame"``.
+
+    Returns
+    -------
+    version : `str`
+        The text. A library with no stored measurements gives the text of
+        an empty store.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the metric or the level is unknown, ``target`` is not a
+        `Target`, or ``subject_ids`` is given without a metric, with a
+        target or with another level.
+    """
+    if metric is not None:
+        check_choice("metric", metric, get_metric_registry().names())
+    if level is not None:
+        check_choice("level", level, tuple(member.value for member in SubjectLevel))
+    if target is not None and not isinstance(target, Target):
+        raise InvalidArgumentError("Pass the Target itself; turn an id into one with targets.get(id).")
+    if metric is None and level is None and target is None and subject_ids is None:
+        from astrometricslib.pipelines.shared.data_version_texts import get_kind_data_version
+
+        return get_kind_data_version(config, "quality")
+    if subject_ids is not None:
+        if metric is None or target is not None or level not in (None, SubjectLevel.FRAME.value):
+            raise InvalidArgumentError("subject_ids needs a metric, and takes no target and no other level.")
+        from astrometricslib.pipelines.shared.data_version_texts import get_frame_group_data_version
+
+        return get_frame_group_data_version(config, metric, subject_ids)
+    return _store(config).data_version(
+        metric=metric,
+        level=None if level is None else SubjectLevel(level),
+        target_id=None if target is None else target.id,
+    )
 
 
 def get_measurement(config: AppConfiguration, row_id: int) -> QualityMeasurement | None:

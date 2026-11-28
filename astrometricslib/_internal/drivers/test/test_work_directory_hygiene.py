@@ -13,9 +13,9 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
-from astrometricslib._internal.drivers import siril_interface
 from astrometricslib._internal.drivers.fits_access import select_dominant_frame_dimensions
-from astrometricslib._internal.drivers.siril_interface import purge_stale_work_directories
+from astrometricslib._internal.drivers.siril import stacking as siril_stacking
+from astrometricslib._internal.drivers.siril.stacking import purge_stale_work_directories
 
 
 def _write_frame(path, width, height) -> str:  # ruff: ignore[missing-type-function-argument]
@@ -98,7 +98,7 @@ def test_no_frames_yields_no_dimensions() -> None:
 
 def test_intermediates_are_discarded_but_evidence_is_kept(tmp_path: Path) -> None:
     """A failed run keeps its logs and staged frame lists, not its bulk."""
-    processor = object.__new__(siril_interface.ImageProcessing)
+    processor = object.__new__(siril_stacking.ImageProcessing)
     target_folder = tmp_path / "FailedTarget"
     (target_folder / "process").mkdir(parents=True)
     (target_folder / "lights").mkdir()
@@ -116,7 +116,7 @@ def test_intermediates_are_discarded_but_evidence_is_kept(tmp_path: Path) -> Non
 
 def test_discarding_intermediates_twice_is_harmless(tmp_path: Path) -> None:
     """Cleanup must be safe to reach on any failure path."""
-    processor = object.__new__(siril_interface.ImageProcessing)
+    processor = object.__new__(siril_stacking.ImageProcessing)
     target_folder = tmp_path / "T"
     target_folder.mkdir()
 
@@ -151,7 +151,7 @@ def test_recent_directories_survive(tmp_path: Path) -> None:
 
 def test_the_master_cache_is_never_purged(tmp_path: Path) -> None:
     """The cache is the optimisation; sweeping it would undo the win."""
-    cache = tmp_path / siril_interface.CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
+    cache = tmp_path / siril_stacking.CALIBRATION_MASTER_CACHE_DIRECTORY_NAME
     cache.mkdir()
     (cache / "bias_abc.fits").write_bytes(b"master")
     ancient = time.time() - 365 * 86400

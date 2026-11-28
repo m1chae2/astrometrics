@@ -19,6 +19,7 @@ from astrometricslib.pipelines.stacking.post_processing.star_width_match import 
     match_star_widths_in_file,
     measure_channel_widths,
 )
+from astrometricslib.test.synthetic.point_stars import add_gaussian_star
 
 SIZE = 600
 SPACING = 40
@@ -48,7 +49,6 @@ def make_stack(
         Shape (3, SIZE, SIZE), 32-bit floats.
     """
     generator = np.random.default_rng(7)
-    rows, columns = np.mgrid[:SIZE, :SIZE]
     image = np.full((3, SIZE, SIZE), SKY, dtype=np.float32)
     centers = [
         (row + generator.uniform(-0.5, 0.5), column + generator.uniform(-0.5, 0.5))
@@ -57,15 +57,13 @@ def make_stack(
     ]
     for row, column in centers:
         flux = generator.uniform(2.0, 6.0)
-        distance_squared = (rows - row) ** 2 + (columns - column) ** 2
         for channel, sigma in enumerate(sigmas):
-            image[channel] += flux / (2 * np.pi * sigma**2) * np.exp(-distance_squared / (2 * sigma**2))
+            add_gaussian_star(image[channel], column, row, flux / (2 * np.pi * sigma**2), sigma)
     # One saturated star is always there, as in a real stack: the brightest
     # value of each channel is what the step takes as saturation.
     for row, column in ((SPACING * 2 + SPACING // 2, SPACING * 2 + SPACING // 2), *saturated):
-        distance_squared = (rows - row) ** 2 + (columns - column) ** 2
         for channel, sigma in enumerate(sigmas):
-            image[channel] += 400.0 / (2 * np.pi * sigma**2) * np.exp(-distance_squared / (2 * sigma**2))
+            add_gaussian_star(image[channel], column, row, 400.0 / (2 * np.pi * sigma**2), sigma)
     image += 0.0005 * generator.standard_normal(image.shape).astype(np.float32)
     return np.minimum(image, 1.0)
 
@@ -175,12 +173,11 @@ def test_the_width_of_a_known_gaussian_star_is_read_without_bias() -> None:
     pixel's own spread), which the expected width includes.
     """
     size, sigma = 330, 1.5
-    yy, xx = np.mgrid[0:size, 0:size]
     generator = np.random.default_rng(5)
     plane = generator.normal(100.0, 2.0, (size, size))
     positions = np.array([[25.0 + 35.0 * i, 25.0 + 35.0 * j] for i in range(9) for j in range(9)])
     for x, y in positions:
-        plane += 300.0 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sigma**2))
+        add_gaussian_star(plane, x, y, 300.0, sigma)
 
     (width,) = measure_channel_widths(plane, positions)
 

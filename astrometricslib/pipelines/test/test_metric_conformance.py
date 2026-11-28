@@ -243,7 +243,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
                 ),
             ],
             framesAccepted=1,
-            framesQuarantined=2,
+            framesSetAside=2,
             flatCalibrationIssues=["not smoothed: a test note"],
             stackCropReason="cropped 120 px on the left: fewer than half the frames covered it",
             stackCropAreaFraction=0.04,
@@ -259,6 +259,18 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
 
     notice_rows = [camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+    if pipeline in ("photometry", "spectroscopy"):
+        # Stored by the stage runner when it skips the stage for want of
+        # astrometry's solution (`tasks.report_needs_astrometry`).
+        from astrometricslib.pipelines.shared.quality.notices import needs_astrometry_measurement
+
+        notice_rows.append(
+            needs_astrometry_measurement(
+                "needs astrometry: its result is missing; run processing.astrometry.run(target) first",
+                context,
+                context.run_subject(),
+            )
+        )
     if pipeline == "astrometry":
         from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
             gaia_tiles_missing_notice_measurement,
@@ -306,7 +318,7 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
 
 # Metrics that stay declared so stored rows and reports citing them can be
 # read, although no step measures them any more.
-RETIRED_METRICS = frozenset({"frame.quarantine_roundness"})
+RETIRED_METRICS = frozenset({"frame.set_aside_roundness"})
 
 # Phase 3: a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record

@@ -104,7 +104,7 @@ def stack_quality_report(
     NotFoundError
         If the stack file, or the stack to compare with, does not exist.
     """
-    from astrometricslib._internal.drivers.siril_output_parsing import (
+    from astrometricslib._internal.drivers.siril.core.output_parsing import (
         measure_rejected_fraction,
         parse_seq_file,
     )
@@ -195,7 +195,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
         skipped_reasons=[
             {"file": frame.path.rsplit("/", 1)[-1], "reason": frame.reason} for frame in excluded[:10]
         ],
-        frames_set_aside_before_stacking=metrics.frames_quarantined,
+        frames_set_aside_before_stacking=metrics.frames_set_aside,
         sessions=[
             {
                 "session": session.session_id,

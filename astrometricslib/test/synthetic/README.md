@@ -36,6 +36,7 @@ from astrometricslib.test.synthetic import (
 | `make_photometry_fits(path, stars, *, date_obs, exptime_s, extra_header, **frame_kwargs)` | The same frame written to a FITS file with `DATE-OBS`, `EXPTIME`, and any extra cards. Returns the array it wrote. |
 | `make_drifted_sequence(stars, n_frames, drift_px_per_frame, rotation_deg_per_frame, flux_scale, **frame_kwargs)` | A list of frames in which the field drifts, rotates, and changes brightness. |
 | `drifted_stars(stars, frame_index, ...)` | The true star positions in one frame of that sequence. |
+| `drifted_frame_solves(paths, shape, drift_px_per_frame, rotation_deg_per_frame, scale_change_per_frame)` | The exact plate solution (a solved header) of every frame of such a sequence, for `VariabilityAnalyzer.process`. |
 | `star_flux_multipliers(n_stars, frame_index, flux_scale)` | The flux multiplier of each star in one frame. |
 
 ### Sequence convention
@@ -127,6 +128,10 @@ Two helpers give tests the pieces most of them build. They are not re-exported b
 
 A test that checks distortion terms, a mirrored image or a turned field builds its own map, because those settings are what it tests. A test that fakes astroquery's own `Simbad` class, one layer lower, keeps its own stand-in.
 
+## Point-sampled stars: `point_stars.py`
+
+`add_gaussian_star(image, x, y, peak, sigma_px)` adds one round Gaussian star to an image in place. Each pixel gets the Gaussian's value at the pixel center (a point sample, not the pixel integral the generators above use), so it matches tests that drew stars with `np.exp` over the whole image. It draws only the square within `STAMP_HALF_WIDTH_SIGMAS` (8) widths of the center. Beyond that the Gaussian is about 1e-14 of its peak, so a float32 image comes out the same as one drawn over every pixel, at a small part of the cost. Import it from the module; the package does not re-export it.
+
 ## Extending the generators
 
 - Add new frame types as a new module here and export the names in `__init__.py`.
@@ -136,7 +141,7 @@ A test that checks distortion terms, a mirrored image or a turned field builds i
 
 ## Tests
 
-The variability field is tested through the photometry pipeline's own tests (`pipelines/photometry/test/test_variability_injection.py`). `test_synthetic_generators.py` checks flux conservation, sub-pixel centroid shifts, the drift rule, line depth and column, the extractor's tilt sign, and seed repeatability. `test_wavelength_dependent_trace.py` checks the `trace_sigma_by_wavelength` option of the spectral generator: leaving it out changes nothing, a constant table gives the same image as the plain width, and the trail width measured at a column follows the table. `test_stand_ins.py` checks that `tan_sky_map` puts its reference pixel at the given sky position and that `FakeSimbad` gives its answers, records each question and raises a set failure. Run them all with:
+The variability field is tested through the photometry pipeline's own tests (`pipelines/photometry/test/test_variability_injection.py`). `test_synthetic_generators.py` checks flux conservation, sub-pixel centroid shifts, the drift rule, line depth and column, the extractor's tilt sign, and seed repeatability. `test_wavelength_dependent_trace.py` checks the `trace_sigma_by_wavelength` option of the spectral generator: leaving it out changes nothing, a constant table gives the same image as the plain width, and the trail width measured at a column follows the table. `test_stand_ins.py` checks that `tan_sky_map` puts its reference pixel at the given sky position, that `FakeSimbad` gives its answers, records each question and raises a set failure, and that `add_gaussian_star` gives the same float32 image as a star drawn over every pixel, also at the image edge. Run them all with:
 
 ```bash
 .venv/bin/pytest astrometricslib/test/synthetic -q

@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This document reviews the plate solving and astrometric calibration pipeline (`astrometricslib.pipelines.astrometry`). It covers the header cards the pipeline reads, its detection and solving methods, the Gaia DR3 refit of the solution, how stars are named, the run flow, the tuned limits, the fallback paths and the quality-summary fields.
+This document reviews the plate solving and astrometric calibration pipeline (`astrometricslib.pipelines.astrometry`). It covers the header cards the pipeline reads, its detection and solving methods, the check of the solution against Gaia DR3, how stars are named, the run flow, the tuned limits, the fallback paths and the quality-summary fields.
 
 Terms are defined in the [glossary](../../Glossary.md). This document also defines each term the first time it appears.
 
@@ -28,10 +28,10 @@ flowchart TD
     B --> C["Gather scale and position hints (image file, then settings)"]
     C --> D{"At least 4 stars found?"}
     D -- no --> F["Use the sky map already in the file, if any"]
-    D -- yes --> L{"At least 10 stars?"}
-    L -- yes --> E["Local solver reads the image file (with hints, then blind)"]
+    D -- yes --> L{"A start position in the hints or header?"}
+    L -- yes --> E["Siril reads the image file and the start position (the header focal length, then others)"]
     L -- no --> O["Online solver: the brightest 100 stars, then the whole image"]
-    E -- "no solution" --> O
+    E -- "no solution" --> X["Solve failed: error with Siril's reason"]
     E -- solved --> G["Fine-tune the map against Gaia star positions"]
     O -- solved --> G
     G --> H["Name stars: SIMBAD, then Gaia, then sky position"]
@@ -40,7 +40,7 @@ flowchart TD
     I --> J["Quality summary"]
 ```
 
-Astrometry.net is an open-source plate solver, used both as a program installed on this computer (the local solver) and as an online service. SIMBAD is an online database of named stars and other objects. The fine-tuning step fits SIP distortion terms of order 2 (Section 3.3), and the quality summary is an `AstrometryQualitySummary` (Section 7).
+Siril is the plate solver, run on this computer with its Gaia catalog. Astrometry.net, an open-source plate solver, is used only as an online service, for an image with no start position. SIMBAD is an online database of named stars and other objects. The fine-tuning step fits SIP distortion terms of order 2 (Section 3.3), and the quality summary is an `AstrometryQualitySummary` (Section 7).
 
 ## 2. Input requirements and FITS header specification
 
@@ -59,11 +59,11 @@ No card is strictly required: a missing card weakens a hint or a correction, and
 | `RA` / `DEC` (or `OBJCTRA` / `OBJCTDEC`) | Optional | `float` or sexagesimal `str` (base-60, such as hours, minutes, seconds) | Where the telescope pointed, as right ascension and declination (the sky's longitude and latitude). A search hint when the target record has no coordinates. | No position hint. |
 | `OBJECT` | Optional | `str` | Target name, used for the extended-source hint (whether the target is spread out, like a galaxy, rather than a point). | Guessed from the file name. |
 
-The pixel-scale hint is the scale from Eq. 2 with a window of ±5%. The solver driver widens that window to 0.8 times its lower edge and 1.2 times its upper edge before calling `solve-field`. With no focal length or no pixel size, no scale hint is sent.
+The pixel-scale hint is the scale from Eq. 2 with a window of ±5%. Siril does not use the window; it takes the focal length from `FOCALLEN`, and works one out from the window only when that card is missing. The online service takes the window as it is. With no focal length or no pixel size, no scale hint is sent.
 
 ## 3. Mathematical and algorithmic formulation
 
-This section covers, in order: finding stars, estimating how much sky a pixel covers, solving and refining the map, moving catalog stars to the image date, naming stars, and judging the map's accuracy.
+This section covers, in order: finding stars, estimating how much sky a pixel covers, solving and checking the map, moving catalog stars to the image date, naming stars, and judging the map's accuracy.
 
 ### 3.1 Point source detection
 
@@ -87,24 +87,20 @@ $$s = 206.265 \, \frac{p_\text{px}}{f_\text{tel}} \tag{2}$$
 
 where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p_\text{px}$ the binned pixel size in μm and $f_\text{tel}$ the focal length in mm. The constant is the number of arcseconds in a radian (206,265) times $10^{-3}$, which turns μm over mm into the same unit.
 
-### 3.3 Plate solve and Gaia DR3 refit
+### 3.3 Plate solve and the Gaia DR3 match
 
-**Local, then online.** Astrometry.net is tried in up to three ways, in order:
+**Siril first, online for an image with no position.** An image with a start position (the hints or the header's `RA` and `DEC`) is solved by Siril alone, in a short Siril process of its own, with its Gaia catalog on the disk. A run is limited to 60 s. If the solve fails, Siril retries with other focal lengths, because camera programs often write a wrong one (a zoom lens's longest value, or a value that is too short). The retries use 0.8, 1.25, 0.64, 1.5625 times the header's focal length, in that order, shorter then longer, so the nearer guesses go first. No other solver is tried after Siril fails. An image with no start position, which Siril cannot solve, goes to the online Astrometry.net service in two ways, in order:
 
-1. The local solver reads the image file and finds its own stars. It is tried only when the pipeline found at least 10 stars; with fewer, a local attempt would spend its whole time limit on a near-certain failure. It runs first with the scale and position hints. If that fails quickly, it retries blind (no hints), because a wrong hint, such as a forgotten focal reducer, can block the right answer. If the hinted run used at least 90% of its time limit, the blind retry is skipped.
-2. The online service is sent the brightest 100 of the pipeline's own detections.
-3. As a last resort, the whole image is uploaded to the online service.
+1. The online service is sent the brightest 100 of the pipeline's own detections.
+2. As a last resort, the whole image is uploaded to the online service.
 
-Only the local solver reports its fit statistics; an online solve has none (Section 3.6).
+Siril reports its fit statistics; an online solve has none (Section 3.6).
 
-**Why refit.** The solver fits only the bright stars of its index files, so its solution can be a pixel or more off. The pipeline then refits the solution to the field's Gaia DR3 stars (`wcs_refinement.py`).
+**Why match to Gaia.** The solver fits only its own reference stars, so its solution can be a pixel or more off and still agree with itself. The pipeline therefore measures the solution against the field's Gaia DR3 stars (`gaia_match.py`). It never changes the solution. An earlier version also refit the solution to these stars; the solver study (AST-23) found that the refit never improved Siril's solution, so it was removed.
 
-**How.** Each detection is matched to the nearest Gaia star within 4 pixels, then 1.5 pixels on later passes. The map is fitted with `astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a flat plane touching it at the middle of the matched stars) plus SIP distortion of order
-2. SIP (Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by the optics. Stars more than 3 robust standard deviations off are dropped, and the fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of spread that a few wild points cannot inflate.
+**How.** Each detection is matched to the nearest Gaia star within 4 star widths of the solution's position. Matches more than 3 robust standard deviations from the median distance are dropped, and this repeats (at most 5 times) until the set stops changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of spread that a few wild points cannot inflate. The RMS distance of the stars that are left is the Gaia match RMS.
 
-**When it is kept.** The refit needs at least 40 matches. It is kept only when it fits Gaia better than the solver's solution and moves the field by at most 30 arcsec.
-
-**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only when the cache already holds the field. A later analysis step downloads the Gaia stars. When it accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks it), unless the stack already holds a refit one.
+**When it is recorded.** The match needs at least 40 stars. With fewer, or with no Gaia stars cached for the field, no RMS is recorded and the flag `gaia_match_skipped` is set.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -136,7 +132,7 @@ $$\frac{r}{s \cdot \text{FWHM}} \le 0.5 \tag{5}$$
 
 The residual is the first of these that was measured:
 
-1. the RMS distance to Gaia stars under the kept solution, when the Gaia refit ran (it does not depend on the solver);
+1. the RMS distance of the Gaia-matched stars under the plate solution, when the Gaia match ran (it does not depend on the solver's own fit);
 2. the solver's own fit residual, which only a local solve reports;
 3. the catalog match separation of Eq. 4.
 
@@ -166,7 +162,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 `run_astrometry_analysis` (`runner.py`) runs `AstrometryPipelineAdapter` through `run_pipeline`. `run_pipeline` (`pipeline_base.py`) calls the adapter's four methods in order. It skips `run` only when `process_input` returns a `Result` with `has_work=False`. After `validate_output` it stores the quality summary on the target and records the run's provenance.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has already checked that an image path exists.
-- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header (never over a solution already refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
+- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, Gaia match, header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center only as a marked, unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records `plate_solve`, then `astrometry_run_gates` adds the rest (5 run gates in all). The runner then stores the summary's numbers and the gates as quality measurements (`record_astrometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns `context`, `stellar_objects`, `wcs` and `image_stats`.
 
@@ -200,17 +196,18 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 | `CATALOG_MATCH_RADIUS_ARCSEC` | `10.0` arcsec | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star. |
 | `MAXIMUM_PLATE_SOLVE_SOURCES` | `100` | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | How many of the brightest detected stars are sent to the online solver. |
 | Solve minimum | 4 sources | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | Fewest detections for a solve to be tried (`process_image`). |
-| `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | `10` | Partly measured ([AST-13](../validation/astrometry.md#ast-13)) | Fewest detections for the local solver to be tried; with fewer, the run goes straight to the online solver, because a local attempt would spend its whole time limit on a near-certain failure (Section 3.3). |
+| `FOCAL_LENGTH_RETRY_FACTORS` | `0.8, 1.25, 0.64, 1.5625` of the header's focal length | Partly measured ([AST-23](../validation/astrometry.md#ast-23)) | The focal lengths Siril retries with after the header's own, shorter and longer, in the order tried (Section 3.3). |
+| `SOLVE_TIMEOUT_SECONDS` | `60` s | Partly measured ([AST-23](../validation/astrometry.md#ast-23)) | The longest one Siril run may take (Section 3.3). |
 | `SourceDetector` threshold | `5σ` | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1). |
-| `MINIMUM_MATCHED_STARS` (`wcs_refinement`) | `40` | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit has about a dozen terms per axis, and 40 stars leaves a wide margin. |
-| `MAXIMUM_SHIFT_ARCSEC` | `30.0` arcsec | Partly measured ([AST-02](../validation/astrometry.md#ast-02)) | Largest move of the whole field a refit may make and still be kept. Set at about ten times the largest solver error seen; a larger move means the fit followed wrong matches. |
+| `MINIMUM_MATCHED_STARS` (`gaia_match`) | `40` | Partly measured ([AST-02](../validation/astrometry.md#ast-02)) | Fewest Gaia-matched stars with which the solution's RMS distance to Gaia is recorded. With fewer, one or two wrong matches would dominate the RMS. |
+| `GAIA_MATCH_RADIUS_PIXELS` | `4` star widths | Partly measured ([AST-02](../validation/astrometry.md#ast-02)) | How far from a detected star a Gaia star may sit and still be matched to it. |
 
 ## 6. Degraded states and fallback pathways
 
 1. **Missing optical metadata.** `FOCALLEN` falls back to the configured focal length. Pixel size falls back from `XPIXSZ` to `PIXSIZE1` times `XBINNING`, then to `PIXSCAL`. With none of these, the solve runs with no scale hint.
 2. **Too few detections (fewer than 4).** No solve is tried. A celestial WCS already in the image header is used instead. Without one, `plate_solve` fails.
-3. **Solver failure.** A tried solve that finds no solution, locally or online, raises `PlateSolveFailedError`. The adapter does not catch it, so the error reaches the caller: `validate_output` never runs, and no quality summary or gate is saved for that run.
-4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept. Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch 2016.0 with a flag.
+3. **Solver failure.** A tried solve that finds no solution, with Siril or online, raises `PlateSolveFailedError`, whose message carries Siril's own reason. The reason is also logged as a warning. The adapter does not catch it, so the error reaches the caller: `validate_output` never runs, and no quality summary or gate is saved for that run.
+4. **No Gaia stars.** The Gaia match is skipped with a flag, and the gate judges the next number. Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch 2016.0 with a flag.
 5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers too busy, and the pause is shared by every process. A paused catalog is answered from stored results, with a warning. Unnamed stars keep position-based names, and `catalog_lookup` reports the outage.
 
 ## 7. Quality summary data models
@@ -248,12 +245,10 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `plate_solve_succeeded` | `bool` | Whether the image ended the run with a WCS (pixel-to-sky map). |
 | `simbad_matched_count` | `int` | Number of detected stars matched to an entry in SIMBAD (an online database of named objects). |
 | `catalog_match_separation_rms_arcsec` | `float \| None` | Typical (RMS) distance, in arcsec, from each star to its nearest SIMBAD or Gaia DR3 catalog star. |
-| `plate_solve_fit_residual_rms_arcsec` | `float \| None` | The Astrometry.net solver's own measure of its fit error, in arcsec. |
+| `plate_solve_fit_residual_rms_arcsec` | `float \| None` | The plate solver's own measure of its fit error, in arcsec. |
 | `plate_solve_matched_star_count` | `int \| None` | Number of stars the solver used to build the WCS (pixel-to-sky map). |
-| `gaia_fit_rms_arcsec` | `float \| None` | Typical (RMS) distance to Gaia DR3 stars under the kept solution. |
-| `gaia_fit_rms_before_arcsec` | `float \| None` | Typical (RMS) distance to the same Gaia stars under the solver's solution. |
-| `gaia_fit_star_count` | `int \| None` | Stars used in the Gaia refit. |
-| `wcs_refinement_shift_arcsec` | `float \| None` | Largest move of the field made by the Gaia refit. |
+| `gaia_match_rms_arcsec` | `float \| None` | Typical (RMS) distance to Gaia DR3 stars under the plate solution. |
+| `gaia_match_star_count` | `int \| None` | Stars used in the Gaia match. |
 | `astrometry_flags` | `list[str]` | Warnings about conditions that limit the accuracy of the sky positions. |
 | `gaia_tiles_count` | `int` | Quality metric attribute. |
 | `gaia_tiles_missing_count` | `int` | Quality metric attribute. |

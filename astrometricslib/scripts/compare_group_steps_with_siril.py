@@ -41,10 +41,15 @@ from scipy import ndimage
 from skimage.registration import phase_cross_correlation
 
 from astrometricslib._internal.drivers.fits_access import read_data
+from astrometricslib._internal.drivers.siril.core.script_run import run_siril_script
+from astrometricslib._internal.drivers.siril.stacking.comparison_scripts import (
+    build_noise_weighted_blend_commands,
+    build_shift_registration_commands,
+)
+from astrometricslib._internal.drivers.siril.stacking.script_builders import SPECTRAL_STAR_DETECTION_COMMANDS
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.pipelines.stacking.post_processing.preview_siril import run_preview_script
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
     SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION,
     _center_crop,
@@ -251,18 +256,7 @@ def _siril_register(
         fits.PrimaryHDU(np.asarray(image, dtype=np.float32)).writeto(
             work / "lights" / f"light_source_{number:05d}.fits"
         )
-    commands = [
-        "requires 1.2.0",
-        "setext fits",
-        "set32bits",
-        "cd lights",
-        "convert light_source -out=../process",
-        "cd ../process",
-        detection,
-        "register light_source_ -transf=shift",
-        "close",
-    ]
-    run_preview_script(str(work), commands, siril_executable)
+    run_siril_script(str(work), build_shift_registration_commands(detection), siril_executable)
     return sorted((work / "process").glob("r_light_source_0*.fits"))
 
 
@@ -290,17 +284,7 @@ def _siril_blend(images: list[np.ndarray], work: Path, siril_executable: str) ->
         fits.PrimaryHDU(np.asarray(image, dtype=np.float32)).writeto(
             work / "lights" / f"light_source_{number:05d}.fits"
         )
-    commands = [
-        "requires 1.2.0",
-        "setext fits",
-        "set32bits",
-        "cd lights",
-        "convert light_source -out=../process",
-        "cd ../process",
-        "stack light_source_ rej n 3 3 -norm=addscale -weight=noise -out=blend",
-        "close",
-    ]
-    run_preview_script(str(work), commands, siril_executable)
+    run_siril_script(str(work), build_noise_weighted_blend_commands(), siril_executable)
     blend_path = work / "process" / "blend.fits"
     return np.asarray(load_plane(str(blend_path)), dtype=np.float64) if blend_path.exists() else None
 
@@ -344,9 +328,9 @@ def compare_target(name: str, manifest_path: str, siril_executable: str, work_ro
         images, reference, crop_fraction=crop, prefer_star_position=spectral
     )
 
-    detections = {"standard": "setfindstar -relax=on"}
+    detections = {"standard": SPECTRAL_STAR_DETECTION_COMMANDS["standard"]}
     if spectral:
-        detections["relaxed"] = "setfindstar -relax=on -roundness=0.15 -radius=3"
+        detections["relaxed"] = SPECTRAL_STAR_DETECTION_COMMANDS["relaxed"]
     siril_outputs = {}
     for label, command in detections.items():
         work = work_root / name.replace(" ", "_") / label

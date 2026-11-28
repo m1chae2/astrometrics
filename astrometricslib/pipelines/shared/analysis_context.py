@@ -73,15 +73,15 @@ class AnalysisContext:
     catalog_match_separation_rms_arcsec: float | None = None
     plate_solve_fit_residual_rms_arcsec: float | None = None
     plate_solve_matched_star_count: int | None = None
-    # The astrometry pipeline's `WcsRefinement` (the Gaia refit of the plate
-    # solution), or `None`. Typed `Any` because this shared module does not
-    # import from one pipeline.
-    wcs_refinement: Any = None
-    # The peak over the background noise of each star the Gaia refit used, in
-    # the order the fit used them, from which the expected position error is
-    # found. Empty when there is none; `gaia_fit_signal_reason` says why.
-    gaia_fit_peak_over_noise: tuple[float, ...] = ()
-    gaia_fit_signal_reason: str = "no Gaia fit was made"
+    # The astrometry pipeline's `GaiaMatch` (the plate solution measured
+    # against Gaia stars), or `None`. Typed `Any` because this shared module
+    # does not import from one pipeline.
+    gaia_match: Any = None
+    # The peak over the background noise of each star the Gaia match used, in
+    # the order the match listed them, from which the expected position error
+    # is found. Empty when there is none; `gaia_match_signal_reason` says why.
+    gaia_match_peak_over_noise: tuple[float, ...] = ()
+    gaia_match_signal_reason: str = "no Gaia match was made"
     astrometry_flags: list[str] = field(default_factory=list)
     # How many Gaia cache tiles lie under the image, and how many of them
     # were not complete to the query depth, so their detections got no Gaia

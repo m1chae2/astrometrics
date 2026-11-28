@@ -208,11 +208,9 @@ BACKFILL_RUN_ID_PREFIX = "backfill-"
 # of "unknown", check its estimator's history in git, then add it here with
 # the first version that holds the registered estimator.
 ESTIMATOR_CHANGED_AT: dict[str, str] = {
-    "astrometry.gate_astrometric_residual": "1.4.0",
-    "astrometry.gaia_fit_star_count": "1.4.0",
-    "astrometry.gaia_fit_rms_arcsec": "1.4.0",
-    "astrometry.gaia_fit_rms_before_arcsec": "1.4.0",
-    "astrometry.wcs_refinement_shift_arcsec": "1.4.0",
+    "astrometry.gate_astrometric_residual": "1.5.0",
+    "astrometry.gaia_match_star_count": "1.5.0",
+    "astrometry.gaia_match_rms_arcsec": "1.5.0",
 }
 
 # The text of a stored time that is read as UTC because it has no zone.
@@ -977,9 +975,9 @@ def _photometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult
     """Give a photometry gate as the measurement step stores it.
 
     Two gates quote a steady number that comes from the run's own data (the
-    smallest comparison set and the largest drift). The summary does not hold
-    it, so those gates are copied only when they were not checked. The rest
-    go through the record step's own `gate_for_measurement`.
+    smallest comparison set and the worst corner displacement). The summary
+    does not hold it, so those gates are copied only when they were not
+    checked. The rest go through the record step's own `gate_for_measurement`.
 
     Parameters
     ----------
@@ -1306,11 +1304,11 @@ _STACKING_VALUES: tuple[ValueMapping, ...] = (
         older_path=("inputQuality", "framesExcludedForBackground"),
     ),
     _value(
-        "stacking.frames_quarantined_count",
+        "stacking.frames_set_aside_count",
         "stackingMetrics",
-        "framesQuarantined",
+        "framesSetAside",
         subject=_STACK,
-        older_path=("inputQuality", "framesQuarantined"),
+        older_path=("inputQuality", "framesSetAside"),
     ),
 )
 
@@ -1502,7 +1500,8 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
         "plateSolveMatchedStarCount",
         subject=_STACK,
     ),
-    _value("astrometry.gaia_fit_star_count", "astrometryMetrics", "gaiaFitStarCount", subject=_STACK),
+    _value("astrometry.gaia_match_star_count", "astrometryMetrics", "gaiaMatchStarCount", subject=_STACK),
+    _value("astrometry.gaia_match_rms_arcsec", "astrometryMetrics", "gaiaMatchRmsArcsec", subject=_STACK),
     _value(
         "astrometry.remote_catalog_queries_attempted_count",
         "astrometryMetrics",
@@ -1524,16 +1523,6 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
         "astrometry.plate_solve_fit_residual_rms_arcsec",
         "astrometryMetrics",
         "plateSolveFitResidualRmsArcsec",
-        subject=_STACK,
-    ),
-    _value("astrometry.gaia_fit_rms_arcsec", "astrometryMetrics", "gaiaFitRmsArcsec", subject=_STACK),
-    _value(
-        "astrometry.gaia_fit_rms_before_arcsec", "astrometryMetrics", "gaiaFitRmsBeforeArcsec", subject=_STACK
-    ),
-    _value(
-        "astrometry.wcs_refinement_shift_arcsec",
-        "astrometryMetrics",
-        "wcsRefinementShiftArcsec",
         subject=_STACK,
     ),
     _value(
@@ -1572,6 +1561,7 @@ _PHOTOMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(PHOTOMET
 # the summary does not keep.
 _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     "photometry.notice_camera_without_profile",
+    "photometry.notice_needs_astrometry",
     "photometry.notice_session_without_comparison_stars",
     "photometry.notice_logged_warnings",
     "photometry.stars_with_light_curve_scatter_count",
@@ -1807,6 +1797,7 @@ SUMMARY_KINDS: tuple[SummaryKind, ...] = (
         extras=_spectroscopy_extras,
         not_held=(
             "spectroscopy.notice_camera_without_profile",
+            "spectroscopy.notice_needs_astrometry",
             "spectroscopy.skipped_no_trail_star_count",
             "spectroscopy.skipped_unidentified_star_count",
             "spectroscopy.notice_stars_below_feature_limit",

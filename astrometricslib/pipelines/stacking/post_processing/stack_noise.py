@@ -57,16 +57,15 @@ When none of those gives a solution (the raw frames carry none, which is the
 case for a target imaged without a plate-solving mount or camera program), the
 last source is the stack itself. The stack is plate-solved in memory by the
 solving part of the code the astrometry step uses (`_plate_solve_stack_wcs`),
-without star naming and without any online query. Its Gaia refit runs only
-when a complete cached Gaia download covers the field. This step does not
+without star naming, without a Gaia match and without any online query.
+This step does not
 change the stack's header. The stacking stage saves a plate solution in it
 afterwards (`stage._save_stack_plate_solution`), before the preview copies the
 header. The solved grid is the stack's own, so no
 trim offset or shift applies and no frame has to line up with it. A solve that
 fails (no match, no index files, a time limit) gives the usual "no result",
 with a reason that says the solve was tried. The source is recorded as
-`PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`, so a set
-chosen from a refit solution can be told from one that was not refit.
+`PLATE_SOLVE_WCS_SOURCE`.
 
 Even a stack's own header is checked. A frame's own "solution" is often only a
 first guess: the camera software (Ekos) writes the position the mount was told
@@ -161,8 +160,7 @@ from astrometricslib.pipelines.stacking.post_processing.aperture_storage import 
     store_apertures_once,
 )
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-    PLATE_SOLVE_REFIT_WCS_SOURCE,
-    PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+    PLATE_SOLVE_WCS_SOURCE,
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSet,
     StackDepth,
@@ -852,7 +850,7 @@ def _plate_solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> t
     reason : `str`
         Why there is none. Empty when there is one.
     wcs_source : `str`
-        `PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`.
+        `PLATE_SOLVE_WCS_SOURCE`.
     """
     key = _stack_solve_key(stack_path, drivers)
     if key is not None and key in _RECENT_STACK_SOLVES:
@@ -880,13 +878,7 @@ def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[W
     needs none of them. A solve with a good star list normally takes tens of
     seconds; a failed one can use the whole limit.
 
-    The solution is refit to Gaia only when a complete cached Gaia download
-    covers the field. The refit reads the cache and never sends a query. With
-    no such download, the solver's own solution is kept as it is, and the
-    returned source says so (`PLATE_SOLVE_UNREFINED_WCS_SOURCE`). A refit can
-    move a solution by more than a pixel (up to 1.4 px on one field; see
-    AST-02 in the astrometry validation register), so sets chosen from the
-    two kinds of solution can be told apart by the stored source. The
+    The solution is the plate solver's own and is not changed. The
     apertures are picked on the stack's own pixels, at least
     `faint_source_clearance_px` from every detected source, so the choice does
     not depend on the solution. The solution only gives each aperture its sky
@@ -909,8 +901,7 @@ def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[W
     reason : `str`
         Why there is none, saying the solve was tried. Empty when there is one.
     wcs_source : `str`
-        `PLATE_SOLVE_REFIT_WCS_SOURCE` or `PLATE_SOLVE_UNREFINED_WCS_SOURCE`,
-        saying whether the solution was refit to cached Gaia stars.
+        `PLATE_SOLVE_WCS_SOURCE`.
     """
     # Imported here: the astrometry package is large, and a stack that has a
     # solution never needs it.
@@ -920,7 +911,7 @@ def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[W
     started = time.monotonic()
     try:
         pipeline = AstrometryPipeline(drivers=drivers)
-        solved_wcs = pipeline.solve_wcs(stack_path, refit_from_cache=True)
+        solved_wcs = pipeline.solve_wcs(stack_path)
     except (
         PlateSolveFailedError,
         RuntimeError,
@@ -938,7 +929,7 @@ def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[W
         return (
             None,
             f"plate-solving the stack itself was tried and failed ({type(error).__name__}: {error})",
-            PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+            PLATE_SOLVE_WCS_SOURCE,
         )
     elapsed = time.monotonic() - started
     if solved_wcs is None:
@@ -946,7 +937,7 @@ def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[W
         return (
             None,
             "plate-solving the stack itself was tried and found no solution",
-            PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+            PLATE_SOLVE_WCS_SOURCE,
         )
     celestial = solved_wcs.celestial if solved_wcs.has_celestial else None
     if celestial is None:
@@ -954,18 +945,10 @@ def _solve_stack_wcs(stack_path: str, drivers: Drivers | None = None) -> tuple[W
         return (
             None,
             "plate-solving the stack itself was tried and gave no sky solution",
-            PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+            PLATE_SOLVE_WCS_SOURCE,
         )
-    was_refit = bool(getattr(pipeline, "last_solve_was_refit", False))
-    refit_note = getattr(pipeline, "last_solve_refit_note", "")
-    if not isinstance(refit_note, str) or not refit_note:
-        refit_note = "not refit"
-    logger.info(
-        "Solved in %.1f s (%s).",
-        elapsed,
-        "refit to cached Gaia stars" if was_refit else refit_note,
-    )
-    return celestial, "", PLATE_SOLVE_REFIT_WCS_SOURCE if was_refit else PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    logger.info("Solved in %.1f s.", elapsed)
+    return celestial, "", PLATE_SOLVE_WCS_SOURCE
 
 
 def _reference_frame_wcs(
@@ -1649,12 +1632,11 @@ class _StackPlateSolve:
         Returns
         -------
         source : `str`
-            `PLATE_SOLVE_REFIT_WCS_SOURCE` when the solution was refit to
-            cached Gaia stars, else `PLATE_SOLVE_UNREFINED_WCS_SOURCE`. Read it
+            `PLATE_SOLVE_WCS_SOURCE`. Read it
             after `solve` has given a solution.
         """
         if self._answer is None:
-            return PLATE_SOLVE_UNREFINED_WCS_SOURCE
+            return PLATE_SOLVE_WCS_SOURCE
         return self._answer[2]
 
     def solve(self) -> tuple[WCS | None, str]:

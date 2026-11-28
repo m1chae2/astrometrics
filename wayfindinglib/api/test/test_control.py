@@ -588,10 +588,12 @@ def test_run_polar_alignment_assist_delegates_to_the_task_module(
     mocker.patch.object(calibration_routines, "run_polar_alignment_assist", return_value="model")
     attempts = [{"ra": 1.0, "dec": 2.0}]
 
-    result = control.mount._run_polar_alignment_assist(attempts, latitude_deg=39.7)
+    result = control.mount._run_polar_alignment_assist(attempts, latitude_deg=39.7, longitude_deg=-105.0)
 
     assert result == "model"
-    calibration_routines.run_polar_alignment_assist.assert_called_once_with(attempts, latitude_deg=39.7)
+    calibration_routines.run_polar_alignment_assist.assert_called_once_with(
+        attempts, latitude_deg=39.7, longitude_deg=-105.0
+    )
 
 
 def test_run_polar_alignment_assist_defaults_latitude_from_observer_location(
@@ -600,13 +602,17 @@ def test_run_polar_alignment_assist_defaults_latitude_from_observer_location(
     """Verify a missing explicit latitude falls back to observer location."""
     from wayfindinglib.tasks.control_tasks import calibration_routines
 
-    mocker.patch.object(control._context, "observer_location", return_value={"latitude": 39.7})
+    mocker.patch.object(
+        control._context, "observer_location", return_value={"latitude": 39.7, "longitude": -105.0}
+    )
     mocker.patch.object(calibration_routines, "run_polar_alignment_assist", return_value="model")
     attempts = [{"ra": 1.0, "dec": 2.0}]
 
     control.mount._run_polar_alignment_assist(attempts)
 
-    calibration_routines.run_polar_alignment_assist.assert_called_once_with(attempts, latitude_deg=39.7)
+    calibration_routines.run_polar_alignment_assist.assert_called_once_with(
+        attempts, latitude_deg=39.7, longitude_deg=-105.0
+    )
 
 
 def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(

@@ -71,7 +71,7 @@ from astrometricslib.models.tuned_parameter import (
     WhenMissing,
 )
 from astrometricslib.pipelines.shared.quality.raw_frame_check import LOW_STAR_FRACTION
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     STRETCHED_STAR_WARNING_ELONGATION,
 )
 

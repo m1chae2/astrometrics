@@ -44,15 +44,13 @@ from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     load_field_gaia_stars,
     tiles_under_image,
 )
+from astrometricslib.pipelines.astrometry.processing.gaia_match import GaiaMatch
 from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import (
     GAIA_DEFAULT_MAGNITUDE_LIMIT,
     make_gaia_tile_fetcher,
 )
 from astrometricslib.pipelines.astrometry.processing.star_detection import (
     estimate_faintest_detected_magnitude,
-)
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
-    WcsRefinement,
 )
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
@@ -237,10 +235,10 @@ class GaiaFieldMatching:
     plate_solve_matched_star_count: int | None
     observation_time: Time | None
     astrometry_flags: list[str]
-    wcs_refinement: WcsRefinement | None
-    wcs_refit_note: str
-    gaia_fit_peak_over_noise: tuple[float, ...]
-    gaia_fit_signal_reason: str
+    gaia_match: GaiaMatch | None
+    gaia_match_note: str
+    gaia_match_peak_over_noise: tuple[float, ...]
+    gaia_match_signal_reason: str
     _detected_on_binned_copy: bool
     gaia_depth_prediction: GaiaDepthPrediction | None
     field_gaia_stars: FieldGaiaStars | None
@@ -507,9 +505,9 @@ class GaiaFieldMatching:
         The tiles are every tile under the image's four corners plus the
         catalog match radius. The missing ones are downloaded to the query
         depth (see `make_gaia_tile_fetcher`), unless this run may not go
-        online. The answer is kept, so the refit and the naming of one image
-        share one fill. When tiles stay missing, one warning names how many
-        and why, and `FLAG_GAIA_TILES_MISSING` is recorded.
+        online. The answer is kept, so the Gaia match and the naming of one
+        image share one fill. When tiles stay missing, one warning names how
+        many and why, and `FLAG_GAIA_TILES_MISSING` is recorded.
 
         Parameters
         ----------

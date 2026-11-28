@@ -110,7 +110,7 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
             exposureGroups=groups if with_groups else [],
             framesAccepted=21,
             framesExcludedForGain=1,
-            framesQuarantined=3,
+            framesSetAside=3,
         ),
     )
     summary.record_gate(passed_gate("flat_noise", 0.002, 0.01, "the flat noise limit"))
@@ -122,7 +122,7 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
     return _dump(summary)
 
 
-def astrometry_summary(version: str = "1.4.0") -> dict[str, Any]:
+def astrometry_summary(version: str = "1.5.0") -> dict[str, Any]:
     """Build an astrometry summary with gates.
 
     Returns
@@ -145,10 +145,8 @@ def astrometry_summary(version: str = "1.4.0") -> dict[str, Any]:
             catalogMatchSeparationRmsArcsec=1.2,
             plateSolveFitResidualRmsArcsec=0.8,
             plateSolveMatchedStarCount=90,
-            gaiaFitRmsArcsec=0.5,
-            gaiaFitRmsBeforeArcsec=0.9,
-            gaiaFitStarCount=80,
-            wcsRefinementShiftArcsec=0.3,
+            gaiaMatchRmsArcsec=0.5,
+            gaiaMatchStarCount=80,
             plateScaleArcsecPerPixel=1.9,
             starFwhmPx=3.2,
             remoteCatalogQueriesAttempted=10,
@@ -189,7 +187,7 @@ def photometry_summary() -> dict[str, Any]:
     )
     summary.record_gate(passed_gate("capture_timestamps", 0.0, 0.0))
     summary.record_gate(passed_gate("comparison_ensemble", 8.0, 5.0, "scatter test"))
-    summary.record_gate(unchecked_gate("registration_drift", "no session was registered"))
+    summary.record_gate(unchecked_gate("registration_corner_displacement", "no session was registered"))
     return _dump(summary)
 
 
@@ -625,7 +623,11 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     # which a summary never held either.
     assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 82 + 5 + 8 + 1 + 9 + 1 + 1
     assert report.skipped["astrometry", backfill.SkipReason.NOT_HELD] == 6 + 1 + 1
-    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3
+    # The photometry count's last term is the "needs astrometry" notice
+    # (`photometry.notice_needs_astrometry`), stored only when the stage is
+    # skipped, so no summary holds it.
+    photometry_not_held = 10 + 9 + 1 + 6 + 3 + 1 + 2 + 5 + 3 + 1
+    assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == photometry_not_held
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
     assert "stacking.frame_weight" not in rows
@@ -686,8 +688,8 @@ def test_an_old_flat_summary_with_no_gates_is_read(tmp_path: Path) -> None:
     assert separation.measured_at == datetime.fromisoformat("2026-10-03T01:00:00+00:00")
     assert separation.run_id.startswith(f"backfill-{TARGET}-astrometry-")
     names = {row.metric for row in rows}
-    assert "astrometry.gaia_fit_rms_arcsec" not in names
-    assert report.skipped["astrometry", backfill.SkipReason.ESTIMATOR_OLDER] == 4
+    assert "astrometry.gaia_match_rms_arcsec" not in names
+    assert report.skipped["astrometry", backfill.SkipReason.ESTIMATOR_OLDER] == 2
     assert "stacking.frames_accepted_count" not in names
     assert not any(name.startswith("astrometry.gate_") for name in names)
 
@@ -701,7 +703,7 @@ def test_a_summary_with_no_pipeline_version_keeps_it_empty(tmp_path: Path) -> No
     report = backfill.run_backfill(
         database, apply=True, make_backup=fake_backup(database), log=lambda _: None
     )
-    assert report.skipped["astrometry", backfill.SkipReason.ESTIMATOR_UNKNOWN] == 5
+    assert report.skipped["astrometry", backfill.SkipReason.ESTIMATOR_UNKNOWN] == 3
     rows = all_rows(database)
     assert {row.pipeline_version for row in rows} == {None}
     assert "unknown" in row_for(rows, "astrometry.sources_detected_count").reason
@@ -852,11 +854,11 @@ def test_values_that_are_not_finite_numbers_are_skipped(tmp_path: Path) -> None:
 
 
 def test_the_estimator_table_compares_versions_by_number() -> None:
-    """Version 1.10.0 is newer than 1.4.0, and unparsable text is unknown."""
-    metric = "astrometry.gaia_fit_rms_arcsec"
+    """Version 1.10.0 is newer than 1.5.0, and unparsable text is unknown."""
+    metric = "astrometry.gaia_match_rms_arcsec"
     assert backfill.estimator_problem(metric, "1.10.0") is None
-    assert backfill.estimator_problem(metric, "1.4.0") is None
-    assert backfill.estimator_problem(metric, "1.3.9") is backfill.SkipReason.ESTIMATOR_OLDER
+    assert backfill.estimator_problem(metric, "1.5.0") is None
+    assert backfill.estimator_problem(metric, "1.4.9") is backfill.SkipReason.ESTIMATOR_OLDER
     assert backfill.estimator_problem(metric, "x") is backfill.SkipReason.ESTIMATOR_UNKNOWN
     assert backfill.estimator_problem(metric, None) is backfill.SkipReason.ESTIMATOR_UNKNOWN
     assert backfill.estimator_problem("stacking.frames_stacked_count", None) is None
@@ -905,8 +907,8 @@ def test_a_metric_with_a_checked_estimator_history_keeps_its_registered_version(
     backfill.run_backfill(database, apply=True, make_backup=fake_backup(database), log=lambda _: None)
     rows = all_rows(database)
     registry = get_metric_registry()
-    checked = row_for(rows, "astrometry.gaia_fit_rms_arcsec")
-    assert checked.definition_version == registry.get("astrometry.gaia_fit_rms_arcsec").definition_version
+    checked = row_for(rows, "astrometry.gaia_match_rms_arcsec")
+    assert checked.definition_version == registry.get("astrometry.gaia_match_rms_arcsec").definition_version
     assert "estimator as registered" in checked.reason
     for row in rows:
         if row.metric in backfill.ESTIMATOR_CHANGED_AT:
@@ -947,7 +949,7 @@ def _live_row_for(metric: str, run_id: str, measured_at: datetime, subject_id: s
         status=MeasurementStatus.MEASURED,
         value=3.0,
         origin=MeasurementOrigin.MEASURED,
-        pipelineVersion="1.4.0",
+        pipelineVersion="1.5.0",
         runId=run_id,
         measuredAt=measured_at,
     )

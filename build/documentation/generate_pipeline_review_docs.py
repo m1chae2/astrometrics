@@ -194,12 +194,12 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "that changes between frames, or comparison stars that scatter more than "
         "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error."
     ),
-    "registration_drift": (
-        "Fails when the field shifts by more than `UNSTABLE_TRACKING_DRIFT_PX`, when rotation and "
-        "scale change move a corner by more than `MAXIMUM_CORNER_DISPLACEMENT_PX` (95th "
-        "percentile), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
-        "(brightness-weighted star centers) were untrustworthy and fell back to the aligned "
-        "position."
+    "registration_corner_displacement": (
+        "Fails when a corner of the frame moves by more than "
+        "`MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or "
+        "rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
+        "(brightness-weighted star centers) were untrustworthy and fell back to the position "
+        "the frame's plate solution gives."
     ),
     "scatter_population": (
         "Not checked when too few stars have a measured scatter, or too few to fit the noise "
@@ -302,9 +302,10 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "Frames taken at a less common gain setting (the camera's amplifier setting) are set "
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
-    "frame_quarantine": (
-        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
-        "aside. The frames are moved all the same; the detail says how many and why."
+    "frame_set_aside": (
+        "Fails (as a warning) when the cloud and target alignment check set aside more than "
+        "`WARN_SET_ASIDE_FRACTION` of a batch. The frames are moved all the same; "
+        "the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -578,9 +579,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "catalog_match_separation_rms_arcsec": (
         "Typical (RMS) distance, in arcsec, from each star to its nearest SIMBAD or Gaia DR3 catalog star."
     ),
-    "plate_solve_fit_residual_rms_arcsec": (
-        "The Astrometry.net solver's own measure of its fit error, in arcsec."
-    ),
+    "plate_solve_fit_residual_rms_arcsec": ("The plate solver's own measure of its fit error, in arcsec."),
     "plate_solve_matched_star_count": "Number of stars the solver used to build the WCS (pixel-to-sky map).",
     "astrometry_flags": "Warnings about conditions that limit the accuracy of the sky positions.",
     "plate_scale_arcsec_per_pixel": "Pixel scale: the sky angle one pixel covers, in arcsec/pixel.",
@@ -593,7 +592,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "plate_solve_attempts": "Number of plate-solve tries.",
     "stars_processed": "Number of stars tracked through the light curves (brightness over time).",
     "stars_found": (
-        "Number of stars detected on the reference frame (the frame every other frame is aligned to)."
+        "Number of stars detected on the reference frame (the frame every other frame is mapped to)."
     ),
     "frames_processed": "Number of calibrated frames measured.",
     "rejected_frames": "Frames rejected because their comparison-star level was out of line with the rest.",
@@ -710,12 +709,8 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         "Stars with no catalog match whose sky position could not be worked out (as when the "
         "image has no pixel-to-sky map); not saved."
     ),
-    "gaia_fit_rms_arcsec": "Typical (RMS) distance to Gaia DR3 stars under the kept solution.",
-    "gaia_fit_rms_before_arcsec": (
-        "Typical (RMS) distance to the same Gaia stars under the solver's solution."
-    ),
-    "gaia_fit_star_count": "Stars used in the Gaia refit.",
-    "wcs_refinement_shift_arcsec": "Largest move of the field made by the Gaia refit.",
+    "gaia_match_rms_arcsec": "Typical (RMS) distance to Gaia DR3 stars under the plate solution.",
+    "gaia_match_star_count": "Stars used in the Gaia match.",
     "expected_stack_fwhm_px": "Expected stack FWHM: the weighted RMS of all input-frame FWHMs.",
     "spectral_registration_flags": (
         "Frames about which the spectral registration (alignment) test raised a concern."
@@ -733,7 +728,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "frames_excluded_for_background": (
         "Number of frames set aside because their sky background differed from the rest."
     ),
-    "frames_quarantined": "Number of frames with clouds or trailed stars moved to the excluded folder.",
+    "frames_set_aside": "Number of frames with clouds or trailed stars moved to the excluded folder.",
     "dark_unique_frame_count": "Number of different frames (copies counted once) in the master dark.",
     "bias_unique_frame_count": "Number of different frames (copies counted once) in the master bias.",
 }
@@ -1307,8 +1302,8 @@ def build_astrometry_doc() -> str:
     gates = discover_gate_names("astrometry")
     record_quality_module = "astrometricslib.pipelines.astrometry.post_processing.record_quality"
     identifier_module = "astrometricslib.pipelines.astrometry.processing.star_identifier"
-    refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
-    driver_module = "astrometricslib._internal.drivers.astrometry_net_driver"
+    match_module = "astrometricslib.pipelines.astrometry.processing.gaia_match"
+    plate_solve_module = "astrometricslib._internal.drivers.siril.astrometry.plate_solve"
     fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
     require_symbol("astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector")
     values = {
@@ -1327,8 +1322,10 @@ def build_astrometry_doc() -> str:
             "astrometricslib.pipelines.astrometry.processing.star_detection",
             "MINIMUM_STARS_FOR_DEPTH_ESTIMATE",
         ),
-        "local_minimum": require_symbol(driver_module, "MINIMUM_SOURCES_FOR_LOCAL_SOLVE"),
-        "blind_cutoff": f"{require_symbol(driver_module, 'HINTED_SOLVE_NEAR_TIMEOUT_FRACTION'):.0%}",
+        "retry_factors": ", ".join(
+            f"{factor:g}" for factor in require_symbol(plate_solve_module, "FOCAL_LENGTH_RETRY_FACTORS")
+        ),
+        "solve_limit": require_symbol(plate_solve_module, "SOLVE_TIMEOUT_SECONDS"),
         "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
         "blob_box": 2 * require_symbol(fwhm_module, "BLOB_WIDTH_BOX_RADIUS_PX"),
         "threshold": float(
@@ -1341,12 +1338,10 @@ def build_astrometry_doc() -> str:
             "astrometricslib.pipelines.astrometry.pre_processing.source_detection",
             "SOURCE_DETECTOR_MERGE_KERNEL_WIDTHS",
         ),
-        "refit_min_stars": require_symbol(refine_module, "MINIMUM_MATCHED_STARS"),
-        "refit_sip": require_symbol(refine_module, "SIP_DEGREE"),
-        "refit_clip": require_symbol(refine_module, "CLIP_SIGMAS"),
-        "refit_shift": require_symbol(refine_module, "MAXIMUM_SHIFT_ARCSEC"),
-        "refit_r1": require_symbol(refine_module, "INITIAL_MATCH_RADIUS_PIXELS"),
-        "refit_r2": require_symbol(refine_module, "REFINED_MATCH_RADIUS_PIXELS"),
+        "match_min_stars": require_symbol(match_module, "MINIMUM_MATCHED_STARS"),
+        "match_clip": require_symbol(match_module, "CLIP_SIGMAS"),
+        "match_passes": require_symbol(match_module, "MAXIMUM_PASSES"),
+        "gaia_match_radius": require_symbol(match_module, "GAIA_MATCH_RADIUS_PIXELS"),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
     }
@@ -1454,12 +1449,17 @@ def build_astrometry_doc() -> str:
             "Fewest detections for a solve to be tried (`process_image`).",
         ],
         [
-            "`MINIMUM_SOURCES_FOR_LOCAL_SOLVE`",
-            f"`{values['local_minimum']}`",
-            status_cell(STATUS_PARTLY_MEASURED, "AST-13"),
-            "Fewest detections for the local solver to be tried; with fewer, the run goes "
-            "straight to the online solver, because a local attempt would spend its whole time "
-            "limit on a near-certain failure (Section 3.3).",
+            "`FOCAL_LENGTH_RETRY_FACTORS`",
+            f"`{values['retry_factors']}` of the header's focal length",
+            status_cell(STATUS_PARTLY_MEASURED, "AST-23"),
+            "The focal lengths Siril retries with after the header's own, shorter and longer, in the "
+            "order tried (Section 3.3).",
+        ],
+        [
+            "`SOLVE_TIMEOUT_SECONDS`",
+            f"`{values['solve_limit']}` s",
+            status_cell(STATUS_PARTLY_MEASURED, "AST-23"),
+            "The longest one Siril run may take (Section 3.3).",
         ],
         [
             "`SourceDetector` threshold",
@@ -1468,19 +1468,17 @@ def build_astrometry_doc() -> str:
             "How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1).",
         ],
         [
-            "`MINIMUM_MATCHED_STARS` (`wcs_refinement`)",
-            f"`{values['refit_min_stars']}`",
-            design_estimate_cell("AST"),
-            "Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit "
-            "has about a dozen terms per axis, and 40 stars leaves a wide margin.",
+            "`MINIMUM_MATCHED_STARS` (`gaia_match`)",
+            f"`{values['match_min_stars']}`",
+            status_cell(STATUS_PARTLY_MEASURED, "AST-02"),
+            "Fewest Gaia-matched stars with which the solution's RMS distance to Gaia is recorded. "
+            "With fewer, one or two wrong matches would dominate the RMS.",
         ],
         [
-            "`MAXIMUM_SHIFT_ARCSEC`",
-            f"`{values['refit_shift']}` arcsec",
+            "`GAIA_MATCH_RADIUS_PIXELS`",
+            f"`{values['gaia_match_radius']:g}` star widths",
             status_cell(STATUS_PARTLY_MEASURED, "AST-02"),
-            "Largest move of the whole field a refit may make and still be kept. Set at about "
-            "ten times the largest solver error seen; a larger move means the fit followed "
-            "wrong matches.",
+            "How far from a detected star a Gaia star may sit and still be matched to it.",
         ],
     ])
     template = r"""# Astrometry and plate solving pipeline review guide
@@ -1491,7 +1489,7 @@ def build_astrometry_doc() -> str:
 
 This document reviews the plate solving and astrometric calibration pipeline
 (`astrometricslib.pipelines.astrometry`). It covers the header cards the pipeline reads, its
-detection and solving methods, the Gaia DR3 refit of the solution, how stars are named, the run
+detection and solving methods, the check of the solution against Gaia DR3, how stars are named, the run
 flow, the tuned limits, the fallback paths and the quality-summary fields.
 
 <<glossary_line>>
@@ -1529,10 +1527,10 @@ flowchart TD
     B --> C["Gather scale and position hints (image file, then settings)"]
     C --> D{"At least 4 stars found?"}
     D -- no --> F["Use the sky map already in the file, if any"]
-    D -- yes --> L{"At least <<local_minimum>> stars?"}
-    L -- yes --> E["Local solver reads the image file (with hints, then blind)"]
+    D -- yes --> L{"A start position in the hints or header?"}
+    L -- yes --> E["Siril reads the image file and the start position (the header focal length, then others)"]
     L -- no --> O["Online solver: the brightest <<solver_sources>> stars, then the whole image"]
-    E -- "no solution" --> O
+    E -- "no solution" --> X["Solve failed: error with Siril's reason"]
     E -- solved --> G["Fine-tune the map against Gaia star positions"]
     O -- solved --> G
     G --> H["Name stars: SIMBAD, then Gaia, then sky position"]
@@ -1541,8 +1539,9 @@ flowchart TD
     I --> J["Quality summary"]
 ```
 
-Astrometry.net is an open-source plate solver, used both as a program installed on this computer
-(the local solver) and as an online service. SIMBAD is an online database of named stars and
+Siril is the plate solver, run on this computer with its Gaia catalog. Astrometry.net, an
+open-source plate solver, is used only as an online service, for an image with no start position.
+SIMBAD is an online database of named stars and
 other objects. The fine-tuning step fits SIP distortion terms of order 2 (Section 3.3), and the
 quality summary is an `AstrometryQualitySummary` (Section 7).
 
@@ -1555,14 +1554,15 @@ in its flags.
 
 <<fits_table>>
 
-The pixel-scale hint is the scale from Eq. 2 with a window of ±5%. The solver driver widens that
-window to 0.8 times its lower edge and 1.2 times its upper edge before calling `solve-field`.
-With no focal length or no pixel size, no scale hint is sent.
+The pixel-scale hint is the scale from Eq. 2 with a window of ±5%. Siril does not use the window;
+it takes the focal length from `FOCALLEN`, and works one out from the window only when that card
+is missing. The online service takes the window as it is. With no focal length or no pixel size,
+no scale hint is sent.
 
 <<heading_3>>
 
 This section covers, in order: finding stars, estimating how much sky a pixel covers, solving
-and refining the map, moving catalog stars to the image date, naming stars, and judging the
+and checking the map, moving catalog stars to the image date, naming stars, and judging the
 map's accuracy.
 
 ### 3.1 Point source detection
@@ -1611,43 +1611,37 @@ where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p_\tex
 size in μm and $f_\text{tel}$ the focal length in mm. The constant is the number of arcseconds in a radian
 (206,265) times $10^{-3}$, which turns μm over mm into the same unit.
 
-### 3.3 Plate solve and Gaia DR3 refit
+### 3.3 Plate solve and the Gaia DR3 match
 
-**Local, then online.** Astrometry.net is tried in up to three ways, in order:
+**Siril first, online for an image with no position.** An image with a start position (the hints
+or the header's `RA` and `DEC`) is solved by Siril alone, in a short Siril process of its own, with
+its Gaia catalog on the disk. A run is limited to <<solve_limit>> s. If the solve fails, Siril
+retries with other focal lengths, because camera programs often write a wrong one (a zoom lens's
+longest value, or a value that is too short). The retries use <<retry_factors>> times the header's
+focal length, in that order, shorter then longer, so the nearer guesses go first. No other solver
+is tried after Siril fails. An image with no start position, which Siril cannot solve, goes to the
+online Astrometry.net service in two ways, in order:
 
-1. The local solver reads the image file and finds its own stars. It is tried only when the
-   pipeline found at least <<local_minimum>> stars; with fewer, a local attempt would spend its
-   whole time limit on a near-certain failure. It runs first with the scale and position hints.
-   If that fails quickly, it retries blind (no hints), because a wrong hint, such as a forgotten
-   focal reducer, can block the right answer. If the hinted run used at least <<blind_cutoff>>
-   of its time limit, the blind retry is skipped.
-2. The online service is sent the brightest <<solver_sources>> of the pipeline's own detections.
-3. As a last resort, the whole image is uploaded to the online service.
+1. The online service is sent the brightest <<solver_sources>> of the pipeline's own detections.
+2. As a last resort, the whole image is uploaded to the online service.
 
-Only the local solver reports its fit statistics; an online solve has none (Section 3.6).
+Siril reports its fit statistics; an online solve has none (Section 3.6).
 
-**Why refit.** The solver fits only the bright stars of its index files, so its solution can be
-a pixel or more off. The pipeline then refits the solution to the field's Gaia DR3 stars
-(`wcs_refinement.py`).
+**Why match to Gaia.** The solver fits only its own reference stars, so its solution can be a
+pixel or more off and still agree with itself. The pipeline therefore measures the solution
+against the field's Gaia DR3 stars (`gaia_match.py`). It never changes the solution. An earlier
+version also refit the solution to these stars; the solver study (AST-23) found that the refit
+never improved Siril's solution, so it was removed.
 
-**How.** Each detection is matched to the nearest Gaia star within <<refit_r1>> pixels, then
-<<refit_r2>> pixels on later passes. The map is fitted with
-`astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky projected onto a
-flat plane touching it at the middle of the matched stars) plus SIP distortion of order
-<<refit_sip>>. SIP
-(Simple Imaging Polynomial) adds small polynomial terms that model the bending of the field by
-the optics. Stars more than <<refit_clip>> robust standard deviations off are dropped, and the
-fit repeats until the matched set stops changing. A robust standard deviation is 1.4826 times
-the median absolute deviation, a measure of spread that a few wild points cannot inflate.
+**How.** Each detection is matched to the nearest Gaia star within <<gaia_match_radius>> star widths
+of the solution's position. Matches more than <<match_clip>> robust standard deviations from the
+median distance are dropped, and this repeats (at most <<match_passes>> times) until the set stops
+changing. A robust standard deviation is 1.4826 times the median absolute deviation, a measure of
+spread that a few wild points cannot inflate. The RMS distance of the stars that are left is the
+Gaia match RMS.
 
-**When it is kept.** The refit needs at least <<refit_min_stars>> matches. It is kept only when
-it fits Gaia better than the solver's solution and moves the field by at most <<refit_shift>>
-arcsec.
-
-**Where it is saved.** The stack's own plate solve reads the Gaia cache only, so it refits only
-when the cache already holds the field. A later analysis step downloads the Gaia stars. When it
-accepts a refit, it saves the refit solution with the stack (the header card `WCSREFIT` marks
-it), unless the stack already holds a refit one.
+**When it is recorded.** The match needs at least <<match_min_stars>> stars. With fewer, or with
+no Gaia stars cached for the field, no RMS is recorded and the flag `gaia_match_skipped` is set.
 
 ### 3.4 Proper motion epoch propagation
 
@@ -1697,8 +1691,8 @@ $$\frac{r}{s \cdot \text{FWHM}} \le <<max_res>> \tag{5}$$
 
 The residual is the first of these that was measured:
 
-1. the RMS distance to Gaia stars under the kept solution, when the Gaia refit ran (it does not
-   depend on the solver);
+1. the RMS distance of the Gaia-matched stars under the plate solution, when the Gaia match ran
+   (it does not depend on the solver's own fit);
 2. the solver's own fit residual, which only a local solve reports;
 3. the catalog match separation of Eq. 4.
 
@@ -1713,11 +1707,10 @@ The gate detail names the one used.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has
   already checked that an image path exists.
-- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS
-  fallback, naming). It writes the solved WCS into the FITS header (never over a solution already
-  refit to Gaia), fills in the target's RA/Dec when they were unset (from its SIMBAD position, with
-  the solved image's center only as a marked, unverified fallback), and saves the stars to the
-  shared catalog.
+- **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, Gaia match,
+  header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the
+  target's RA/Dec when they were unset (from its SIMBAD position, with the solved image's center
+  only as a marked, unverified fallback), and saves the stars to the shared catalog.
 - **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records
   `plate_solve`, then `astrometry_run_gates` adds the rest (<<gate_count>> in all).
   The runner then stores the summary's numbers and the gates as quality measurements
@@ -1743,10 +1736,11 @@ The gate detail names the one used.
    these, the solve runs with no scale hint.
 2. **Too few detections (fewer than 4).** No solve is tried. A celestial WCS already in the
    image header is used instead. Without one, `plate_solve` fails.
-3. **Solver failure.** A tried solve that finds no solution, locally or online, raises
-   `PlateSolveFailedError`. The adapter does not catch it, so the error reaches the caller:
+3. **Solver failure.** A tried solve that finds no solution, with Siril or online, raises
+   `PlateSolveFailedError`, whose message carries Siril's own reason. The reason is also logged as
+   a warning. The adapter does not catch it, so the error reaches the caller:
    `validate_output` never runs, and no quality summary or gate is saved for that run.
-4. **No Gaia stars.** The refit is skipped with a flag and the solver's solution is kept.
+4. **No Gaia stars.** The Gaia match is skipped with a flag, and the gate judges the next number.
    Without `DATE-OBS`, or with a cache that has no proper motions, Gaia positions stay at epoch
    2016.0 with a flag.
 5. **Catalog outages.** The outside-service gateway pauses a host that keeps failing or answers
@@ -1788,10 +1782,6 @@ def build_photometry_doc() -> str:
         "ens_scatter": require_symbol(record_quality_module, "MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED"),
         "scatter_pop": require_symbol(record_quality_module, "MINIMUM_STARS_FOR_SCATTER_POPULATION"),
         "fallback": require_symbol(record_quality_module, "MAXIMUM_CENTROID_FALLBACK_FRACTION"),
-        "drift": require_symbol(
-            "astrometricslib.pipelines.photometry.pre_processing.assess_input_quality",
-            "UNSTABLE_TRACKING_DRIFT_PX",
-        ),
         "min_comp": require_symbol(ensemble_module, "MINIMUM_COMPARISON_STARS"),
         "max_comp": require_symbol(ensemble_module, "DEFAULT_MAXIMUM_COMPARISON_STARS"),
         "noise_model_stars": require_symbol(indices_module, "MINIMUM_STARS_FOR_NOISE_MODEL"),
@@ -1945,26 +1935,18 @@ def build_photometry_doc() -> str:
             "pulsating and rotating variables change by less than this." + see_also("PHO-09"),
         ],
         [
-            "`UNSTABLE_TRACKING_DRIFT_PX`",
-            f"`{values['drift']:g}` px",
-            design_estimate_cell("PHO"),
-            "Largest shift of the field between frames before `registration_drift` fails. Half "
-            "of the ±40 px box in which a star's center is searched, so stars are caught "
-            "before they leave the box.",
-        ],
-        [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",
             f"`{values['corner']}` px",
             design_estimate_cell("PHO"),
-            "Largest shift of an image corner caused by rotation and scale change between frames "
-            "(95th percentile)." + see_also("PHO-04"),
+            "Largest shift of an image corner beyond the shift of the field's middle, from a "
+            "turn or a change of scale between frames (95th percentile)." + see_also("PHO-04"),
         ],
         [
             "`MAXIMUM_CENTROID_FALLBACK_FRACTION`",
             f"`{values['fallback']:g}`",
             design_estimate_cell("PHO"),
-            "Largest share of star measurements that may keep the aligned position because the "
-            "star's own centroid was refused." + see_also("PHO-04"),
+            "Largest share of star measurements that may keep the plate solution's position "
+            "because the star's own centroid was refused." + see_also("PHO-04"),
         ],
         [
             "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED`",
@@ -2011,7 +1993,7 @@ by an ensemble (a combined set) of constant comparison stars in the same frames.
 
 A session here is the frames of one night (noon to noon) taken with the same gain setting and
 offset; the run uses only the frames of the requested filter. Each session has a reference
-frame: the frame every other frame is aligned to, and on which the stars to measure are found.
+frame: the frame every other frame is mapped to, and on which the stars to measure are found.
 
 The diagram shows one run, top to bottom.
 
@@ -2019,7 +2001,7 @@ The diagram shows one run, top to bottom.
 flowchart TD
     A["Frames in the requested filter (spectral frames left out)"] --> B["Group into observing sessions"]
     B --> C["Per session: find the stars to measure on the reference frame, optionally named from a catalog"]
-    C --> D["Per frame: read capture time, align to the reference frame, find star centers"]
+    C --> D["Per frame: read capture time, place stars by the frame's solution, find centers"]
     D --> E["Sum each star's light in a circle, subtract sky, estimate the error"]
     E --> F["Convert times to a common solar-system clock"]
     F --> G["Divide by a fixed set of steady comparison stars"]
@@ -2070,10 +2052,12 @@ mid-exposure). The `capture_timestamps` gate quotes which time basis was used.
 
 ### 3.2 Centroid and aperture photometry
 
-**Placing each star.** Each star is placed at its position on the reference frame, moved by the
-frame's fitted shift, rotation and scale change. It is then re-centered on its centroid (the
+**Placing each star.** Siril plate-solves every frame of a session on its own. A star's sky
+position comes from the reference frame's solution, and the frame's own solution turns it into a
+pixel position in that frame. The star is then re-centered on its centroid (the
 brightness-weighted center of its light, photutils `centroid_com`). When the centroid is not
-trustworthy, the aligned position is kept and the reason is recorded. Apertures are never
+trustworthy, the solution's position is kept and the reason is recorded. A frame Siril cannot
+solve is left out, with the reason, and no other way places the stars. Apertures are never
 rounded to whole pixels.
 
 **Measuring its light.** Aperture photometry sums the light inside a circle (the aperture) and
@@ -2560,9 +2544,10 @@ flowchart TD
 Section 3 names the steps in the usual terms: the grating equation, differential refraction and
 the zero-point shift (Section 3.1); QE, instrument response, airmass extinction and dereddening
 (Section 3.3); and the Pickles and Gaia XP comparisons (Sections 3.4 and 3.5). The normal image
-is the target's solved standard stack, whose WCS (pixel-to-sky map) names the stars. Without it,
-the stars are named by matching the pattern of their pixel positions to catalog stars (Section
-6). The quality summary is a `SpectroscopyQualitySummary` (Section 7).
+is the target's solved standard stack of the same camera and optic, whose WCS (pixel-to-sky map)
+names the stars; without one, the spectral stack's own WCS names them when the astrometry pipeline
+has solved that stack. Spectroscopy never runs astrometry: with neither, the stage is skipped
+(Section 6). The quality summary is a `SpectroscopyQualitySummary` (Section 7).
 
 <<heading_2>>
 
@@ -2704,12 +2689,13 @@ together.
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`.
 - **Stage 2 (`run`).** Finds the stars with `AstrometryPipeline` (no solve), names them from the
-  target's solved stack, and runs `SpectroscopyPipeline.process`. Each spectrum carries four
-  quality checkpoints, in order: `raw_frame`, `pre_processing`, `processing` and
-  `post_processing`. Each checkpoint is a set of measured values (metrics), some with a limit.
-  The `processing` checkpoint judges the classification: a poor match, an ambiguous match, and a
-  type from line strengths that is more than <<subtypes>> subtype steps from the template-fit
-  type.
+  target's solved stack (`resolve_spectral_stack_solution`: the standard stack's WCS shifted onto
+  the spectral stack, else the spectral stack's own WCS), and runs `SpectroscopyPipeline.process`.
+  Each spectrum carries four quality checkpoints, in order: `raw_frame`, `pre_processing`,
+  `processing` and `post_processing`. Each checkpoint is a set of measured values (metrics), some
+  with a limit. The `processing` checkpoint judges the classification: a poor match, an ambiguous
+  match, and a type from line strengths that is more than <<subtypes>> subtype steps from the
+  template-fit type.
 - **Stage 3 (`validate_output`).** Builds the summary, records the eight
   `spectroscopy_run_gates`, then `gaia_xp_agreement` (<<gate_count>> in all).
   It then stores the run totals, the per-stage medians and the gates as quality measurements
@@ -2750,8 +2736,12 @@ leaves too large an error, happens when the instrument is calibrated (`calibrati
 4. **Reddened hot stars.** With no catalog $E(B-V)$, an O, B or A star tends to read about one
    step of the reference list cool. The list skips some subtypes, so one step can be more than
    one subtype: the A stars of <<SPE-16>> read two subtypes cool.
-5. **No solved stack.** Stars are named by matching the pattern of their pixel positions to
-   catalog stars ("by geometry"), which can fail on sparse fields.
+5. **No plate solution.** The stage runner skips spectroscopy with the reason `needs astrometry:
+   ...; run processing.astrometry.run(target) first`, one job warning
+   (`spectroscopy.notice_needs_astrometry`) and one INFO log line; it never runs astrometry. When
+   the standard stack's WCS and the spectral field do not share one shift, stars are named by
+   matching the pattern of their pixel positions to catalog stars ("by geometry"), which can fail
+   on sparse fields.
 
 <<quality_section>>"""
     values["analysis_note"] = ANALYSIS_STAGES_NOTE
@@ -3161,9 +3151,9 @@ def build_stacking_doc() -> str:
         "min_surviving": require_symbol(
             "astrometricslib.utilities.stack_filter_floor", "DEFAULT_MINIMUM_SURVIVING_FRAMES"
         ),
-        "quarantine": require_symbol(
-            "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine",
-            "WARN_QUARANTINED_FRACTION",
+        "set_aside": require_symbol(
+            "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside",
+            "WARN_SET_ASIDE_FRACTION",
         ),
         "penalty": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
@@ -3290,8 +3280,8 @@ def build_stacking_doc() -> str:
             "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
-            "`WARN_QUARANTINED_FRACTION`",
-            f"`{values['quarantine']}`",
+            "`WARN_SET_ASIDE_FRACTION`",
+            f"`{values['set_aside']}`",
             status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
             "Share of a batch above which setting frames aside draws a warning. It blocks nothing: "
             "every frame that fails a check is moved. About twice the share the step picks from a "
@@ -3465,8 +3455,8 @@ flowchart TD
 Siril is an open-source astronomy image processor that does the pixel work. In code terms the
 run starts at `stage.stack_frames(target)`, splits frames in `stack_runner.run_stack`, and
 stacks through a `StackingDriver` (the interface for a stacking program), whose Siril version
-runs `ImageProcessing` (Section 4). Setting bad frames aside is the frame quarantine, and the
-quality summary is a `StackQualitySummary` (Section 7).
+runs `ImageProcessing` (Section 4). Setting frames aside is the set-aside check, a cloud and
+target alignment check, and the quality summary is a `StackQualitySummary` (Section 7).
 
 <<heading_2>>
 
@@ -3599,7 +3589,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames
    at a less common gain setting set aside, frames set aside by an earlier run dropped, the
-   quarantine (imaging only), and the background test.
+   the set-aside check (imaging only; the cloud and target alignment check), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames,
    settings and stacking code: a short code that changes whenever any of them changes. A match
    with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
@@ -3609,8 +3599,8 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    becomes the single `_previous` version (`previous_stack.py`), which a person can swap back or
    discard.
 4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length (and by night for
-   spectra) and calls the `StackingDriver`. The Siril driver (`siril_stacking_driver.py`) runs
-   `ImageProcessing` in the `siril_interface` package: masters, calibration, registration (alignment) and
+   spectra) and calls the `StackingDriver`. The Siril driver (`siril/stacking/stacking_driver.py`) runs
+   `ImageProcessing` in the `siril/stacking/` package: masters, calibration, registration (alignment) and
    stacking. Spectral registration that loses too many frames is retried with relaxed detection,
    then with phase correlation (aligning whole images by their overall pattern rather than by
    single stars).
@@ -3654,8 +3644,10 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Temperature gap above <<dark_tol>> °C.** The nearest dark is applied with a soft flag;
    `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
-2. **Bad frames.** Frames with too few stars or non-round stars move to `_excluded`. A batch
-   whose share of bad frames is above <<quarantine>> moves nothing and `frame_quarantine` fails.
+2. **Bad frames.** The cloud and target alignment check moves frames with too few stars,
+   non-round stars or a pointing off the target to `_excluded`. It moves every failing frame.
+   A batch whose share of bad frames is above <<set_aside>> only draws a warning, and
+   `frame_set_aside` fails as a warning.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R
    > <<degrade>>$ in `stack_sharpness`.
 4. **Over-subtraction.** `zero_pixel_fraction` and `negative_pixels` catch darks or biases that
@@ -3753,7 +3745,7 @@ The fifth pipeline, stacking, does not use this interface and has no adapter. It
 `stage.stack_frames` through `stack_runner.run_stack` to a `StackingDriver`: the interface for a
 program that calibrates, aligns and combines frames. The one implementation uses Siril, an
 open-source astronomy image processor, through the `ImageProcessing` class in
-the `siril_interface` package.
+the Siril driver's `siril/stacking/` package.
 
 ```mermaid
 flowchart LR

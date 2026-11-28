@@ -5,8 +5,11 @@ a nebula that fills the frame and leaves only a faint rim of sky at the edges.
 Siril is not started.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
+from astropy.io import fits
 
 from astrometricslib.pipelines.shared.image_scaling import (
     AUTOSTRETCH_SHADOWS_CLIP_SIGMA,
@@ -15,6 +18,7 @@ from astrometricslib.pipelines.shared.image_scaling import (
 from astrometricslib.pipelines.stacking.post_processing.stretch_sky import (
     CLIPPED_SHARE_LIMIT,
     measure_stretch_sky,
+    sky_background_for_file,
 )
 
 SIZE = 400
@@ -132,3 +136,16 @@ def resolve_limit() -> float:
     from astrometricslib.foundation.parameters import resolve
 
     return float(resolve(CLIPPED_SHARE_LIMIT).value)
+
+
+def test_the_sky_of_a_single_channel_stack_is_measured_as_before(tmp_path: Path) -> None:
+    """Verify a mono stack still gets a measured sky with no green step."""
+    path = tmp_path / "mono.fits"
+    rng = np.random.default_rng(3)
+    fits.writeto(path, rng.normal(0.01, 0.0005, (200, 200)).astype(np.float32))
+
+    sky = sky_background_for_file(str(path))
+
+    assert sky is not None
+    assert sky[0] == pytest.approx(0.01, abs=0.0005)
+    assert sky[1] == pytest.approx(0.0005, rel=0.1)

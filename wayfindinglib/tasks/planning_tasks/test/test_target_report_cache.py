@@ -20,6 +20,7 @@ import pytest
 
 from astrometricslib import AppConfiguration, FrameRecord, Target
 from astrometricslib.foundation.storage.data_versions import bump_data_version
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.tasks.planning_tasks import target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import build_target_dataset_report
@@ -73,6 +74,12 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         "wayfindinglib.analytics.data_versions.equipment_signs", lambda config: ("equipment",)
     )
 
+    # The report reads the science library's data versions; the build
+    # itself is replaced, so a stand-in that answers only those will do.
+    versions = attach_library_versions(
+        SimpleNamespace(quality=SimpleNamespace(records=SimpleNamespace())), config
+    )
+
     def ask(target: Target | None = None, **kwargs: Any) -> Any:
         """Ask for the report of a target.
 
@@ -82,7 +89,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             The report.
         """
         return build_target_dataset_report(
-            target or Target(id="M 81"), astrometrics=None, butler=butler, config=config, **kwargs
+            target or Target(id="M 81"), astrometrics=versions, butler=butler, config=config, **kwargs
         )
 
     return SimpleNamespace(

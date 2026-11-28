@@ -16,10 +16,13 @@ Description: Four objects, one per analysis pipeline, each reached from
   for moving objects (`run`).
 
 There is no call that runs every pipeline: a script, and the app's Analyze
-Target button, call each pipeline in turn. A run adds astrometry first when
-the pipeline needs it and its result is missing or out of date. Every run
-records a job. Each method is a thin wrapper of one owner function, which it
-names.
+Target button, call each pipeline in turn. Astrometry is the core layer:
+photometry and spectroscopy only read its plate solution and never run it.
+Without a current solution they are skipped, with the reason
+``needs astrometry: ...``, so run ``processing.astrometry.run`` first. (Until
+issue 182 they ran astrometry themselves when its result was missing or out
+of date.) Every run records a job. Each method is a thin wrapper of one
+owner function, which it names.
 """
 
 from datetime import UTC, datetime
@@ -222,10 +225,16 @@ class PhotometryPipeline(_Pipeline):
     ) -> ProcessTargetResult:
         """Measure the brightness of a target's stars, night by night.
 
-        Photometry names its stars with the stack's plate solution, so
-        astrometry runs first when its result is missing or older than the
-        stack; when it cannot run, photometry is skipped with the reason
-        ``needs astrometry: ...``. Only frames of one camera and one optic
+        Photometry names its stars with the stack's plate solution. It reads
+        astrometry's result and never runs astrometry: run
+        ``processing.astrometry.run(target)`` first (or with ``stack``, for
+        another stack). When the solution is missing, older than the stack,
+        or the stack could not be solved, photometry is skipped, not failed:
+        ``results["photometry"]`` is ``{"status": "skipped", ...}`` and
+        ``stages_skipped["photometry"]`` holds the reason ``needs
+        astrometry: <why>; run processing.astrometry.run(target) first``,
+        which the job also lists as a warning. (Until issue 182 this call
+        ran astrometry itself first.) Only frames of one camera and one optic
         are measured: those of the analyzed stack. The result replaces the
         target's saved photometry summary. Save the target afterwards with
         ``targets.update(target)``.
@@ -244,14 +253,16 @@ class PhotometryPipeline(_Pipeline):
             optic.
         stack : `StackConfigurationResult` or `str`, optional
             The stack to analyze: another configuration's stack from
-            ``processing.stacking.get_stack``, or the path of an image to
-            solve when the target has no stack. Left out, the main stack.
+            ``processing.stacking.get_stack``, or the path of an image
+            astrometry solved when the target has no stack. Its plate
+            solution must already be there. Left out, the main stack.
 
         Returns
         -------
         result : `ProcessTargetResult`
-            The photometry result under ``results["photometry"]``, the
-            prerequisites run and the stages skipped.
+            The photometry result under ``results["photometry"]``, or the
+            skipped entry and its reason in ``stages_skipped``.
+            ``prerequisites_run`` stays empty.
         """
         from astrometricslib.pipelines.pipeline_runs import run_photometry
 
@@ -275,11 +286,17 @@ class SpectroscopyPipeline(_Pipeline):
     ) -> ProcessTargetResult:
         """Extract and classify the spectra of a target's spectral stack.
 
-        Spectroscopy takes its field center and star names from the solved
-        imaging stack, so astrometry runs first when its result is missing
-        or out of date. A target with no spectral data is skipped, with a
-        ``{"status": "skipped", ...}`` entry, not an error. Save the target
-        afterwards with ``targets.update(target)``.
+        Spectroscopy takes its field center and star names from a plate
+        solution and never runs astrometry. The solution is the target's
+        solved imaging stack's of the same camera and optic, else the
+        spectral stack's own when ``processing.astrometry.run(target,
+        spectral_stack)`` has solved it. With neither, spectroscopy is
+        skipped, not failed: ``stages_skipped["spectroscopy"]`` holds the
+        reason ``needs astrometry: <why>; run ... first``, which the job
+        also lists as a warning. (Until issue 182 this call ran astrometry
+        on the imaging stack first.) A target with no spectral data is
+        skipped, with a ``{"status": "skipped", ...}`` entry, not an error.
+        Save the target afterwards with ``targets.update(target)``.
 
         Owner: astrometricslib.pipelines.pipeline_runs.run_spectroscopy
 
@@ -297,7 +314,8 @@ class SpectroscopyPipeline(_Pipeline):
         Returns
         -------
         result : `ProcessTargetResult`
-            The spectroscopy result under ``results["spectroscopy"]``.
+            The spectroscopy result under ``results["spectroscopy"]``, or
+            the skipped entry and its reason in ``stages_skipped``.
         """
         from astrometricslib.pipelines.pipeline_runs import run_spectroscopy
 
@@ -317,7 +335,9 @@ class SpectroscopyPipeline(_Pipeline):
 
         One observing night at a time; a night with fewer than two frames is
         skipped, with the reason in the result. Spectroscopy runs first when
-        its result is missing or older than the spectral stack. The summary
+        its result is missing or older than the spectral stack; when it has
+        no plate solution to read, both are skipped with the reason
+        ``needs spectroscopy: needs astrometry: ...``. The summary
         is kept in ``quality.spectroscopy_variation``, and the stack's
         spectra stay as they are.
 

@@ -110,7 +110,8 @@ if GraXpert, Cosmic Clarity or the star toning fails, the picture is made from
 the result of the step before it, and if Siril fails, there is no picture.
 
 This module runs the steps in order and saves the result. The steps live in
-their own modules: `preview_siril` (the Siril scripts), `preview_graxpert`
+their own modules: the Siril driver's preview part (``siril.preview``, the
+Siril scripts, run with ``siril.core.script_run``), `preview_graxpert`
 (the gradient removal), `preview_cosmic_clarity` (the denoise),
 `starnet_stretch` (the StarNet stretch) and `preview_color` (the color
 steps). `preview_steps` runs one optional step, and `preview_settings` holds
@@ -126,6 +127,19 @@ import time
 from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import read_data, read_header, write_image
+from astrometricslib._internal.drivers.siril.core.program import find_local_gaia_catalog
+from astrometricslib._internal.drivers.siril.core.script_run import last_siril_output, run_siril_script
+from astrometricslib._internal.drivers.siril.preview.color_calibration import (
+    build_pcc_script,
+    reports_imprecise_solution,
+)
+from astrometricslib._internal.drivers.siril.preview.stretch import (
+    PROCESSED_STEM,
+    build_bright_object_script,
+    build_picture_script,
+    build_preview_script,
+    build_stretch_script,
+)
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.foundation.run_abandonment import RunAbandonedError
@@ -141,7 +155,7 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
     BackgroundGradientOutcome,
     not_measured_outcome,
-    write_binned_model,
+    write_binned_sky,
 )
 from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     choose_bright_object_stretch_for_file,
@@ -157,11 +171,9 @@ from astrometricslib.pipelines.stacking.post_processing.masked_stretch import (
     plan_masked_stretch_for_file,
 )
 from astrometricslib.pipelines.stacking.post_processing.preview_color import (
-    build_pcc_script,
     calibrate_from_sun_like_stars,
     check_white_balance,
     decide_remove_green,
-    find_local_gaia_catalog,
     has_plate_solution,
     is_colour_image,
     level_stretched_sky,
@@ -176,29 +188,20 @@ from astrometricslib.pipelines.stacking.post_processing.preview_settings import 
     PreviewSettings,
     write_preview_settings,
 )
-from astrometricslib.pipelines.stacking.post_processing.preview_siril import (
-    PROCESSED_STEM,
-    build_bright_object_script,
-    build_picture_script,
-    build_preview_script,
-    build_stretch_script,
-    last_siril_output,
-    run_preview_script,
-    sky_background_for_file,
-)
 from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep, next_source
 from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.sky_plane import choose_background_method_for_file
 from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
 from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import stretch_with_starnet
+from astrometricslib.pipelines.stacking.post_processing.stretch_sky import (
+    choose_sky_stretch,
+    sky_background_for_file,
+)
 
 logger = logging.getLogger(__name__)
 
-
-# The sentence Siril logs when its photometric color calibration fits the stars
-# poorly. The text follows Siril 1.4.
-_SIRIL_IMPRECISE_PCC_TEXT = "imprecise solution"
 
 # The scratch folder lives on the local disk (~/.cache/astrometrics/siril), not
 # system temp folder: that is often held in RAM, and a Flatpak Siril is
@@ -279,10 +282,9 @@ def _picture_script(
         If given, each cleanup step that failed and was skipped is added to
         it.
     background_outcomes : `list` [`BackgroundGradientOutcome`], optional
-        If given, the measurement of GraXpert's background model is added to
-        it: the numbers, or the reason there are none (GraXpert not
-        configured, skipped for a bright object, failed, or no model).
-        GraXpert's full-size model file is deleted either way.
+        If given, the measurement of the stack's own sky bins is added to it:
+        the numbers, or the reason there are none (a bright object, a stack
+        that could not be read, too few sky bins).
     object_category : `str` or `None`, optional
         The target's kind (`Target.object_category`). Only a nebula or a
         galaxy can get the masked stretch (see `masked_stretch`). `None`,
@@ -309,7 +311,9 @@ def _picture_script(
         )
         if background_outcomes is not None:
             background_outcomes.append(
-                not_measured_outcome("the preview of a bright object skips GraXpert, so there is no model")
+                not_measured_outcome(
+                    "the preview of a bright object skips the background step, so the sky was not measured"
+                )
             )
         if steps_log is not None:
             steps_log.append("Bright object: its own stretch, without GraXpert or the denoise")
@@ -328,7 +332,14 @@ def _picture_script(
                     used=False, reason="the bright-object stretch was used", category=object_category
                 ).record(),
             )
-        return build_bright_object_script(name, "preview", bright_object)
+        return build_bright_object_script(
+            name,
+            "preview",
+            bright_object.black_point,
+            bright_object.midtones,
+            bright_object.white_point,
+            bright_object.scale,
+        )
     steps: list[str] = []
     graxpert_executable = configuration.get_graxpert_executable()
     if graxpert_executable:
@@ -339,8 +350,9 @@ def _picture_script(
         background_record = {"method": "none", "reason": "GraXpert is not configured"}
         steps.append("GraXpert not configured")
         if background_outcomes is not None:
+            # The sky is measured whether or not GraXpert is there.
             background_outcomes.append(
-                not_measured_outcome("GraXpert is not configured, so there is no model")
+                choose_background_method_for_file(os.path.join(scratch, name)).sky_background
             )
     colour = is_colour_image(os.path.join(scratch, name))
     if colour and configuration.get_preview_star_width_match_enabled():
@@ -381,8 +393,8 @@ def _picture_script(
                     solve,
                     local_catalog,
                 )
-                succeeded = run_preview_script(scratch, commands, siril_executable)
-                if succeeded and _SIRIL_IMPRECISE_PCC_TEXT in last_siril_output():
+                succeeded = run_siril_script(scratch, commands, siril_executable)
+                if succeeded and reports_imprecise_solution(last_siril_output()):
                     pcc_imprecise.append(True)
                 return succeeded
 
@@ -518,21 +530,24 @@ def _picture_script(
         return build_preview_script(
             name,
             "preview",
-            choice.sky_level,
+            choose_sky_stretch(
+                choice.sky_level,
+                linked,
+                sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
+            ),
             remove_green,
-            linked,
-            sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
         )
     if not stretched_by_starnet:
-        stretched = run_preview_script(
+        sky_background = sky_background_for_file(
+            os.path.join(scratch, name), remove_green, linked, stretch_record
+        )
+        stretched = run_siril_script(
             scratch,
             build_stretch_script(
                 name,
                 "stretched",
-                choice.sky_level,
+                choose_sky_stretch(choice.sky_level, linked, sky_background),
                 remove_green,
-                linked,
-                sky_background_for_file(os.path.join(scratch, name), remove_green, linked, stretch_record),
             ),
             siril_executable,
         )
@@ -729,10 +744,10 @@ def write_stack_preview(
         it, so the caller can record that the picture differs from its
         settings (see `preview_notices`).
     background_outcomes : `list` [`BackgroundGradientOutcome`], optional
-        If given, GraXpert's background model is measured and the result is
+        If given, the stack's own sky bins are measured and the result is
         added to it (see `background_gradient`), and the 64 by 64 map is saved
-        beside the picture (`background_model_path_for`). Left out, the model
-        is deleted unmeasured. A preview that was not made adds nothing.
+        beside the picture (`background_model_path_for`). Left out, the sky is
+        not measured. A preview that was not made adds nothing.
     object_category : `str` or `None`, optional
         The target's kind (`Target.object_category`), for the masked stretch
         (see `masked_stretch`). Left out, the stack is of an unknown kind and
@@ -803,7 +818,7 @@ def write_stack_preview(
         )
         if steps_log is not None:
             steps_log.extend(steps_taken)
-        succeeded = commands is not None and run_preview_script(scratch, commands, siril_executable)
+        succeeded = commands is not None and run_siril_script(scratch, commands, siril_executable)
         picture = os.path.join(scratch, "preview.jpg")
         if not succeeded or not os.path.isfile(picture):
             logger.warning("No preview made for '%s': Siril did not save the picture.", stacked_path)
@@ -819,7 +834,7 @@ def write_stack_preview(
             _copy_observation_header(scratch_stack, processed_path)
         write_preview_settings(stacked_path, settings or PreviewSettings(), settings_used, steps_taken)
         for background_outcome in background_outcomes or []:
-            write_binned_model(background_outcome, background_model_path)
+            write_binned_sky(background_outcome, background_model_path)
     except RunAbandonedError:
         # The job was cancelled. A picture only partly made is not left
         # beside the stack; the caller of a remake puts the old one back.

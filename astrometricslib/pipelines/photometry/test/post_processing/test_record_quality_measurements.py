@@ -25,7 +25,7 @@ from astrometricslib.pipelines.photometry.metrics import (
     PHOTOMETRY_GATE_COMPARISON_ENSEMBLE,
     PHOTOMETRY_GATE_FLUX_UNCERTAINTY,
     PHOTOMETRY_GATE_PHOTOMETRY_WORK,
-    PHOTOMETRY_GATE_REGISTRATION_DRIFT,
+    PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT,
     PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG,
     PHOTOMETRY_METRICS,
     PHOTOMETRY_SCIENCE_OUTCOME_METRIC_NAMES,
@@ -203,7 +203,7 @@ def _gate_inputs() -> dict:
     }
 
 
-def test_the_registration_gate_stores_the_global_drift_when_the_corner_test_fails() -> None:
+def test_the_registration_gate_stores_the_corner_displacement_when_it_fails() -> None:
     """A rotated field fails the gate; the corner value has its own metric."""
     from astrometricslib.pipelines.photometry.test.post_processing.test_record_quality import (
         centroid_summary,
@@ -218,12 +218,13 @@ def test_the_registration_gate_stores_the_global_drift_when_the_corner_test_fail
         m.metric: m
         for m in rq.photometry_run_measurements(photometry_fixture_metrics(), gates, inputs, _context())
     }
-    gate = by_name[PHOTOMETRY_GATE_REGISTRATION_DRIFT]
+    gate = by_name[PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT]
 
     assert gate.check_outcome is GateStatus.FAILED
-    assert gate.value == pytest.approx(5.0)
+    assert gate.value == pytest.approx(1.9)
     assert gate.check_limit is not None
     assert gate.check_limit.unit == "px"
+    assert gate.check_limit.value == pytest.approx(1.0)
     assert by_name[PHOTOMETRY_CORNER_DISPLACEMENT_P95_PX].value == pytest.approx(1.9)
     assert by_name[PHOTOMETRY_CENTROID_FALLBACK_FRACTION].value == pytest.approx(0.1)
 

@@ -5,9 +5,9 @@ group them and how to judge the result. A stacking program (the "engine")
 does the pixel work: it calibrates the frames, registers them (lines them
 up) and combines them. `StackingDriver` is the abstract base class every
 engine's driver implements. Siril is the engine in use
-(`SirilStackingDriver` in `drivers/siril_stacking_driver.py`). Because the
-pipeline only uses this interface, it never depends on one program's
-commands or file formats.
+(`SirilStackingDriver` in `drivers/siril/stacking/stacking_driver.py`).
+Because the pipeline only uses this interface, it never depends on one
+program's commands or file formats.
 
 A driver takes a `StackSettings` and returns a `StackRunResult`. Everything
 the pipeline needs to know about the run, including values it used to read

@@ -21,6 +21,7 @@ from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC
 from wayfindinglib.analytics.result_quality.judge_results import needs_attention
 from wayfindinglib.analytics.result_quality.science_goal import science_goal_for_setting
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.analytics.test.night_quality_helpers import (
     FIRST_NIGHT,
     OTHER,
@@ -69,7 +70,7 @@ def _context(library: FakeLibrary, stored: dict[str, list[Any]] | None = None) -
     """
     records = stored or {}
     return SimpleNamespace(
-        astrometrics=library,
+        astrometrics=attach_library_versions(library, _CONFIG["config"]),
         config=_CONFIG["config"],
         review_cache=VersionedCache(),
         active_telescope=lambda: None,
@@ -128,12 +129,12 @@ def test_set_aside_frames_recorded_by_rows_are_counted_apart() -> None:
     )
     moved = "frame moved to _excluded/"
     # Two moved frames that were measured, and one that was not (only a
-    # quarantine row exists), so both paths of the account are used.
+    # set-aside row exists), so both paths of the account are used.
     for index in range(3):
         extra = FrameRecord(
             path=f"/lib/lights/HD 1/Scope/CamA/moved_{index}.fits", timestamp=stamp, exposure_s=60
         )
-        metric = STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC if index < 2 else "frame.quarantine_roundness"
+        metric = STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC if index < 2 else "frame.set_aside_roundness"
         rows.append(make_row(metric, 1, 0.5, target, extra, moved))
 
     (entry,) = _review(FakeLibrary([target], rows)).targets

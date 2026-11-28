@@ -11,7 +11,7 @@ name = "astrometrics"
 version = "0.2.0"
 description = "Integrated image processing, photometry, spectroscopy, and telescope control for amateur astronomy and citizen science."
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Michael Coelho", email = "macoelho25@gmail.com" }]
 keywords = [
@@ -147,13 +147,14 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "simulator", "build/tpm/test"]
+testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "simulator", "build/tpm/test", "build/linux/siril_gpu/test"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
     "anyio: mark test to run with anyio",
     "trio: mark test as trio-only (skip if trio not installed)",
-    "golden: compare real M 13 frame measurements with pinned values (needs the Git LFS sample frames)"
+    "golden: compare real M 13 frame measurements with pinned values (needs the Git LFS sample frames)",
+    "windows_sensitive: the test touches behavior that differs on Windows; added by the root conftest.py, and the only tests a pull request runs on Windows"
 ]
 log_cli = true
 log_cli_level = "INFO"
@@ -268,8 +269,8 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # ssh/rsync/scp to remote StellarMate boxes). Reviewed: every call site uses
 # list-form args (never shell=True, never a string built by interpolating
 # untrusted input into a shell command), which is the safe subprocess pattern.
-"astrometricslib/_internal/drivers/siril_interface/*.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
-"astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/_internal/drivers/siril/core/*.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # the one place that starts Siril (see siril/test/test_siril_driver_rules.py)
+"astrometricslib/_internal/drivers/siril/stacking/*.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # the stack run pipes Siril's output and stops its process tree
 "astrometricslib/scripts/check_drive_integrity.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/scripts/upload_library.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "build/linux/record_performance.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
@@ -286,6 +287,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "simulator/observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "print"] # list-form start of the stand-in processes, always through the supervisor; also a command-line program
 "simulator/test/test_phd2_live.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print"] # starts real indiserver and PHD2 processes in list form, in a temporary world; with `-s` it reports the guiding outcome
 "simulator/test/test_fit_live.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print"] # reads INDI properties with indi_getprop in list form (127.0.0.1 only) from a temporary world; with `-s` it reports the closure numbers
+"simulator/test/test_alignment_live.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print"] # starts the real indiserver in list form and asks flatpak whether Siril is installed, in a temporary world on 127.0.0.1; with `-s` it reports the alignment outcome
 "simulator/test/test_world_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # starts real indiserver processes and calls indi_setprop and indi_getprop in list form, on 127.0.0.1 only
 "simulator/test/test_observatory.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"] # runs the supervisor, `sleep` and `pgrep` in list form
 "simulator/library_copy.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "print", "hardcoded-sql-expression"] # table names come from the copy itself; list-form fuse-overlayfs and fusermount3; also a command-line program
@@ -303,9 +305,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/pipelines/stacking/post_processing/stack_preview.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a Siril run that timed out
 "astrometricslib/pipelines/stacking/post_processing/preview_steps.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a preview step that timed out
 "astrometricslib/pipelines/stacking/post_processing/starnet_stretch.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a StarNet run that timed out
-"astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a Siril (StarNet) run that timed out; the run itself goes through preview_siril.run_preview_script
-"astrometricslib/_internal/drivers/siril_stacking_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"astrometricslib/_internal/drivers/astrometry_net_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a Siril (StarNet) run that timed out; the run itself goes through the Siril driver's script_run.run_siril_script
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/phone_share.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
@@ -320,8 +320,8 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # These stand in for a Siril process without needing Siril installed, using
 # `true`/`sleep` off PATH like any other list-form subprocess call in this
 # codebase (never shell=True, never interpolated).
-"astrometricslib/_internal/drivers/test/test_siril_command_synchronisation.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
-"astrometricslib/_internal/drivers/test/test_siril_process_target_pipe_timeout.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"astrometricslib/_internal/drivers/siril/test/test_siril_command_synchronisation.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"astrometricslib/_internal/drivers/siril/test/test_siril_process_target_pipe_timeout.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 # S608: these all bind values through parameterized `?` placeholders; the
 # only f-string interpolation is a code-defined table name (from a registry
 # constant, never a request body or user text field) or, for the Gaia ADQL
@@ -351,6 +351,10 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "build/tpm/seed_library.py" = ["banned-api"] # the seeder writes the private guiding stores directly, into a throwaway library
 "build/agent_tools/validate_plate_solution_check.py" = ["banned-api"] # runs the private plate-solution check on shifted solutions of a library copy; no public call takes a shifted map
+"build/agent_tools/plate_solver_study/judge.py" = ["banned-api"] # measures saved plate solutions with the private detector, refit and Gaia cache reader, as register entry AST-23 records; no public call takes an outside solution
+"build/agent_tools/plate_solver_study/corner_check.py" = ["banned-api"] # reads the private Gaia cache copy, as judge.py does
+"build/agent_tools/plate_solver_study/run_solvers.py" = ["banned-api", "subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form solve-field and flatpak calls; reads the private solve-field fit statistics
+"build/linux/siril_gpu/siril_gpu_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # list-form flatpak, pip and nvidia-smi calls only, no shell
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/main_backend.py" = ["module-import-not-at-top-of-file"] # warnings.filterwarnings() must precede import

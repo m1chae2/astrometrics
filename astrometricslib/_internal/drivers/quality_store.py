@@ -52,15 +52,19 @@ empty. Only a write creates the file and brings the schema up to date.
 Times are stored as UTC with the offset ``+00:00``, so text order is time
 order. A naive time is refused.
 
-A read of the newest rows of one target (``target_id`` given, ``latest_only``
-true, and no other filter than the metric, level and subset label) is kept in
+A read of the newest rows of one target, or of one metric over the whole
+library (``target_id`` or ``metric`` given, ``latest_only`` true, and no
+other filter than the metric, level, target and subset label), is kept in
 memory, and the next read of the same question reads only what was written
 since (see `QualityStore.query`). The result is always the one a full read
-would give.
+would give. `QualityStore.data_version` gives a short opaque text that
+changes whenever the rows a question reads change, so a caller can keep a
+result it worked out from them.
 
 Every database problem is raised as `StorageError`.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -527,10 +531,14 @@ A read of fewer rows takes a few milliseconds, so keeping it gains nothing.
 A target with a few hundred frames gives thousands of rows and reads in
 about 0.3 seconds. Design estimate, register row WAY-D107."""
 
-LATEST_READ_MAXIMUM_ENTRIES = 6
+LATEST_READ_MAXIMUM_ENTRIES = 16
 """How many reads of the newest rows are kept (the least recently used one is
 dropped first). One read of a target with 120 frames is about 4000 rows, a
-few megabytes. Design estimate, register row WAY-D107."""
+few megabytes. The capture history alone keeps four reads (one for each frame
+metric it reads, over the whole library), and the depth goal and the
+star-shape review of the target in view keep more, so a smaller number drops
+reads that are asked for again a minute later. Design estimate, register row
+WAY-D107."""
 
 LATEST_READ_MAXIMUM_CHANGED_SUBJECTS = 500
 """The most subjects written since a kept read that are read again one by one.
@@ -552,6 +560,9 @@ class _LatestRead:
     rows_up_to_mark : `int`
         How many rows (of any subject) had a row number up to `mark`. Fewer
         now means a row was deleted.
+    row_id_sum_up_to_mark : `int`
+        The sum of those row numbers. A row deleted while another was put
+        in below `mark` leaves the count the same but changes the sum.
     mark_fingerprint : `tuple`
         The run id, metric, subject id and time of the row numbered `mark`.
         Another row there now means the table was emptied and filled again.
@@ -563,6 +574,7 @@ class _LatestRead:
     schema_version: int
     mark: int
     rows_up_to_mark: int
+    row_id_sum_up_to_mark: int
     mark_fingerprint: tuple[Any, ...] | None
     rows: dict[tuple[str, str, str, str], tuple[str, int, QualityMeasurement]]
 
@@ -1355,7 +1367,7 @@ class QualityStore:
             keepable = (
                 latest_only
                 and row_ids is None
-                and target_id is not None
+                and (target_id is not None or metric is not None)
                 and has_variant_column
                 and since is None
                 and observing_night_id is None
@@ -1373,6 +1385,91 @@ class QualityStore:
                     (self.db_path, metric, level, target_id, variant, library_only),
                 )
             return self._read_measurements(connection, source, where, parameters)
+
+    def data_version(
+        self,
+        metric: str | None = None,
+        level: SubjectLevel | None = None,
+        target_id: str | None = None,
+    ) -> str:
+        """Give a short text that changes whenever the rows of a question do.
+
+        A caller that works something out from the rows `query` gives for a
+        metric, level and target can keep its answer while this text stays
+        the same, and needs no row read to find out. The text is opaque: it
+        is only meant to be compared with an earlier one.
+
+        It is made from the count, the largest row number, the sum of the
+        row numbers and the newest time of the matching rows (newest or
+        not), the row numbered largest, the schema version and the database
+        path, in one short query. With a target, the matching rows also
+        include every row of a subject that has a row of the target, since a
+        newer row that names another target (a frame moved to another
+        target) hides the older row from the target's newest rows. The store
+        only adds rows, and removes only a deleted frame's rows, so an
+        added, removed or replaced row changes it. A row of another metric,
+        level or target does not.
+
+        Parameters
+        ----------
+        metric : `str`, optional
+            Only this metric.
+        level : `SubjectLevel`, optional
+            Only subjects of this level.
+        target_id : `str`, optional
+            Only this target.
+
+        Returns
+        -------
+        version : `str`
+            The text. A missing file or missing quality tables give the
+            text of an empty store.
+
+        Notes
+        -----
+        A `StorageError` is raised if the file cannot be read, or was
+        written by a newer version of this code.
+        """
+        conditions: list[str] = []
+        parameters: list[Any] = []
+        for column, wanted in (
+            ("metric", metric),
+            ("subject_level", None if level is None else SubjectLevel(level).value),
+        ):
+            if wanted is not None:
+                conditions.append(f"{column} = ?")
+                parameters.append(wanted)
+        if target_id is not None:
+            # A newer row of one of the target's subjects that names another
+            # target (a frame moved to another target) hides the older row
+            # from the target's newest rows, so those rows count too.
+            subjects = " AND ".join(["target_id = ?", *conditions])
+            conditions.append(
+                "(target_id = ? OR subject_id IN "  # ruff: ignore[hardcoded-sql-expression]
+                f"(SELECT subject_id FROM quality_measurements WHERE {subjects}))"
+            )
+            parameters = [*parameters, target_id, target_id, *parameters]
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        parts: tuple[Any, ...] = (self.db_path, 0)
+        with self._read_connection() as connection:
+            if connection is not None:
+                connection.execute("BEGIN")
+                try:
+                    found = connection.execute(
+                        # The conditions are fixed text; the values are bound.
+                        "SELECT COUNT(*), COALESCE(MAX(row_id), 0), COALESCE(SUM(row_id), 0), "  # ruff: ignore[hardcoded-sql-expression]
+                        f"COALESCE(MAX(measured_at), '') FROM quality_measurements {where}",
+                        parameters,
+                    ).fetchone()
+                    parts = (
+                        self.db_path,
+                        self._read_schema_version(connection),
+                        *(found[index] for index in range(4)),
+                        self._fingerprint(connection, int(found[1])),
+                    )
+                finally:
+                    connection.rollback()
+        return hashlib.sha256(repr(parts).encode("utf-8")).hexdigest()[:32]
 
     @staticmethod
     def _read_measurements(
@@ -1417,14 +1514,18 @@ class QualityStore:
 
         The newest rows of one target come from a window query over the whole
         table, which takes about 0.3 seconds for a library of 50000 rows
-        however few rows the target has. The table only grows by appending
+        however few rows the target has. The newest rows of one metric over
+        the whole library (the capture history reads four metrics of every
+        frame) are as slow, because they are thousands of rows. The table
+        only grows by appending
         (a row is never changed; only a deleted frame's rows are removed). So
         a kept read is brought up to date like this, and the answer equals a
         full read:
 
         1. Check the table has not lost or swapped rows below the kept read's
-           mark (the count of rows up to the mark and the row numbered at the
-           mark are as they were). If they are not, read in full.
+           mark (the count and the sum of the row numbers up to the mark, and
+           the row numbered at the mark, are as they were). If they are not,
+           read in full.
         2. Find the subjects that have rows numbered above the mark, whatever
            their target. Only they can have a different newest row.
         3. Drop the kept rows of those subjects and read their newest rows
@@ -1450,8 +1551,12 @@ class QualityStore:
         connection.execute("BEGIN")
         try:
             schema_version = self._read_schema_version(connection)
-            top = connection.execute("SELECT MAX(row_id), COUNT(*) FROM quality_measurements").fetchone()
-            top_row, row_count = (int(top[0]), int(top[1])) if top[0] is not None else (0, 0)
+            top = connection.execute(
+                "SELECT MAX(row_id), COUNT(*), SUM(row_id) FROM quality_measurements"
+            ).fetchone()
+            top_row, row_count, row_id_sum = (
+                (int(top[0]), int(top[1]), int(top[2])) if top[0] is not None else (0, 0, 0)
+            )
             with _LATEST_READS_LOCK:
                 kept = _LATEST_READS.get(question)
                 if kept is not None:
@@ -1492,6 +1597,7 @@ class QualityStore:
                     schema_version=schema_version,
                     mark=top_row,
                     rows_up_to_mark=row_count,
+                    row_id_sum_up_to_mark=row_id_sum,
                     mark_fingerprint=self._fingerprint(connection, top_row),
                     rows=rows,
                 )
@@ -1549,10 +1655,12 @@ class QualityStore:
             mark was deleted or replaced, or too many subjects changed.
         """
         counted = connection.execute(
-            "SELECT COUNT(*) FROM quality_measurements WHERE row_id <= ?", (kept.mark,)
+            "SELECT COUNT(*), COALESCE(SUM(row_id), 0) FROM quality_measurements WHERE row_id <= ?",
+            (kept.mark,),
         ).fetchone()
         if (
             int(counted[0]) != kept.rows_up_to_mark
+            or int(counted[1]) != kept.row_id_sum_up_to_mark
             or self._fingerprint(connection, kept.mark) != kept.mark_fingerprint
         ):
             return None

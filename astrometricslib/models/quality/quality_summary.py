@@ -278,7 +278,7 @@ class StackingPipelineQualityMetrics(BaseModel):
     frames_excluded_for_background: int = Field(default=0, alias="framesExcludedForBackground")
     # Frames with clouds or trailed stars that the stage moved into the
     # `_excluded` folder before stacking.
-    frames_quarantined: int = Field(default=0, alias="framesQuarantined")
+    frames_set_aside: int = Field(default=0, alias="framesSetAside")
     # Why the stage cropped the stack's edges, in one sentence with the rule's
     # numbers, and the share of the image area the crop removed (0 to 1).
     # Both are `None` when the stack was not cropped.
@@ -417,7 +417,7 @@ class StackQualitySummary(PipelineQualitySummaryBase):
             "framesAccepted",
             "framesExcludedForGain",
             "framesExcludedForBackground",
-            "framesQuarantined",
+            "framesSetAside",
             "darkUniqueFrameCount",
             "biasUniqueFrameCount",
         ):
@@ -433,8 +433,10 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 # Bumped whenever AstrometryPipelineQualityMetrics's shape changes
 # meaningfully. 1.4.0: the residual gate judges the plate solver's own fit
 # when it reports one, Gaia positions carry proper motion to the observation
-# epoch, and the scale hint uses binning.
-ASTROMETRY_PIPELINE_VERSION = "1.4.0"
+# epoch, and the scale hint uses binning. 1.5.0: the Siril plate solution is
+# no longer refit to Gaia; the Gaia refit fields are replaced by the RMS
+# distance of the solution to Gaia stars (`gaia_match_*`).
+ASTROMETRY_PIPELINE_VERSION = "1.5.0"
 
 
 class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
@@ -509,20 +511,14 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     # How many stars the plate solver matched to its reference stars when it
     # fitted the solution. `None` when the solver reported none.
     plate_solve_matched_star_count: int | None = Field(default=None, alias="plateSolveMatchedStarCount")
-    # The refit of the solution to the field's Gaia DR3 stars (see
-    # `pipelines.astrometry.processing.wcs_refinement`). `gaia_fit_rms_arcsec`
-    # is the RMS distance, in arcseconds, between `gaia_fit_star_count`
-    # detected stars and their Gaia positions (moved to the image's date) under
-    # the solution that was kept, so it does not depend on the plate solver.
-    # `wcs_refinement_shift_arcsec` is how far the refit moved the field (the
-    # largest move over a 5 by 5 grid of points), and
-    # `gaia_fit_rms_before_arcsec` the RMS of the same stars under the
-    # solver's own solution. All `None` when the refit was not tried or had
-    # too few stars.
-    gaia_fit_rms_arcsec: float | None = Field(default=None, alias="gaiaFitRmsArcsec")
-    gaia_fit_rms_before_arcsec: float | None = Field(default=None, alias="gaiaFitRmsBeforeArcsec")
-    gaia_fit_star_count: int | None = Field(default=None, alias="gaiaFitStarCount")
-    wcs_refinement_shift_arcsec: float | None = Field(default=None, alias="wcsRefinementShiftArcsec")
+    # The solution measured against the field's Gaia DR3 stars (see
+    # `pipelines.astrometry.processing.gaia_match`). `gaia_match_rms_arcsec`
+    # is the RMS distance, in arcseconds, between `gaia_match_star_count`
+    # detected stars and their Gaia positions (moved to the image's date)
+    # under the plate solution, so it does not depend on the plate solver's
+    # own fit. Both `None` when no match was made or it had too few stars.
+    gaia_match_rms_arcsec: float | None = Field(default=None, alias="gaiaMatchRmsArcsec")
+    gaia_match_star_count: int | None = Field(default=None, alias="gaiaMatchStarCount")
     # Short stable keys for conditions that limit how far the results can be
     # trusted: ``gaia_tiles_missing`` (some Gaia cache tiles under the image
     # were not complete to the query depth, so stars there have no Gaia

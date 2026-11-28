@@ -480,6 +480,27 @@ def test_depth_goal_met_for_the_suggestion_refresh(butler: DiskButler) -> None:
     assert tasks.depth_goal_met(library, butler, "Vega") is None
 
 
+def _with_real_versions(library: Any, config: AppConfiguration) -> Any:
+    """Give a stand-in library the real data versions of a library folder.
+
+    The stand-in answers the reads of the status; its data versions come
+    from a real science library over the temporary library folder, so the
+    rows a test writes there change them as in the app.
+
+    Returns
+    -------
+    library : `Any`
+        The same stand-in, with ``targets.get_data_version`` and
+        ``quality.records.get_camera_data_version``.
+    """
+    from astrometricslib import Astrometrics
+
+    real = Astrometrics(config)
+    library.targets.get_data_version = real.targets.get_data_version
+    library.quality.records.get_camera_data_version = real.quality.records.get_camera_data_version
+    return library
+
+
 @pytest.fixture
 def cached(tmp_path: Any, butler: DiskButler, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Give a library folder, an empty cache and a way to ask for a status.
@@ -498,7 +519,9 @@ def cached(tmp_path: Any, butler: DiskButler, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(tasks, "_DEPTH_GOAL_CACHE", tasks.VersionedCache())
     monkeypatch.setattr("wayfindinglib.analytics.data_versions.equipment_signs", lambda _config: ("rig",))
     recorder = Recorder([statement("more_frames", StatementKind.RECOMMENDATION, seconds=4800.0, frames=40)])
-    fake_library = FakeLibrary({"NGC 7331": []}, [row(SURFACE_METRIC, 24.2)], {"NGC 7331": "LIN"})
+    fake_library = _with_real_versions(
+        FakeLibrary({"NGC 7331": []}, [row(SURFACE_METRIC, 24.2)], {"NGC 7331": "LIN"}), config
+    )
 
     def ask() -> Any:
         """Ask for the status of NGC 7331.
@@ -516,7 +539,7 @@ def cached(tmp_path: Any, butler: DiskButler, monkeypatch: pytest.MonkeyPatch) -
             report_for_noise_ratio=recorder,
         )
 
-    return SimpleNamespace(config=config, butler=butler, recorder=recorder, ask=ask)
+    return SimpleNamespace(config=config, butler=butler, recorder=recorder, ask=ask, library=fake_library)
 
 
 def _write_measurement(config: AppConfiguration, target: str) -> None:
@@ -693,7 +716,7 @@ def test_the_depth_goal_version_changes_once_when_the_night_rolls_over(
         version : `Any`
             The version.
         """
-        return depth_goal_data_version(cached.config, cached.butler, "NGC 7331", moment)
+        return depth_goal_data_version(cached.config, cached.butler, cached.library, "NGC 7331", moment)
 
     assert version(now) == version(now + 60.0)
     assert version(now + 86400.0) != version(now)

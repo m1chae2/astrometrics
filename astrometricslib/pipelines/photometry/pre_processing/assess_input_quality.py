@@ -7,31 +7,6 @@ never needs to change when the variability-flagging logic does.
 """
 
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
-from astrometricslib.models.tuned_parameter import (
-    HardcodedKind,
-    ParameterRole,
-    ParameterSource,
-    TunedParameter,
-)
-from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import CENTROID_SEARCH_HALF_WIDTH_PX
-
-# `locate_star_centroid` only searches a box around a star's expected
-# position (`CENTROID_SEARCH_HALF_WIDTH_PX`, its `search_half_width`
-# default). Once frame-to-frame drift approaches half that radius, a star with
-# even a little of its own positional jitter risks landing outside the search
-# box and silently returning no centroid. The limit is therefore half the
-# search half-width (20 px at the default 40 px), which catches instability
-# well before that failure mode.
-UNSTABLE_TRACKING_DRIFT_PX = TunedParameter(
-    name="photometry.unstable_tracking_drift_px",
-    default=0.5 * CENTROID_SEARCH_HALF_WIDTH_PX,
-    unit="px",
-    description="Frame-to-frame shift above which tracking counts as unstable.",
-    role=ParameterRole.JUDGMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D16",
-)
 
 
 def assess_input_quality(

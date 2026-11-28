@@ -1,0 +1,20 @@
+#!/bin/sh
+# Starts GraXpert on the graphics card, with the same arguments as the program.
+#
+# Installed by build/linux/setup_siril_gpu.sh from
+# build/linux/siril_gpu/templates/graxpert-gpu.sh.in. Run that script again
+# instead of editing this copy.
+#
+# GraXpert 4 is built for CUDA 13. The CUDA 13 runtime and cuBLAS come from
+# the system (/usr/local/cuda). The system's cuDNN can be the build for
+# CUDA 12, which makes GraXpert abort, so a cuDNN built for CUDA 13 (the
+# nvidia-cudnn-cu13 wheel from PyPI) is supplied from a private folder.
+#
+# When started inside the Siril Flatpak, it runs GraXpert on the host through
+# flatpak-spawn, because the sandbox cannot see the host's /usr/local/cuda.
+GRAXPERT="@GRAXPERT_PROGRAM@"
+LIBS="@GRAXPERT_LIBS@"
+if [ "$container" = "flatpak" ]; then
+    exec flatpak-spawn --host --env=LD_LIBRARY_PATH="$LIBS" "$GRAXPERT" "$@"
+fi
+LD_LIBRARY_PATH="$LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$GRAXPERT" "$@"

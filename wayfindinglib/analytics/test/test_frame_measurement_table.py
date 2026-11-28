@@ -1,14 +1,14 @@
-"""Purpose: Check the kept frame measurements against a real quality store.
+"""Purpose: Check the capture history's frame reads against a real store.
 
 Description: The capture history reads four metrics of every frame in the
-library (`read_frame_measurements`). A cache keeps them as a
-`FrameMeasurements` table and brings it up to date by reading only the rows
-added since (`update_frame_measurements`). These tests write a small quality
-database with the science library's own store, add rows to it the way a
-live night does, and check that the kept table brought up to date equals a
-new full read. They also check that a removed row, a reused row number, a
-row measured before the kept newest time, or rows that changed while they
-were read make the update give up, so the caller reads everything again.
+library (`read_frame_measurements`) and keeps them with the science
+library's opaque data version of those rows (`frame_measurement_version`).
+The science library keeps its own reads and brings them up to date with
+only the rows written since. These tests write a small quality database
+with the science library's own store, add rows to it the way a live night
+does, and check that a read after the change equals a fresh read with
+nothing kept, and that the version changes exactly when the rows the
+capture history reads change.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -16,11 +16,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from astrometricslib import CaptureSetting
+from astrometricslib._internal.drivers import quality_store
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.api.quality import QualityMeasurements
-from astrometricslib.drivers import get_frame_metric_data_versions
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import (
     BACKGROUND_METRIC,
@@ -28,10 +30,8 @@ from wayfindinglib.analytics.capture_history import (
     SATURATED_FRACTION_METRIC,
     STAR_ELONGATION_METRIC,
     STAR_WIDTH_METRIC,
-    FrameMeasurements,
-    read_frame_measurement_table,
+    frame_measurement_version,
     read_frame_measurements,
-    update_frame_measurements,
 )
 
 START = datetime(2026, 11, 1, 6, tzinfo=UTC)
@@ -100,14 +100,21 @@ def _frame(
     ]
 
 
-def _library(tmp_path: Path) -> tuple[Any, QualityStore, Any]:
-    """Write a made-up library of two targets and read its table once.
+@pytest.fixture(autouse=True)
+def keep_every_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let the science library keep reads of any size, starting with none."""
+    monkeypatch.setattr(quality_store, "LATEST_READ_MINIMUM_ROWS", 1)
+    quality_store._LATEST_READS.clear()
+
+
+def _library(tmp_path: Path) -> tuple[Any, QualityStore]:
+    """Write a made-up library of two targets.
 
     Returns
     -------
-    astrometrics, store, read_version
-        The stand-in library (the real quality reader), the store to add
-        rows to, and a function that reads the pinned metrics' version.
+    astrometrics, store
+        The stand-in library (the real quality reader) and the store to add
+        rows to.
     """
     library = tmp_path / "library"
     library.mkdir()
@@ -129,55 +136,44 @@ def _library(tmp_path: Path) -> tuple[Any, QualityStore, Any]:
     store.write_measurements(rows)
     config = SimpleNamespace(get_library_path=lambda: str(library))
     astrometrics = SimpleNamespace(quality=SimpleNamespace(records=QualityMeasurements(config)))
-
-    def read_version() -> Any:
-        """Read the version of the pinned metrics.
-
-        Returns
-        -------
-        version : `Any`
-            See `get_frame_metric_data_versions`.
-        """
-        return get_frame_metric_data_versions(config, tuple(PINNED_FRAME_METRICS))
-
-    return astrometrics, store, read_version
+    return astrometrics, store
 
 
-def _full(astrometrics: Any, read_version: Any) -> FrameMeasurements:
-    """Read the table from scratch.
+def _fresh(astrometrics: Any) -> dict[str, Any]:
+    """Read the numbers with nothing kept by the science library.
 
     Returns
     -------
-    measurements : `FrameMeasurements`
+    measurements : `dict`
         A full read.
     """
-    return read_frame_measurement_table(astrometrics, read_version)
+    quality_store._LATEST_READS.clear()
+    return read_frame_measurements(astrometrics)
 
 
-def test_the_table_holds_what_read_frame_measurements_gives(tmp_path: Path) -> None:
-    """The kept table's numbers are the capture history's usual read."""
-    astrometrics, _, read_version = _library(tmp_path)
+def test_the_read_picks_the_newest_usable_whole_frame_rows(tmp_path: Path) -> None:
+    """A newer row wins; a color plane and another version are left out."""
+    astrometrics, _ = _library(tmp_path)
 
-    table = _full(astrometrics, read_version)
+    values = read_frame_measurements(astrometrics)
 
-    assert table.values == read_frame_measurements(astrometrics)
-    assert table.version == read_version()
-    assert {metric: value for metric, (value, _) in table.values["M 13/c.fits"].items()} == {
+    assert set(values) == {"M 13/a.fits", "M 31/b.fits", "M 13/c.fits"}
+    assert {metric: value for metric, (value, _) in values["M 13/c.fits"].items()} == {
         STAR_ELONGATION_METRIC: 1.3
     }
-    assert set(table.marks) == set(PINNED_FRAME_METRICS)
+    assert set(values["M 13/a.fits"]) == set(PINNED_FRAME_METRICS)
 
 
-def test_added_rows_merged_into_the_table_equal_a_full_read(tmp_path: Path) -> None:
-    """Rows of a live night, merged in, give exactly what a full read gives.
+def test_a_read_after_a_live_night_equals_a_fresh_read(tmp_path: Path) -> None:
+    """Rows of a live night, read through the kept reads, equal a fresh read.
 
     The added rows cover a new frame, a newer row that replaces an older
     one, a newer not-measured row that hides a value, a row at another
     definition version, a color plane and another target's frame.
     """
-    astrometrics, store, read_version = _library(tmp_path)
-    kept = _full(astrometrics, read_version)
-    kept_values = {subject: dict(values) for subject, values in kept.values.items()}
+    astrometrics, store = _library(tmp_path)
+    kept = read_frame_measurements(astrometrics)
+    kept_copy = {subject: dict(values) for subject, values in kept.items()}
     store.write_measurements([
         *_frame("M 13/new.fits", 60),
         _measurement(STAR_ELONGATION_METRIC, "M 13/a.fits", 1.6, 61),
@@ -187,114 +183,58 @@ def test_added_rows_merged_into_the_table_equal_a_full_read(tmp_path: Path) -> N
         *_frame("M 57/x.fits", 62, target_id="M 57"),
     ])
 
-    updated = update_frame_measurements(astrometrics, kept, read_version())
-    fresh = _full(astrometrics, read_version)
+    updated = read_frame_measurements(astrometrics)
 
-    assert updated is not None
-    assert updated == fresh
-    assert updated.values == read_frame_measurements(astrometrics)
-    assert STAR_WIDTH_METRIC not in updated.values["M 31/b.fits"]
-    assert BACKGROUND_METRIC not in updated.values["M 13/a.fits"]
-    assert {subject: dict(values) for subject, values in kept.values.items()} == kept_values
+    assert updated == _fresh(astrometrics)
+    assert STAR_WIDTH_METRIC not in updated["M 31/b.fits"]
+    assert BACKGROUND_METRIC not in updated["M 13/a.fits"]
+    assert {subject: dict(values) for subject, values in kept.items()} == kept_copy
 
 
-def test_updating_frame_by_frame_still_equals_a_full_read(tmp_path: Path) -> None:
-    """An updated table can be brought up to date again, frame by frame."""
-    astrometrics, store, read_version = _library(tmp_path)
-    kept = _full(astrometrics, read_version)
-
+def test_frame_by_frame_reads_and_a_deleted_frame_equal_a_fresh_read(tmp_path: Path) -> None:
+    """Each read during a night, and after a deleted frame, is exact."""
+    astrometrics, store = _library(tmp_path)
+    read_frame_measurements(astrometrics)
     for number in range(4):
         store.write_measurements(_frame(f"M 13/n{number}.fits", 70 + number))
-        updated = update_frame_measurements(astrometrics, kept, read_version())
-        assert updated is not None
-        assert updated == _full(astrometrics, read_version)
-        kept = updated
-
-
-def test_rows_of_one_metric_alone_are_merged(tmp_path: Path) -> None:
-    """A metric whose rows did not change keeps its part as it was."""
-    astrometrics, store, read_version = _library(tmp_path)
-    kept = _full(astrometrics, read_version)
-    store.write_measurements([_measurement(STAR_ELONGATION_METRIC, "M 13/a.fits", 1.7, 80)])
-
-    updated = update_frame_measurements(astrometrics, kept, read_version())
-
-    assert updated == _full(astrometrics, read_version)
-
-
-def test_a_deleted_frame_makes_the_update_give_up(tmp_path: Path) -> None:
-    """Rows removed (a deleted frame) as rows were added need a full read."""
-    astrometrics, store, read_version = _library(tmp_path)
-    kept = _full(astrometrics, read_version)
+        assert read_frame_measurements(astrometrics) == _fresh(astrometrics)
     store.delete_frame_measurements(["M 31/b.fits"])
-    store.write_measurements(_frame("M 13/new.fits", 60))
-
-    assert update_frame_measurements(astrometrics, kept, read_version()) is None
-
-
-def test_a_removed_newest_row_whose_number_is_used_again_makes_it_give_up(tmp_path: Path) -> None:
-    """When the kept newest row is gone, its row number may be used again."""
-    astrometrics, store, read_version = _library(tmp_path)
-    store.write_measurements(_frame("M 13/e.fits", 60))
-    kept = _full(astrometrics, read_version)
-    store.delete_frame_measurements(["M 13/e.fits"])
-    store.write_measurements(_frame("M 13/f.fits", 61, elongation=1.8))
-
-    assert update_frame_measurements(astrometrics, kept, read_version()) is None
+    store.write_measurements(_frame("M 13/after.fits", 80))
+    after = read_frame_measurements(astrometrics)
+    assert after == _fresh(astrometrics)
+    assert "M 31/b.fits" not in after
 
 
-def test_a_row_measured_before_the_kept_newest_time_makes_it_give_up(tmp_path: Path) -> None:
-    """A row added late with an old time is missed, so the update gives up."""
-    astrometrics, store, read_version = _library(tmp_path)
-    kept = _full(astrometrics, read_version)
-    store.write_measurements([_measurement(STAR_ELONGATION_METRIC, "M 13/a.fits", 1.6, 0)])
+def test_the_version_follows_only_the_rows_the_history_reads(tmp_path: Path) -> None:
+    """A stack row or another metric leaves the version; a frame row does not.
 
-    assert update_frame_measurements(astrometrics, kept, read_version()) is None
+    A deleted frame and a row added with an old time change it too, and an
+    equal version always means an equal read.
+    """
+    astrometrics, store = _library(tmp_path)
+    version = frame_measurement_version(astrometrics)
+    assert all(isinstance(part, str) for part in version)
+    assert frame_measurement_version(astrometrics) == version
 
-
-def test_a_metric_with_no_rows_before_makes_it_give_up(tmp_path: Path) -> None:
-    """A metric that had no rows has no kept newest row to check against."""
-    library = tmp_path / "library"
-    library.mkdir()
-    store = QualityStore(str(library / "astrometrics.db"))
-    store.write_measurements([_measurement(STAR_WIDTH_METRIC, "M 13/a.fits", 2.4, 1)])
-    config = SimpleNamespace(get_library_path=lambda: str(library))
-    astrometrics = SimpleNamespace(quality=SimpleNamespace(records=QualityMeasurements(config)))
-
-    def read_version() -> Any:
-        """Read the version of the pinned metrics.
-
-        Returns
-        -------
-        version : `Any`
-            See `get_frame_metric_data_versions`.
-        """
-        return get_frame_metric_data_versions(config, tuple(PINNED_FRAME_METRICS))
-
-    kept = _full(astrometrics, read_version)
-    store.write_measurements([_measurement(STAR_ELONGATION_METRIC, "M 13/a.fits", 1.2, 2)])
-
-    assert update_frame_measurements(astrometrics, kept, read_version()) is None
-
-
-def test_no_new_rows_keeps_the_numbers(tmp_path: Path) -> None:
-    """With no row added, the update gives the same numbers."""
-    astrometrics, _, read_version = _library(tmp_path)
-    kept = _full(astrometrics, read_version)
-
-    assert update_frame_measurements(astrometrics, kept, read_version()) == kept
-
-
-def test_rows_read_while_the_data_changed_record_no_version(tmp_path: Path) -> None:
-    """When the version changed while reading, the table cannot be updated."""
-    astrometrics, _, read_version = _library(tmp_path)
-    real = read_version()
-    versions = iter([
-        real,
-        {**real, STAR_WIDTH_METRIC: real[STAR_WIDTH_METRIC]._replace(measurement_count=99)},
+    store.write_measurements([
+        _measurement("stacking.star_elongation", "M 13/stack.fits", 1.1, 90, level=SubjectLevel.STACK),
+        _measurement("frame.sky_noise_e", "M 13/c.fits", 11.0, 90),
     ])
+    assert frame_measurement_version(astrometrics) == version
 
-    table = read_frame_measurement_table(astrometrics, lambda: next(versions))
+    store.write_measurements([_measurement(STAR_ELONGATION_METRIC, "M 13/a.fits", 1.6, 0)])
+    late = frame_measurement_version(astrometrics)
+    assert late != version
 
-    assert table.version is None
-    assert update_frame_measurements(astrometrics, table, real) is None
+    store.delete_frame_measurements(["M 31/b.fits"])
+    assert frame_measurement_version(astrometrics) != late
+
+
+def test_an_unmeasured_frame_row_changes_the_version_but_not_its_numbers(tmp_path: Path) -> None:
+    """A not-measured row moves the version but adds no number."""
+    astrometrics, store = _library(tmp_path)
+    version = frame_measurement_version(astrometrics)
+    store.write_measurements([_measurement(STAR_WIDTH_METRIC, "M 13/none.fits", None, 95)])
+
+    assert frame_measurement_version(astrometrics) != version
+    assert "M 13/none.fits" not in read_frame_measurements(astrometrics)

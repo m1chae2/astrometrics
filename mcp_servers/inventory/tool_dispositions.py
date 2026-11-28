@@ -415,6 +415,11 @@ DECISIONS = {
         "in pixels on its stack or a named image and writes nothing.",
         tool_class="observe",
     ),
+    "star_get_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes on any write to the star catalog, so "
+        "a cache knows when to work out again. Of no use to an AI client.",
+    ),
     "star_count_by_class": ToolDecision(
         "keep",
         "Since #206 the class counts that star_query's detail='class_counts' gave. Counts the stars of each "
@@ -696,6 +701,32 @@ DECISIONS = {
         "Built 2026-11-27 (#206). Reads one stored quality row by its id, even when a newer row replaced "
         "it, so a cited row can be read back. Writes nothing and creates no table.",
         tool_class="observe",
+    ),
+    "quality_records_get_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes when the stored quality rows of a "
+        "metric, level or target change, so a cache knows when to read them again. Of no use to an AI "
+        "client, which reads the rows with quality_records_query.",
+    ),
+    "quality_records_get_camera_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes when a camera's stored measurements "
+        "or calibration records change, so a cache knows when to work out again. Of no use to an AI client.",
+    ),
+    "quality_stacks_get_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes when the library's stack-level "
+        "measurements, calibration records or capture settings change. Of no use to an AI client.",
+    ),
+    "target_get_data_version": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text that changes when one target's record, "
+        "measurements or calibration records change. Of no use to an AI client.",
+    ),
+    "target_get_record_versions": ToolDecision(
+        "drop",
+        "Built 2026-11-27 (#182). Gives an opaque text for each stored target record, so a cache reads "
+        "again only the targets that changed. Of no use to an AI client.",
     ),
     "quality_records_get_metric": ToolDecision(
         "keep",

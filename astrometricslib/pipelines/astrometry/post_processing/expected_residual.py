@@ -2,8 +2,8 @@
 
 It is stored beside the measured one.
 
-After the Gaia refit, the stars sit some distance from their Gaia positions
-(`astrometry.gaia_fit_rms_arcsec`). Part of that distance is not a fault of
+After the Gaia match, the stars sit some distance from their Gaia positions
+(`astrometry.gaia_match_rms_arcsec`). Part of that distance is not a fault of
 the solution: the star finder cannot place a faint star exactly, and no
 centroid is exact when the star falls at one place inside its pixel. A
 reader who wants to know whether the rest is distortion or tilt needs the
@@ -223,7 +223,7 @@ def expected_residual(
     Parameters
     ----------
     peak_over_noise : `Sequence` [`float`]
-        The peak over the sky noise of each star the Gaia refit used. Empty
+        The peak over the sky noise of each star the Gaia match used. Empty
         when there is none.
     signal_reason : `str`
         Why `peak_over_noise` is empty. Empty when it is not.
@@ -339,7 +339,7 @@ def record_expected_residual_quality(
     Parameters
     ----------
     peak_over_noise : `Sequence` [`float`]
-        The peak over the sky noise of each star the Gaia refit used.
+        The peak over the sky noise of each star the Gaia match used.
     signal_reason : `str`
         Why that list is empty, when it is.
     fwhm_px : `float` or `None`

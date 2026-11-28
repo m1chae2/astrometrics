@@ -33,6 +33,7 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
     read_fit_statistics,
+    solve_failure_reason,
 )
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.stellar_source import StellarObject
@@ -396,45 +397,23 @@ def plate_solution_problem(
     return None
 
 
-# The header card that says the sky map was refit to Gaia stars after the
-# solver made it (see `wcs_refinement`). A file with no card, or a false one,
-# holds the solver's own solution, which the analysis step may still refit
-# and save (`stage.save_refit_stack_plate_solution`).
-REFIT_TO_GAIA_KEYWORD = "WCSREFIT"
-
 # The keywords that describe where an image points on the sky, for the first
 # two axes. `write_wcs_to_fits_header` deletes these before it writes a new
 # solution. Without that step, a card from an older solve can survive and
 # contradict the new one. For example, an old `CD1_1` matrix outranks a new
 # `PC1_1` matrix when astropy reads the header, and an old `A_4_0` term
-# stays next to a new second-order SIP fit.
+# stays next to a new second-order SIP fit. ``WCSREFIT`` is the card an earlier
+# version wrote to mark a solution refit to Gaia; nothing reads it now, and a
+# new solution removes it.
 _STALE_WCS_KEYWORD_PATTERN = re.compile(
     r"^(WCSAXES|CTYPE[12]|CRVAL[12]|CRPIX[12]|CDELT[12]|CUNIT[12]|CROTA[12]"
     r"|PC[12]_[12]|CD[12]_[12]|PV[12]_\d+|PS[12]_\d+"
     r"|LONPOLE|LATPOLE|RADESYS|RADECSYS|EQUINOX"
-    r"|(A|B|AP|BP)_ORDER|(A|B|AP|BP)_\d+_\d+|(A|B)_DMAX)$"
+    r"|(A|B|AP|BP)_ORDER|(A|B|AP|BP)_\d+_\d+|(A|B)_DMAX|WCSREFIT)$"
 )
 
 
-def header_is_refit_to_gaia(header: fits.Header) -> bool:
-    """Say whether a header's sky map was refit to Gaia stars.
-
-    Parameters
-    ----------
-    header : `astropy.io.fits.Header`
-        The first header of a FITS file.
-
-    Returns
-    -------
-    is_refit : `bool`
-        True when the header carries `REFIT_TO_GAIA_KEYWORD` as true.
-    """
-    return bool(header.get(REFIT_TO_GAIA_KEYWORD, False))
-
-
-def put_wcs_in_header(
-    header: fits.Header, wcs: WCS, *, mark_plate_solved: bool, refit_to_gaia: bool | None = None
-) -> None:
+def put_wcs_in_header(header: fits.Header, wcs: WCS, *, mark_plate_solved: bool) -> None:
     """Replace the sky-map keywords of a header in memory.
 
     The old sky-map keywords are deleted first (see `write_wcs_to_fits_header`
@@ -449,10 +428,6 @@ def put_wcs_in_header(
         The sky map to store.
     mark_plate_solved : `bool`
         Whether to write `PLATE_SOLVED_KEYWORD`.
-    refit_to_gaia : `bool`, optional
-        Whether to write `REFIT_TO_GAIA_KEYWORD` as true or false. Left out,
-        the card is not touched, so a solution that is only moved (turned or
-        cropped) keeps its mark.
     """
     for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
         del header[keyword]
@@ -462,11 +437,9 @@ def put_wcs_in_header(
         header[card.keyword] = (card.value, card.comment)
     if mark_plate_solved:
         header[PLATE_SOLVED_KEYWORD] = (True, "sky map written by a plate solve")
-    if refit_to_gaia is not None:
-        header[REFIT_TO_GAIA_KEYWORD] = (refit_to_gaia, "sky map refit to Gaia stars")
 
 
-def write_wcs_to_fits_header(path: str, wcs: WCS, *, refit_to_gaia: bool = False) -> None:
+def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
     """Save a solved sky map (WCS) into a FITS file's header.
 
     The next program that opens the file (this library, Siril, a FITS
@@ -480,9 +453,7 @@ def write_wcs_to_fits_header(path: str, wcs: WCS, *, refit_to_gaia: bool = False
     file would then lose the lens distortion near the image edges.
 
     It also writes the card `PLATE_SOLVED_KEYWORD`, so a reader can tell this
-    solution from a pointing guess (see `header_is_plate_solved`), and the
-    card `REFIT_TO_GAIA_KEYWORD`, so a reader can tell a refit solution from
-    the solver's own (see `header_is_refit_to_gaia`).
+    solution from a pointing guess (see `header_is_plate_solved`).
 
     The function logs a warning and returns if the file cannot be updated.
 
@@ -492,9 +463,6 @@ def write_wcs_to_fits_header(path: str, wcs: WCS, *, refit_to_gaia: bool = False
         The FITS file to update. A missing or empty path does nothing.
     wcs : `astropy.wcs.WCS`
         The solved sky map to store.
-    refit_to_gaia : `bool`, optional
-        True when ``wcs`` was refit to Gaia stars. Written to the header either
-        way, so an older mark never survives a new solution.
     """
     if not path or not os.path.exists(path):
         return
@@ -513,7 +481,7 @@ def write_wcs_to_fits_header(path: str, wcs: WCS, *, refit_to_gaia: bool = False
             changed : `bool`
                 Always `True`, because the header is changed.
             """
-            put_wcs_in_header(header, wcs, mark_plate_solved=True, refit_to_gaia=refit_to_gaia)
+            put_wcs_in_header(header, wcs, mark_plate_solved=True)
             return True
 
         update_first_header(path, _write_solved_wcs)
@@ -682,7 +650,11 @@ def _resolve_frame_wcs_with_fit(
         solve_timeout=solve_timeout,
     )
     if header is None:
-        logger.warning("Plate solve failed for %s; no WCS available.", image.path)
+        logger.warning(
+            "Plate solve failed for %s; no WCS available (%s).",
+            image.path,
+            solve_failure_reason(star_identifier.solver) or "no reason given",
+        )
         return None, False, True, no_fit_statistics
 
     with warnings.catch_warnings():

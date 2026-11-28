@@ -32,6 +32,7 @@ import math
 import multiprocessing
 import os
 import statistics
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -43,6 +44,7 @@ from scipy.stats import median_abs_deviation
 
 from astrometricslib._internal.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_header_and_data
+from astrometricslib._internal.drivers.interfaces.plate_solve_driver import FrameSolve
 from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.foundation.parameter_context import bind_equipment_key, current_equipment_key
 from astrometricslib.foundation.parameters import resolve
@@ -80,9 +82,13 @@ from astrometricslib.pipelines.photometry.pre_processing.detector_noise import (
     DetectorNoise,
     resolve_detector_noise,
 )
+from astrometricslib.pipelines.photometry.pre_processing.frame_mapping import (
+    FrameMapping,
+    FrameMappingError,
+    wcs_from_solved_header,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     CentroidShiftSummary,
-    FrameAlignment,
     FrameRejection,
     ObservationTimeError,
     _process_single_frame_worker,
@@ -93,7 +99,6 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     detect_neighbor_field,
     measure_aperture_photometry,
     read_observation_time,
-    select_alignment_anchors,
     summarize_centroid_shifts,
 )
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
@@ -900,32 +905,32 @@ class VariabilityAnalyzer:
         # with the reason. Filled during `process()`. The photometry runner
         # reads it to build the `capture_timestamps` gate.
         self.frames_without_usable_date_obs: list[ExcludedFrame] = []
+        # Frames left out because no plate solution places the stars in them,
+        # each with the reason. The reference frame is among them when it has
+        # none, and then the session has no stars. Filled during `process()`.
+        # The photometry runner lists them as excluded frames.
+        self.frames_without_solution: list[ExcludedFrame] = []
         # How many frames each star's own centroid was refused in (it kept
-        # the shifted reference position instead), keyed by star id. Only
+        # the frame's plate solution position instead), keyed by star id. Only
         # stars with at least one such frame appear. Filled during
         # `process()`; see `refine_star_centroid`.
         self.centroid_fallback_counts: dict[str, int] = {}
         # For each frame, keyed by timestamp: how far every star with a
-        # refined centroid sat from its shifted reference position, in
+        # refined centroid sat from the frame's plate solution position, in
         # pixels (see `centroid_offsets_px`). A frame in which every star
         # fell back has an empty list. Filled during `process()`;
         # `centroid_shift_summary()` summarizes it for the
-        # `registration_drift` gate.
+        # `registration_corner_displacement` gate.
         self.centroid_offsets_by_frame: dict[datetime, list[float]] = {}
-        # For each frame, keyed by timestamp: the shift, rotation and scale
-        # change that lined it up with the reference frame (see
-        # `fit_frame_alignment`). Filled during `process()`.
-        self.alignment_by_frame: dict[datetime, FrameAlignment] = {}
+        # For each frame, keyed by timestamp: the map from the reference
+        # frame's pixels to the frame's, made from the two plate solutions
+        # (see `FrameMapping`). Filled during `process()`.
+        self.mapping_by_frame: dict[datetime, FrameMapping] = {}
         # Star measurements made in the frames after the reference frame, one
         # per star per frame. The denominator of the fallback fraction.
         self.centroid_measurement_count = 0
-        # Which rule chose the stars that measure each frame's global shift
-        # (see `select_alignment_anchors`), and how many it chose. `None`
-        # and 0 before `process()` has run.
-        self.alignment_anchor_rule: str | None = None
-        self.alignment_anchor_count = 0
         self.frame_ensemble_composition: list[FrameEnsembleComposition] = []
-        # How far each frame's alignment drifted from the reference
+        # How far each frame's middle moved from the reference
         # frame, keyed by timestamp: `(delta_x_shift, delta_y_shift)` in
         # pixels. Populated during `process()`; used by
         # `_apply_frame_normalization` to build each star's
@@ -1011,6 +1016,7 @@ class VariabilityAnalyzer:
     def process(
         self,
         image_paths: list[str],
+        frame_solves: Mapping[str, FrameSolve],
         max_workers: int | None = None,
         id_prefix: str = "",
         seed_stars: list[StellarObject] | None = None,
@@ -1023,6 +1029,13 @@ class VariabilityAnalyzer:
         ----------
         image_paths : `list` [`str`]
             The pictures to process. The first picture is used as the map.
+        frame_solves : `Mapping` [`str`, `FrameSolve`]
+            Each picture's plate solution, or the reason it has none, keyed by
+            path (see `PlateSolveDriver.solve_frames`). Every star's circle
+            is placed where its picture's own solution puts it. A picture
+            with no solution is left out and listed in
+            `frames_without_solution`; no other way places the circles. When
+            the first picture has none, nothing is measured.
         max_workers : `int`, optional
             How many CPU cores to use.
         id_prefix : `str`, optional
@@ -1102,10 +1115,15 @@ class VariabilityAnalyzer:
         # for the whole run -- so airmass detrending read the wrong
         # airmass for every point.
         reference_airmass = compute_frame_airmass(reference_header)
-        # The reference frame is what every later frame is aligned
+        # The reference frame is what every later frame is mapped
         # against, so it has no computed offset of its own -- its
         # drift is zero by definition.
         self.frame_registration_drift[reference_timestamp] = (0.0, 0.0)
+        reference_wcs = self._frame_wcs(reference_path, frame_solves)
+        if reference_wcs is None:
+            # Every star is placed through the reference frame's solution,
+            # so without it no frame can be measured. Never guess a place.
+            return
         self.frame_paths_in_order.append(reference_path)
 
         # Retry with different parameters if detection fails
@@ -1129,26 +1147,12 @@ class VariabilityAnalyzer:
         # SourceDetector already returns a list sorted by flux
         max_stars = 2000
 
-        # Alignment anchors always come from this blind detection pass,
-        # regardless of whether seed_stars is given: frame-to-frame
-        # alignment does not care which stars are being tracked or
-        # reported, only that enough real stars exist to measure a
-        # reliable shift. The anchors are unsaturated stars with a high
-        # peak signal-to-noise, not the detections ranked 50 to 100 (which
-        # are noise peaks in a sparse field); see `select_alignment_anchors`.
-        anchors = select_alignment_anchors(
-            reference_data, reference_stars_detected, saturation_threshold_adu=saturation_threshold_adu
-        )
-        reference_top_refs_minimal = list(anchors.stars)
         # The stars of the reference frame, found with a finder that also
         # lists close pairs (the run's own detections keep stars about 10 px
         # apart), so each star's sky ring can leave out its bright neighbors
         # and each star can be checked for crowding. The same list, moved by
-        # each frame's alignment, serves every frame.
+        # each frame's plate solution, serves every frame.
         reference_neighbors = detect_neighbor_field(reference_data)
-        self.alignment_anchor_rule = anchors.rule
-        self.alignment_anchor_count = len(anchors.stars)
-        logger.info("  Alignment anchors: %s stars (%s).", len(anchors.stars), anchors.rule)
 
         reference_stars_minimal = []
         if seed_stars is not None:
@@ -1252,25 +1256,46 @@ class VariabilityAnalyzer:
 
         logger.info("  Initialized %s reference stars.", len(self.stellar_objects))
 
-        if len(image_paths) > 1:
+        # Each later frame is placed through its own plate solution. A frame
+        # whose solution is missing or does not map the frame is left out.
+        frame_mappings: dict[str, FrameMapping] = {}
+        for path in image_paths[1:]:
+            frame_wcs = self._frame_wcs(path, frame_solves)
+            if frame_wcs is None:
+                continue
+            try:
+                frame_mappings[path] = FrameMapping.from_solutions(
+                    reference_wcs, frame_wcs, self.reference_frame_shape
+                )
+            except FrameMappingError as mapping_error:
+                self._leave_out_unsolved_frame(path, str(mapping_error))
+        if self.frames_without_solution:
+            logger.info(
+                "  %s of %s frames have no plate solution and are left out.",
+                len(self.frames_without_solution),
+                len(image_paths),
+            )
+
+        if frame_mappings:
             # Default to a limit of 75% CPU cores unless the caller
             # specifies otherwise
             max_workers = max_workers if max_workers is not None else max(1, int(os.cpu_count() * 0.75))
             logger.info(
                 "Starting parallel processing for %s frames using %s workers...",
-                len(image_paths) - 1,
+                len(frame_mappings),
                 max_workers,
             )
             worker_arguments = [
                 (
                     path,
                     reference_stars_minimal,
-                    reference_top_refs_minimal,
+                    frame_mappings[path],
                     saturation_threshold_adu,
                     self.detector_noise,
                     reference_neighbors,
                 )
                 for path in image_paths[1:]
+                if path in frame_mappings
             ]
 
             # "spawn", never "fork": the backend runs many threads, and
@@ -1327,7 +1352,7 @@ class VariabilityAnalyzer:
                     airmass,
                     star_positions,
                     exposure_s,
-                    frame_alignment,
+                    frame_mapping,
                     *extra_items,
                 ) = data
                 peaks_by_star = extra_items[0] if extra_items else {}
@@ -1335,11 +1360,9 @@ class VariabilityAnalyzer:
                     if not star_position.is_refined:
                         previous_count = self.centroid_fallback_counts.get(star_id, 0)
                         self.centroid_fallback_counts[star_id] = previous_count + 1
-                offsets, _ = centroid_offsets_px(
-                    star_positions, reference_positions, delta_x, delta_y, alignment=frame_alignment
-                )
+                offsets, _ = centroid_offsets_px(star_positions, reference_positions, frame_mapping)
                 self.centroid_offsets_by_frame[timestamp] = offsets
-                self.alignment_by_frame[timestamp] = frame_alignment
+                self.mapping_by_frame[timestamp] = frame_mapping
                 self.centroid_measurement_count += sum(
                     1 for star_id in star_positions if star_id in reference_positions
                 )
@@ -1393,27 +1416,67 @@ class VariabilityAnalyzer:
             self.session_zero_points = None
 
     def centroid_shift_summary(self) -> CentroidShiftSummary | None:
-        """Summarize how far star centroids sat from their shifted positions.
+        """Summarize how far star centroids sat from their solution positions.
 
-        The result feeds the ``registration_drift`` gate. It is built from
-        the per-frame offsets that `process()` recorded.
+        The result feeds the ``registration_corner_displacement`` gate. It is
+        built from the per-frame offsets that `process()` recorded.
 
         Returns
         -------
         summary : `CentroidShiftSummary` or `None`
             The median and 95th-percentile per-star offset, the fraction of
             star measurements that fell back, the worst frame, and the
-            anchor rule. `None` when the session had no frame after the
-            reference frame.
+            corner displacement of the frames. `None` when the session had no
+            frame after the reference frame.
         """
         return summarize_centroid_shifts(
             self.centroid_offsets_by_frame,
             self.centroid_measurement_count,
             sum(self.centroid_fallback_counts.values()),
-            anchor_rule=self.alignment_anchor_rule,
-            anchor_count=self.alignment_anchor_count,
-            alignments_by_frame=self.alignment_by_frame,
+            mappings_by_frame=self.mapping_by_frame,
         )
+
+    def _leave_out_unsolved_frame(self, path: str, reason: str) -> None:
+        """Leave a frame out because no plate solution places its stars.
+
+        The reason is logged as a warning, so the job lists it, and kept in
+        `frames_without_solution`, so the run's excluded frames name it.
+
+        Parameters
+        ----------
+        path : `str`
+            The frame.
+        reason : `str`
+            A short sentence that says why it has no usable solution.
+        """
+        logger.warning("Frame %s is left out of photometry: %s.", os.path.basename(path), reason)
+        self.frames_without_solution.append(ExcludedFrame(path=path, reason=f"no plate solution: {reason}"))
+
+    def _frame_wcs(self, path: str, frame_solves: Mapping[str, FrameSolve]) -> Any | None:
+        """Read a frame's sky map from its plate solution, or leave it out.
+
+        Parameters
+        ----------
+        path : `str`
+            The frame.
+        frame_solves : `Mapping` [`str`, `FrameSolve`]
+            The session's solutions, keyed by path.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The frame's sky map, or `None` when it has no usable solution
+            (the frame is then recorded in `frames_without_solution`).
+        """
+        solve = frame_solves.get(path)
+        if solve is None or solve.header is None:
+            self._leave_out_unsolved_frame(path, solve.reason if solve and solve.reason else "not solved")
+            return None
+        try:
+            return wcs_from_solved_header(solve.header)
+        except FrameMappingError as read_error:
+            self._leave_out_unsolved_frame(path, str(read_error))
+            return None
 
     def _record_barycentric_times(
         self, target_position_deg: tuple[float, float] | None, observer_site: ObservatorySite | None

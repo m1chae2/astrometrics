@@ -30,8 +30,9 @@ results (a star's CV, its variability score, its periods and its two period
 checks) stay on the star records. The noise-model curve stays in the quality
 summary because it is a list of points, not a number.
 
-Names follow ``<checkpoint>.<snake_case>``, so a gate's name is joined to the
-prefix ``gate_`` (for example ``photometry.gate_registration_drift``).
+Names follow ``<checkpoint>.<snake_case>``. A gate's metric is its name
+joined to the prefix ``gate_``, or a name that says what the stored value is
+(``photometry.gate_registration_corner_displacement``).
 """
 
 import datetime
@@ -51,7 +52,11 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_spec, notice_spec
+from astrometricslib.pipelines.shared.quality.notices import (
+    camera_without_profile_spec,
+    needs_astrometry_spec,
+    notice_spec,
+)
 
 PHOTOMETRY_STARS_PROCESSED = "photometry.stars_processed_count"
 PHOTOMETRY_STARS_FOUND = "photometry.stars_found_count"
@@ -193,7 +198,7 @@ PHOTOMETRY_GATE_SESSION_CONTENT = "photometry.gate_session_content"
 PHOTOMETRY_GATE_SESSION_PLATE_SOLVE = "photometry.gate_session_plate_solve"
 PHOTOMETRY_GATE_PHOTOMETRY_WORK = "photometry.gate_photometry_work"
 PHOTOMETRY_GATE_COMPARISON_ENSEMBLE = "photometry.gate_comparison_ensemble"
-PHOTOMETRY_GATE_REGISTRATION_DRIFT = "photometry.gate_registration_drift"
+PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT = "photometry.gate_registration_corner_displacement"
 PHOTOMETRY_GATE_SCATTER_POPULATION = "photometry.gate_scatter_population"
 PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION = "photometry.gate_variability_discrimination"
 PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE = "photometry.gate_detectable_amplitude"
@@ -1141,15 +1146,16 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         register_entry="PHO-02",
     ),
     _gate_metric(
-        PHOTOMETRY_GATE_REGISTRATION_DRIFT,
+        PHOTOMETRY_GATE_REGISTRATION_CORNER_DISPLACEMENT,
         "px",
-        "Whether the frames stayed lined up with each other.",
-        "The value is the largest frame-to-frame alignment offset of any star, in pixels. The limit is "
-        "20 px. The check fails when that offset passes the limit, when the corner displacement or the "
-        "centroid fallback share passes its own limit (stored by their own metrics), so the outcome can "
-        "be failed with the value under the limit. It is not checked when no star recorded a drift and no "
-        "session has a per-star summary.",
-        "Every star of the run and the aligned frames of every session.",
+        "Whether each frame's plate solution placed the stars well enough.",
+        "The value is the largest 95th-percentile corner displacement of a frame beyond the shift of its "
+        "middle, in pixels. The limit is 1 px. The check fails when that passes the limit or when the "
+        "centroid fallback share passes its own limit (stored by its own metric), so the outcome can "
+        "be failed with the value under the limit. It is not checked when no session has a per-star "
+        "summary. The older metric photometry.gate_registration_drift (the largest offset of any star "
+        "from the first frame, limit 20 px) is no longer written; its stored rows stay as history.",
+        "The frame mappings of every session.",
         register_entry="PHO-04",
     ),
     _gate_metric(
@@ -1261,6 +1267,7 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
     *_WINDOW_METRICS,
     *_AMPLITUDE_METRICS,
     camera_without_profile_spec("photometry"),
+    needs_astrometry_spec("photometry"),
     notice_spec(
         PHOTOMETRY_NOTICE_SESSION_WITHOUT_COMPARISON_STARS,
         Checkpoint.PHOTOMETRY,

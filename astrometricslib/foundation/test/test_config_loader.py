@@ -215,17 +215,17 @@ def test_a_blank_stacks_path_counts_as_unset(config_in_tmp_path: AppConfiguratio
     assert config.get_stacks_path() == config.get_frames_path()
 
 
-def test_quarantine_of_bad_frames_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
+def test_set_aside_of_bad_frames_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """Stacking moves clouded and trailed frames aside unless told not to."""
     config = config_in_tmp_path
-    assert config.get_quarantine_bad_frames_enabled() is True
+    assert config.get_set_aside_bad_frames_enabled() is True
 
 
-def test_quarantine_of_bad_frames_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
-    """The ``quarantine_bad_frames_enabled`` setting switches the step off."""
+def test_set_aside_of_bad_frames_can_be_turned_off(config_in_tmp_path: AppConfiguration) -> None:
+    """The ``set_aside_bad_frames_enabled`` setting switches the step off."""
     config = config_in_tmp_path
-    config.app_config.set("Processing.Siril", "quarantine_bad_frames_enabled", "false")
-    assert config.get_quarantine_bad_frames_enabled() is False
+    config.app_config.set("Processing.Siril", "set_aside_bad_frames_enabled", "false")
+    assert config.get_set_aside_bad_frames_enabled() is False
 
 
 def test_star_toning_of_the_preview_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
@@ -352,3 +352,29 @@ def test_skipping_unchanged_stacks_can_be_turned_off(config_in_tmp_path: AppConf
     config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "skip_unchanged_stacks_enabled", "false")
     assert config.get_skip_unchanged_stacks_enabled() is False
+
+
+def test_a_settings_file_with_the_old_local_solver_keys_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings with the old local solver keys load, and the keys are ignored.
+
+    The local solver section (``index_path``, ``autoindex``, ``cpulimit``)
+    stays in the file, and so does the older ``Astrometry.Solver`` section;
+    nothing reads either, and no setting that is read changes.
+    """
+    settings_path = tmp_path / "astrometrics.config.toml"
+    settings_path.write_text(
+        '["Processing.Astrometry.Local Solver"]\n'
+        'index_path = "/usr/share/astrometry"\nautoindex = "true"\ncpulimit = "300"\n\n'
+        '["Astrometry.Solver"]\nindex_path = "/old/place"\n\n'
+        '["Processing.Astrometry.Online Solver"]\napi_key = "abc"\n\n'
+        '["Processing.Astrometry"]\nmaximum_identified_stars = "123"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: settings_path)
+
+    config = AppConfiguration()
+
+    assert config.get_maximum_identified_stars() == 123
+    assert config.get_value("Processing.Astrometry.Online Solver", "api_key") == "abc"

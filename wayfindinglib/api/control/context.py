@@ -879,6 +879,22 @@ class ControlContext:
 
         return location["latitude"] if location else FALLBACK_SITE["latitude"]
 
+    def observer_longitude_deg(self) -> float:
+        """Return the observer longitude, or the fallback site's if unknown.
+
+        The fallback is `site_profile_reader.FALLBACK_SITE`, as for
+        `observer_latitude_deg`.
+
+        Returns
+        -------
+        longitude_deg : `float`
+            Longitude in degrees, east positive.
+        """
+        location = self.observer_location()
+        from wayfindinglib.data_access.site_profile_reader import FALLBACK_SITE
+
+        return location["longitude"] if location else FALLBACK_SITE["longitude"]
+
     def ekos_log_directory(self) -> str:
         """Return the local folder that holds downloaded Ekos logs.
 

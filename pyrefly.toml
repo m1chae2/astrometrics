@@ -17,6 +17,11 @@ search-path = [
     "build/tpm/test",
     # real_snapshot.py imports the shared copy path guard from here by name.
     "build/agent_tools",
+    # The plate-solver study scripts (register entry AST-23) and the Siril GPU
+    # setup step are plain modules next to each other that import each other
+    # by name, like the TPM harness above.
+    "build/agent_tools/plate_solver_study",
+    "build/linux/siril_gpu",
 ]
 
 # build/documentation/ and documentation/conf.py hold Sphinx extension and
@@ -24,4 +29,13 @@ search-path = [
 # under the docs build's own environment, never imported by the application.
 # The Pyrefly CI job installs base deps only, not the `docs` extra, so these
 # imports are unresolvable there.
-project-excludes = ["**/build/documentation/**", "documentation/conf.py"]
+#
+# build/agent_tools/plate_solver_study/ is the evidence behind register entry
+# AST-23. Its solve-field side imports code that was removed with solve-field,
+# so it only runs on commit 62906cee (see its README) and is not type-checked
+# against the current tree.
+project-excludes = [
+    "**/build/documentation/**",
+    "documentation/conf.py",
+    "build/agent_tools/plate_solver_study/**",
+]

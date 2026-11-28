@@ -15,7 +15,7 @@ the database, replacing temporary labels so duplicates are not saved.
 run's results. It builds on three layers, each in its own module, and each
 may use the layers below it: `gaia_field_matching` (the run's state and the
 Gaia naming), `simbad_matching` (the SIMBAD naming and the center-star rule)
-and `plate_solution_steps` (the solver's scale hints and the Gaia refit). The
+and `plate_solution_steps` (the solver's scale hints and the Gaia match). The
 detection is in `star_detection` and the Gaia downloads in
 `gaia_tile_queries`.
 """
@@ -35,6 +35,7 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
     read_fit_statistics,
+    solve_failure_reason,
 )
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
@@ -49,12 +50,9 @@ from astrometricslib.pipelines.astrometry.processing.gaia_field_matching import 
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
     FieldGaiaStars,
 )
+from astrometricslib.pipelines.astrometry.processing.gaia_match import GaiaMatch, record_plate_scale
 from astrometricslib.pipelines.astrometry.processing.plate_solution_steps import PlateSolutionSteps
 from astrometricslib.pipelines.astrometry.processing.star_detection import find_unique_stars
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
-    WcsRefinement,
-    record_plate_scale,
-)
 from astrometricslib.utilities.exceptions import PlateSolveFailedError
 
 logger = logging.getLogger(__name__)
@@ -172,18 +170,18 @@ class StarIdentifier(PlateSolutionSteps):
         # Stable keys for conditions that limit the last run's results; see
         # the ``FLAG_*`` constants.
         self.astrometry_flags: list[str] = []
-        # What the Gaia refit of the plate solution found for the last image
-        # (see `_refine_wcs_against_gaia`), or `None` before one was tried.
-        self.wcs_refinement: WcsRefinement | None = None
-        # One plain sentence saying what happened to the Gaia refit of the last
-        # image: it was used, it was rejected (and why), it found no cached
-        # Gaia stars, or it was not tried. Empty before any image.
-        self.wcs_refit_note: str = ""
-        # The peak over the background noise of each star the final Gaia fit
-        # used, and why there is none (see `_record_fit_star_signal`). The
+        # What matching the detections to Gaia found for the last image (see
+        # `_measure_wcs_against_gaia`), or `None` before one was tried.
+        self.gaia_match: GaiaMatch | None = None
+        # One plain sentence saying what happened to the Gaia match of the
+        # last image: it was measured, it found no cached Gaia stars, or it
+        # was not tried. Empty before any image.
+        self.gaia_match_note: str = ""
+        # The peak over the background noise of each star the Gaia match
+        # used, and why there is none (see `_record_match_star_signal`). The
         # expected position error is found from them.
-        self.gaia_fit_peak_over_noise: tuple[float, ...] = ()
-        self.gaia_fit_signal_reason: str = "no Gaia fit was made"
+        self.gaia_match_peak_over_noise: tuple[float, ...] = ()
+        self.gaia_match_signal_reason: str = "no Gaia match was made"
         self._detected_on_binned_copy = False
         # The predicted Gaia query depth of the last image (from its header),
         # or `None` when no image header was read. A caller that names stars
@@ -308,14 +306,12 @@ class StarIdentifier(PlateSolutionSteps):
         maximum_identified_stars: int | None = None,
         target_name: str | None = None,
         solve_only: bool = False,
-        refit_from_cache: bool = False,
     ) -> tuple[list[StellarObject], WCS | None]:
         """Run the full process: find the stars, map the image, and name them.
 
         With `solve_only`, the process stops as soon as the solver has
-        answered: no SIMBAD or Gaia naming and no online query of any kind.
-        The Gaia refit is skipped too, unless `refit_from_cache` asks for a
-        refit against the local cache alone.
+        answered: no SIMBAD or Gaia naming, no Gaia match and no online query
+        of any kind.
 
         Parameters
         ----------
@@ -335,12 +331,6 @@ class StarIdentifier(PlateSolutionSteps):
         solve_only : `bool`, optional
             If True, return the solver's solution as it is and skip every
             step that asks an online catalog. The stars come back unnamed.
-        refit_from_cache : `bool`, optional
-            Used only with `solve_only`. If True, refit the solution to the
-            Gaia stars of a complete cached download that covers the field. The
-            cache is the only source: nothing is sent to a remote service. With
-            no such download the refit is skipped and the flag
-            ``wcs_refinement_skipped`` is recorded.
 
         Returns
         -------
@@ -387,10 +377,10 @@ class StarIdentifier(PlateSolutionSteps):
         self.plate_solve_fit_residual_rms_arcsec = None
         self.plate_solve_matched_star_count = None
         self.astrometry_flags = []
-        self.wcs_refinement = None
-        self.wcs_refit_note = "not refit: it was not tried"
-        self.gaia_fit_peak_over_noise = ()
-        self.gaia_fit_signal_reason = "no Gaia fit was made"
+        self.gaia_match = None
+        self.gaia_match_note = "not measured: it was not tried"
+        self.gaia_match_peak_over_noise = ()
+        self.gaia_match_signal_reason = "no Gaia match was made"
         self._detected_on_binned_copy = is_color_frame
 
         # We limit how many stars we send to the plate solver because it
@@ -402,7 +392,7 @@ class StarIdentifier(PlateSolutionSteps):
         # We take the stars from the beginning of the list because they
         # are already sorted from brightest to dimmest.
         solver_sources = unique_sources[:MAXIMUM_PLATE_SOLVE_SOURCES]
-        # Every detection, kept for the Gaia refit of the solution. The
+        # Every detection, kept for the Gaia match of the solution. The
         # identification limit below keeps the brightest stars, which in a
         # globular cluster such as M 13 are the unresolved core, where Gaia
         # has no star to match.
@@ -446,9 +436,9 @@ class StarIdentifier(PlateSolutionSteps):
                 )
                 h, w = data.shape
 
-                # Determine scale hints dynamically. We
-                # use a very narrow 5% window here because the
-                # plate solve driver will relax it by another 20%.
+                # Determine scale hints dynamically. Siril uses them only to
+                # work out a focal length when the header has none; the
+                # online service takes the window as it is.
                 scale_lower, scale_upper = self._calculate_scale_hints(image_data_or_path)
 
                 solved_header = self.solver.solve(
@@ -479,16 +469,13 @@ class StarIdentifier(PlateSolutionSteps):
                         wcs = WCS(solved_header, naxis=2)
                     record_plate_scale(wcs)
                     if solve_only:
-                        if refit_from_cache:
-                            wcs = self._refine_wcs_against_gaia(
-                                wcs, all_detected_sources, h, w, cache_only=True
-                            )
                         return self.stellar_objects, wcs
-                    wcs = self._refine_wcs_against_gaia(wcs, all_detected_sources, h, w)
+                    self._measure_wcs_against_gaia(wcs, all_detected_sources, h, w)
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
                 else:
-                    logger.error("Could not solve field.")
-                    raise PlateSolveFailedError("Plate solving failed: could not solve field.")
+                    reason = solve_failure_reason(self.solver) or "could not solve field"
+                    logger.error("Could not solve field: %s", reason)
+                    raise PlateSolveFailedError(f"Plate solving failed: {reason}.")
         else:
             # Not attempting plate solving, but we can still identify
             # if we have hints

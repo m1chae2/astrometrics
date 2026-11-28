@@ -70,12 +70,18 @@ ARCSEC_PER_ARCMIN = 60.0
 #:   right ascension was lower than the reported one (13.515409 h against
 #:   13.516520 h at M 51, declination unchanged), so solved minus commanded in
 #:   right ascension is minus ``MM_IH``.
-#: * ``MM_ID`` is +1, NOT MEASURED. Best derivation: the measured ``MM_IH``
-#:   behaves as true = reported + term (the opposite of the older source,
-#:   where the instrument is the observed position minus the term); the same
-#:   change for declination makes solved minus commanded in declination equal
-#:   to plus ``MM_ID``. The live check decides; a flip is one number here.
+#: * ``MM_ID`` is +1, MEASURED live on 2026-11-28 by plate-solving the
+#:   simulator's frames: with ``MM_ID`` = +4 the solved declination was 3.9
+#:   arcminutes higher than without it, so solved minus commanded in
+#:   declination is plus ``MM_ID``. The same run gave ``MM_IH`` = -9 as +9.4
+#:   arcminutes of right ascension, which confirms the -1 above.
 MOUNT_MODEL_SIGNS = {"MM_IH": -1.0, "MM_ID": 1.0}
+#: The standard deviation of a normal distribution is this times the median
+#: absolute deviation (for a normal distribution, 1 / 0.6745).
+MAD_TO_SIGMA = 1.4826
+#: The seed of the go-to scatter's random generator (see
+#: `simulator.goto_scatter`), so a run draws the same offsets again.
+GO_TO_SCATTER_SEED = 182
 #: The terms that are always written as zero: the app's pointing model is not
 #: used (its hour angle is computed from right ascension alone, so the polar
 #: and flexure terms are fitted against a made-up angle and the index and cone
@@ -181,6 +187,10 @@ class FitResult:
     guide_rate_fraction : `dict` [`str`, `float`] or `None`
         The mount's ``GUIDE_RATE_WE`` and ``GUIDE_RATE_NS`` as written, so
         the simulated guider calibration agrees with them.
+    go_to_scatter : `dict` [`str`, `~typing.Any`] or `None`
+        The size of the go-to scatter the exposure driver redraws for each
+        new destination (`simulator.goto_scatter.GotoScatterSettings`), or
+        `None` when there are too few first attempts to give one.
     notes : `list` [`str`]
         Statuses from the measurements and the conversions.
     """
@@ -188,6 +198,7 @@ class FitResult:
     values: list[FittedValue] = field(default_factory=list)
     controller_settings: dict[str, float] | None = None
     guide_rate_fraction: dict[str, float] | None = None
+    go_to_scatter: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
 
     def value_of(self, device: str, property_name: str, element: str) -> float | None:
@@ -562,6 +573,19 @@ def _mount_model(measurements: Measurements, result: FitResult) -> None:
     candidate = _best(measurements, "mount_model")
     requested = {"MM_IH": 0.0, "MM_ID": 0.0}
     if candidate is not None:
+        result.go_to_scatter = {
+            "mean_ra_arcsec": candidate.values["ra_angle_median_arcsec"],
+            "mean_dec_arcsec": candidate.values["dec_median_arcsec"],
+            "sigma_ra_arcsec": MAD_TO_SIGMA * candidate.values.get("ra_angle_mad_arcsec", 0.0),
+            "sigma_dec_arcsec": MAD_TO_SIGMA * candidate.values.get("dec_mad_arcsec", 0.0),
+            "seed": GO_TO_SCATTER_SEED,
+            "count": int(candidate.values.get("count", 0.0)),
+            "source": candidate.call,
+            "nights": list(candidate.nights),
+            "note": "Each new destination draws a new offset from a normal distribution with the "
+            "median of the first attempts as its middle and 1.4826 times their median absolute "
+            "deviation as its spread, on each axis.",
+        }
         requested["MM_IH"] = (
             MOUNT_MODEL_SIGNS["MM_IH"] * candidate.values["ra_angle_median_arcsec"] / ARCSEC_PER_ARCMIN
         )
@@ -595,7 +619,7 @@ def _mount_model(measurements: Measurements, result: FitResult) -> None:
                 element,
                 0.0,
                 None,
-                "always zero: only a constant offset is simulated",
+                "always zero: only the index terms are simulated",
                 note="Not simulated: the app's pointing model is not used (see simulator/README.md).",
             )
         )

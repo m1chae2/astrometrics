@@ -1,6 +1,6 @@
 # Installation
 
-*Version 2.1 · 2026-11-14 · Status: current*
+*Version 2.4 · 2026-11-28 · Status: current*
 
 This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
@@ -11,7 +11,6 @@ These parts do not work on Windows yet:
 
 - Telescope control and the simulated observatory. Both need INDI, which is not available on Windows.
 - Downloading frames from the telescope computer, which uses `rsync`.
-- The local plate solver. Plate solving uses the online astrometry.net service instead, which needs an API key.
 - A packaged installer. Windows runs from a copy of the source code.
 
 Windows limits a path to 260 characters unless long paths are turned on, and a deep library folder, for example on Google Drive, can pass that. The setup script warns when they are off and prints the one-line command that turns them on. It needs administrator rights and a restart.
@@ -27,6 +26,8 @@ Keep the frames on the same drive as `%LOCALAPPDATA%`, usually `C:`. Siril reads
 
 **Software.** The steps below install or set up each item.
 
+Each item is the work of others, under its own license, and you accept that license when you install it. Some are not open source. [Third-party notices](https://github.com/m1chae2/astrometrics/blob/main/THIRD_PARTY_NOTICES.md) lists each license and the acknowledgements to include when you publish results.
+
 | Software | Why the app needs it | How you get it |
 | --- | --- | --- |
 | Git | Downloads the code | Your package manager |
@@ -34,7 +35,7 @@ Keep the frames on the same drive as `%LOCALAPPDATA%`, usually `C:`. Siril reads
 | Node.js 24 and npm | Runs the app window (built with Electron, a toolkit for desktop apps) | You install it yourself. `install_ubuntu_deps.sh` does not add it |
 | Siril | Stacks frames. Stacking combines many frames into one image | `install_ubuntu_deps.sh` |
 | INDI and `swig`, `build-essential` and other build tools | Controls the telescope hardware | `install_ubuntu_deps.sh` |
-| A plate solver | Works out which part of the sky an image shows | The online astrometry.net service (needs an API key) or a local solver from `install_ubuntu_deps.sh --with-local-solver` |
+| Siril's plate solver | Works out which part of the sky an image shows | Comes with Siril 1.4 or newer. Step 5 below sets up its star catalog. An image with no position uses the online astrometry.net service, which needs an API key |
 
 Node.js 24 is the version the project's own tests use. On Ubuntu under WSL (Windows Subsystem for Linux), `sudo ./build/linux/setup_wsl.sh` installs it from NodeSource.
 
@@ -53,16 +54,14 @@ Node.js 24 is the version the project's own tests use. On Ubuntu under WSL (Wind
    sudo ./build/linux/install_ubuntu_deps.sh
    ```
 
-   The script has two optional settings. Run it with `--help` to list them.
+   The script has optional settings. Run it with `--help` to list them.
 
    **Siril source.** `--siril-source=apt` is the default. It uses Ubuntu's own package, which stays at the version Ubuntu ships. `--siril-source=flatpak` installs Siril from Flathub, which tracks new releases more closely. It is also the only choice that supports weighted stacking.
 
-   **Local plate solver.** `--with-local-solver` also installs astrometry.net and its index files, so plate solving runs on your computer. Leave it off to use the online service instead.
-
-   The two settings work together:
+   Both settings are optional. For example:
 
    ```bash
-   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
+   sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
    ```
 
 3. Install Node.js 24 and npm if `node -v` does not show version 24 or newer. See the table above.
@@ -75,9 +74,18 @@ Node.js 24 is the version the project's own tests use. On Ubuntu under WSL (Wind
 
    The script makes a `.venv` folder in the repository, installs the app and its Python packages, and copies the configuration template to `~/.config/astrometrics/astrometrics.config.toml` if you have no configuration yet. Running it again is safe. It skips steps that are already done.
 
-5. Edit the configuration file. See the next section.
+5. Set up Siril's star catalog. Siril's plate solver, which works out where each image points, reads the Gaia star catalog (about 1.5 GB) from your disk. The script downloads it, checks it against a pinned size and checksum, and refuses a file that does not match. A matching catalog that Siril's own installer made is kept. Without the catalog, a frame with a header position is not solved; a frame with no position goes to the online service.
 
-6. Start the app.
+   ```bash
+   ./build/linux/setup_siril_catalog.sh --check   # report only; changes nothing
+   ./build/linux/setup_siril_catalog.sh           # download it if it is missing
+   ```
+
+   Run it as your own user, not with `sudo`. On Windows, `setup_windows.ps1` does this step.
+
+6. Edit the configuration file. See the next section.
+
+7. Start the app.
 
    ```bash
    ./astrometrics.sh start
@@ -92,7 +100,7 @@ The configuration file is `~/.config/astrometrics/astrometrics.config.toml`. Its
 | Setting | Section | What to do |
 | --- | --- | --- |
 | `frames_path` | `[Image Library]` | Set the folder where raw and calibration frames are saved. Use a folder on your local disk. |
-| `api_key` | `[Processing.Astrometry.Online Solver]` | Enter your astrometry.net API key. Do this if you did not install the local solver. |
+| `api_key` | `[Processing.Astrometry.Online Solver]` | Enter your astrometry.net API key. Only an image with no position in its header uses it. |
 | `siril_executable` | `[Processing.Siril]` | The default, `siril-cli`, is correct for an `apt` install. For a Flathub install, set `flatpak run --command=siril-cli org.siril.Siril`. |
 | `stack_weight` | `[Processing.Siril]` | Leave it blank for an `apt` install. For a Flathub install, you can set `wfwhm` to turn on weighted stacking. |
 
@@ -104,10 +112,6 @@ Stacking must use Siril's `-cli` command. The plain `siril` and `flatpak run org
 
 :::{warning}
 Weighted stacking (`stack_weight = wfwhm`) needs a Siril that accepts the `-weight=` argument of the `stack` command. Ubuntu's `apt` package does not. Stacking then fails with `Unexpected argument to stacking`. This is why `stack_weight` ships blank.
-:::
-
-:::{note}
-`--with-local-solver` installs index files sized for the camera and telescope in the configuration template. A different camera or telescope sees a different amount of sky and needs index files to match. They are listed by field-of-view size at [data.astrometry.net](https://data.astrometry.net). You can also run `apt-cache search astrometry-data`.
 :::
 
 ### Graphics card on a laptop with two cards
@@ -125,6 +129,36 @@ The app chooses at start. It cannot switch cards while it runs, so plugging in o
 On Windows the `gpu` setting does nothing. The app asks Windows for the high-performance card (the NVIDIA or AMD card next to an Intel one) every time it starts, on battery too. On a computer with one card this changes nothing. The start-up log, `main.log` in `%LOCALAPPDATA%\astrometrics\logs`, names the card the window got, on the line that starts with `GPU:`.
 
 GraXpert, which removes the sky's gradient from the preview picture, chooses its card on its own. On Windows it uses the graphics card through DirectML, Microsoft's interface for running AI models on any graphics card.
+
+### Siril's tools on an NVIDIA graphics card
+
+Siril's AI tools can run on an NVIDIA graphics card, which is usually faster than the processor. They are GraXpert, StarNet2 (which removes stars from an image) and the Python scripts Siril runs, such as GraXpert-AI and Cosmic Clarity. With the Flathub Siril, each tool needs extra pieces: permissions for the Siril sandbox, NVIDIA's CUDA libraries at fixed versions, a GPU build of ONNX Runtime (the library that runs the AI models) and two small wrapper scripts. `build/linux/setup_siril_gpu.sh` puts each piece in place. It is optional. Without it, the tools run on the processor.
+
+1. Install Siril from Flathub (`--siril-source=flatpak`), open it once and run any script from its **Scripts** menu. Siril then makes its Python environment and settings file.
+2. Install GraXpert and StarNet2 in `~/Applications`, or note where they are.
+3. See what the script would do. It changes nothing in this step.
+
+   ```bash
+   ./build/linux/setup_siril_gpu.sh --dry-run
+   ```
+
+4. Close Siril, then run the script.
+
+   ```bash
+   ./build/linux/setup_siril_gpu.sh
+   ```
+
+   Run it as your own user, not with `sudo`. It downloads 2 to 3 GB of libraries from PyPI. It checks each file against a pinned checksum and refuses any file that does not match. NVIDIA's CUDA and cuDNN libraries are under NVIDIA's own license agreements, which are not open source. Before the first download, the script shows the address of each agreement and asks you to accept it. Answer `y` to go on. Without a terminal, add `--accept-nvidia-license` instead. If GraXpert or StarNet2 is somewhere else, add `--graxpert=<path>` or `--starnet=<path>`.
+
+5. Check the result. Every part should show `ready`.
+
+   ```bash
+   ./build/linux/setup_siril_gpu.sh --check
+   ```
+
+The script adds only settings that are missing and never removes one. It fills the GraXpert setting of the app (`graxpert_executable`) and the StarNet and GraXpert settings of Siril only when they are empty. On a computer without an NVIDIA card, or without the Flathub Siril, it says so and stops without an error. GraXpert 4 also needs NVIDIA's CUDA 13 libraries in `/usr/local/cuda`. The script reports whether they are there but does not install them. The details are in `build/linux/README.md`.
+
+Windows needs none of this. Siril's normal Windows installer has no sandbox to open, and GraXpert uses the graphics card through DirectML.
 
 ### Storage layout
 
@@ -222,7 +256,7 @@ Your frames, and any database copies in `backup_path`, are in folders that the s
 
 **`Unexpected argument to stacking`.** Siril is too old for weighted stacking. Leave `stack_weight` blank, or reinstall Siril with `--siril-source=flatpak`.
 
-**Plate solving fails.** Plate solving needs one solver. Install the local one with `--with-local-solver`, or set `api_key` for the online one.
+**Plate solving fails.** Siril needs version 1.4 or newer and its star catalog (step 5). Run `./build/linux/setup_siril_catalog.sh --check` to see whether the catalog is in place. An image with no position in its header needs `api_key` for the online service.
 
 ## Next steps
 

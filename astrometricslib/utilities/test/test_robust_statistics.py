@@ -17,6 +17,7 @@ from astrometricslib.utilities.robust_statistics import (
     per_axis_sigma_from_distances,
     robust_sigma,
     sigma_clipped_values,
+    smooth_median_and_sigma,
 )
 
 
@@ -116,3 +117,73 @@ def test_sigma_clipped_values_stops_on_zero_spread() -> None:
     kept = sigma_clipped_values([4.0] * 10 + [9.0], minimum_count=3, maximum_passes=5, clip_sigma=3.0)
     assert kept is not None
     assert kept.size == 11
+
+
+def _quantized(true_sigma: float, step: int, seed: int, size: int = 400_000) -> np.ndarray:
+    """Draw bell-curve numbers and round them to a grid of the given step.
+
+    Returns
+    -------
+    values : `numpy.ndarray`
+        Numbers centered near 500, on a grid of ``step``.
+    """
+    rng = np.random.default_rng(seed)
+    return step * np.round(rng.normal(500.0, true_sigma, size) / step)
+
+
+@pytest.mark.parametrize("step", [1, 4])
+def test_smooth_sigma_follows_the_true_noise_on_a_grid(step: int) -> None:
+    """On numbers in steps of 1 or 4, the spread follows the noise smoothly.
+
+    Noise from 24 to 30 in small steps is measured on 4-step data. The plain
+    MAD jumps between grid values (multiples of 4 times 1.4826), while the
+    smoothed spread stays within 1.5 percent of the true noise (the rounding
+    itself adds step squared over 12 to the variance, and spreading each value
+    over its cell adds as much again) and takes a different value for every
+    noise level.
+    """
+    noises = np.linspace(24.0, 30.0, 13) if step == 4 else np.linspace(3.0, 4.0, 13)
+    smooth = np.array([smooth_median_and_sigma(_quantized(n, step, 7 + i))[1] for i, n in enumerate(noises)])
+    plain = np.array([robust_sigma(_quantized(n, step, 7 + i)) for i, n in enumerate(noises)])
+
+    np.testing.assert_allclose(smooth, noises, rtol=0.015)
+    assert len(set(np.round(smooth, 6))) == noises.size
+    assert len(set(np.round(plain, 6))) < noises.size
+    assert np.all(np.diff(smooth) > -0.02 * noises[:-1])
+
+
+def test_smooth_median_is_not_stuck_on_the_grid() -> None:
+    """A level 1 ADU off the 4-step grid is read as such."""
+    rng = np.random.default_rng(5)
+    values = 4.0 * np.round((rng.normal(501.0, 25.0, 400_000)) / 4.0)
+
+    median, _ = smooth_median_and_sigma(values)
+
+    assert abs(median - 4.0 * round(median / 4.0)) > 0.3
+    assert median == pytest.approx(501.0, abs=0.2)
+
+
+def test_smooth_sigma_of_averaged_whole_numbers_is_not_constant() -> None:
+    """Means of 6 whole numbers (a grid of 1/6) give a spread that varies."""
+    rng = np.random.default_rng(9)
+    spreads = []
+    for noise in (10.0, 10.2, 10.4, 10.6):
+        raw = np.round(rng.normal(680.0, noise, size=(6, 300_000)))
+        spreads.append(smooth_median_and_sigma(raw.mean(axis=0))[1])
+    spreads_array = np.array(spreads)
+
+    assert len(set(np.round(spreads_array, 4))) == 4
+    np.testing.assert_allclose(spreads_array, np.array([10.0, 10.2, 10.4, 10.6]) / np.sqrt(6.0), rtol=0.02)
+
+
+def test_smooth_values_equal_the_plain_ones_off_a_grid() -> None:
+    """Numbers off a grid give the ordinary median and MAD."""
+    samples = np.random.default_rng(1).normal(100.0, 3.0, 50_000)
+    short = [1.0, 2.0, 3.0, 4.0, 10.0]
+
+    assert smooth_median_and_sigma(samples) == (float(np.median(samples)), robust_sigma(samples))
+    assert smooth_median_and_sigma(short) == (3.0, robust_sigma(short))
+    median, sigma = smooth_median_and_sigma([np.nan, 5.0, 5.0])
+    assert median == pytest.approx(5.0)
+    assert sigma == pytest.approx(0.0)
+    assert all(np.isnan(smooth_median_and_sigma([])))

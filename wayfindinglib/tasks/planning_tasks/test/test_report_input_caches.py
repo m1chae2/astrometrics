@@ -19,6 +19,7 @@ from astrometricslib import AppConfiguration, CaptureSetting
 from astrometricslib._internal.drivers.quality_store import QualityStore
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.tasks.planning_tasks import target_report_inputs, target_report_tasks
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import read_noise_history
 from wayfindinglib.tasks.planning_tasks.target_report_tasks import _read_ekos_contexts
@@ -118,7 +119,7 @@ def _write(config: AppConfiguration, level: SubjectLevel, run_id: str) -> None:
 def test_a_new_frame_does_not_read_the_noise_history_again(config: AppConfiguration) -> None:
     """Frame rows leave the kept history; a stack row replaces it."""
     quality = _Quality()
-    astrometrics = SimpleNamespace(quality=quality)
+    astrometrics = attach_library_versions(SimpleNamespace(quality=quality), config)
     _write(config, SubjectLevel.FRAME, "frame-0")
     first = read_noise_history(astrometrics, config)
     reads = quality.reads
@@ -146,7 +147,7 @@ def test_without_a_configuration_the_noise_history_is_read_every_time() -> None:
 
 def test_the_kept_noise_history_equals_a_fresh_one(config: AppConfiguration) -> None:
     """The kept history and the history read without keeping are equal."""
-    astrometrics = SimpleNamespace(quality=_Quality())
+    astrometrics = attach_library_versions(SimpleNamespace(quality=_Quality()), config)
     kept = read_noise_history(astrometrics, config)
     assert read_noise_history(astrometrics, config) == kept
     assert read_noise_history(astrometrics) == kept

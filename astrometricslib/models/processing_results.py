@@ -228,11 +228,14 @@ class ProcessTargetResult(BaseModel):
     stages_run: list[str] = Field(default_factory=list)
     # The stages that ran only because a stage the caller asked for needs
     # them and their saved result was missing or out of date (they are also
-    # in `stages_run`).
+    # in `stages_run`). Only spectroscopy is ever added, before spectral
+    # variation: astrometry is never run for another stage.
     prerequisites_run: list[str] = Field(default_factory=list)
-    # The stages that did not run because a prerequisite could not run, with
-    # the reason (such as "needs astrometry: the target has no imaging
-    # stack to solve"). Each also has a "skipped" entry in `results`.
+    # The stages that did not run because the astrometry result they read
+    # was missing or out of date, or a prerequisite could not run, with the
+    # reason (such as "needs astrometry: its result is missing; run
+    # processing.astrometry.run(target) first"). Each also has a "skipped"
+    # entry in `results`, and the job lists the astrometry skips as warnings.
     stages_skipped: dict[str, str] = Field(default_factory=dict)
     results: dict[str, Any] = Field(default_factory=dict)
     # The target's astrometry, photometry and spectroscopy quality
@@ -300,7 +303,7 @@ class PredictedFrame(BaseModel):
     file: str
     # Why, in one sentence with the frame's value and the limit.
     reason: str
-    # "clouded", "trailed" or "off_field" (the quarantine step), "uneven_sky"
+    # "clouded", "trailed" or "off_field" (the set-aside step), "uneven_sky"
     # (kept with a warning), "minority_gain", "already_set_aside",
     # "background_split" or "exposure_not_foldable" (its exposure length has
     # too few frames and no group within the fold ratio limit).
@@ -377,7 +380,7 @@ class StackPrediction(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     # What each frame check found, in the order they ran.
     gates: list[GateResult] = Field(default_factory=list)
-    # Frames the quarantine check could not read. They stay in the stack.
+    # Frames the set-aside check could not read. They stay in the stack.
     unreadable: list[str] = Field(default_factory=list)
     # True when no frame is left, so a stack would fail.
     nothing_left: bool = False

@@ -2,7 +2,7 @@
 
 The star identifier reads the Gaia stars of an image through
 `gaia_field_stars.load_field_gaia_stars` and lists the tiles with
-`gaia_field_stars.tiles_under_image`. `use_field_stars` replaces both inside
+`gaia_field_stars.tiles_under_image`. `use_field_stars` replaces them inside
 the star identifier, so a test can hand it a fixed table without a cache or a
 network.
 """
@@ -73,5 +73,4 @@ def use_field_stars(
 
     monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", fake_load)
     monkeypatch.setattr(gaia_field_matching, "tiles_under_image", lambda *_arguments, **_keywords: [1])
-    monkeypatch.setattr(plate_solution_steps, "tiles_under_image", lambda *_arguments, **_keywords: [1])
     return calls

@@ -34,6 +34,9 @@ from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import PointingCorrection
 from wayfindinglib.models.session.telemetry import MountPointingModel
 
+FEEDFORWARD_REFUSED_CONFIDENCES = ("insufficient_data", "low")
+"""Confidence values of a pointing model that is not fed forward."""
+
 
 def compute_pointing_correction(
     comparison_input_id: str,
@@ -46,6 +49,8 @@ def compute_pointing_correction(
     pointing_model: MountPointingModel | None = None,
     *,
     latitude_deg: float,
+    longitude_deg: float,
+    timestamp: float,
 ) -> PointingCorrection:
     """Compute one iteration's pointing error and closing correction.
 
@@ -69,9 +74,16 @@ def compute_pointing_correction(
         pointing model exactly: `converged` is judged against the raw
         measured error.
         Skipped even when supplied if its `confidence` is
-        ``"insufficient_data"`` -- an unfit model predicts nothing.
-    latitude_deg : `float`
-        Observer latitude in decimal degrees, keyword-only and required.
+        ``"insufficient_data"`` (an unfit model predicts nothing) or
+        ``"low"`` (the points did not separate its terms, so its
+        prediction cannot be trusted).
+    latitude_deg, longitude_deg : `float`
+        Observer latitude and longitude in decimal degrees (east
+        positive), keyword-only and required. They are used only when
+        `pointing_model` is supplied.
+    timestamp : `float`
+        Time of the solve in seconds since 1970-01-01 UTC, keyword-only
+        and required. It sets the hour angle the model is evaluated at.
         It is used only when `pointing_model` is supplied.
 
     Returns
@@ -92,12 +104,12 @@ def compute_pointing_correction(
     unexplained_residual_arcsec = None
     convergence_error_arcsec = pointing_error_arcsec
 
-    if pointing_model is not None and pointing_model.confidence != "insufficient_data":
+    if pointing_model is not None and pointing_model.confidence not in FEEDFORWARD_REFUSED_CONFIDENCES:
         measured_delta_ra_arcsec, measured_delta_dec_arcsec = signed_offset_components_arcsec(
             commanded_ra_deg, commanded_dec_deg, solved_ra_deg, solved_dec_deg
         )
         predicted_delta_ra_arcsec, predicted_delta_dec_arcsec = predict_pointing_error(
-            commanded_ra_deg, commanded_dec_deg, pointing_model, latitude_deg
+            commanded_ra_deg, commanded_dec_deg, pointing_model, latitude_deg, longitude_deg, timestamp
         )
         model_predicted_error_arcsec = math.hypot(predicted_delta_ra_arcsec, predicted_delta_dec_arcsec)
         unexplained_residual_arcsec = math.hypot(

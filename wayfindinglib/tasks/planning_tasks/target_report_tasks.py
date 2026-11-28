@@ -186,7 +186,7 @@ from wayfindinglib.models.quality.statements import (
 )
 from wayfindinglib.tasks.planning_tasks.target_report_inputs import (
     FRAME_WEIGHT_METRIC,
-    QUARANTINE_METRICS,
+    SET_ASIDE_METRICS,
     TargetRows,
     assign_stacks_to_settings,
     frame_altitudes,
@@ -602,15 +602,15 @@ def _set_aside_parts(
     Returns
     -------
     reasons_by_setting, evidence_by_setting, unassigned : `tuple`
-        The reasons counted for each setting; the stored quarantine rows of
+        The reasons counted for each setting; the stored set-aside rows of
         the matched frames for each setting; and the reasons counted for
         frames no stored measurement could place.
     """
     by_id = {observation.frame_id: observation for observation in observations}
-    quarantine_rows: dict[str, list[QualityMeasurement]] = defaultdict(list)
+    set_aside_rows: dict[str, list[QualityMeasurement]] = defaultdict(list)
     for row in rows:
-        if row.metric in QUARANTINE_METRICS:
-            quarantine_rows[row.subject.subject_id].append(row)
+        if row.metric in SET_ASIDE_METRICS:
+            set_aside_rows[row.subject.subject_id].append(row)
     reasons_by_setting: dict[CaptureSetting, Counter] = defaultdict(Counter)
     evidence_by_setting: dict[CaptureSetting, list[MeasurementReference]] = defaultdict(list)
     unassigned: Counter = Counter()
@@ -620,9 +620,7 @@ def _set_aside_parts(
             unassigned[reason] += 1
             continue
         reasons_by_setting[observation.capture_setting][reason] += 1
-        evidence_by_setting[observation.capture_setting].extend(
-            _references(quarantine_rows.get(frame_id, []))
-        )
+        evidence_by_setting[observation.capture_setting].extend(_references(set_aside_rows.get(frame_id, [])))
     return reasons_by_setting, evidence_by_setting, unassigned
 
 
@@ -2288,7 +2286,7 @@ def build_target_dataset_report(
         )
     return _TARGET_REPORT_CACHE.get_or_build(
         key,
-        lambda: report_data_version(config, butler),
+        lambda: report_data_version(config, butler, astrometrics),
         lambda: _build_target_dataset_report(
             target,
             astrometrics=astrometrics,

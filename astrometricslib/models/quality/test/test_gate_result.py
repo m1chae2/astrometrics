@@ -57,9 +57,9 @@ def test_passed_gate_is_on_record() -> None:
 def test_unchecked_gate_is_recorded_and_is_not_a_pass() -> None:
     """A gate that could not run is recorded as `not_checked`, not `passed`."""
     summary = _empty_summary()
-    summary.record_gate(unchecked_gate("quarantine", "3 frames are too few to judge"))
+    summary.record_gate(unchecked_gate("set_aside", "3 frames are too few to judge"))
 
-    recorded = summary.gate("quarantine")
+    recorded = summary.gate("set_aside")
     assert recorded is not None
     assert recorded.status is GateStatus.NOT_CHECKED
     assert recorded.status is not GateStatus.PASSED
@@ -69,8 +69,8 @@ def test_unchecked_gate_is_recorded_and_is_not_a_pass() -> None:
 def test_rerecording_a_gate_replaces_the_earlier_answer() -> None:
     """Running the same check twice leaves one answer, the later one."""
     summary = _empty_summary()
-    summary.record_gate(unchecked_gate("quarantine", "too few frames"))
-    summary.record_gate(passed_gate("quarantine"))
+    summary.record_gate(unchecked_gate("set_aside", "too few frames"))
+    summary.record_gate(passed_gate("set_aside"))
 
     assert [gate.status for gate in summary.gates] == [GateStatus.PASSED]
 

@@ -1,16 +1,14 @@
-"""Tests for the per-star centroid offsets behind `registration_drift`.
+"""Tests for the per-star centroid offsets behind the registration gate.
 
-A frame's global shift moves every reference position by the same amount.
-When the field also rotates, each star is displaced by its own amount, so its
-centroid sits away from the shifted reference position. These tests build
-synthetic sequences whose true answer is known (`make_drifted_sequence`) and
-check three things:
+Each frame's plate solution places every reference star. The star's own
+centroid then sits near that place, and what is left is the per-star offset.
+These tests build synthetic sequences whose true solutions are known
+(`make_drifted_sequence` and `drifted_frame_solves`) and check three things:
 
 * A pure translation leaves the per-star offsets near zero.
-* A rotation of 0.05 degrees per frame gives offsets that grow with the
-  star's distance from the rotation center, and a 95th percentile above the
-  median.
-* The summary and the gate report that distribution.
+* A rotating field leaves them near zero too, because each frame's solution
+  follows the rotation. The rotation shows in the corner displacement.
+* The summary and the gate report those numbers.
 """
 
 import math
@@ -24,6 +22,10 @@ from astropy.io import fits
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.pipelines.photometry.post_processing import record_quality as rg
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
+from astrometricslib.pipelines.photometry.pre_processing.frame_mapping import (
+    FrameMapping,
+    wcs_from_solved_header,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     CentroidShiftSummary,
     StarPosition,
@@ -31,7 +33,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     centroid_offsets_px,
     summarize_centroid_shifts,
 )
-from astrometricslib.test.synthetic import SyntheticStar, make_drifted_sequence
+from astrometricslib.test.synthetic import SyntheticStar, drifted_frame_solves, make_drifted_sequence
 
 SATURATION_ADU = 65535.0
 SEQUENCE_SHAPE = (400, 600)
@@ -39,14 +41,11 @@ FRAME_COUNT = 8
 ROTATION_DEG_PER_FRAME = 0.05
 STAR_FWHM_PX = 3.5
 
-# Star offsets from the frame center, in pixels. The first six are the
-# alignment anchors. They are symmetric about the center, so the median of
-# their displacements is zero and the global shift stays at zero under pure
-# rotation. The rest are extra stars at other distances from the center. The
-# farthest star is 197 px away, which a rotation of 0.35 degrees (the last
-# frame) moves by 1.2 px, inside the 1.5 px limit for a centroid.
-ANCHOR_OFFSETS_PX = [(170, 100), (170, -100), (-170, 100), (-170, -100), (120, 0), (-120, 0)]
-EXTRA_OFFSETS_PX = [(30, 0), (0, 70), (0, -110), (-60, -40), (60, 40)]
+# Star offsets from the frame center, in pixels: first a ring, then more
+# stars at other distances. The farthest star is 197 px
+# away, which a rotation of 0.35 degrees (the last frame) moves by 1.2 px.
+STAR_OFFSETS_PX = [(170, 100), (170, -100), (-170, 100), (-170, -100), (120, 0), (-120, 0)]
+MORE_STAR_OFFSETS_PX = [(30, 0), (0, 70), (0, -110), (-60, -40), (60, 40)]
 CENTER_PX = ((SEQUENCE_SHAPE[1] - 1) / 2, (SEQUENCE_SHAPE[0] - 1) / 2)
 
 
@@ -60,13 +59,17 @@ def _field_stars() -> list[SyntheticStar]:
     """
     return [
         SyntheticStar(CENTER_PX[0] + dx, CENTER_PX[1] + dy, 30000.0, STAR_FWHM_PX)
-        for dx, dy in ANCHOR_OFFSETS_PX + EXTRA_OFFSETS_PX
+        for dx, dy in STAR_OFFSETS_PX + MORE_STAR_OFFSETS_PX
     ]
 
 
 def _measure_offsets(
-    tmp_path: Path, frames: list[np.ndarray], stars: list[SyntheticStar]
-) -> tuple[dict[datetime, list[float]], list[list[float]], int, int]:
+    tmp_path: Path,
+    frames: list[np.ndarray],
+    stars: list[SyntheticStar],
+    drift_px: tuple[float, float],
+    rotation_deg_per_frame: float,
+) -> tuple[dict[datetime, list[float]], dict[datetime, FrameMapping], int, int]:
     """Run the frame worker on a sequence and collect the per-star offsets.
 
     Parameters
@@ -77,68 +80,66 @@ def _measure_offsets(
         The frames, in time order. Frame 0 is the reference and is not
         measured.
     stars : `list` [`SyntheticStar`]
-        The stars in frame 0. The first `len(ANCHOR_OFFSETS_PX)` are the
-        alignment anchors.
+        The stars in frame 0.
+    drift_px : `tuple` [`float`, `float`]
+        The drift between frames, in pixels, which the solutions follow.
+    rotation_deg_per_frame : `float`
+        The rotation between frames, in degrees, which the solutions follow.
 
     Returns
     -------
     offsets_by_frame : `dict` [`datetime.datetime`, `list` [`float`]]
         For each measured frame, the offset of every refined star, in pixels.
-    per_star : `list` [`list` [`float`]]
-        For each measured frame, the offset of each star in input order.
-        A star whose centroid was refused has an offset of NaN.
+    mappings_by_frame : `dict` [`datetime.datetime`, `FrameMapping`]
+        For each measured frame, its mapping from the reference frame.
     measurement_count : `int`
         Star measurements made.
     fallback_count : `int`
-        Measurements that kept the aligned position.
+        Measurements that kept the solution's position.
     """
     reference = [(f"star{index}", star.x, star.y) for index, star in enumerate(stars)]
     reference_positions = {star_id: (x, y) for star_id, x, y in reference}
-    anchors = [(star.x, star.y, 0.0) for star in stars[: len(ANCHOR_OFFSETS_PX)]]
+    paths = [str(tmp_path / f"frame_{index:02d}.fits") for index in range(len(frames))]
+    solves = drifted_frame_solves(paths, SEQUENCE_SHAPE, drift_px, rotation_deg_per_frame)
+    reference_wcs = wcs_from_solved_header(solves[paths[0]].header)
     start = datetime(2026, 5, 24, 4, 0, 0)
     offsets_by_frame: dict[datetime, list[float]] = {}
-    per_star: list[list[float]] = []
+    mappings_by_frame: dict[datetime, FrameMapping] = {}
     measurement_count = fallback_count = 0
     for index, frame in enumerate(frames[1:], start=1):
-        path = tmp_path / f"frame_{index:02d}.fits"
         timestamp = start + timedelta(minutes=index)
         hdu = fits.PrimaryHDU(frame)
         hdu.header["DATE-OBS"] = timestamp.isoformat(timespec="milliseconds")
         hdu.header["EXPTIME"] = 1.0
-        hdu.writeto(path)
+        hdu.writeto(paths[index])
+        mapping = FrameMapping.from_solutions(
+            reference_wcs, wcs_from_solved_header(solves[paths[index]].header), SEQUENCE_SHAPE
+        )
         _, result = _process_single_frame_worker((
-            str(path),
+            paths[index],
             reference,
-            anchors,
+            mapping,
             SATURATION_ADU,
             DetectorNoise(),
         ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, _, shift_x, shift_y, _, _, positions, _, _, _ = result
-        offsets, fallbacks = centroid_offsets_px(positions, reference_positions, shift_x, shift_y)
+        positions = result[6]
+        offsets, fallbacks = centroid_offsets_px(positions, reference_positions, mapping)
         offsets_by_frame[timestamp] = offsets
+        mappings_by_frame[timestamp] = mapping
         measurement_count += len(positions)
         fallback_count += fallbacks
-        per_star.append([
-            centroid_offsets_px({star_id: positions[star_id]}, reference_positions, shift_x, shift_y)[0][0]
-            if positions[star_id].is_refined
-            else math.nan
-            for star_id, _, _ in reference
-        ])
-    return offsets_by_frame, per_star, measurement_count, fallback_count
+    return offsets_by_frame, mappings_by_frame, measurement_count, fallback_count
 
 
-def test_a_rotating_field_gives_offsets_that_grow_with_distance_from_the_center(
-    tmp_path: Path,
-) -> None:
-    """Verifies 0.05 deg of rotation per frame spreads the per-star offsets.
+def test_a_rotating_field_leaves_the_per_star_offsets_near_zero(tmp_path: Path) -> None:
+    """Verifies 0.05 deg of rotation per frame does not spread the offsets.
 
-    With no noise, the offset of a star in frame ``k`` equals its distance
-    from the center times the rotation angle ``k * 0.05`` degrees in
-    radians. In the last frame the nearest star is 30 px from the center and
-    the farthest 197 px, so the offsets must rise with distance and match
-    that product to 0.02 px. Over the whole sequence the 95th percentile must
-    lie above the median.
+    With no noise, every star's centroid sits within 0.02 px of the place its
+    frame's solution gives, however far the star is from the rotation center,
+    and no centroid is refused. The rotation shows in the corner displacement
+    of the last frame, which is the rotation angle times the distance from
+    the center to a corner.
     """
     stars = _field_stars()
     frames = make_drifted_sequence(
@@ -150,31 +151,28 @@ def test_a_rotating_field_gives_offsets_that_grow_with_distance_from_the_center(
         add_noise=False,
     )
 
-    offsets_by_frame, per_star, measurements, fallbacks = _measure_offsets(tmp_path, frames, stars)
+    offsets_by_frame, mappings_by_frame, measurements, fallbacks = _measure_offsets(
+        tmp_path, frames, stars, (0.0, 0.0), ROTATION_DEG_PER_FRAME
+    )
 
-    distances = np.array([math.hypot(star.x - CENTER_PX[0], star.y - CENTER_PX[1]) for star in stars])
-    last_frame_offsets = np.array(per_star[-1])
-    angle_rad = math.radians(ROTATION_DEG_PER_FRAME * (FRAME_COUNT - 1))
-    assert np.all(np.isfinite(last_frame_offsets))
-    assert np.corrcoef(distances, last_frame_offsets)[0, 1] > 0.99
-    assert last_frame_offsets == pytest.approx(distances * angle_rad, abs=0.02)
-
-    summary = summarize_centroid_shifts(offsets_by_frame, measurements, fallbacks)
+    assert max(max(offsets) for offsets in offsets_by_frame.values()) < 0.02
+    summary = summarize_centroid_shifts(
+        offsets_by_frame, measurements, fallbacks, mappings_by_frame=mappings_by_frame
+    )
     assert summary is not None
     assert summary.fallback_count == 0
-    assert summary.median_offset_px is not None
-    assert summary.p95_offset_px is not None
-    assert summary.p95_offset_px > summary.median_offset_px
-    assert summary.p95_offset_px > 0.5
-    assert summary.worst_frame == max(offsets_by_frame)
+    assert summary.mapped_frame_count == FRAME_COUNT - 1
+    angle_rad = math.radians(ROTATION_DEG_PER_FRAME * (FRAME_COUNT - 1))
+    assert summary.worst_corner_displacement_px == pytest.approx(angle_rad * math.hypot(*CENTER_PX), abs=0.02)
+    assert summary.worst_frame is not None
 
 
 def test_a_pure_translation_leaves_the_per_star_offsets_near_zero(tmp_path: Path) -> None:
     """Verifies a drifting field with no rotation gives offsets under 0.1 px.
 
-    The field drifts by (0.3, -0.2) px per frame on a noisy sky. The global
-    shift takes up all of that motion, so each star's own centroid lands on
-    the shifted reference position to within the centroid's noise.
+    The field drifts by (0.3, -0.2) px per frame on a noisy sky. The solution
+    follows all of that motion, so each star's own centroid lands on the
+    solution's place to within the centroid's noise.
     """
     stars = _field_stars()
     frames = make_drifted_sequence(
@@ -187,19 +185,24 @@ def test_a_pure_translation_leaves_the_per_star_offsets_near_zero(tmp_path: Path
         seed=5,
     )
 
-    offsets_by_frame, _, measurements, fallbacks = _measure_offsets(tmp_path, frames, stars)
+    offsets_by_frame, mappings_by_frame, measurements, fallbacks = _measure_offsets(
+        tmp_path, frames, stars, (0.3, -0.2), 0.0
+    )
 
-    summary = summarize_centroid_shifts(offsets_by_frame, measurements, fallbacks)
+    summary = summarize_centroid_shifts(
+        offsets_by_frame, measurements, fallbacks, mappings_by_frame=mappings_by_frame
+    )
     assert summary is not None
     assert summary.fallback_count == 0
     assert summary.median_offset_px is not None
     assert summary.p95_offset_px is not None
     assert summary.median_offset_px < 0.05
     assert summary.p95_offset_px < 0.1
+    assert summary.worst_corner_displacement_px == pytest.approx(0.0, abs=1e-3)
 
 
 def _drift_gate(summaries: list[CentroidShiftSummary]) -> GateResult:
-    """Build only the ``registration_drift`` gate from summaries.
+    """Build only the ``registration_corner_displacement`` gate from summaries.
 
     Parameters
     ----------
@@ -209,7 +212,8 @@ def _drift_gate(summaries: list[CentroidShiftSummary]) -> GateResult:
     Returns
     -------
     gate : `GateResult`
-        The ``registration_drift`` gate, with one star's global drift of 3 px.
+        The ``registration_corner_displacement`` gate, with one star's
+        global drift of 3 px.
     """
     return rg._registration_drift_gate([3.0], summaries)
 
@@ -242,36 +246,37 @@ def _sequence_summary(
         shape=SEQUENCE_SHAPE,
         add_noise=False,
     )
-    offsets_by_frame, _, measurements, fallbacks = _measure_offsets(tmp_path, frames, stars)
-    summary = summarize_centroid_shifts(offsets_by_frame, measurements, fallbacks)
+    offsets_by_frame, mappings_by_frame, measurements, fallbacks = _measure_offsets(
+        tmp_path, frames, stars, drift_px, rotation_deg_per_frame
+    )
+    summary = summarize_centroid_shifts(
+        offsets_by_frame, measurements, fallbacks, mappings_by_frame=mappings_by_frame
+    )
     assert summary is not None
     return summary
 
 
-def test_the_gate_reports_the_offsets_of_a_shift_only_alignment_without_judging_them(
-    tmp_path: Path,
-) -> None:
-    """Verifies the offsets are quoted, not judged, when no rotation is fitted.
+def test_the_gate_reports_the_offsets_and_the_corner_displacement(tmp_path: Path) -> None:
+    """Verifies a small rotation passes and the detail quotes the numbers.
 
-    Six anchors are fewer than `MINIMUM_ANCHORS_FOR_SIMILARITY`, so the
-    frames are lined up by a shift alone and a rotation of 0.05 degrees per
-    frame leaves per-star offsets above 1 px. The gate does not fail on them
-    (they cannot be told from centroid noise). Its detail quotes the median,
-    the percentile and the worst frame.
+    A rotation of 0.01 degrees per frame moves a corner of the last frame by
+    0.4 px, under the limit of 1 px. The detail quotes the median offset, the
+    95th percentile, the corner displacement and the worst frame.
     """
-    summary = _sequence_summary(tmp_path, ROTATION_DEG_PER_FRAME, (0.0, 0.0))
+    summary = _sequence_summary(tmp_path, 0.01, (0.0, 0.0))
 
     gate = _drift_gate([summary])
 
     assert summary.p95_offset_px is not None
     assert summary.median_offset_px is not None
-    assert summary.p95_offset_px > 1.0
-    assert summary.corner_displacement_p95_px is None
-    assert gate.name == rg.REGISTRATION_DRIFT_GATE_NAME
+    assert summary.corner_displacement_p95_px is not None
+    assert summary.corner_displacement_p95_px < rg.MAXIMUM_CORNER_DISPLACEMENT_PX.reference_value
+    assert gate.name == rg.REGISTRATION_CORNER_DISPLACEMENT_GATE_NAME
     assert gate.status is GateStatus.PASSED
     assert f"median {summary.median_offset_px:.2f} px" in gate.detail
     assert f"95th percentile {summary.p95_offset_px:.2f} px" in gate.detail
-    assert "worst frame 2026-05-24 04:07:00" in gate.detail
+    assert f"a corner moves {summary.corner_displacement_p95_px:.2f} px" in gate.detail
+    assert "worst frame 2026-05-24 04:0" in gate.detail
 
 
 def test_the_gate_passes_a_drifting_field_with_no_rotation(tmp_path: Path) -> None:
@@ -282,7 +287,23 @@ def test_the_gate_passes_a_drifting_field_with_no_rotation(tmp_path: Path) -> No
 
     assert gate.status is GateStatus.PASSED
     assert "95th percentile 0.0" in gate.detail
-    assert "0.0% of star measurements kept the aligned position" in gate.detail
+    assert "0.0% of star measurements kept the solution's position" in gate.detail
+
+
+def _shift_by_two_mapping() -> FrameMapping:
+    """Build the mapping of a frame whose field moved 2 px along x.
+
+    Returns
+    -------
+    mapping : `FrameMapping`
+        The mapping from frame 0 to frame 1 of a two-frame sequence.
+    """
+    solves = drifted_frame_solves(["a", "b"], SEQUENCE_SHAPE, (2.0, 0.0))
+    return FrameMapping.from_solutions(
+        wcs_from_solved_header(solves["a"].header),
+        wcs_from_solved_header(solves["b"].header),
+        SEQUENCE_SHAPE,
+    )
 
 
 def test_centroid_offsets_count_fallbacks_and_skip_unknown_stars() -> None:
@@ -294,7 +315,7 @@ def test_centroid_offsets_count_fallbacks_and_skip_unknown_stars() -> None:
     }
     reference = {"a": (8.0, 20.0), "b": (48.0, 58.0)}
 
-    offsets, fallbacks = centroid_offsets_px(positions, reference, 2.0, 0.0)
+    offsets, fallbacks = centroid_offsets_px(positions, reference, _shift_by_two_mapping())
 
     assert offsets == pytest.approx([math.hypot(0.3, 0.4)])
     assert fallbacks == 1

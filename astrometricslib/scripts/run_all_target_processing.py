@@ -61,8 +61,8 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     split_standard_and_spectral_frames,
 )
 from astrometricslib.pipelines.stacking.metrics import (
-    FRAME_QUARANTINE_ROUNDNESS,
-    FRAME_QUARANTINE_SKY_MEDIAN,
+    FRAME_SET_ASIDE_ROUNDNESS,
+    FRAME_SET_ASIDE_SKY_MEDIAN,
     STACKING_APERTURE_SET_NUMBER,
     STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
     STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -73,7 +73,7 @@ from astrometricslib.pipelines.stacking.metrics import (
 from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
 )
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import parse_set_aside_action
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import parse_set_aside_action
 from astrometricslib.pipelines.target_batch import process_targets_in_parallel
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
@@ -543,8 +543,8 @@ def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datet
     The stack's members and their nights are the frames of the
     ``stacking.frame_weight`` rows the stack just stored (each row names its
     frame by subject id and carries the frame's observing night). That is the
-    set of frames Siril really stacked, so a frame the quarantine set aside is
-    not counted. Each subject id is matched to the target's frame with
+    set of frames Siril really stacked, so a frame the set-aside check set
+    aside is not counted. Each subject id is matched to the target's frame with
     `frame_subject_id`.
 
     Parameters
@@ -978,10 +978,10 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         status == "success",
     )
     moved_frames = sorted({
-        os.path.basename(quarantine_row.subject.subject_id)
-        for metric in (FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN)
-        for quarantine_row in query(metric)
-        if parse_set_aside_action(quarantine_row.action_taken) is not None
+        os.path.basename(set_aside_row.subject.subject_id)
+        for metric in (FRAME_SET_ASIDE_ROUNDNESS, FRAME_SET_ASIDE_SKY_MEDIAN)
+        for set_aside_row in query(metric)
+        if parse_set_aside_action(set_aside_row.action_taken) is not None
     })
     row["frames_moved_count"] = len(moved_frames)
     row["frames_moved"] = ";".join(moved_frames)
@@ -1226,7 +1226,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
             "predicted noise and the aperture-set row were recorded, whether the earlier-nights stack's "
             "rows are there (yes, no, or n/a for a stack of one night), whether the odd–even difference "
             "measurement ran (run, skipped with its ratio, failed, or n/a), any refusal and its reason, and "
-            "the frames the quarantine moved."
+            "the frames the set-aside check moved."
         ),
     )
     parser.add_argument(
@@ -1463,7 +1463,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # this one starts staging its own files. A successful stack removes its own
     # work directory, so anything old enough to be swept here belongs to
     # a run that crashed or was cancelled.
-    from astrometricslib._internal.drivers.siril_interface import purge_stale_work_directories
+    from astrometricslib._internal.drivers.siril.stacking import purge_stale_work_directories
 
     siril_work_directory = siril_work_directory_path()
     purged_count, reclaimed_bytes = purge_stale_work_directories(siril_work_directory)

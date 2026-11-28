@@ -18,7 +18,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import previous_stack_path
 
-SIRIL_DRIVER = "astrometricslib._internal.drivers.siril_interface.ImageProcessing"
+SIRIL_DRIVER = "astrometricslib._internal.drivers.siril.stacking.ImageProcessing"
 SUMMARY_BUILDER = "astrometricslib.pipelines.stacking.stage._build_stack_quality_summary"
 RUN_STACK = "astrometricslib.pipelines.stacking.stack_runner.run_stack"
 
@@ -48,7 +48,7 @@ def make_target() -> Target:
 
 @pytest.fixture
 def stacks_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the stacks path at a temporary folder and turn the quarantine off.
+    """Point the stacks path at a temporary folder; turn set-aside off.
 
     Returns
     -------
@@ -57,7 +57,7 @@ def stacks_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     configuration = get_configuration()
     monkeypatch.setattr(configuration, "get_stacks_path", lambda: tmp_path)
-    monkeypatch.setattr(configuration, "get_quarantine_bad_frames_enabled", lambda: False)
+    monkeypatch.setattr(configuration, "get_set_aside_bad_frames_enabled", lambda: False)
     folder = tmp_path / "lights" / "M 52"
     folder.mkdir(parents=True)
     return folder

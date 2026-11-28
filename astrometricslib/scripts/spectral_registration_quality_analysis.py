@@ -1,7 +1,7 @@
 """SA200 spectral registration quality validity check.
 
 Runs Siril's registration step (shift-only transform, matching the
-production spectral stacking path in the siril_interface package) against a
+production spectral stacking path in the Siril driver) against a
 target's Star Analyzer 200 ("SPEC") frames, then parses the resulting
 .seq registration summary and per-frame .lst star lists to flag
 frames where registration looks untrustworthy: too few matched star
@@ -9,14 +9,14 @@ pairs, or the zero-order star's position/amplitude
 drifting sharply frame-to-frame.
 
 The registration-quality check alone only registers frames -- it does
-not stack -- so it can run standalone alongside other analyses
-without contending with a full stacking job for Siril's concurrency
-slot. Pass ``--sweep-filters`` to additionally run a small stacking
-sweep across filter_wfwhm settings: field-star population is
+not stack. Like every Siril run, it waits for a free Siril slot first
+(the Siril driver's one lock policy), so it never overloads the machine
+while a stack runs. Pass ``--sweep-filters`` to additionally run a small
+stacking sweep across filter_wfwhm settings: field-star population is
 typically rich enough in spectral frames too (a diffraction grating
 disperses every star's light, not just the target's, so most stars
 still look like normal point sources), so filter_wfwhm/stack_weight
-are no longer gated to standard-imaging-only in the siril_interface package.
+are no longer gated to standard-imaging-only in the Siril driver.
 The sweep measures the stacked zero-order star's own FWHM
 specifically -- not a whole-field median FWHM across many stars,
 which is what rejection_threshold_analysis.py uses and which doesn't
@@ -30,7 +30,6 @@ import json
 import logging
 import os
 import shutil
-import subprocess
 import sys
 import time
 from typing import Any
@@ -40,13 +39,16 @@ from astropy.stats import sigma_clipped_stats
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib._internal.drivers.fits_access import collapse_to_2d, read_data
-from astrometricslib._internal.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
+from astrometricslib._internal.drivers.siril.core.output_parsing import parse_seq_file, parse_zero_order_star
+from astrometricslib._internal.drivers.siril.core.script_run import last_siril_output, run_siril_script
+from astrometricslib._internal.drivers.siril.stacking.comparison_scripts import (
+    build_spectral_registration_check_commands,
+)
 from astrometricslib._internal.errors import DATA_ERRORS
 from astrometricslib._internal.processing_scripts import detect_point_sources
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.foundation.paths import siril_work_directory
-from astrometricslib.foundation.system import split_program_command
 from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
     MIN_MATCHED_STAR_PAIRS,
     ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
@@ -92,12 +94,11 @@ def resolve_spec_frames(target, camera: str, date_prefix: str | None = None) -> 
     ]
 
 
-def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> str:
+def run_siril_check_script(work_dir: str, commands: list[str], timeout: int = 600) -> str:
     """Run a one-shot Siril console script against a working directory.
 
-    Writes ``commands`` to a ``registration_check.ssf`` script file
-    inside ``work_dir`` and invokes the configured Siril executable
-    against it.
+    The Siril driver writes ``commands`` to a ``registration_check`` script
+    file inside ``work_dir`` and runs the configured Siril on it.
 
     Parameters
     ----------
@@ -105,7 +106,8 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
         Directory to run Siril against (passed as Siril's ``-d``
         argument) and where the generated script file is written.
     commands : `list` of `str`
-        Siril console commands to write into the script, in order.
+        Siril console commands to write into the script, in order, as the
+        driver's script builder writes them.
     timeout : `int`, optional
         Maximum time in seconds to wait for Siril to finish, by
         default 600.
@@ -113,26 +115,15 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
     Returns
     -------
     combined_output : `str`
-        The subprocess's combined stdout and stderr.
+        Siril's combined standard output and error.
     """
     from astrometricslib.foundation.config import get_configuration
 
     siril_executable = get_configuration().get_siril_executable()
-
-    script_path = os.path.join(work_dir, "registration_check.ssf")
-    with open(script_path, "w") as script_file:
-        script_file.write("requires 1.2.0\n")
-        for cmd in commands:
-            script_file.write(cmd + "\n")
-
-    parts = split_program_command(siril_executable)
-    if "flatpak" in parts[0] and "run" in parts:
-        idx = parts.index("run")
-        parts.insert(idx + 1, "--filesystem=host")
-    args = [*parts, "-d", work_dir, "-s", script_path]
-
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    return result.stdout + result.stderr
+    run_siril_script(
+        work_dir, commands, siril_executable, timeout_seconds=timeout, script_name="registration_check"
+    )
+    return last_siril_output(include_errors=True)
 
 
 def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> float | None:
@@ -351,15 +342,7 @@ def run_analysis() -> None:
         os.symlink(frame.path, os.path.join(lights_dir, f"light_source_{index + 1:05d}.fits"))
 
     print("\nRunning Siril conversion + registration (shift-only transform)...")
-    output = run_siril_script(
-        work_dir,
-        [
-            "cd lights",
-            "convert light_source -out=../process -fitseq",
-            "cd ../process",
-            "register light_source -transf=shift",
-        ],
-    )
+    output = run_siril_check_script(work_dir, build_spectral_registration_check_commands())
     if "Registration finished" not in output and "Sequence processing succeeded" not in output:
         print("Registration did not complete successfully. Siril output:")
         print(output[-4000:])

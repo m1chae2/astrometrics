@@ -144,7 +144,7 @@ def reading(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         active_telescope=lambda: SimpleNamespace(name="T"), active_camera=lambda: SimpleNamespace(name="C")
     )
     monkeypatch.setattr(night_index, "get_equipment_catalog", lambda config: catalog)
-    monkeypatch.setattr(night_index, "get_target_document_signs", lambda config: state.signs)
+    monkeypatch.setattr(night_index, "target_record_versions", lambda context: state.signs)
     monkeypatch.setattr(night_index, "nights_context_signs", lambda config: state.context_signs)
     monkeypatch.setattr(
         night_index.capture_history,

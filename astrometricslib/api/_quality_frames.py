@@ -287,7 +287,7 @@ class QualityFrames(MovedNames):
             astrometricslib.pipelines.stacking.pre_processing.blink_pair.find_blink_partner
 
         Nothing is stored. The typical frame is the frame of the same session
-        (the batch the quarantine step judges the frame in) whose stored
+        (the batch the set-aside step judges the frame in) whose stored
         ``frame.star_elongation`` and ``frame.sky_unevenness`` lie closest to
         the session medians. The reference star is a bright, isolated,
         unsaturated star near the frame center, chosen with the rules of the
@@ -335,7 +335,7 @@ class QualityFrames(MovedNames):
         (frame to stack, stack to frame, frame to frame, or those chained
         through the sky for frames of two stacks), and, between two frames
         of one size that nothing else links, matching the frames' bright
-        stars the way the quarantine's pointing check does (trying the
+        stars the way the set-aside check's pointing check does (trying the
         second frame as it is and turned half a revolution). The first two
         read only headers and small files, so they are fast; star matching
         reads both frames' pixels. When nothing applies, the same pixel is
@@ -388,6 +388,28 @@ class QualityStacks(MovedNames):
     def __init__(self, config: AppConfiguration, drivers: Drivers | None = None) -> None:
         self._config = config
         self._drivers = drivers
+
+    def get_data_version(self) -> str:
+        """Give a short text that changes whenever the library's stack data do.
+
+        Owner:
+            astrometricslib.pipelines.shared.data_version_texts.get_stack_data_version
+
+        The stack data are the stored stack-level measurements of every
+        target, the calibration records of the stacks and the capture
+        settings. A result pooled over every library stack (a noise model,
+        the stack roundness baseline) can keep its answer while this text
+        stays the same. A new frame leaves it as it is; a stack run changes
+        it. The text is opaque: compare it with an earlier one.
+
+        Returns
+        -------
+        version : `str`
+            The text.
+        """
+        from astrometricslib.pipelines.shared.data_version_texts import get_stack_data_version
+
+        return get_stack_data_version(self._config)
 
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure(
@@ -507,7 +529,7 @@ class QualityStacks(MovedNames):
         spaced evenly through the possible ones, and a subset with fewer
         than four frames is left out. Each is stacked into the target's
         ``_subsets`` folder with the normal settings (without the frame
-        quarantine step) and its noise is measured in the library stack's
+        set-aside step) and its noise is measured in the library stack's
         sky apertures, so the numbers compare. The library stack is the
         last point of the curve and is not stacked again. The noise, the
         reference flux, the effective frame count and the effective time are

@@ -7,6 +7,7 @@ orchestration methods.
 """
 
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Never
@@ -706,6 +707,55 @@ def _write_photometry_frame_fits(path, star_pixel_positions, date_obs) -> None: 
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
+def _solve_every_frame_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the built-in plate solver give every frame a steady solution.
+
+    The photometry stage places its stars through each frame's own plate
+    solution, which Siril makes. These frames never move, so one solution
+    fits all of them, and no Siril is started.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The fixture that undoes the change after the test.
+    """
+    from astrometricslib._internal.drivers.driver_set import Drivers
+    from astrometricslib._internal.drivers.interfaces.plate_solve_driver import FrameSolve, PlateSolveDriver
+    from astrometricslib.test.synthetic import drifted_frame_solves
+
+    class SteadyPlateSolver(PlateSolveDriver):
+        """A plate solver that solves every frame the same way."""
+
+        def solve(
+            self,
+            image_path: str | None = None,
+            sources: list[dict[str, Any]] | None = None,
+            image_width: int = 1000,
+            image_height: int = 1000,
+            **hints: Any,
+        ) -> fits.Header | None:
+            """Solve nothing: only whole sessions are solved here.
+
+            Returns
+            -------
+            header : `astropy.io.fits.Header` or `None`
+                Always `None`.
+            """
+            return None
+
+        def solve_frames(self, image_paths: Sequence[str], **hints: Any) -> dict[str, FrameSolve]:
+            """Give each frame the exact solution of an unmoving field.
+
+            Returns
+            -------
+            solves : `dict` [`str`, `FrameSolve`]
+                The solved header of each frame, keyed by path.
+            """
+            return drifted_frame_solves(list(image_paths), (256, 256), (0.0, 0.0))
+
+    monkeypatch.setattr(Drivers, "plate_solve_or_default", lambda self, api_key=None: SteadyPlateSolver())
+
+
 def test_target_analyze_target_photometry_runs_each_session_independently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -792,6 +842,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(
         )
 
     monkeypatch.setattr(session_identification, "identify_session_stars", _fake_identify_session_stars)
+    _solve_every_frame_in_place(monkeypatch)
 
     target = Target(id="PhotometrySessionSplitTestTarget", frames=frames)
 
@@ -886,6 +937,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
         )
 
     monkeypatch.setattr(session_identification, "identify_session_stars", _fake_identify_session_stars)
+    _solve_every_frame_in_place(monkeypatch)
 
     target = Target(id="PhotometryAstrometrySeedTestTarget", frames=frames)
 
@@ -1205,7 +1257,7 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
 def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerFixture) -> None:
     """Verify one session's plate-solve failure only excludes that session.
 
-    `AstrometryNetPlateSolveDriver.solve()` returns `None` on an ordinary
+    `SirilPlateSolveDriver.solve()` returns `None` on an ordinary
     solve failure (no matching field), but a genuinely unexpected
     exception (a config error, a malformed header, etc.) must also be
     caught rather than propagating and taking down every other,
@@ -1219,14 +1271,14 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerF
     target = Target(id="MatchTestTarget")
 
     mocker.patch(
-        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.siril.astrometry.solve_driver.SirilPlateSolveDriver.solve",
         return_value=None,
     )
     result_a = _solve_session_wcs(session_a, target)
     assert result_a is None  # ordinary solve failure -- no exception at all
 
     mocker.patch(
-        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.siril.astrometry.solve_driver.SirilPlateSolveDriver.solve",
         side_effect=RuntimeError("unexpected local solver failure"),
     )
     result_b = _solve_session_wcs(session_b, target)

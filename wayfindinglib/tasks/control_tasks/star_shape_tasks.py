@@ -10,20 +10,20 @@ The review is asked for on every visit to the Image Processing screen, so
 its slow parts are kept in the context's `star_shape_cache` (a
 `VersionedCache`) until the data behind them change:
 
-* the target's stored star-shape numbers, until the target's own data
-  change (`get_target_data_version`). When the only change is new quality
-  rows (a new frame was measured), only those rows are read and merged in
-  (`update_stored_shape_rows`); anything else reads them all again;
+* the target's stored star-shape numbers, until the science library's data
+  version of the target's quality rows changes
+  (``quality.records.get_data_version``). They are then read again; the
+  science library reads only the rows written since its last read;
 * the frame roundness limit, until the data it is worked out from change
   (`roundness_limit_data_version`): the session and guiding records, the
   equipment, site and configuration, and the measured frames of the nights
   it uses. A frame that is indexed but not yet measured does not rebuild it.
   The frames' part of that version is kept too (`kept_roundness_signature`),
-  so while no frame row and no frame changes, no frame row is read;
+  so while no frame row and no frame changes, no frame row is read.
   Live guiding samples are counted only in coarse steps, as for a target
   report, so live guiding does not rebuild it on every call;
-* the stack baseline, until any stack-level quality row changes
-  (`get_stack_quality_data_version`).
+* the stack baseline, until any stack-level quality row changes (the
+  science library's opaque ``quality.stacks.get_data_version``).
 
 The set-aside listing is not kept here; it is read once per review.
 """
@@ -33,14 +33,13 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from astrometricslib import Target
 from astrometricslib.arguments import FrameChoice, Page, observing_night_id
-from astrometricslib.drivers import get_stack_quality_data_version, get_target_data_version
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, InvalidArgumentError
 from wayfindinglib.analytics.capture_history import roundness_baseline_signature
-from wayfindinglib.analytics.data_versions import report_context_version
+from wayfindinglib.analytics.data_versions import library_data_version, report_context_version
 from wayfindinglib.analytics.night_index import NightFrame, build_night_index
 from wayfindinglib.analytics.star_shape_review import (
     ROUNDNESS_LIMIT_NAME,
@@ -49,7 +48,6 @@ from wayfindinglib.analytics.star_shape_review import (
     read_stack_roundness_low_limit,
     read_star_shape_rows,
     read_stored_shape_rows,
-    update_stored_shape_rows,
 )
 from wayfindinglib.models.session.star_shape_review import StarShapeReview
 from wayfindinglib.tasks.control_tasks import night_analysis
@@ -136,16 +134,18 @@ def get_star_shape_review(
 def kept_shape_rows(context: ControlContext, target_id: str) -> StoredShapeRows:
     """Give a target's stored star-shape numbers, read again only on change.
 
-    When the target's data version changed only because quality rows were
-    added (a new frame was measured, or an old frame measured again), the
-    kept numbers are brought up to date by reading the added rows alone
-    (`update_stored_shape_rows`). The answer is the same as a full read.
-    Any other change, such as a deleted frame, reads every row again.
+    The numbers are kept with the science library's opaque data version of
+    the target's quality rows (``quality.records.get_data_version``), so a
+    new frame of another target, or a change to the target's document alone,
+    reads nothing. When the version changes (a frame of the target was
+    measured, measured again or deleted), the numbers are read again. The
+    science library reads only the rows written since its last read, so
+    the answer is the same as a full read.
 
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the science library, the configuration and the cache.
+        Supplies the science library and the cache.
     target_id : `str`
         The target's id.
 
@@ -153,36 +153,29 @@ def kept_shape_rows(context: ControlContext, target_id: str) -> StoredShapeRows:
     -------
     stored : `StoredShapeRows`
         The numbers. The same object is handed to every caller while the
-        target's data (`get_target_data_version`) stay the same; it is not
-        changed by anyone.
+        target's quality rows stay the same; it is not changed by anyone.
     """
 
-    def read_version() -> Any:
-        """Read the target's data version.
+    def read_version() -> str | None:
+        """Read the data version of the target's quality rows.
 
         Returns
         -------
-        version : `Any`
-            See `get_target_data_version`.
+        version : `str` or `None`
+            The science library's opaque version, or `None` when it could
+            not be read (the numbers are then read and not kept).
         """
-        return get_target_data_version(context.config, target_id)
-
-    def update(_kept_version: Any, kept: StoredShapeRows, version: Any) -> StoredShapeRows | None:
-        """Read only the rows added since the kept numbers were read.
-
-        Returns
-        -------
-        stored : `StoredShapeRows` or `None`
-            The numbers for `version`, or `None` to read them all again.
-        """
-        return update_stored_shape_rows(context.astrometrics, target_id, kept, version)
+        try:
+            return context.astrometrics.quality.records.get_data_version(target=Target(id=target_id))
+        except AstrometricsError as error:
+            logger.warning("Could not read the data version of %s: %s", target_id, error)
+            return None
 
     return context.star_shape_cache.get_or_build(
         ("star_shape_rows", target_id),
         read_version,
-        lambda: read_stored_shape_rows(context.astrometrics, target_id, read_version=read_version),
+        lambda: read_stored_shape_rows(context.astrometrics, target_id),
         copy_result=False,
-        update=update,
     )
 
 
@@ -270,18 +263,19 @@ def kept_roundness_signature(
     cache dropped them. So the signature is kept in the context's
     `star_shape_cache` with a key made of two parts:
 
-    * the data version of the stored frame measurements
-      (`night_analysis.frame_measurement_version`), a few short queries
-      that read no frame rows. Equal versions mean the measurements are the
-      same, as `night_analysis.kept_frame_measurements` also assumes;
+    * the science library's opaque data version of the stored frame
+      measurements (`night_analysis.frame_measurement_version`), a few
+      short queries that read no frame rows. Equal versions mean the
+      measurements are the same, as `night_analysis.kept_frame_measurements`
+      also assumes;
     * the frames themselves. The night index hands over the same frame
       objects while the targets' documents stay the same, so comparing them
       is quick.
 
     While both stay the same, the kept signature is given and no frame row
     is read. When either changes, the signature is worked out again from
-    the kept measurements (which then read only the added rows when they
-    can). So the answer always equals a fresh
+    the kept measurements (the science library then reads only the rows
+    written since its last read). So the answer always equals a fresh
     `roundness_baseline_signature`, and two calls give equal signatures
     exactly when fresh ones would be equal.
 
@@ -319,11 +313,9 @@ def kept_roundness_signature(
             See `roundness_baseline_signature`.
         """
         stored = night_analysis.kept_frame_measurements(context, measurement_version)
-        return roundness_baseline_signature(frames, stored.values, night)
+        return roundness_baseline_signature(frames, stored, night)
 
-    version = None
-    if measurement_version is not None:
-        version = (tuple(sorted(measurement_version.items())), frames)
+    version = None if measurement_version is None else (measurement_version, frames)
     return context.star_shape_cache.get_or_build(
         ("roundness_signature", night), version, build, copy_result=False
     )
@@ -373,7 +365,7 @@ def kept_stack_roundness_low_limit(context: ControlContext, stack_subject: str) 
 
     The baseline reads the stored elongation of every library stack, so it
     is kept until any stack-level quality row changes
-    (`get_stack_quality_data_version`). A new frame does not change it.
+    (``quality.stacks.get_data_version``). A new frame does not change it.
 
     Parameters
     ----------
@@ -389,6 +381,8 @@ def kept_stack_roundness_low_limit(context: ControlContext, stack_subject: str) 
     """
     return context.star_shape_cache.get_or_build(
         ("stack_roundness_low_limit", stack_subject),
-        lambda: get_stack_quality_data_version(context.config),
+        lambda: library_data_version(
+            lambda: context.astrometrics.quality.stacks.get_data_version(), "the stack data"
+        ),
         lambda: read_stack_roundness_low_limit(context.astrometrics, stack_subject),
     )

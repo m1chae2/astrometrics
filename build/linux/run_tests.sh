@@ -13,7 +13,7 @@
 #   ./build/linux/run_tests.sh astrometricslib # one suite
 #   COVERAGE=1 ./build/linux/run_tests.sh backend
 #
-# Suites: astrometricslib, wayfindinglib, backend, mcp_servers, simulator, build_tpm.
+# Suites: astrometricslib, wayfindinglib, backend, mcp_servers, simulator, build_tpm, build_linux.
 # "all" runs every one. A bare `pytest` collects the same tests, because
 # `testpaths` in pyproject.toml names the same folders (a test checks this).
 #
@@ -23,7 +23,8 @@
 # Parallel runs (needs pytest-xdist, which setup_venv.sh installs): set
 # PYTEST_WORKERS to a worker count, or to "auto" for one per core, e.g.
 #   PYTEST_WORKERS=8 ./build/linux/run_tests.sh astrometricslib
-# Unset, the tests run one at a time, as CI does.
+# The Linux CI jobs set PYTEST_WORKERS=auto. Unset, the tests run one at a
+# time.
 # =============================================================================
 
 set -euo pipefail
@@ -41,6 +42,15 @@ export PYTHONPATH="${PYTHONPATH:-.}"
 export ASTROMETRICS_TESTING="${ASTROMETRICS_TESTING:-1}"
 export ASTROMETRICS_FAST_TEST="${ASTROMETRICS_FAST_TEST:-1}"
 
+# Matplotlib keeps its list of fonts in a cache folder. The root conftest.py
+# moves the cache folder into a new temporary folder for every test process,
+# so without this each pytest worker, and each child process a test starts,
+# would rebuild the font list first (several seconds each time). This folder
+# holds only Matplotlib's own font list, never test data, so it is kept
+# between runs and shared by all workers.
+export MPLCONFIGDIR="${MPLCONFIGDIR:-${XDG_CACHE_HOME:-$HOME/.cache}/astrometrics-tests/matplotlib}"
+mkdir -p "$MPLCONFIGDIR"
+
 SUITE="${1:-all}"
 [ $# -gt 0 ] && shift
 
@@ -54,6 +64,7 @@ suite_targets() {
     mcp_servers)     echo "mcp_servers/" ;;
     simulator)       echo "simulator/" ;;
     build_tpm)       echo "build/tpm/test/" ;;
+    build_linux)     echo "build/linux/siril_gpu/test/" ;;
     *) echo "unknown suite: $1" >&2; return 1 ;;
   esac
 }
@@ -85,15 +96,15 @@ case "$SUITE" in
   all)
     # Coverage is per-package and each run overwrites coverage.xml, so the
     # combined run is for local use and leaves coverage to the CI jobs.
-    for suite in astrometricslib wayfindinglib backend mcp_servers simulator build_tpm; do
+    for suite in astrometricslib wayfindinglib backend mcp_servers simulator build_tpm build_linux; do
       COVERAGE=0 run_suite "$suite" "$@"
     done
     ;;
-  astrometricslib|wayfindinglib|backend|mcp_servers|simulator|build_tpm)
+  astrometricslib|wayfindinglib|backend|mcp_servers|simulator|build_tpm|build_linux)
     run_suite "$SUITE" "$@"
     ;;
   *)
-    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend|mcp_servers|simulator|build_tpm] [pytest args...]" >&2
+    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend|mcp_servers|simulator|build_tpm|build_linux] [pytest args...]" >&2
     exit 2
     ;;
 esac

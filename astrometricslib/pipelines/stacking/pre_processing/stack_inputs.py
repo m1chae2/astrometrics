@@ -104,7 +104,7 @@ SETTINGS_THAT_CHANGE_A_STACK = (
     "get_stack_filter_wfwhm_percentile",
     "get_stack_filter_round_percentile",
     "get_trim_noisy_stack_edges_enabled",
-    "get_quarantine_bad_frames_enabled",
+    "get_set_aside_bad_frames_enabled",
     "get_background_homogeneity_check_enabled",
 )
 
@@ -282,7 +282,7 @@ def _master_recipes() -> dict[str, str]:
         fingerprint, because the bias frames are listed with the calibration
         frames.
     """
-    from astrometricslib._internal.drivers.siril_interface.staging import master_recipe
+    from astrometricslib._internal.drivers.siril.stacking.staging import master_recipe
 
     return {"dark": master_recipe("dark"), "flat": master_recipe("flat")}
 

@@ -18,11 +18,11 @@ from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
-from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import MANIFEST_FILE_NAME
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME
+from astrometricslib.pipelines.stacking.pre_processing import frame_set_aside
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import MANIFEST_FILE_NAME
 
-FINDER = "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.find_frames_to_quarantine"
+FINDER = "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside.find_frames_to_set_aside"
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ def quality(tmp_path: Path) -> QualityRecords:
         The quality API on a stub configuration.
     """
     configuration = SimpleNamespace(
-        get_frames_path=lambda: tmp_path / "frames", get_quarantine_bad_frames_enabled=lambda: True
+        get_frames_path=lambda: tmp_path / "frames", get_set_aside_bad_frames_enabled=lambda: True
     )
     return QualityRecords(configuration, None, targets=MagicMock())
 
@@ -143,14 +143,14 @@ def with_measurement(star_counts: dict[str, int]) -> object:
     finder : `Callable`
         Runs the real finder on the frames with `fake_measurement`.
     """
-    real_finder = frame_quarantine.find_frames_to_quarantine
+    real_finder = frame_set_aside.find_frames_to_set_aside
 
     def finder(frames: list[FrameRecord], target_id: str | None = None) -> object:
         """Find the frames to move, using the made-up measurements.
 
         Returns
         -------
-        report : `QuarantineReport`
+        report : `SetAsideReport`
             What the real finder decided.
         """
         return real_finder(frames, fake_measurement(star_counts), target_id=target_id)
@@ -163,15 +163,15 @@ def write_manifest(folder: Path, entries: list[dict[str, object]]) -> Path:
 
     Returns
     -------
-    quarantine : `pathlib.Path`
+    set_aside_folder : `pathlib.Path`
         The `_excluded` folder.
     """
-    quarantine = folder / QUARANTINE_FOLDER_NAME
-    quarantine.mkdir()
+    set_aside_folder = folder / SET_ASIDE_FOLDER_NAME
+    set_aside_folder.mkdir()
     for entry in entries:
-        (quarantine / str(entry["file"])).write_bytes(b"x")
-    (quarantine / MANIFEST_FILE_NAME).write_text(json.dumps(entries))
-    return quarantine
+        (set_aside_folder / str(entry["file"])).write_bytes(b"x")
+    (set_aside_folder / MANIFEST_FILE_NAME).write_text(json.dumps(entries))
+    return set_aside_folder
 
 
 def manifest_entry(folder: Path, name: str) -> dict[str, object]:
@@ -180,7 +180,7 @@ def manifest_entry(folder: Path, name: str) -> dict[str, object]:
     Returns
     -------
     entry : `dict`
-        The entry, as the quarantine step writes it.
+        The entry, as the set-aside step writes it.
     """
     return {
         "file": name,
@@ -198,14 +198,14 @@ def manifest_entry(folder: Path, name: str) -> dict[str, object]:
 def test_list_reads_the_manifests(pipelines: ProcessingPipelines, tmp_path: Path) -> None:
     """Listed frames carry the manifest's measurements and their folder."""
     folder = camera_folder(tmp_path)
-    quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
+    set_aside_folder = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
 
     frames = restore_excluded_frames(pipelines, Target(id="M 1")).frames
 
     assert [frame.file for frame in frames] == ["frame_003.fits"]
     assert frames[0].star_count == 203
     assert frames[0].moved_at == "2026-10-03T08:00:00+00:00"
-    assert frames[0].folder == str(quarantine)
+    assert frames[0].folder == str(set_aside_folder)
 
 
 def test_list_is_empty_for_a_target_with_nothing_set_aside(
@@ -221,7 +221,7 @@ def test_a_stray_excluded_folder_without_a_manifest_is_not_listed(
     pipelines: ProcessingPipelines, tmp_path: Path
 ) -> None:
     """Only `_excluded` folders that hold a manifest count."""
-    (camera_folder(tmp_path) / QUARANTINE_FOLDER_NAME).mkdir()
+    (camera_folder(tmp_path) / SET_ASIDE_FOLDER_NAME).mkdir()
 
     assert restore_excluded_frames(pipelines, Target(id="M 1")).frames == []
 
@@ -229,14 +229,14 @@ def test_a_stray_excluded_folder_without_a_manifest_is_not_listed(
 def test_restore_without_apply_only_lists(pipelines: ProcessingPipelines, tmp_path: Path) -> None:
     """The default restore moves nothing."""
     folder = camera_folder(tmp_path)
-    quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
+    set_aside_folder = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
 
     report = restore_excluded_frames(pipelines, Target(id="M 1"))
 
     assert report.applied is False
     assert report.restored_count == 0
     assert [frame.file for frame in report.frames] == ["frame_003.fits"]
-    assert (quarantine / "frame_003.fits").exists()
+    assert (set_aside_folder / "frame_003.fits").exists()
 
 
 def test_restore_with_apply_moves_frames_back_and_rescans(
@@ -244,7 +244,7 @@ def test_restore_with_apply_moves_frames_back_and_rescans(
 ) -> None:
     """With ``apply`` the frame returns and the target is rescanned."""
     folder = camera_folder(tmp_path)
-    quarantine = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
+    set_aside_folder = write_manifest(folder, [manifest_entry(folder, "frame_003.fits")])
     target = Target(id="M 1")
 
     report = restore_excluded_frames(pipelines, target, apply=True)
@@ -252,7 +252,7 @@ def test_restore_with_apply_moves_frames_back_and_rescans(
     assert report.applied is True
     assert report.restored_count == 1
     assert (folder / "frame_003.fits").exists()
-    assert not quarantine.exists()
+    assert not set_aside_folder.exists()
     scans.assert_called_once_with(pipelines._targets, target)
 
 
@@ -274,12 +274,12 @@ def test_frame_quality_has_no_set_aside_preview(quality: QualityRecords, tmp_pat
     target = make_target(folder, 12)
 
     with pytest.raises(InvalidArgumentError, match="Unknown include section"):
-        quality.frames.measure(target.frames, include=["quarantine_preview"])
+        quality.frames.measure(target.frames, include=["set_aside_preview"])
 
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:
     """A folder named with underscores or no spaces still matches."""
-    assert frame_quarantine.target_folder_names("M 52") == ["M 52", "M_52", "M52"]
+    assert frame_set_aside.target_folder_names("M 52") == ["M 52", "M_52", "M52"]
 
 
 def test_restore_moves_only_the_chosen_frame_and_rescans(
@@ -287,20 +287,20 @@ def test_restore_moves_only_the_chosen_frame_and_rescans(
 ) -> None:
     """Only the chosen frame returns, and the target is rescanned."""
     folder = camera_folder(tmp_path)
-    quarantine = write_manifest(
+    set_aside_folder = write_manifest(
         folder, [manifest_entry(folder, "frame_003.fits"), manifest_entry(folder, "frame_004.fits")]
     )
     target = Target(id="M 1")
 
     catalog = SimpleNamespace(_config=quality._config)
-    restored = TargetFrames(catalog).restore(target, [str(quarantine / "frame_003.fits")])
+    restored = TargetFrames(catalog).restore(target, [str(set_aside_folder / "frame_003.fits")])
 
     assert len(restored) == 0
     assert (folder / "frame_003.fits").exists()
-    assert (quarantine / "frame_004.fits").exists()
+    assert (set_aside_folder / "frame_004.fits").exists()
     assert [
         entry["file"]
-        for entry in frame_quarantine.read_quarantine_manifest(str(quarantine / MANIFEST_FILE_NAME))
+        for entry in frame_set_aside.read_set_aside_manifest(str(set_aside_folder / MANIFEST_FILE_NAME))
     ] == ["frame_004.fits"]
     scans.assert_called_once_with(catalog, target)
 

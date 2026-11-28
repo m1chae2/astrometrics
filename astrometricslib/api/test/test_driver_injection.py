@@ -211,11 +211,11 @@ def real_drivers_are_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("A real driver was used instead of the one that was injected.")
 
     for path in (
-        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.siril.astrometry.solve_driver.SirilPlateSolveDriver.solve",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
-        "astrometricslib._internal.drivers.siril_stacking_driver.SirilStackingDriver.stack_batch",
+        "astrometricslib._internal.drivers.siril.stacking.stacking_driver.SirilStackingDriver.stack_batch",
     ):
         monkeypatch.setattr(path, forbidden)
 
@@ -314,14 +314,16 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
     target = Target(id="Injection Field", frames=frames)
-    # Photometry alone, as if astrometry had just run.
-    monkeypatch.setattr("astrometricslib.pipelines.tasks.stage_staleness_reason", lambda *_a, **_k: None)
+    # Photometry alone, as if astrometry had just solved the stack.
+    monkeypatch.setattr("astrometricslib.pipelines.tasks.missing_astrometry_reason", lambda *_a, **_k: None)
 
     result = astrometrics.processing.photometry.run(target, frames=frames)
 
     assert "photometry" in result.results
-    assert len(solver.calls) == 1
+    # The reference frame is solved to name the stars, and every frame is
+    # solved to place them (the default `solve_frames` calls `solve` for each).
     assert solver.calls[0]["image_path"] == frame_paths[0]
+    assert [call["image_path"] for call in solver.calls[1:]] == frame_paths
     assert simbad.region_calls
 
 
@@ -460,7 +462,7 @@ def test_the_stack_noise_plate_solve_uses_the_injected_solver(field_image: str) 
     wcs, reason, wcs_source = real_solve(field_image, Drivers(plate_solve=solver, simbad=simbad))
 
     assert reason == ""
-    assert wcs_source == "plate solve of the stack, not refit"
+    assert wcs_source == "plate solve of the stack"
     assert len(solver.calls) == 1
     assert wcs is not None
     assert wcs.wcs.crval[1] == pytest.approx(FIELD_DEC_DEG)
@@ -483,19 +485,19 @@ def test_group_derotation_passes_the_drivers_to_the_trail_measurement(
 
 def test_defaults_build_the_real_drivers() -> None:
     """With no drivers given, the built-in drivers are the ones built."""
-    from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
     from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
-    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.siril.astrometry.solve_driver import SirilPlateSolveDriver
+    from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     drivers = Drivers()
-    assert isinstance(drivers.plate_solve_or_default(), AstrometryNetPlateSolveDriver)
+    assert isinstance(drivers.plate_solve_or_default(), SirilPlateSolveDriver)
     assert isinstance(drivers.stacking_or_default(), SirilStackingDriver)
     assert isinstance(drivers.simbad_or_default(), AstroquerySimbadDriver)
 
     astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
-    assert isinstance(identifier.solver, AstrometryNetPlateSolveDriver)
+    assert isinstance(identifier.solver, SirilPlateSolveDriver)
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)
     assert not astrometrics.processing._drivers.any_chosen
 
@@ -515,7 +517,7 @@ def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
 
 def test_the_public_stacking_driver_is_the_built_in_one() -> None:
     """`drivers.get_stacking_driver` gives Siril, which opens and stops."""
-    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
     from astrometricslib.drivers import get_stacking_driver
 
     engine = get_stacking_driver()

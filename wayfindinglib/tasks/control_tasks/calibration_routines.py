@@ -351,6 +351,7 @@ def run_backlash_calibration(
 def run_polar_alignment_assist(
     attempts: list[dict[str, Any]],
     latitude_deg: float,
+    longitude_deg: float,
 ) -> MountPointingModel:
     """Fit ME/MA from this session's plate solves for real-time adjustment.
 
@@ -382,12 +383,17 @@ def run_polar_alignment_assist(
     latitude_deg : `float`
         Observer latitude in decimal degrees. Required, so no stand-in
         site is assumed.
+    longitude_deg : `float`
+        Observer longitude in decimal degrees, east positive. Required: it
+        sets the true hour angle of each solve.
 
     Returns
     -------
     model : `MountPointingModel`
         The freshly-fit model. `confidence` is ``"insufficient_data"``
-        with fewer than 4 attempts -- call again once more solves are
-        in, rather than treating a too-small fit as a real answer.
+        with fewer than 4 timed attempts, or when the attempts are too
+        close together on the sky to separate the terms -- call again once
+        more solves are in, rather than treating a weak fit as a real
+        answer.
     """
-    return fit_pointing_model(attempts, latitude_deg=latitude_deg)
+    return fit_pointing_model(attempts, latitude_deg=latitude_deg, longitude_deg=longitude_deg)

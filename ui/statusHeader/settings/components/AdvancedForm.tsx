@@ -1,4 +1,3 @@
-import { Checkbox } from '../../../common/components/Checkbox';
 import { PopoverSelect } from '../../../common/components/PopoverSelect';
 import { TextInput } from '../../../common/components/TextInput';
 import { ConfigData } from '../utils/configUtils';
@@ -9,7 +8,6 @@ interface AdvancedFormProps {
     loadingConfig?: boolean;
 }
 
-const LOCAL_SOLVER_SECTION = 'Processing.Astrometry.Local Solver';
 const SIRIL_SECTION = 'Processing.Siril';
 const PARALLELISM_SECTION = 'Processing.Parallelism';
 const CATALOGS_SECTION = 'Catalogs';
@@ -34,29 +32,6 @@ export const AdvancedForm: React.FC<AdvancedFormProps> = ({
                 Install-time and performance settings. Most users won't need to
                 touch these after initial setup.
             </div>
-
-            <h4>Local Astrometry Solver</h4>
-            <label className="settings__field">
-                <span className="settings__label">Index Path</span>
-                <TextInput
-                    value={String(configData[LOCAL_SOLVER_SECTION]?.['index_path'] ?? '')}
-                    onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'index_path', e.target.value)}
-                    disabled={loadingConfig}
-                />
-            </label>
-            <Checkbox
-                className="settings__field settings__field--row"
-                label="Autoindex"
-                checked={configData[LOCAL_SOLVER_SECTION]?.['autoindex'] === 'true'} onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'autoindex', e.target.checked ? 'true' : 'false')} disabled={loadingConfig}
-            />
-            <label className="settings__field">
-                <span className="settings__label">CPU Limit (seconds)</span>
-                <TextInput
-                    value={String(configData[LOCAL_SOLVER_SECTION]?.['cpulimit'] ?? '')}
-                    onChange={(e) => handleConfigChange(LOCAL_SOLVER_SECTION, 'cpulimit', e.target.value)}
-                    disabled={loadingConfig}
-                />
-            </label>
 
             <div className="settings__divider">
                 <h4>Siril</h4>

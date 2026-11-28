@@ -296,6 +296,51 @@ def test_measure_sky_background_ignores_a_galaxy_over_half_the_frame() -> None:
     assert bare[1] == pytest.approx(2e-4, rel=0.1)
 
 
+def _stepped_sky(noise: float, step: int, seed: int) -> np.ndarray:
+    """Make a sky of independent noise, stored in whole steps like a raw frame.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        A 1500 x 1500 `float64` image near 500, in multiples of ``step``.
+    """
+    rng = np.random.default_rng(seed)
+    return step * np.round(rng.normal(500.0, noise, (1500, 1500)) / step)
+
+
+@pytest.mark.parametrize(
+    ("step", "noises"), [(4, (25.0, 26.0, 27.0, 28.0, 29.0)), (1, (5.0, 5.2, 5.4, 5.6, 5.8))]
+)
+def test_measure_sky_background_noise_follows_a_stepped_sky(step: int, noises: tuple[float, ...]) -> None:
+    """A raw frame in steps of 4 or 1 ADU gives a noise that follows the truth.
+
+    The median of absolute differences of such numbers can only be a multiple
+    of the step, so the old noise took a few repeated values (25.16, 29.35,
+    ...). The noise now differs for every true noise and stays within 2
+    percent of it, and the level is not stuck on the grid.
+    """
+    from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
+
+    measured = [measure_sky_background(_stepped_sky(n, step, 20 + i)) for i, n in enumerate(noises)]
+
+    assert all(m is not None for m in measured)
+    found = np.array([m[1] for m in measured if m is not None])
+    np.testing.assert_allclose(found, noises, rtol=0.02)
+    assert len(set(np.round(found, 6))) == len(noises)
+
+
+def test_measure_sky_background_level_is_not_stuck_on_the_grid() -> None:
+    """A level between two grid values of a 4-step frame is read between."""
+    from astrometricslib.pipelines.shared.image_scaling import measure_sky_background
+
+    rng = np.random.default_rng(3)
+    image = 4.0 * np.round(rng.normal(502.0, 25.0, (1500, 1500)) / 4.0)
+    measured = measure_sky_background(image)
+
+    assert measured is not None
+    assert measured[0] == pytest.approx(502.0, abs=0.3)
+
+
 def _siril_median_and_spread(values: np.ndarray, full_scale: float) -> tuple[float, float]:
     """Compute Siril's median and scaled MAD of the non-zero pixels.
 
@@ -438,12 +483,12 @@ def test_zero_mad_uses_siril_guard_value() -> None:
 
 def test_autostretch_command_uses_measured_sky() -> None:
     """A measured sky gives an mtf command with the black point below it."""
-    from astrometricslib.pipelines.stacking.post_processing.preview_siril import _autostretch_command
+    from astrometricslib.pipelines.stacking.post_processing.stretch_sky import choose_sky_stretch
 
-    command = _autostretch_command(0.2, False, (0.01, 1e-4)).split()
+    command = choose_sky_stretch(0.2, False, (0.01, 1e-4)).command().split()
     assert command[0] == "mtf" and command[3] == "1"
     assert float(command[1]) == pytest.approx(0.01 - 2.8e-4)
-    assert _autostretch_command(0.2).startswith("autostretch")
+    assert choose_sky_stretch(0.2).command().startswith("autostretch")
 
 
 def _sorted_median_statistics(channel: np.ndarray) -> tuple[float, float, float, float]:

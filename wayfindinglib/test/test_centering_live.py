@@ -6,9 +6,11 @@ instead of the in-process `SimulatorIndiInterface`, because only a real
 protocol connection shows which mount commands are sent and in which
 units. The whole module is skipped when no INDI server is reachable.
 
-Only the camera frame and the plate solve are replaced -- solving a
-simulator image is not meaningful (the simulator camera does not draw the
-star field of a given target), so a fixed solved position stands in.
+Only the camera frame and the plate solve are replaced here, by a fixed
+solved position, to check the mount commands and their units. The simulator's
+camera does draw the star field (from the ``gsc`` catalog) and Siril solves
+it: ``simulator/test/test_alignment_live.py`` runs the whole path with no
+stand-in.
 Everything after that (the arithmetic and the real INDI mount commands
 of ``control.mount.slew(center=True)``) runs for real: the sync must send
 the solved right ascension in hours, and the slew back the target's.

@@ -15,8 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib._internal.drivers import siril_interface
-from astrometricslib._internal.drivers.siril_interface import session
+from astrometricslib._internal.drivers.siril.core import lock as siril_lock
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.tasks import (
@@ -62,12 +61,12 @@ def test_a_wait_is_added_to_the_bound_tally_only() -> None:
     """Runs in one process keep separate totals; an unbound wait is dropped."""
     first, second = RunTally(), RunTally()
 
-    session._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
-    with siril_interface.bind_lock_wait(first):
-        session._record_siril_lock_wait(2.0)
-        with siril_interface.bind_lock_wait(second):
-            session._record_siril_lock_wait(3.0)
-        session._record_siril_lock_wait(1.0)
+    siril_lock._record_siril_lock_wait(7.0)  # no run is bound: nothing is kept
+    with siril_lock.bind_lock_wait(first):
+        siril_lock._record_siril_lock_wait(2.0)
+        with siril_lock.bind_lock_wait(second):
+            siril_lock._record_siril_lock_wait(3.0)
+        siril_lock._record_siril_lock_wait(1.0)
 
     assert first.total == pytest.approx(3.0)
     assert second.total == pytest.approx(3.0)
@@ -83,7 +82,7 @@ def test_an_uncontended_slot_records_a_negligible_wait() -> None:
     """
     tally = RunTally()
 
-    with siril_interface.bind_lock_wait(tally), siril_interface.siril_process_lock(max_concurrent_runs=1):
+    with siril_lock.bind_lock_wait(tally), siril_lock.siril_process_lock(max_concurrent_runs=1):
         pass
 
     assert tally.total < 0.5
@@ -97,6 +96,11 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
     files. Slots live under the configured library path, so two
     processes pointed at different libraries deliberately do not
     contend -- which is why the waiter cannot simply be this test.
+
+    The holder keeps its slot until this test tells it to let go, which
+    the test does one second after the waiter says it is about to wait.
+    A fixed hold time would fail on a busy machine, where starting the
+    waiter can take longer than the hold.
     """
     import subprocess  # ruff: ignore[suspicious-subprocess-import] -- real processes are the point
     import sys
@@ -105,41 +109,63 @@ def test_time_blocked_on_a_slot_is_recorded() -> None:
     holder_source = (
         "import time, sys;"
         f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib._internal.drivers.siril_interface import siril_process_lock;"
+        "from astrometricslib._internal.drivers.siril.core.lock import siril_process_lock;"
         "ctx = siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "print('holding', flush=True);"
-        "time.sleep(8);"
+        "sys.stdin.readline();"
         "ctx.__exit__(None, None, None)"
     )
     waiter_source = (
         "import sys;"
         f"sys.path.insert(0, {repository_root!r});"
-        "from astrometricslib._internal.drivers import siril_interface;"
+        "from astrometricslib._internal.drivers.siril.core import lock as siril_lock;"
         "from astrometricslib.foundation.run_tally import RunTally;"
         "tally = RunTally();"
-        "scope = siril_interface.bind_lock_wait(tally);"
+        "scope = siril_lock.bind_lock_wait(tally);"
         "scope.__enter__();"
-        "ctx = siril_interface.siril_process_lock(max_concurrent_runs=1);"
+        "sys.stdin.readline();"
+        "print('waiting', flush=True);"
+        "ctx = siril_lock.siril_process_lock(max_concurrent_runs=1);"
         "ctx.__enter__();"
         "ctx.__exit__(None, None, None);"
         "scope.__exit__(None, None, None);"
         "print(tally.total, flush=True)"
     )
 
+    # Both start at once, so their slow imports overlap. The waiter asks for
+    # the slot only when told to, after the holder has it.
     holder = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
-        [sys.executable, "-c", holder_source], stdout=subprocess.PIPE, text=True
+        [sys.executable, "-c", holder_source], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
     )
     try:
-        assert holder.stdout.readline().strip() == "holding"
-        waiter = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
-            [sys.executable, "-c", waiter_source], capture_output=True, text=True, timeout=60
+        waiter = subprocess.Popen(  # ruff: ignore[subprocess-without-shell-equals-true] -- fixed argv
+            [sys.executable, "-c", waiter_source], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
         )
-        recorded_wait = float(waiter.stdout.strip().splitlines()[-1])
+        try:
+            assert holder.stdout.readline().strip() == "holding"
+            waiter.stdin.write("go\n")
+            waiter.stdin.flush()
+            assert waiter.stdout.readline().strip() == "waiting"
+            # Keep the slot for one second of the waiter's wait, twice the
+            # 0.5 s the check below needs, then let it go.
+            time.sleep(1.0)
+            holder.stdin.write("release\n")
+            holder.stdin.flush()
+            waiter_output, _ = waiter.communicate(timeout=60)
+        finally:
+            if waiter.poll() is None:
+                waiter.kill()
+                waiter.wait(timeout=20)
+        recorded_wait = float(waiter_output.strip().splitlines()[-1])
 
         assert recorded_wait > 0.5
     finally:
+        # Closing the holder's input also lets it go if the test failed early.
+        with contextlib.suppress(BrokenPipeError):
+            holder.stdin.close()
         holder.wait(timeout=20)
+        holder.stdout.close()
 
 
 def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,7 +193,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.Mon
         """
         # The stack waited in the queue; the wait goes to this run's tally,
         # as `siril_process_lock` would add it.
-        session._record_siril_lock_wait(reported_lock_wait)
+        siril_lock._record_siril_lock_wait(reported_lock_wait)
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
@@ -221,7 +247,7 @@ def test_a_stack_still_waiting_for_a_slot_is_not_abandoned(monkeypatch: pytest.M
         stacked_path : `str`
             A made-up output path.
         """
-        with session.siril_process_lock(max_concurrent_runs=1):
+        with siril_lock.siril_process_lock(max_concurrent_runs=1):
             return "/stacked/output.fits"
 
     monkeypatch.setattr(
@@ -257,6 +283,11 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch: pytest.MonkeyPat
         return "/never/reached.fits"
 
     monkeypatch.setattr(tasks, "_stack_with_job_tracking", _hung_stack)
+    # Short waits keep the test quick. The stand-in ignores the request to
+    # stop, so the join after giving up always runs to its limit; the result
+    # this test checks does not depend on either wait.
+    monkeypatch.setattr(tasks, "_STACKING_TIMEOUT_POLL_SECONDS", 0.1)
+    monkeypatch.setattr(tasks, "_ABANDONED_THREAD_JOIN_SECONDS", 0.1)
 
     class _Target:
         id = "HungTarget"

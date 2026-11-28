@@ -391,14 +391,16 @@ def audit_pipeline_structures() -> list[dict[str, Any]]:
     # Stacking has no `AnalysisPipeline` adapter. It runs through
     # `stacking.stage.stack_frames`, which hands the pixel work to a
     # `StackingDriver` (by default `SirilStackingDriver`, built on the Siril
-    # session class `ImageProcessing` in the `drivers/siril_interface/`
+    # session class `ImageProcessing` in the `drivers/siril/stacking/`
     # package). Its row checks that those pieces exist instead of a
     # four-phase lifecycle.
     stacking_entry = "stacking.stage.stack_frames → SirilStackingDriver"
     try:
         stage_mod = importlib.import_module("astrometricslib.pipelines.stacking.stage")
-        driver_mod = importlib.import_module("astrometricslib._internal.drivers.siril_stacking_driver")
-        session_mod = importlib.import_module("astrometricslib._internal.drivers.siril_interface")
+        driver_mod = importlib.import_module(
+            "astrometricslib._internal.drivers.siril.stacking.stacking_driver"
+        )
+        session_mod = importlib.import_module("astrometricslib._internal.drivers.siril.stacking")
         entry_points_exist = all((
             callable(getattr(stage_mod, "stack_frames", None)),
             getattr(driver_mod, "SirilStackingDriver", None) is not None,
@@ -467,7 +469,7 @@ def generate_markdown_report(
         "execution, quality validation, and serialization. Stacking has no such adapter. "
         "It runs through `stacking.stage.stack_frames`, which hands the pixel work to a "
         "`StackingDriver` (by default `SirilStackingDriver`, built on the Siril session class "
-        "`ImageProcessing` in the `drivers/siril_interface/` package). Its row checks that those entry "
+        "`ImageProcessing` in the `drivers/siril/stacking/` package). Its row checks that those entry "
         "points exist.",
         "",
         "| Pipeline Domain | Adapter Class or Entry Point | Lifecycle Complete? "

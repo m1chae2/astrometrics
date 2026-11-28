@@ -14,8 +14,10 @@ file inside the shared test folder or the test's own folder.
 """
 
 import collections.abc
+import functools
 import logging
 import os
+import re
 import sys
 import tempfile
 import types
@@ -27,7 +29,18 @@ import pytest
 # 1. Set testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
 
-# 2. Configure Matplotlib to use the headless Agg backend
+# 2. Configure Matplotlib to use the headless Agg backend.
+# Keep Matplotlib's font list in one lasting folder. Step 3 moves
+# XDG_CACHE_HOME into a new temporary folder, so without this every test
+# process (and every child process) rebuilds the font list first.
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(
+        os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+        "astrometrics-tests",
+        "matplotlib",
+    ),
+)
 import matplotlib
 
 matplotlib.use("Agg")
@@ -67,16 +80,17 @@ test_calibration_path.mkdir(parents=True, exist_ok=True)
 # Tests of parts that exist only on Linux, which Windows does not collect at
 # all. The rules that differ between the systems live in per-system modules
 # (`foundation/_system_posix.py` and `_system_windows.py`, and the Siril
-# pipes in `siril_interface/_pipes_posix.py` and `_pipes_windows.py`); each
+# pipes in `siril/core/_pipes_posix.py` and `_pipes_windows.py`); each
 # is tested on its own system, Windows by the "windows CI" workflow.
 # Path (relative to the project, with "/") -> why.
 LINUX_ONLY_TEST_PATHS = {
     "simulator/": "the simulator runs INDI, which is not available on Windows",
     "build/tpm/": "the TPM harness runs the simulator and Linux shell tools",
-    "astrometricslib/_internal/drivers/test/test_siril_command_synchronisation.py": (
+    "build/linux/": "the Linux setup steps (Flatpak, Siril GPU libraries) exist only on Linux",
+    "astrometricslib/_internal/drivers/siril/test/test_siril_command_synchronisation.py": (
         "Siril's Linux pipes are FIFOs; the Windows named pipes are tested in test_siril_windows.py"
     ),
-    "astrometricslib/_internal/drivers/test/test_siril_process_cleanup.py": (
+    "astrometricslib/_internal/drivers/siril/test/test_siril_process_cleanup.py": (
         "the cleanup uses fuser, pgrep and process groups; Windows uses taskkill (test_system_windows.py)"
     ),
     "backend/tests/test_copy_path_guard.py": "it tests the Linux-only real-data runs of build/agent_tools",
@@ -85,6 +99,82 @@ LINUX_ONLY_TEST_PATHS = {
     "wayfindinglib/drivers/test/test_indi_property_state.py": "INDI is not available on Windows",
     "wayfindinglib/drivers/test/test_indi_worker.py": "INDI is not available on Windows",
 }
+
+
+# Tests that a pull request runs on Windows. The "windows CI" workflow runs
+# only these (`-m windows_sensitive`) on a pull request, and the whole suite
+# on a push to main, by hand and once a week. A test gets the
+# `windows_sensitive` marker when its file mentions something that behaves
+# differently on Windows. The rule reads the file's text, so a new test of
+# these things is picked up without anyone adding it to a list. Reason ->
+# what in the file's text counts.
+WINDOWS_SENSITIVE_PATTERNS = {
+    "it tests a per-system module or the Windows set-up": (
+        r"_system_windows|_system_posix|foundation\.system\b|foundation import system\b"
+        r"|_pipes_windows|_pipes_posix|siril\.core\.pipes|siril\.core import pipes"
+        r"|program_setup|set_up_programs|build/windows|setup_windows"
+    ),
+    "it checks which system runs": (
+        r"sys\.platform|\bwin32\b|platform\.system|\bos\.name\b|PureWindowsPath|PurePosixPath|linux_only"
+    ),
+    "it handles path separators or home folders": (
+        r"image_paths|path_guard|\bos\.sep\b|\bos\.pathsep\b|\bos\.altsep\b|as_posix|expanduser|Path\.home"
+    ),
+    "it makes links": (
+        r"\bos\.symlink\b|symlink_to|is_symlink|readlink|hardlink|\bos\.link\b|file_staging|stage_file"
+    ),
+    "it starts or stops processes": (
+        r"\bsubprocess\b|Popen|\bos\.kill\b|\bpsutil\b|\bsignal\.(?:SIG|signal\b|raise_signal|alarm)"
+        r"|taskkill|shutil\.which|multiprocessing"
+    ),
+    "it replaces, locks or sets the mode of files": (
+        r"\bos\.replace\b|msvcrt|fcntl|filelock|FileLock|\btempfile\b|chmod|st_mode"
+    ),
+    "it uses the settings, cache or data folder locations": (
+        r"platformdirs|XDG_[A-Z]+_HOME|user_(?:config|data|cache|state|log)_(?:dir|path)"
+    ),
+    "it reads or writes line endings": r"newline=|\\r\\n|os\.linesep|CRLF",
+}
+
+# Extra test files that are Windows-sensitive although no pattern above
+# finds them. Path (relative to the project, with "/") -> why.
+WINDOWS_SENSITIVE_EXTRA_TEST_PATHS = {
+    "mcp_servers/common/test/test_path_sandbox.py": (
+        "it checks whether a path lies inside a folder, which depends on drive letters and separators"
+    ),
+    "backend/tests/test_static_mounts.py": "it turns folder paths into web addresses",
+}
+
+
+@functools.cache
+def windows_sensitive_reasons(test_file: Path) -> tuple[str, ...]:
+    """Say why a test file is Windows-sensitive, if it is.
+
+    Parameters
+    ----------
+    test_file : `pathlib.Path`
+        A test file inside the project.
+
+    Returns
+    -------
+    reasons : `tuple` [`str`]
+        One reason from `WINDOWS_SENSITIVE_PATTERNS` for each pattern the
+        file's text matches, and the reason from
+        `WINDOWS_SENSITIVE_EXTRA_TEST_PATHS` when the file is listed there.
+        Empty when the file is not Windows-sensitive.
+    """
+    try:
+        text = test_file.read_text(encoding="utf-8")
+    except OSError, UnicodeDecodeError:
+        return ()
+    reasons = [reason for reason, pattern in WINDOWS_SENSITIVE_PATTERNS.items() if re.search(pattern, text)]
+    try:
+        relative = _project_path(test_file)
+    except ValueError:
+        relative = ""
+    if relative in WINDOWS_SENSITIVE_EXTRA_TEST_PATHS:
+        reasons.append(WINDOWS_SENSITIVE_EXTRA_TEST_PATHS[relative])
+    return tuple(reasons)
 
 
 def _project_path(path: Path) -> str:
@@ -143,8 +233,18 @@ def pytest_configure(config: pytest.Config) -> None:
     )
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Skip the tests marked ``linux_only`` on Windows, with their reason."""
+    """Mark the Windows-sensitive tests; skip ``linux_only`` ones on Windows.
+
+    Every system adds the ``windows_sensitive`` marker (see
+    `windows_sensitive_reasons`), so ``-m windows_sensitive`` picks the same
+    tests on Linux and Windows. The hook runs first, before ``-m`` chooses
+    the tests.
+    """
+    for item in items:
+        if windows_sensitive_reasons(item.path):
+            item.add_marker(pytest.mark.windows_sensitive)
     if sys.platform != "win32":
         return
     for item in items:

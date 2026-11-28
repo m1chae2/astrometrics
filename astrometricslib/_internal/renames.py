@@ -29,7 +29,7 @@ __all__ = ["RENAMES", "MovedNames", "moved_module_name"]
 RENAMES: dict[str, str] = {
     # Step 4b (stars).
     "astrometricslib.StellarCatalog.dataset_version": (
-        "astrometricslib.drivers.get_library_data_version(config) (the library's write counters)"
+        "astrometrics.stars.get_data_version() (an opaque text that changes with the star catalog)"
     ),
     "astrometricslib.StellarCatalog.find_or_create_by_position": (
         "astrometrics.stars.query(ra_deg=..., dec_deg=..., radius_deg=...) to find the star, then "
@@ -199,8 +199,33 @@ RENAMES: dict[str, str] = {
         "astrometrics.visualization.get_sky_picture(target)"
     ),
     # Step 4f: names the host modules no longer offer.
-    "astrometricslib.drivers.LIBRARY_DATA_KINDS": "astrometricslib.drivers.get_library_data_version(config)",
+    "astrometricslib.drivers.LIBRARY_DATA_KINDS": (
+        "astrometrics.targets.get_data_version(), astrometrics.quality.records.get_data_version() "
+        "and astrometrics.stars.get_data_version()"
+    ),
     "astrometricslib.drivers.LibraryFolders": "astrometricslib.drivers.library_folders(config_file)",
+    # Issue #182: the storage versions became opaque texts on public objects.
+    "astrometricslib.drivers.get_target_data_version": "astrometrics.targets.get_data_version(target)",
+    "astrometricslib.drivers.get_library_data_version": (
+        "astrometrics.targets.get_data_version(), astrometrics.quality.records.get_data_version() "
+        "or astrometrics.stars.get_data_version() (one opaque text per kind of data)"
+    ),
+    "astrometricslib.drivers.get_target_document_signs": "astrometrics.targets.get_record_versions()",
+    "astrometricslib.drivers.get_camera_data_versions": (
+        "astrometrics.quality.records.get_camera_data_version(camera=..., before_night=...)"
+    ),
+    "astrometricslib.drivers.get_target_camera_names": (
+        "astrometrics.quality.records.get_camera_data_version(target=target) (the version of its cameras)"
+    ),
+    "astrometricslib.drivers.get_stack_quality_data_version": (
+        "astrometrics.quality.stacks.get_data_version()"
+    ),
+    "astrometricslib.drivers.get_frame_metric_signs": (
+        "astrometrics.quality.records.get_data_version(metric=..., subject_ids=...)"
+    ),
+    "astrometricslib.drivers.get_frame_metric_data_versions": (
+        "astrometrics.quality.records.get_data_version(metric=..., level='frame')"
+    ),
     "astrometricslib.drivers.read_launch_identity": (
         "astrometricslib.drivers.launch_identity_from_settings(settings)"
     ),
@@ -208,6 +233,14 @@ RENAMES: dict[str, str] = {
     "astrometricslib.drivers.tile_of_source_id": "nothing public (a private sky-tile helper)",
     "astrometricslib.drivers.tiles_for_cone": "nothing public (a private sky-tile helper)",
     "astrometricslib.drivers.tiles_for_footprint": "nothing public (a private sky-tile helper)",
+    # Issue #182: astropy's offline setup and table warm-up are private.
+    "astrometricslib.configure_offline_iers": (
+        "nothing: astropy is set offline when astrometricslib is imported, so the call is not needed"
+    ),
+    "astrometricslib.warm_earth_orientation_data": (
+        "nothing: Astrometrics(...) loads astropy's Earth-rotation table in the background, "
+        "so the call is not needed"
+    ),
     "astrometricslib.parameters.run_tuning": "astrometricslib.parameters.tune(...)",
     "astrometricslib.parameters.collect_tuners": "astrometricslib.parameters.tune(...)",
     "astrometricslib.parameters.read_tuned_record": "astrometricslib.parameters.tune(...)",

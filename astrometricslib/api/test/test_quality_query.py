@@ -425,3 +425,60 @@ def test_deleting_a_targets_frames_forgets_their_measurements(tmp_path: Path) ->
     assert not gone.exists()
     rows = QualityMeasurements(configuration).query(latest_only=False)
     assert [row.subject.subject_id for row in rows] == ["M31/scope/cam/kept.fits"]
+
+
+def test_the_data_version_changes_only_with_the_matching_rows(
+    quality: QualityMeasurements, tmp_path: Path
+) -> None:
+    """The version follows the rows of its metric, level and target only.
+
+    Asking before anything is stored creates no file. An added row of the
+    metric changes the version, at any target for a library-wide version;
+    a row of another metric, a stack row and a row of another target leave
+    a narrower version as it is; a deleted frame changes it back.
+    """
+    width = "frame.star_width_moffat_arcsec"
+    empty = quality.get_data_version(metric=width, level="frame")
+    assert isinstance(empty, str)
+    assert list(tmp_path.iterdir()) == []
+
+    store = QualityStore(str(tmp_path / "astrometrics.db"))
+    store.write_measurements([_measurement("run-1", BASE_TIME)])
+    library = quality.get_data_version(metric=width, level="frame")
+    target = quality.get_data_version(target=Target(id="M31"))
+    assert library != empty
+    assert quality.get_data_version(metric=width, level="frame") == library
+
+    other_target = _measurement(
+        "run-2",
+        BASE_TIME,
+        subject=QualitySubject(level=SubjectLevel.FRAME, subject_id="M13/a.fits", target_id="M13"),
+    )
+    store.write_measurements([other_target])
+    assert quality.get_data_version(target=Target(id="M31")) == target
+    after_other_target = quality.get_data_version(metric=width, level="frame")
+    assert after_other_target != library
+
+    other_metric = _measurement("run-3", BASE_TIME, metric="frame.star_elongation", value=1.1)
+    stack = _measurement(
+        "run-4",
+        BASE_TIME,
+        subject=QualitySubject(level=SubjectLevel.STACK, subject_id="M13/stack.fits", target_id="M13"),
+    )
+    store.write_measurements([other_metric, stack])
+    assert quality.get_data_version(metric=width, level="frame") == after_other_target
+
+    # The deleted frame leaves the rows as they were after the first write,
+    # so the version is that one again.
+    store.delete_frame_measurements(["M13/a.fits"])
+    assert quality.get_data_version(metric=width, level="frame") == library
+
+
+def test_the_data_version_refuses_unknown_names(quality: QualityMeasurements) -> None:
+    """An unregistered metric, an unknown level and a bare id are refused."""
+    with pytest.raises(InvalidArgumentError):
+        quality.get_data_version(metric="frame.no_such_metric")
+    with pytest.raises(InvalidArgumentError):
+        quality.get_data_version(level="galaxy")
+    with pytest.raises(InvalidArgumentError):
+        quality.get_data_version(target="M31")  # type: ignore[arg-type]

@@ -197,7 +197,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         levels=_FRAME_ONLY,
         better=Direction.NONE,
         meaning="The brightness of the sky background in one frame.",
-        decisions=("frame quarantine", "background homogeneity"),
+        decisions=("set-aside check", "background homogeneity"),
         # `raw_frame_check` measures its own plain-median sky level
         # (`sky_median_adu`). That is a different estimator and must never
         # be emitted under this name.
@@ -322,7 +322,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
             "The number of connected bright regions in one raw frame. Hot pixels, nebulosity and "
             "pieces of a trail count too, and merged stars count once, so it is not a star count."
         ),
-        decisions=("frame quarantine", "raw frame check"),
+        decisions=("set-aside check", "raw frame check"),
         estimator=(
             "`ndimage.label` count of regions above 40 noise units (`DETECTION_SIGMA`) after "
             "background removal and a 1.5 px Gaussian smooth, from `detect_stars`."
@@ -335,7 +335,7 @@ FRAME_METRICS: tuple[MetricSpec, ...] = (
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "A frame with far fewer regions than its batch usually has cloud or fog, and "
-            "the quarantine and the raw frame check flag it."
+            "the set-aside check and the raw frame check flag it."
         ),
         register_entry="STK-01",
     ),

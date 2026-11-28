@@ -6,12 +6,13 @@ slow reads: the target's stored rows, the performance envelope behind the
 frame roundness limit, and the stack baseline. Each is read once while its
 data version stays the same, read again when the version changes, and read
 every time when the version cannot be worked out. The set-aside listing is
-read once per review. Further tests check that the kept rows are brought up
-to date instead of read again when the update can do it, and what the
-version of the roundness limit follows: live guiding samples and frames of
-nights the limit does not use leave it as it is. A randomized test checks
-that the kept roundness signature gives equal versions exactly when fresh
-signatures are equal, and that an unchanged library reads no measurements.
+read once per review. The target's rows are kept with the science
+library's opaque data version of the target's quality rows. Further tests
+check what the version of the roundness limit follows: live guiding samples
+and frames of nights the limit does not use leave it as it is. A randomized
+test checks that the kept roundness signature gives equal versions exactly
+when fresh signatures are equal, and that an unchanged library reads no
+measurements.
 """
 
 import dataclasses
@@ -27,7 +28,6 @@ from astrometricslib.exceptions import StorageError
 from wayfindinglib.analytics.capture_history import (
     STAR_ELONGATION_METRIC,
     STAR_WIDTH_METRIC,
-    FrameMeasurements,
     roundness_baseline_signature,
 )
 from wayfindinglib.analytics.night_index import NightFrame, NightIndex
@@ -54,7 +54,6 @@ class _Counts:
     def __init__(self) -> None:
         """Start with no reads and fixed versions."""
         self.rows = 0
-        self.updates = 0
         self.envelopes = 0
         self.stack_limits = 0
         self.set_aside = 0
@@ -110,22 +109,14 @@ def counts(monkeypatch: pytest.MonkeyPatch) -> _Counts:
         counts.stack_limits += 1
         return STACK_LIMIT
 
-    def update_rows(*_arguments: Any) -> None:
-        """Count an update of the kept rows; giving none makes a full read."""
-        counts.updates += 1
-
     monkeypatch.setattr(star_shape_tasks, "read_stored_shape_rows", read_rows)
-    monkeypatch.setattr(star_shape_tasks, "update_stored_shape_rows", update_rows)
     monkeypatch.setattr(star_shape_tasks.night_analysis, "recorded_sessions", lambda _context: ([], []))
     monkeypatch.setattr(star_shape_tasks.night_analysis, "performance_envelope", envelope)
     monkeypatch.setattr(star_shape_tasks, "read_stack_roundness_low_limit", stack_limit)
-    monkeypatch.setattr(star_shape_tasks, "get_target_data_version", lambda *_: counts.target_version)
     monkeypatch.setattr(
         star_shape_tasks, "roundness_limit_data_version", lambda _context, _night: counts.review_version
     )
-    monkeypatch.setattr(
-        star_shape_tasks, "get_stack_quality_data_version", lambda _config: counts.stack_version
-    )
+    monkeypatch.setattr(star_shape_tasks, "library_data_version", lambda _read, _what: counts.stack_version)
     return counts
 
 
@@ -149,8 +140,26 @@ def _context(counts: _Counts) -> SimpleNamespace:
         counts.set_aside += 1
         return []
 
+    def get_data_version(**_filters: Any) -> str:
+        """Give the target's made-up data version, or fail without one.
+
+        Returns
+        -------
+        version : `str`
+            The version the test set.
+
+        Raises
+        ------
+        StorageError
+            When the test set no version, as an unreadable library does.
+        """
+        if counts.target_version is None:
+            raise StorageError("the quality store is locked")
+        return str(counts.target_version)
+
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(frames=SimpleNamespace(get_set_aside=get_set_aside))
+        targets=SimpleNamespace(frames=SimpleNamespace(get_set_aside=get_set_aside)),
+        quality=SimpleNamespace(records=SimpleNamespace(get_data_version=get_data_version)),
     )
     return SimpleNamespace(astrometrics=astrometrics, config=object(), star_shape_cache=VersionedCache())
 
@@ -191,7 +200,6 @@ def test_each_part_is_read_again_only_when_its_own_data_change(counts: _Counts) 
     counts.target_version = ("target", 2)
     star_shape_tasks.get_star_shape_review(context, _target())
     assert (counts.rows, counts.envelopes, counts.stack_limits) == (2, 1, 1)
-    assert counts.updates == 1
 
     counts.review_version = ("review", 2)
     star_shape_tasks.get_star_shape_review(context, _target())
@@ -222,22 +230,6 @@ def test_without_a_version_nothing_is_kept(counts: _Counts) -> None:
     star_shape_tasks.get_star_shape_review(context, _target())
 
     assert (counts.rows, counts.envelopes, counts.stack_limits) == (2, 2, 2)
-
-
-def test_an_update_that_works_replaces_the_full_read(
-    counts: _Counts, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """When the kept rows can be brought up to date, nothing is read again."""
-    updated = StoredShapeRows(frames={f"{TARGET_ID}/a.fits": {"frame.star_elongation": (1.4, 9)}}, stack=None)
-    monkeypatch.setattr(star_shape_tasks, "update_stored_shape_rows", lambda *_arguments: updated)
-    context = _context(counts)
-
-    star_shape_tasks.get_star_shape_review(context, _target())
-    counts.target_version = ("target", 2)
-    review = star_shape_tasks.get_star_shape_review(context, _target())
-
-    assert counts.rows == 1
-    assert review.series[0].elongation == pytest.approx(1.4)
 
 
 MEASURED_FRAMES = 10
@@ -277,7 +269,7 @@ class _VersionInputs:
         self.measurement_reads = 0
         self.context = SimpleNamespace(config=object(), butler=object(), star_shape_cache=VersionedCache())
 
-    def measurement_version(self) -> dict[str, Any]:
+    def measurement_version(self) -> tuple[str, ...]:
         """Give the stand-in data version of the stored measurements.
 
         It is made from the stored values themselves, so it changes exactly
@@ -286,14 +278,12 @@ class _VersionInputs:
 
         Returns
         -------
-        version : `dict`
-            One entry holding every stored value.
+        version : `tuple` [`str`, ...]
+            One text holding every stored value.
         """
-        return {
-            "rows": tuple(
-                sorted((subject, tuple(sorted(values.items()))) for subject, values in self.values.items())
-            )
-        }
+        return (
+            repr(sorted((subject, tuple(sorted(values.items()))) for subject, values in self.values.items())),
+        )
 
     def version(self, night: str | None) -> Any:
         """Work out the limit version with the stand-in context.
@@ -362,16 +352,16 @@ def version_inputs(monkeypatch: pytest.MonkeyPatch) -> _VersionInputs:
             tonight=tonight, frames=tuple(frames), ekos_nights=frozenset(), guiding_nights=frozenset()
         )
 
-    def kept_measurements(_context: Any, _version: Any = None) -> FrameMeasurements:
+    def kept_measurements(_context: Any, _version: Any = None) -> dict[str, Any]:
         """Give the stand-in stored values of the frames.
 
         Returns
         -------
-        measurements : `FrameMeasurements`
+        measurements : `dict`
             A copy of the values, so later changes do not reach it.
         """
         inputs.measurement_reads += 1
-        return FrameMeasurements(values={subject: dict(values) for subject, values in inputs.values.items()})
+        return {subject: dict(values) for subject, values in inputs.values.items()}
 
     monkeypatch.setattr(star_shape_tasks, "report_context_version", lambda *_: inputs.records)
     monkeypatch.setattr(star_shape_tasks, "build_night_index", night_index)

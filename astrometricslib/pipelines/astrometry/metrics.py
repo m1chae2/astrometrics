@@ -12,8 +12,8 @@ one stacked image, so it is about that stack:
 
 - Counts of stars and of catalog lookups (unit ``count``).
 - Distances and sizes: the three position-error numbers (the catalog match
-  separation, the plate solver's fit residual and the Gaia refit RMS), the
-  size of the Gaia refit's move, the pixel scale and the star width. Each
+  separation, the plate solver's fit residual and the RMS distance to Gaia),
+  the pixel scale and the star width. Each
   keeps its current estimator under a name that says which one it is. In
   particular `astrometry.catalog_match_separation_rms_arcsec` is not the
   plate-solve fit residual (see validation register entry AST-01).
@@ -54,14 +54,12 @@ ASTROMETRY_POSITION_ONLY_STAR_COUNT = "astrometry.position_only_star_count"
 ASTROMETRY_UNRESOLVED_STAR_COUNT = "astrometry.unresolved_star_count"
 ASTROMETRY_PLATE_SOLVE_ATTEMPTS = "astrometry.plate_solve_attempts_count"
 ASTROMETRY_PLATE_SOLVE_MATCHED_STAR_COUNT = "astrometry.plate_solve_matched_star_count"
-ASTROMETRY_GAIA_FIT_STAR_COUNT = "astrometry.gaia_fit_star_count"
+ASTROMETRY_GAIA_MATCH_STAR_COUNT = "astrometry.gaia_match_star_count"
 ASTROMETRY_REMOTE_CATALOG_QUERIES_ATTEMPTED = "astrometry.remote_catalog_queries_attempted_count"
 ASTROMETRY_REMOTE_CATALOG_QUERIES_FAILED = "astrometry.remote_catalog_queries_failed_count"
 ASTROMETRY_CATALOG_MATCH_SEPARATION_RMS_ARCSEC = "astrometry.catalog_match_separation_rms_arcsec"
 ASTROMETRY_PLATE_SOLVE_FIT_RESIDUAL_RMS_ARCSEC = "astrometry.plate_solve_fit_residual_rms_arcsec"
-ASTROMETRY_GAIA_FIT_RMS_ARCSEC = "astrometry.gaia_fit_rms_arcsec"
-ASTROMETRY_GAIA_FIT_RMS_BEFORE_ARCSEC = "astrometry.gaia_fit_rms_before_arcsec"
-ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC = "astrometry.wcs_refinement_shift_arcsec"
+ASTROMETRY_GAIA_MATCH_RMS_ARCSEC = "astrometry.gaia_match_rms_arcsec"
 ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL = "astrometry.plate_scale_arcsec_per_pixel"
 ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX = "astrometry.star_width_gaussian_px"
 
@@ -336,11 +334,11 @@ _TARGET_CLIPPING_PURPOSE = (
 _EXPECTED_RESIDUAL_REVIEW_DATE = datetime.date(2027, 4, 30)
 _EXPECTED_RESIDUAL_COMPUTED_BY = "pipelines.astrometry.post_processing.expected_residual.expected_residual"
 _EXPECTED_RESIDUAL_SAMPLE = (
-    "The stars of the Gaia refit's final set, the same stars the Gaia refit RMS is taken over. Missing "
-    "when the refit was not tried, had too few stars, or the frame is a one-shot-color frame."
+    "The Gaia-matched stars that were kept, the same stars the Gaia match RMS is taken over. Missing "
+    "when the match was not made, had too few stars, or the frame is a one-shot-color frame."
 )
 _EXPECTED_RESIDUAL_QUESTION = (
-    "Does the Gaia refit RMS come down to what the stars' own centroid noise, the pixel phase and the "
+    "Does the Gaia match RMS come down to what the stars' own centroid noise, the pixel phase and the "
     "Gaia position error predict? If the measured RMS is several times the expectation, the difference "
     "is distortion, tilt or a bad match, not noise. The observatory has too few solved stacks to "
     "say yet where the two part company."
@@ -360,12 +358,12 @@ _EXPECTED_RESIDUAL_METRICS: tuple[MetricSpec, ...] = (
         better=Direction.LOWER,
         meaning=(
             "A lower bound on the root mean square distance from a Gaia position that noise in each star's "
-            "own centroid leaves, over the stars of the Gaia refit. It is a lower bound because the "
+            "own centroid leaves, over the stars of the Gaia match. It is a lower bound because the "
             "Cramer-Rao limit is the best any estimator can do; the star finder does worse."
         ),
         decisions=("distortion or tilt against noise",),
         estimator=(
-            "For each refit star the peak over the background noise is A/n (its peak above the sky, over "
+            "For each matched star the peak over the background noise is A/n (its peak above the sky, over "
             "the standard deviation of the sky pixels, both from the star finder). The centroid error of a "
             "Gaussian star on a white-noise background is at least sqrt(2/pi) / (A/n) pixels along each "
             "axis (the Cramer-Rao bound; it equals sqrt(2) times FWHM / (2.355 SNR) with SNR the signal-to-"
@@ -427,7 +425,7 @@ _EXPECTED_RESIDUAL_METRICS: tuple[MetricSpec, ...] = (
         better=Direction.LOWER,
         meaning=(
             "The root mean square error of the Gaia positions themselves, moved to the image's date by "
-            "proper motion, over the stars of the Gaia refit."
+            "proper motion, over the stars of the Gaia match."
         ),
         decisions=("distortion or tilt against noise",),
         estimator=(
@@ -435,7 +433,7 @@ _EXPECTED_RESIDUAL_METRICS: tuple[MetricSpec, ...] = (
             "added in quadrature. The cached Gaia cone holds no error columns, so this value is not "
             "found, and each row says so."
         ),
-        sample_definition="The stars of the Gaia refit's final set. Never measured at present.",
+        sample_definition="The Gaia-matched stars that were kept. Never measured at present.",
         band=_BAND,
         computed_by=_EXPECTED_RESIDUAL_COMPUTED_BY,
         uncertainty_kind=UncertaintyKind.NONE,
@@ -448,7 +446,7 @@ _EXPECTED_RESIDUAL_METRICS: tuple[MetricSpec, ...] = (
     _count_metric(
         ASTROMETRY_EXPECTED_RESIDUAL_STAR_COUNT,
         "How many stars the expected residual rests on.",
-        "The number of stars in the Gaia refit's final set that have a peak over the noise.",
+        "The number of kept Gaia-matched stars that have a peak over the noise.",
         _EXPECTED_RESIDUAL_SAMPLE,
         "The expected centroid noise is a root mean square over these stars, so the count says how far "
         "to trust it.",
@@ -564,27 +562,27 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The solve requests made during the run.",
         "A solve that needed retries is told apart from one that worked the first time.",
         better=Direction.LOWER,
-        computed_by="_internal.drivers.astrometry_net_driver._call_with_transient_retry",
+        computed_by="_internal.drivers.astrometry_net_client._call_with_transient_retry",
         levels=_RUN_ONLY,
     ),
     _count_metric(
         ASTROMETRY_PLATE_SOLVE_MATCHED_STAR_COUNT,
         "How many stars the plate solver matched to its own reference stars.",
-        "The number of usable rows in the solver's match table.",
-        "The stars in the solver's match table. Missing when the solver gave no table, as the online "
+        "The number of matched stars Siril prints after a solve (`nmatched`).",
+        "The stars Siril matched to its Gaia catalog. Missing when the solver gave no fit, as the online "
         "solver does.",
         "The fit residual is an RMS over these stars, so the count says how far to trust it.",
         better=Direction.HIGHER,
-        computed_by="_internal.drivers.astrometry_net_driver.read_corr_fit_statistics",
+        computed_by="_internal.drivers.siril.astrometry.plate_solve.parse_fit",
     ),
     _count_metric(
-        ASTROMETRY_GAIA_FIT_STAR_COUNT,
-        "How many stars the Gaia refit of the solution used.",
-        "The number of stars in the refit's final set, after its outlier clipping.",
-        "The detected stars matched to a Gaia position. Missing when the refit was not tried.",
+        ASTROMETRY_GAIA_MATCH_STAR_COUNT,
+        "How many stars the Gaia match of the solution used.",
+        "The number of detected stars kept after matching to Gaia and clipping outliers.",
+        "The detected stars matched to a Gaia position. Missing when the match was not made.",
         "The Gaia RMS is over these stars, so the count says how far to trust it.",
         better=Direction.HIGHER,
-        computed_by="pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia",
+        computed_by="pipelines.astrometry.processing.gaia_match.measure_gaia_match",
         register_entry="AST-02",
     ),
     _count_metric(
@@ -616,7 +614,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "stars within the catalog match radius. It is not the plate-solve fit residual: wrong matches "
         "raise it, and SIMBAD's uneven position precision does too. Rounded to 4 decimals.",
         "The detected stars that matched a catalog star. Missing when none matched.",
-        "The `astrometric_residual` self-check falls back to it when neither the Gaia refit nor the "
+        "The `astrometric_residual` self-check falls back to it when neither the Gaia match nor the "
         "solver gave a residual.",
         better=Direction.LOWER,
         computed_by=_IDENTIFIER,
@@ -628,54 +626,32 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "How far the plate solver's fitted star positions sit from its own reference stars, as a root "
         "mean square.",
         "Root mean square of the distance between each matched field star's position under the solved "
-        "coordinates and its reference star's position, read from the solver's match table. The "
-        "reference stars carry their own position errors, so this is a pessimistic check of the "
-        "solution.",
-        "The stars in the solver's match table. Missing when the solver gave no table.",
-        "The `astrometric_residual` self-check uses it when the Gaia refit gave no residual.",
+        "coordinates and its reference star's position. Siril prints the spread of that distance on each "
+        "axis, and the two are combined. The reference stars carry their own position errors, so this "
+        "is a pessimistic check of the solution.",
+        "The stars Siril matched to its Gaia catalog. Missing when the solver gave no fit, as the online "
+        "solver does.",
+        "The `astrometric_residual` self-check uses it when the Gaia match gave no residual.",
         better=Direction.LOWER,
-        computed_by="_internal.drivers.astrometry_net_driver.read_corr_fit_statistics",
+        computed_by="_internal.drivers.siril.astrometry.plate_solve.parse_fit",
         register_entry="AST-01",
     ),
     _value_metric(
-        ASTROMETRY_GAIA_FIT_RMS_ARCSEC,
+        ASTROMETRY_GAIA_MATCH_RMS_ARCSEC,
         "arcsec",
-        "How far the detected stars sit from their Gaia DR3 positions under the kept solution, as a "
+        "How far the detected stars sit from their Gaia DR3 positions under the plate solution, as a "
         "root mean square.",
-        "Root mean square of the distance between each refit star and its Gaia position, moved to the "
-        "image's date. It uses the refined solution when the refit was applied and the solver's own "
-        "otherwise, so it does not depend on the plate solver.",
-        "The stars of the refit's final set. Missing when the refit was not tried or had too few stars.",
+        "Root mean square of the distance between each Gaia-matched star and its Gaia position, moved to "
+        "the image's date. The solution is the plate solver's own and is not changed. Stars more than 3 "
+        "robust standard deviations from the median distance are left out. It does not depend on the "
+        "plate solver's own fit.",
+        "The Gaia-matched stars that were kept. Missing when the match was not made or had too few stars.",
         "The `astrometric_residual` self-check judges it first, because it is independent of the solver.",
         better=Direction.LOWER,
-        computed_by="pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia",
+        computed_by="pipelines.astrometry.processing.gaia_match.measure_gaia_match",
         register_entry="AST-02",
         purpose=MetricPurpose.DECISION,
         decisions=("run flag",),
-    ),
-    _value_metric(
-        ASTROMETRY_GAIA_FIT_RMS_BEFORE_ARCSEC,
-        "arcsec",
-        "How far the same refit stars sit from their Gaia positions under the solver's own solution.",
-        "Root mean square of the distance between each refit star and its Gaia position under the "
-        "solution as the plate solver returned it, over the refit's final set of stars.",
-        "The stars of the refit's final set. Missing when the refit was not tried or had too few stars.",
-        "Read beside the value after the refit, it shows how much the refit helped.",
-        better=Direction.LOWER,
-        computed_by="pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia",
-        register_entry="AST-02",
-    ),
-    _value_metric(
-        ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC,
-        "arcsec",
-        "How far the Gaia refit moved the solution.",
-        "The largest move, over a 5 by 5 grid of image points, between the solver's solution and the "
-        "refined one. It is 0 when the refit was tried and not applied.",
-        "The grid points of the image. Missing when the refit was not tried or had too few stars.",
-        "A large move means the plate solver was far off, which the solver's own fit does not show.",
-        better=Direction.LOWER,
-        computed_by="pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia",
-        register_entry="AST-02",
     ),
     _value_metric(
         ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL,
@@ -736,7 +712,7 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "fraction",
         "Whether the plate solution misses its stars by a large part of a star's width.",
         "The value is the RMS residual divided by the star width in arcseconds (the plate scale times "
-        "the star width in pixels). The residual is the Gaia refit RMS when there is one, else the "
+        "the star width in pixels). The residual is the RMS distance to Gaia when there is one, else the "
         "solver's fit residual, else the catalog match separation; the reason says which. The limit "
         "is 0.5. The check fails above the limit and is not checked when the residual, the plate "
         "scale or the star width is missing.",

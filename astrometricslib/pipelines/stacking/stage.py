@@ -117,7 +117,7 @@ def stack_frames(
     quality_recording : `FrameQualityRecording` or `None`, optional
         The configuration and the shared calibration library, from the caller,
         for the frame quality rows. The stage stores them only for an imaging
-        stack with the quarantine step turned on, and only when both this and
+        stack with the set-aside step turned on, and only when both this and
         ``measured_at`` are given. Left out (tests), none are stored.
     make_preview : `bool`, optional
         Make the stack's preview picture too (on by default, as the batch
@@ -695,10 +695,9 @@ def _save_stack_plate_solution(run: StackRun, stacked_path: str | None) -> None:
     header holds at most the pointing the camera software was told to use,
     which can be tens of pixels off. So a stack with no plate solution is
     solved here, with the same no-network solve the noise step uses
-    (`_plate_solve_stack_wcs`: refit to Gaia only from a complete cached
-    download), and the solution is written with `write_wcs_to_fits_header`,
-    which marks it as plate-solved. A stack that already carries a plate
-    solution is not solved again.
+    (`_plate_solve_stack_wcs`), and the solution is written with
+    `write_wcs_to_fits_header`, which marks it as plate-solved. A stack
+    that already carries a plate solution is not solved again.
 
     The viewer shows the stack's stretched FITS (`processed_fits_path_for`).
     The solution is written there too when that file exists and has none yet.
@@ -750,13 +749,7 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
         True when the stack was solved by this call.
     """
     from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
-    from astrometricslib.pipelines.shared.session_identification import (
-        header_is_refit_to_gaia,
-        write_wcs_to_fits_header,
-    )
-    from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
-        PLATE_SOLVE_REFIT_WCS_SOURCE,
-    )
+    from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
     from astrometricslib.pipelines.stacking.post_processing.stack_noise import _plate_solve_stack_wcs
 
     try:
@@ -768,7 +761,6 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
     saved_wcs = celestial_wcs(stack_header) if header_is_plate_solved(stack_header) else None
     if saved_wcs is not None:
         wcs = saved_wcs
-        refit_to_gaia = header_is_refit_to_gaia(stack_header)
     else:
         wcs, reason, source = _plate_solve_stack_wcs(stacked_path, drivers)
         if wcs is None:
@@ -776,16 +768,15 @@ def ensure_stack_plate_solution(stacked_path: str, drivers: Any = None) -> tuple
                 "The stack has no plate solution saved, so the viewer cannot name its stars: %s.", reason
             )
             return None, reason, False
-        refit_to_gaia = source == PLATE_SOLVE_REFIT_WCS_SOURCE
-        write_wcs_to_fits_header(stacked_path, wcs, refit_to_gaia=refit_to_gaia)
+        write_wcs_to_fits_header(stacked_path, wcs)
         solved_now = True
         logger.info("Saved the stack's plate solution in its header (%s).", source)
 
-    _save_solution_in_viewer_copy(stacked_path, wcs, replace=False, refit_to_gaia=refit_to_gaia)
+    _save_solution_in_viewer_copy(stacked_path, wcs, replace=False)
     return wcs, "", solved_now
 
 
-def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool, refit_to_gaia: bool) -> None:
+def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool) -> None:
     """Give the stack's viewer copy the stack's plate solution.
 
     The copy has the stack's pixel grid, or a crop of it whose place on the
@@ -802,9 +793,6 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
     replace : `bool`
         True to write over a solution the copy already has; False to write
         only when it has none.
-    refit_to_gaia : `bool`
-        Whether the solution was refit to Gaia stars (see
-        `write_wcs_to_fits_header`).
     """
     from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
     from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
@@ -834,7 +822,7 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
     if header_is_plate_solved(processed_header) and not replace:
         return
     if same_grid:
-        write_wcs_to_fits_header(processed_path, wcs, refit_to_gaia=refit_to_gaia)
+        write_wcs_to_fits_header(processed_path, wcs)
         logger.info("Saved the plate solution in the viewer's copy %s.", os.path.basename(processed_path))
         return
     # A cropped picture: its header says where it sits on the stack, so the
@@ -849,53 +837,8 @@ def _save_solution_in_viewer_copy(stacked_path: str, wcs: Any, *, replace: bool,
     shifted_wcs = celestial_wcs(stack_header)
     if shifted_wcs is None:
         return
-    write_wcs_to_fits_header(processed_path, shifted_wcs, refit_to_gaia=refit_to_gaia)
+    write_wcs_to_fits_header(processed_path, shifted_wcs)
     logger.info("Saved the shifted plate solution in the cropped copy %s.", os.path.basename(processed_path))
-
-
-def save_refit_stack_plate_solution(stacked_path: str, refit_wcs: Any) -> bool:
-    """Save a plate solution refit to Gaia in a stack whose own is not.
-
-    The analysis step downloads the Gaia stars of the field and refits the
-    solution. The stack's plate solve cannot do that while it runs (it reads
-    the cache only, and a field the cache holds only to a shallow depth has no
-    refit). This is the one place that saves the later, better solution. It
-    uses the writer the stack's own solve uses (`write_wcs_to_fits_header`),
-    marks the header as refit (``WCSREFIT``) and gives the viewer's copy the
-    same solution. A stack that already holds a refit solution is left alone.
-    The caller must pass only a refit that the refit's own acceptance rules
-    accepted (`wcs_refinement.WcsRefinement.applied`).
-
-    Parameters
-    ----------
-    stacked_path : `str`
-        The imaging stack.
-    refit_wcs : `astropy.wcs.WCS`
-        The accepted refit, on the stack's own pixel grid.
-
-    Returns
-    -------
-    saved : `bool`
-        True when the solution was written; False when the stack already
-        had a refit one or its header could not be read.
-    """
-    from astrometricslib._internal.drivers.fits_access import read_header
-    from astrometricslib.pipelines.shared.session_identification import (
-        header_is_refit_to_gaia,
-        write_wcs_to_fits_header,
-    )
-
-    try:
-        stack_header = read_header(stacked_path)
-    except (OSError, *DATA_ERRORS) as error:
-        logger.warning("Could not read the header of %s to save its refit solution: %s", stacked_path, error)
-        return False
-    if header_is_refit_to_gaia(stack_header):
-        return False
-    write_wcs_to_fits_header(stacked_path, refit_wcs, refit_to_gaia=True)
-    logger.info("Saved the stack's plate solution refit to Gaia stars in its header.")
-    _save_solution_in_viewer_copy(stacked_path, refit_wcs, replace=True, refit_to_gaia=True)
-    return True
 
 
 def _turn_stack_north_up(run: StackRun, stacked_path: str | None) -> bool:
@@ -1174,8 +1117,7 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     )
 
     skipped_steps: list[SkippedPreviewStep] = []
-    # A spectral stack has no sky gradient worth measuring: GraXpert's model
-    # is not measured for it.
+    # A spectral stack has no sky gradient worth measuring.
     background_outcomes: list[BackgroundGradientOutcome] | None = None if run.has_spectral else []
     run.preview_path = write_stack_preview(
         stacked_path,

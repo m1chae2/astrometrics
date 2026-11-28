@@ -72,6 +72,20 @@ def test_a_flat_tilted_sky_with_a_blob_takes_the_plane_path() -> None:
     assert "Background: plane fit (gradient 1.0%, limit 3.0%)" == decision.step_sentence()
 
 
+def test_the_sky_measurement_is_in_the_stacks_units_on_both_paths() -> None:
+    """The stored level is the stack sky level; the blob is left out."""
+    for tilt, method in ((0.01, "plane"), (0.2, "graxpert")):
+        decision = choose_background_method(make_sky(tilt, blob_amplitude=0.05))
+
+        assert decision.method == method
+        measured = decision.sky_background.gradient
+        assert measured is not None
+        assert measured.level == pytest.approx(SKY_LEVEL, rel=0.02)
+        assert measured.tilt_fraction == pytest.approx(tilt, rel=0.15)
+        assert decision.sky_background.binned_sky is not None
+        assert np.isnan(decision.sky_background.binned_sky[32, 32])
+
+
 def test_the_plane_leaves_no_ring_and_keeps_the_blob() -> None:
     """After the plane the sky is level in every ring; the blob stays."""
     image = make_sky(0.02, blob_amplitude=0.05)
@@ -159,6 +173,8 @@ def test_a_stack_that_cannot_be_measured_keeps_graxpert(image: np.ndarray) -> No
     assert decision.method == "graxpert"
     assert decision.gradient_fraction is None
     assert decision.reason
+    assert decision.sky_background.gradient is None
+    assert decision.sky_background.reason
 
 
 def test_the_sky_bins_leave_out_a_bright_object() -> None:

@@ -463,6 +463,7 @@ astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,_WID
 astrometricslib/pipelines/stacking/post_processing/other_stack_alignment.py,align_with_stars.star_count,Cap on how many stars are used to align two stacks; more only costs time.
 astrometricslib/pipelines/stacking/post_processing/preview_cosmic_clarity.py,COSMIC_CLARITY_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/preview_graxpert.py,GRAXPERT_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
+astrometricslib/pipelines/stacking/post_processing/preview_graxpert.py,GRAXPERT_UNIT_LIMIT,"GraXpert's own rescale threshold (it leaves an image alone when its brightest pixel is 1.0 or less); not a choice. Measured 2026-11-28."
 astrometricslib/pipelines/stacking/post_processing/preview_siril.py,PREVIEW_TIMEOUT_SECONDS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/post_processing/quarter_turn.py,_TURNS_DEGREES,The four quarter turns of an image; geometry
 astrometricslib/pipelines/stacking/post_processing/registration_shifts.py,IDENTITY_TOLERANCE_PX,"Sampling, numerics, plumbing or math constant."

@@ -3265,26 +3265,29 @@ STACK_STAR_SHAPE_METRIC_BY_FRAME_METRIC: dict[str, str] = {
     },
 }
 
-_BACKGROUND_COMPUTED_BY = "pipelines.stacking.post_processing.background_gradient.measure_background_model"
+_BACKGROUND_COMPUTED_BY = "pipelines.stacking.post_processing.background_gradient.measure_sky_background"
 _BACKGROUND_SAMPLE = (
-    "GraXpert's background model of the stack's picture (the stack as cropped for the picture), cut into "
-    "a 64 by 64 grid and reduced to the median of each bin. A bin with no finite pixel is left out. At "
-    "least half the bins must be finite. A color stack's planes are averaged first. Not measured when "
-    "GraXpert is not configured, when the stack is a bright object (its picture skips GraXpert), when "
-    "GraXpert fails or writes no model, or when the stack is spectral. The reason is stored."
+    "The stack's own sky bins: the stack as cropped for the picture, cut into a 64 by 64 grid and reduced "
+    "to the median of each bin, keeping only the bins that are robustly sky (the preview's sky-bin "
+    "selection drops the bins a bright object or a nebula lifts). At least half of the 64 by 64 bins must "
+    "be sky. A color stack's planes are averaged first. Not measured when the stack is a bright object "
+    "(its picture skips the background step), when too few bins are sky, when the stack cannot be read, "
+    "when no preview is made, or when the stack is spectral. The reason is stored."
 )
 _BACKGROUND_PURPOSE_REASON = (
-    "It records the sky gradient of the stack from GraXpert's model, so one night can be compared with "
-    "another and a tilt (sky) can be told from a round term (flat field). No decision uses it: any limit "
-    "must come from the equipment envelope, which is not measured yet. The design estimate is STK-D74."
+    "It records the sky gradient of the stack from its own sky bins, so one night can be compared with "
+    "another and a tilt (sky) can be told from a round term (flat field). The tilt is the number the "
+    "preview's plane-or-GraXpert choice compares with its limit, but the stored rows are never read back "
+    "by a decision. The design estimate is STK-D74."
 )
 _BACKGROUND_UNCERTAINTY = (
-    "No uncertainty is reported. The model is a smooth fit, not a sample with independent errors."
+    "No uncertainty is reported. The values come from a smooth fit to bin medians, not from a sample "
+    "with independent errors."
 )
 
 
 def _background_metric(name: str, unit: str, meaning: str, estimator: str) -> MetricSpec:
-    """Declare one value measured from the stack's GraXpert background model.
+    """Declare one value measured from the stack's own sky bins.
 
     Parameters
     ----------
@@ -3318,29 +3321,30 @@ _BACKGROUND_METRICS: tuple[MetricSpec, ...] = (
     _background_metric(
         STACKING_BACKGROUND_MODEL_LEVEL_STACK_UNIT,
         "stack_unit",
-        "The sky level of the stack, as GraXpert's background model gives it.",
-        "The median of the 64 by 64 binned model. The other background values are fractions of it.",
+        "The sky level of the stack, from its own sky bins.",
+        "The median of the 64 by 64 sky bins, in the stack's units. The other background values are "
+        "fractions of it.",
     ),
     _background_metric(
         STACKING_BACKGROUND_SPREAD_FRACTION,
         "fraction",
         "How much the sky background varies across the stack: the 5th to 95th percentile range, as a "
         "fraction of the level.",
-        "(95th percentile - 5th percentile) / median of the binned model. The two percentiles leave out "
+        "(95th percentile - 5th percentile) / median of the sky bins. The two percentiles leave out "
         "the few bins at the extremes. 0.01 means 1 percent.",
     ),
     _background_metric(
         STACKING_BACKGROUND_RANGE_FRACTION,
         "fraction",
         "The full range of the sky background across the stack, as a fraction of the level.",
-        "(largest - smallest) / median of the binned model. It is always at least the spread.",
+        "(largest - smallest) / median of the sky bins. It is always at least the spread.",
     ),
     _background_metric(
         STACKING_BACKGROUND_TILT_FRACTION,
         "fraction",
         "How much a flat, tilted sheet fitted to the sky background changes across the frame, as a "
         "fraction of the level.",
-        "A plane a + b*x + c*y is fitted to the binned model by least squares, where x and y run from -1 "
+        "A plane a + b*x + c*y is fitted to the sky bins by least squares, where x and y run from -1 "
         "to +1 across the columns and rows. The value is 2*sqrt(b^2 + c^2) / median: the change across the "
         "full width and the full height, combined as the length of a vector. A tilt across the frame "
         "usually comes from the sky (the Moon, twilight, light pollution, airglow).",
@@ -3366,7 +3370,7 @@ _BACKGROUND_METRICS: tuple[MetricSpec, ...] = (
         "fraction",
         "How much brighter the corners are than the center after the tilt is removed, as a fraction of "
         "the level.",
-        "A plane plus a round term d*r^2 + e*r^4 is fitted to the binned model, with r^2 = x^2 + y^2 about "
+        "A plane plus a round term d*r^2 + e*r^4 is fitted to the sky bins, with r^2 = x^2 + y^2 about "
         "the frame center. The value is (2*d + 4*e) / median: the round term at the corner (r^2 = 2) "
         "minus its value at the center. Positive means the corners are brighter. A round term looks like "
         "a flat-field error (vignetting under- or over-corrected), not a sky gradient.",
@@ -3375,14 +3379,14 @@ _BACKGROUND_METRICS: tuple[MetricSpec, ...] = (
         STACKING_BACKGROUND_PLANE_FIT_RMS_FRACTION,
         "fraction",
         "How much of the sky background the plane fit leaves unexplained, as a fraction of the level.",
-        "The root-mean-square residual of the plane fit over the binned model, divided by the median.",
+        "The root-mean-square residual of the plane fit over the sky bins, divided by the median.",
     ),
     _background_metric(
         STACKING_BACKGROUND_RADIAL_FIT_RMS_FRACTION,
         "fraction",
         "How much of the sky background the plane plus round-term fit leaves unexplained, as a "
         "fraction of the level.",
-        "The root-mean-square residual of the plane plus round-term fit over the binned model, divided by "
+        "The root-mean-square residual of the plane plus round-term fit over the sky bins, divided by "
         "the median. Compared with the plane fit's residual it shows whether the round term helped.",
     ),
 )

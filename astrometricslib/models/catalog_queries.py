@@ -13,6 +13,8 @@ return:
   target's image (`Visualization.get_star_overlay`).
 - `ReindexReport` from `TargetFrames.scan`, which does change data: how many
   frames each target gained or lost.
+- `TargetRecordVersions` from `TargetCatalog.get_record_versions`: an opaque
+  text for each target's stored record, which changes when the record does.
 """
 
 from typing import Any
@@ -24,6 +26,7 @@ __all__ = [
     "ReindexReport",
     "TargetCameraCounts",
     "TargetNightCounts",
+    "TargetRecordVersions",
     "TargetReindexChange",
     "TargetStarCount",
 ]
@@ -125,3 +128,19 @@ class ReindexReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     targets: list[TargetReindexChange] = Field(default_factory=list)
+
+
+class TargetRecordVersions(BaseModel):
+    """The answer of `TargetCatalog.get_record_versions`.
+
+    Parameters
+    ----------
+    versions : `dict` [`str`, `str`]
+        Each stored target's id and an opaque text that changes whenever
+        the target's stored record (its frames and stacks) changes. Compare
+        a text with an earlier one; read nothing else into it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    versions: dict[str, str] = Field(default_factory=dict)

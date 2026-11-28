@@ -48,7 +48,7 @@ from typing import Any
 
 from astrometricslib import CaptureSetting, Target, Telescope
 from astrometricslib.arguments import observing_night_id
-from astrometricslib.drivers import VersionedCache, get_camera_data_versions
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -59,6 +59,7 @@ from astrometricslib.parameters import (
 )
 from astrometricslib.reports import QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
+from wayfindinglib.analytics.data_versions import library_data_version
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,
     SKY_RATE_METRIC,
@@ -94,8 +95,8 @@ row WAY-D106."""
 _SKY_MODEL_CACHE = VersionedCache(maximum_entries=SKY_MODEL_CACHE_MAXIMUM_ENTRIES)
 """The fitted sky models, by library, equipment key and site. Each is kept
 until the finished-night measurements of its camera change
-(`get_camera_data_versions` with ``finished_before_night``). A frame of the
-night in progress does not change them (register row WAY-D107)."""
+(``quality.records.get_camera_data_version`` with ``before_night``). A frame
+of the night in progress does not change them (register row WAY-D107)."""
 
 CAMERA_OBSERVATIONS_CACHE_MAXIMUM_ENTRIES = 8
 """How many cameras' frame observations the cache keeps. A library has a few
@@ -718,7 +719,7 @@ class LibraryInputs:
             self._observations[camera] = list(observations)
         return self._observations[camera]
 
-    def camera_data_version(self, camera: str) -> tuple[str | int, ...] | None:
+    def camera_data_version(self, camera: str) -> str | None:
         """Work out the version of the data an equipment baseline reads.
 
         Parameters
@@ -728,20 +729,26 @@ class LibraryInputs:
 
         Returns
         -------
-        version : `tuple` or `None`
-            Changes when a measurement of a finished night or a calibration
-            record of this camera is written, and not when a frame of the
-            night in progress or another camera's record is (see
-            `get_camera_data_versions`). `None` when it cannot be read. It is
-            read once for each camera and night in the life of this object.
+        version : `str` or `None`
+            The science library's opaque version of the camera's data
+            (``quality.records.get_camera_data_version`` with
+            ``before_night``). It changes when a measurement of a finished
+            night or a calibration record of this camera is written, and not
+            when a frame of the night in progress or another camera's record
+            is. `None` when it cannot be read. It is read once for each
+            camera and night in the life of this object.
         """
         night = self.unfinished_night_id
         key = (camera, night)
         if key not in self._camera_versions:
             # One object serves one report, so the version is read once for it,
             # and the sky model and the camera's frames both use that reading.
-            versions = get_camera_data_versions(self.config, [camera], finished_before_night=night)
-            self._camera_versions[key] = None if versions is None else versions[camera]
+            self._camera_versions[key] = library_data_version(
+                lambda: self.astrometrics.quality.records.get_camera_data_version(
+                    camera=camera, before_night=night
+                ),
+                f"camera {camera}",
+            )
         return self._camera_versions[key]
 
     def _read_camera_observations(

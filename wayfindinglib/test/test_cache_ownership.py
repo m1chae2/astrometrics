@@ -6,10 +6,17 @@ since (issue #182). `wayfindinglib` keeps only what it works out from them,
 with the science library's opaque data version
 (``quality.records.get_data_version``) as the cache version. So no
 `wayfindinglib` module may use the storage details a cache would need to
-bring stored rows up to date itself: the removed frame-metric data versions
-and the named parts of a stored-rows version (the row count, the newest row
-number, the sum of the row numbers and the newest time). These tests read
-the source of every `wayfindinglib` module that is not a test.
+bring stored rows up to date itself, and every narrower version of the
+science library's data (one target, a camera, the stacks, a group of
+frames, the target records) is an opaque text from a public object, such as
+``targets.get_data_version``. So no `wayfindinglib` module may import a
+storage-version helper of `astrometricslib.drivers`, or read the named parts
+of a stored-rows version (the row count, the newest row number, the sum of
+the row numbers and the newest time). The only version helpers it may
+import are the write counters: `bump_data_version` and `read_data_versions`
+for its own database, and `get_library_data_version`, the library-wide
+counters of each kind of data (no rows). These tests read the source of
+every `wayfindinglib` module that is not a test.
 """
 
 import ast
@@ -19,8 +26,21 @@ from pathlib import Path
 import astrometricslib.drivers
 import wayfindinglib
 
-FORBIDDEN_NAMES = frozenset({"get_frame_metric_data_versions", "FrameMetricDataVersion", "TargetDataVersion"})
-"""Storage helpers of `astrometricslib` that hand row details to a caller."""
+FORBIDDEN_NAMES = frozenset({
+    "FrameMetricDataVersion",
+    "TargetDataVersion",
+    "get_camera_data_versions",
+    "get_frame_metric_data_versions",
+    "get_frame_metric_signs",
+    "get_stack_quality_data_version",
+    "get_target_camera_names",
+    "get_target_data_version",
+    "get_target_document_signs",
+})
+"""Storage-version helpers that give out storage details."""
+
+ALLOWED_COUNTERS = frozenset({"bump_data_version", "read_data_versions", "get_library_data_version"})
+"""The write-counter helpers `wayfindinglib` may still import (see above)."""
 
 FORBIDDEN_ATTRIBUTES = frozenset({
     "measurement_count",
@@ -48,21 +68,34 @@ def _library_modules() -> Iterator[tuple[Path, ast.Module]]:
         yield path, ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def test_the_frame_metric_data_versions_are_not_public() -> None:
-    """The helper that handed row numbers across the boundary is gone."""
-    assert not hasattr(astrometricslib.drivers, "get_frame_metric_data_versions")
-    assert "get_frame_metric_data_versions" not in astrometricslib.drivers.__all__
+def _is_version_helper(name: str) -> bool:
+    """Say whether a name looks like a storage-version helper.
+
+    Returns
+    -------
+    helper : `bool`
+        True for a name about data versions or storage signs.
+    """
+    return "data_version" in name or name.endswith("_signs") or name.endswith("DataVersion")
 
 
-def test_wayfindinglib_imports_no_storage_row_helper() -> None:
-    """No module imports a helper that gives stored row numbers."""
+def test_the_storage_version_helpers_are_not_public() -> None:
+    """The helpers that handed storage details across the boundary are gone."""
+    public = set(astrometricslib.drivers.__all__)
+    assert public & FORBIDDEN_NAMES == set()
+    assert {name for name in public if _is_version_helper(name)} <= ALLOWED_COUNTERS
+
+
+def test_wayfindinglib_imports_no_storage_version_helper() -> None:
+    """No module imports a storage-version helper, apart from the counters."""
     found = [
         f"{path}: {alias.name}"
         for path, tree in _library_modules()
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("astrometricslib")
         for alias in node.names
         if alias.name in FORBIDDEN_NAMES
+        or (_is_version_helper(alias.name) and alias.name not in ALLOWED_COUNTERS)
     ]
     assert found == []
 

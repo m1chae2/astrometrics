@@ -43,10 +43,11 @@ from typing import Any
 import numpy as np
 
 from astrometricslib import CaptureSetting, Target
-from astrometricslib.drivers import VersionedCache, get_stack_quality_data_version
+from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, resolve_parameter
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, QualityMeasurement, SubjectLevel
+from wayfindinglib.analytics.data_versions import library_data_version
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.analytics.result_quality.forecast import (
     NoiseHistory,
@@ -89,7 +90,8 @@ register row WAY-D107."""
 
 _NOISE_HISTORY_CACHE = VersionedCache(maximum_entries=NOISE_HISTORY_CACHE_MAXIMUM_ENTRIES)
 """The pooled noise history of each library, kept until its stack-level data
-change (`get_stack_quality_data_version`). A new frame does not change it."""
+change (``quality.stacks.get_data_version``). A new frame does not change
+it."""
 
 
 @dataclass
@@ -250,7 +252,7 @@ def read_noise_history(astrometrics: Any, config: Any | None = None) -> NoiseHis
 
     The result reads stack-level rows only, so a new frame of any target does
     not change it. With a `config` it is kept until the stack-level data
-    change (`get_stack_quality_data_version`), and a later call gives the
+    change (``quality.stacks.get_data_version``), and a later call gives the
     kept result. Without a `config` it is read every time.
 
     Parameters
@@ -292,7 +294,11 @@ def read_noise_history(astrometrics: Any, config: Any | None = None) -> NoiseHis
     except AttributeError, OSError, TypeError, ValueError:
         return build()
     return _NOISE_HISTORY_CACHE.get_or_build(
-        ("noise_history", library), lambda: get_stack_quality_data_version(config), build
+        ("noise_history", library),
+        lambda: library_data_version(
+            lambda: astrometrics.quality.stacks.get_data_version(), "the stack data"
+        ),
+        build,
     )
 
 

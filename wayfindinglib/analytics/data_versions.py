@@ -55,6 +55,15 @@ stored sky background rows of their frames. The version
 of the night in progress holds tonight's frames, sessions and background
 rows. Both include the equipment and configuration signs. A change of the
 equipment or the configuration rebuilds both parts.
+
+Every version of science-library data that is narrower than the library
+counters (one target, the cameras of a target, a group of frames, the stack
+data) is an opaque text that the science library's public objects give
+(``targets.get_data_version``, ``quality.records.get_camera_data_version``,
+``quality.records.get_data_version`` and ``quality.stacks.get_data_version``).
+They hold no counts or row numbers, so this library depends on nothing about
+how the science library stores its data. `library_data_version` reads one of
+them and gives `None` when the library cannot be read.
 """
 
 from __future__ import annotations
@@ -65,21 +74,17 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from astrometricslib import Target
 from astrometricslib.arguments import observing_night_id
-from astrometricslib.drivers import (
-    get_camera_data_versions,
-    get_frame_metric_signs,
-    get_library_data_version,
-    get_target_camera_names,
-    get_target_data_version,
-)
+from astrometricslib.drivers import get_library_data_version
+from astrometricslib.exceptions import AstrometricsError
 from wayfindinglib.analytics.capture_history import BACKGROUND_METRIC
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.drivers.control_record_store import BULK_GUIDING_SAMPLES_KIND, RECORD_VERSION_TABLES
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Callable, Hashable
 
     from wayfindinglib.analytics.night_index import NightIndex
 
@@ -121,6 +126,30 @@ CONFIG_SECTION_PREFIX = "Observatory"
 
 They hold the camera profiles (gain, read noise), the equipment items and
 the site, which a depth forecast reads."""
+
+
+def library_data_version(read: Callable[[], str], what: str) -> str | None:
+    """Read one opaque data version of the science library.
+
+    Parameters
+    ----------
+    read : `~collections.abc.Callable`
+        Calls the science library, for example
+        ``lambda: astrometrics.targets.get_data_version(target)``.
+    what : `str`
+        What the version is of, for the log message.
+
+    Returns
+    -------
+    version : `str` or `None`
+        The science library's opaque text, or `None` when the library could
+        not be read; the caller must not keep a result then.
+    """
+    try:
+        return read()
+    except AstrometricsError as error:
+        logger.warning("Could not read the data version of %s: %s", what, error)
+        return None
 
 
 def config_signs(config: Any) -> str:
@@ -246,7 +275,7 @@ def report_data_version(config: Any, butler: Any) -> Hashable | None:
 
 
 def depth_goal_data_version(
-    config: Any, butler: Any, target_id: str, now: float | None = None
+    config: Any, butler: Any, astrometrics: Any, target_id: str, now: float | None = None
 ) -> Hashable | None:
     """Work out the version of the inputs of one target's depth goal.
 
@@ -254,18 +283,18 @@ def depth_goal_data_version(
     chosen level, and the same context as a target report. Unlike
     `report_data_version` it does not watch the library counters, which a
     new frame of any target changes. It watches the one target's own data
-    (`get_target_data_version`). The forecast also reads the frames, stacks
-    and calibration records of the same camera from other targets (the
-    efficiency baseline, the sky model and the noise model), so it watches
-    the data of each camera the target used (`get_camera_data_versions`). A
-    new frame from another camera leaves the version as it is.
+    (``targets.get_data_version``). The forecast also reads the frames,
+    stacks and calibration records of the same camera from other targets
+    (the efficiency baseline, the sky model and the noise model), so it
+    watches the data of each camera the target used
+    (``quality.records.get_camera_data_version`` with the target). A new
+    frame from another camera leaves the version as it is.
 
     The camera part counts only the measurements of finished nights (the
     camera-wide estimate describes the camera's usual performance, and a
     night in progress is not representative; WAY-D107). A frame of the same
     camera taken tonight leaves it as it is, and it changes once when the
-    night rolls over. The target's own part (`get_target_data_version`)
-    still sees tonight's frames.
+    night rolls over. The target's own part still sees tonight's frames.
 
     Parameters
     ----------
@@ -273,6 +302,8 @@ def depth_goal_data_version(
         The application settings.
     butler : `DiskButler`
         The record store. It gives the wayfinding records.
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
     target_id : `str`
         The target's id.
     now : `float`, optional
@@ -287,16 +318,18 @@ def depth_goal_data_version(
         out, in which case the caller must not keep a result.
     """
     context = report_context_version(config, butler)
-    target = get_target_data_version(config, target_id)
-    cameras = get_target_camera_names(config, target_id)
-    if context is None or target is None or cameras is None:
+    target = Target(id=target_id)
+    own = library_data_version(lambda: astrometrics.targets.get_data_version(target), target_id)
+    if context is None or own is None:
         return None
-    camera_versions = get_camera_data_versions(
-        config, cameras, finished_before_night=observing_night_id(time.time() if now is None else now)
+    night = observing_night_id(time.time() if now is None else now)
+    cameras = library_data_version(
+        lambda: astrometrics.quality.records.get_camera_data_version(target=target, before_night=night),
+        f"the cameras of {target_id}",
     )
-    if camera_versions is None:
+    if cameras is None:
         return None
-    return (context, target, tuple(sorted(camera_versions.items())))
+    return (context, own, cameras)
 
 
 def nights_index_version(context: Any, tonight: str, signs: Hashable) -> Hashable | None:
@@ -380,7 +413,8 @@ def nights_data_versions(
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the configuration (``config``).
+        Supplies the science library (``astrometrics``), whose opaque
+        versions of the frames' background rows it reads.
     index : `NightIndex`
         The nights' frames and sessions.
     signs : `~collections.abc.Hashable`
@@ -395,10 +429,17 @@ def nights_data_versions(
         keep a result.
     """
     try:
-        background = get_frame_metric_signs(
-            context.config, BACKGROUND_METRIC, (index.finished_subject_ids, index.tonight_subject_ids)
-        )
-        if background is None:
+        records = context.astrometrics.quality.records
+        background = [
+            library_data_version(
+                lambda subjects=subjects: records.get_data_version(
+                    metric=BACKGROUND_METRIC, subject_ids=subjects
+                ),
+                "the frames' background rows",
+            )
+            for subjects in (index.finished_subject_ids, index.tonight_subject_ids)
+        ]
+        if None in background:
             return None
         return (
             (index.finished_digest, background[0], signs),

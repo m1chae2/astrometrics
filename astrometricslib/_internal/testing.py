@@ -5,12 +5,15 @@ a program always runs the built-in plate solver, stacking program and catalog
 clients over the database its settings name. A test that needs a fake one, or
 a stand-in database, builds the root with `astrometrics_with_drivers`.
 `read_saved_target` reads one target's stored record straight from storage,
-to check what a save wrote. Only tests, and the library's own scripts, may
-import this module.
+to check what a save wrote. `data_version_calls` gives the public
+data-version calls of a library folder without building an `Astrometrics`,
+so a stand-in library in a test can answer them as the real one does. Only
+tests, and the library's own scripts, may import this module.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from astrometricslib import Astrometrics
@@ -27,7 +30,7 @@ if TYPE_CHECKING:
     )
     from astrometricslib.api import AbstractCatalogAccess
 
-__all__ = ["astrometrics_with_drivers", "read_saved_target"]
+__all__ = ["astrometrics_with_drivers", "data_version_calls", "read_saved_target"]
 
 
 def astrometrics_with_drivers(
@@ -105,3 +108,41 @@ def read_saved_target(astrometrics: Astrometrics, target_id: str) -> Target | No
     from astrometricslib.pipelines.shared.target_records import read_saved_target as read_saved
 
     return read_saved(astrometrics.targets, target_id)
+
+
+def data_version_calls(config: AppConfiguration) -> SimpleNamespace:
+    """Give the public data-version calls of a library folder.
+
+    Each call is the owner function behind the public method, over the
+    library that `config` names. Nothing is built or written, so a test of a
+    stand-in library can give the stand-in the real versions of the rows it
+    writes to that folder.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The settings that name the library folder.
+
+    Returns
+    -------
+    calls : `types.SimpleNamespace`
+        ``targets`` (``get_data_version``, ``get_record_versions``),
+        ``records`` (``get_data_version``, ``get_camera_data_version``) and
+        ``stacks`` (``get_data_version``), each as on `Astrometrics`.
+    """
+    from astrometricslib.pipelines.shared import data_version_texts
+    from astrometricslib.pipelines.shared.quality import stored_measurements
+
+    return SimpleNamespace(
+        targets=SimpleNamespace(
+            get_data_version=lambda target: data_version_texts.get_target_data_version(config, target),
+            get_record_versions=lambda: data_version_texts.get_target_record_versions(config),
+        ),
+        records=SimpleNamespace(
+            get_data_version=lambda **options: stored_measurements.get_data_version(config, **options),
+            get_camera_data_version=lambda **options: data_version_texts.get_camera_data_version(
+                config, **options
+            ),
+        ),
+        stacks=SimpleNamespace(get_data_version=lambda: data_version_texts.get_stack_data_version(config)),
+    )

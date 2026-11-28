@@ -310,6 +310,13 @@
       "interim_block": "",
       "note": "Built 2026-10-25. Reads which flat, bias and dark masters, optic, camera, Siril version and stacking algorithm version each library stacking run used, by run id or target, so two runs confounded by a calibration change can be told apart. Writes nothing and creates no table."
     },
+    "quality_records_get_camera_data_version": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#182). Gives an opaque text that changes when a camera's stored measurements or calibration records change, so a cache knows when to work out again. Of no use to an AI client."
+    },
     "quality_records_get_capture_settings": {
       "tool_class": "observe",
       "category": "image-processing",
@@ -358,6 +365,13 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Reads a file from any path and returns every aperture, which can overflow the reply. Scripts and wayfindinglib use it."
+    },
+    "quality_stacks_get_data_version": {
+      "tool_class": "unclassified",
+      "category": "image-processing",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#182). Gives an opaque text that changes when the library's stack-level measurements, calibration records or capture settings change. Of no use to an AI client."
     },
     "quality_stacks_measure": {
       "tool_class": "compute",
@@ -561,6 +575,20 @@
       "disposition": "drop",
       "interim_block": "",
       "note": "Replaced by target_query."
+    },
+    "target_get_data_version": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#182). Gives an opaque text that changes when one target's record, measurements or calibration records change. Of no use to an AI client."
+    },
+    "target_get_record_versions": {
+      "tool_class": "observe",
+      "category": "targets",
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Built 2026-11-27 (#182). Gives an opaque text for each stored target record, so a cache reads again only the targets that changed. Of no use to an AI client."
     },
     "target_measure_field_centers": {
       "tool_class": "observe",

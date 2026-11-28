@@ -29,6 +29,7 @@ from wayfindinglib.analytics.frame_counting import TargetFrames, judgments_by_pa
 from wayfindinglib.analytics.package_suggestions import DEFAULT_NOISE_GOAL
 from wayfindinglib.analytics.session_progress import current_night
 from wayfindinglib.analytics.test.frame_counting_helpers import FakeLibrary, judgment_row, make_frame
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.test.test_planning import _configuration
 from wayfindinglib.drivers.butler import DiskButler
@@ -319,6 +320,7 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
         3e-4, above the goal.
     """
     library = FakeLibrary({"M 81": [], "M 13": []}, [noise_row(3e-4)], {"M 81": "Sy2", "M 13": "GlC"})
+    library = attach_library_versions(library, isolated_butler.config)
     planning = ObservationPlanning(isolated_butler.config, isolated_butler, astrometrics=library)
     made = Fixture(planning, library)
 

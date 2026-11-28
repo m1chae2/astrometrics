@@ -31,6 +31,7 @@ from wayfindinglib.analytics.result_quality.science_goal import (
     science_goal_for_target,
 )
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.analytics.test.night_quality_helpers import (
     FIRST_NIGHT,
     REVIEWED,
@@ -63,6 +64,18 @@ def config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
     configuration = AppConfiguration()
     configuration.update_config({"Image Library": {"path": str(library)}})
     return configuration
+
+
+def _versions_only(config: AppConfiguration) -> Any:
+    """Give a stand-in library that answers only the data versions.
+
+    Returns
+    -------
+    library : `types.SimpleNamespace`
+        Its data versions are those of the library folder `config` names.
+    """
+    empty = SimpleNamespace(targets=SimpleNamespace(), quality=SimpleNamespace(records=SimpleNamespace()))
+    return attach_library_versions(empty, config)
 
 
 def _butler(stored: SiteProfile | None = None) -> Any:
@@ -254,7 +267,7 @@ def test_the_site_is_read_never_stored_and_its_source_is_noted(config: AppConfig
 def test_the_reviewed_night_is_left_out_of_its_own_baseline(config: AppConfiguration) -> None:
     """Three nights make a baseline; leaving one out leaves two, so none."""
     target = make_target(STAR, 3)
-    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    library = attach_library_versions(FakeLibrary([target], make_rows(target, REVIEWED)), config)
     inputs = LibraryInputs(library, _butler(SITE), config)
     inputs.targets()
 
@@ -389,19 +402,19 @@ def test_the_sky_model_is_fitted_once_for_every_report_until_its_camera_changes(
 
     monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
 
-    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
-    second = LibraryInputs(None, _butler(SITE), config)
+    LibraryInputs(_versions_only(config), _butler(SITE), config).sky_model_for(SETTING)
+    second = LibraryInputs(_versions_only(config), _butler(SITE), config)
     assert second.sky_model_for(SETTING) == (None, "made up")
     assert len(fits) == 1
 
     # A frame of another camera leaves the fit as it is.
     _write_camera_row(config, "OtherCam", "run-1")
-    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    LibraryInputs(_versions_only(config), _butler(SITE), config).sky_model_for(SETTING)
     assert len(fits) == 1
 
     # A frame of another target taken with the same camera fits it again.
     _write_camera_row(config, SETTING.camera, "run-2", target_id="Other", observing_night_id="2020-01-01")
-    LibraryInputs(None, _butler(SITE), config).sky_model_for(SETTING)
+    LibraryInputs(_versions_only(config), _butler(SITE), config).sky_model_for(SETTING)
     assert len(fits) == 2
 
 
@@ -427,7 +440,7 @@ def test_a_sky_model_without_chosen_nights_is_fitted_and_kept_apart(
 
     monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
 
-    inputs = LibraryInputs(None, _butler(SITE), config)
+    inputs = LibraryInputs(_versions_only(config), _butler(SITE), config)
     inputs.sky_model_for(SETTING)
     inputs.sky_model_for(SETTING, ["2026-09-24"])
     inputs.sky_model_for(SETTING, ["2026-09-24"])
@@ -455,7 +468,7 @@ def test_the_camera_observations_are_read_once_until_their_camera_changes(
 
     monkeypatch.setattr(LibraryInputs, "_read_camera_observations", counted)
     target = make_target(STAR, 2)
-    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    library = attach_library_versions(FakeLibrary([target], make_rows(target, REVIEWED)), config)
 
     first = LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
     second = LibraryInputs(library, _butler(SITE), config).camera_observations(SETTING.camera)
@@ -481,7 +494,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
     from astrometricslib.exceptions import AstrometricsError
 
     target = make_target(STAR, 1)
-    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    library = attach_library_versions(FakeLibrary([target], make_rows(target, REVIEWED)), config)
     good_query = library.quality.records.query
     state = {"fail": True}
 
@@ -524,7 +537,7 @@ def _local_evening(night_id: str) -> float:
 def test_the_camera_inputs_read_only_finished_nights(config: AppConfiguration) -> None:
     """Frames of the night in progress are left out of the observations."""
     target = make_target(STAR, 4)
-    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    library = attach_library_versions(FakeLibrary([target], make_rows(target, REVIEWED)), config)
     inputs = LibraryInputs(library, _butler(SITE), config, now=_local_evening(REVIEWED))
     assert inputs.unfinished_night_id == REVIEWED
     nights = {observation.night_id for observation in inputs.camera_observations(SETTING.camera)}
@@ -571,7 +584,7 @@ def test_a_frame_tonight_keeps_the_camera_inputs_and_the_rollover_reads_once(
     monkeypatch.setattr(LibraryInputs, "_read_camera_observations", counted_read)
     monkeypatch.setattr(LibraryInputs, "_fit_sky_model", counted_fit)
     target = make_target(STAR, 4)
-    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    library = attach_library_versions(FakeLibrary([target], make_rows(target, REVIEWED)), config)
     tonight = _local_evening(REVIEWED)
 
     def visit(now: float) -> list[FrameObservation]:
@@ -617,7 +630,7 @@ def test_a_failed_target_lookup_leaves_a_note_and_is_not_kept(
 
     monkeypatch.setattr(library_inputs, "_CAMERA_OBSERVATIONS_CACHE", library_inputs.VersionedCache())
     target = make_target(STAR, 1)
-    library = FakeLibrary([target], make_rows(target, REVIEWED))
+    library = attach_library_versions(FakeLibrary([target], make_rows(target, REVIEWED)), config)
     good_get = library.targets.get
     state = {"fail": True}
 
@@ -668,6 +681,6 @@ def test_a_frame_row_with_no_night_is_not_a_finished_night(config: AppConfigurat
         row.model_copy(update={"subject": row.subject.model_copy(update={"observing_night_id": None})})
         for row in rows
     ]
-    library = FakeLibrary([target], no_night)
+    library = attach_library_versions(FakeLibrary([target], no_night), config)
     inputs = LibraryInputs(library, _butler(SITE), config, now=_local_evening("2026-12-31"))
     assert inputs.camera_rows(SETTING.camera) == []

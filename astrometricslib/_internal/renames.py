@@ -201,6 +201,24 @@ RENAMES: dict[str, str] = {
     # Step 4f: names the host modules no longer offer.
     "astrometricslib.drivers.LIBRARY_DATA_KINDS": "astrometricslib.drivers.get_library_data_version(config)",
     "astrometricslib.drivers.LibraryFolders": "astrometricslib.drivers.library_folders(config_file)",
+    # Issue #182: the storage versions became opaque texts on public objects.
+    "astrometricslib.drivers.get_target_data_version": "astrometrics.targets.get_data_version(target)",
+    "astrometricslib.drivers.get_target_document_signs": "astrometrics.targets.get_record_versions()",
+    "astrometricslib.drivers.get_camera_data_versions": (
+        "astrometrics.quality.records.get_camera_data_version(camera=..., before_night=...)"
+    ),
+    "astrometricslib.drivers.get_target_camera_names": (
+        "astrometrics.quality.records.get_camera_data_version(target=target) (the version of its cameras)"
+    ),
+    "astrometricslib.drivers.get_stack_quality_data_version": (
+        "astrometrics.quality.stacks.get_data_version()"
+    ),
+    "astrometricslib.drivers.get_frame_metric_signs": (
+        "astrometrics.quality.records.get_data_version(metric=..., subject_ids=...)"
+    ),
+    "astrometricslib.drivers.get_frame_metric_data_versions": (
+        "astrometrics.quality.records.get_data_version(metric=..., level='frame')"
+    ),
     "astrometricslib.drivers.read_launch_identity": (
         "astrometricslib.drivers.launch_identity_from_settings(settings)"
     ),

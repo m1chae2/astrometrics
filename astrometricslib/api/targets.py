@@ -18,7 +18,11 @@ from astrometricslib.api._target_frames import TargetFrames
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job
-from astrometricslib.models.catalog_queries import TargetCameraCounts, TargetNightCounts
+from astrometricslib.models.catalog_queries import (
+    TargetCameraCounts,
+    TargetNightCounts,
+    TargetRecordVersions,
+)
 from astrometricslib.models.field_centers import ImagedFieldCenters
 from astrometricslib.models.observatory_configuration import ObservatoryConfiguration
 from astrometricslib.models.page import Page
@@ -344,6 +348,53 @@ class TargetCatalog(MovedNames):
             limit=limit,
             offset=offset,
         )
+
+    def get_data_version(self, target: Target) -> str:
+        """Give a short text that changes when one target's own data change.
+
+        Owner:
+            astrometricslib.pipelines.shared.data_version_texts.get_target_data_version
+
+        The target's own data are its stored record (frames and stacks), its
+        stored quality measurements and its calibration records. A result
+        about the target can keep its answer while this text stays the same.
+        Data of other targets do not change it. The text is opaque: compare
+        it with an earlier one.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+
+        Returns
+        -------
+        version : `str`
+            The text.
+        """
+        from astrometricslib.pipelines.shared.data_version_texts import get_target_data_version
+
+        return get_target_data_version(self._config, target)
+
+    def get_record_versions(self) -> TargetRecordVersions:
+        """Give a short text for each target that changes when its record does.
+
+        Owner:
+            astrometricslib.pipelines.shared.data_version_texts.get_target_record_versions
+
+        It reads every stored target record once and decodes none, so a
+        result built from every target's frames can read again only the
+        targets whose record changed. A stored quality measurement does not
+        change a record's text. Each text is opaque: compare it with an
+        earlier one.
+
+        Returns
+        -------
+        versions : `TargetRecordVersions`
+            ``versions``: each stored target's id and its text.
+        """
+        from astrometricslib.pipelines.shared.data_version_texts import get_target_record_versions
+
+        return get_target_record_versions(self._config)
 
     def count_by_camera(self) -> TargetCameraCounts:
         """Count the light frames each camera took, overall and per target.

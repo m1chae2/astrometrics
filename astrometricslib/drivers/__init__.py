@@ -3,12 +3,11 @@
 Description: Storage and file helpers that the backend, the MCP servers and
 `wayfindinglib` share: the data store (`Butler`, `AbstractButler`,
 `DatasetSpec`, `connect_db`), the library's write counters
-(`get_library_data_version`, `get_target_data_version`,
-`get_camera_data_versions`, `get_frame_metric_signs`,
-`get_stack_quality_data_version`,
-`get_target_camera_names`, `get_target_document_signs`, and
-`bump_data_version` and `read_data_versions` for a database that keeps its
-own counters) and the cache that uses them
+(`get_library_data_version`, and `bump_data_version` and
+`read_data_versions` for a database that keeps its own counters; the
+versions of one target, camera, stack set or group of frames are opaque
+texts from the public objects, such as ``targets.get_data_version``) and
+the cache that uses them
 (`VersionedCache`), file locks and work folders, the checks for a mounted
 drive, the launch identity (`LaunchIdentity`, `launch_identity_from_settings`)
 and the offline switch it carries (`require_online`, `require_local_host`,
@@ -66,13 +65,7 @@ from astrometricslib.foundation.run_abandonment import stop_process_group
 from astrometricslib.foundation.storage.butler import AbstractButler, Butler, DatasetSpec
 from astrometricslib.foundation.storage.data_versions import (
     bump_data_version,
-    get_camera_data_versions,
-    get_frame_metric_signs,
     get_library_data_version,
-    get_stack_quality_data_version,
-    get_target_camera_names,
-    get_target_data_version,
-    get_target_document_signs,
     read_data_versions,
 )
 from astrometricslib.foundation.storage.local_database import connect_db
@@ -92,16 +85,10 @@ __all__ = [
     "connect_db",
     "existing_stack_path",
     "file_lock",
-    "get_camera_data_versions",
-    "get_frame_metric_signs",
     "get_gaia_archive",
     "get_library_data_version",
     "get_simbad_driver",
-    "get_stack_quality_data_version",
     "get_stacking_driver",
-    "get_target_camera_names",
-    "get_target_data_version",
-    "get_target_document_signs",
     "header_is_plate_solved",
     "is_loopback_host",
     "is_path_inside",

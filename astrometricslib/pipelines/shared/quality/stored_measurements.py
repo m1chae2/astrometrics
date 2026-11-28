@@ -17,7 +17,7 @@ database file or table is created by asking.
 """
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from datetime import UTC, datetime
 
 from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
@@ -196,6 +196,7 @@ def get_data_version(
     metric: str | None = None,
     level: str | None = None,
     target: Target | None = None,
+    subject_ids: Collection[str] | None = None,
 ) -> str:
     """Give a short text that changes whenever the matching rows change.
 
@@ -219,6 +220,11 @@ def get_data_version(
         Only subjects of this level (a `SubjectLevel` value).
     target : `Target`, optional
         Only this target.
+    subject_ids : `~collections.abc.Collection` [`str`], optional
+        Only the frame-level rows of the metric about these frames (their
+        subject ids, see `Target.frame_subject_id`). It needs ``metric``,
+        and cannot be combined with ``target`` or a level other than
+        ``"frame"``.
 
     Returns
     -------
@@ -229,8 +235,9 @@ def get_data_version(
     Raises
     ------
     InvalidArgumentError
-        If the metric or the level is unknown, or ``target`` is not a
-        `Target`.
+        If the metric or the level is unknown, ``target`` is not a
+        `Target`, or ``subject_ids`` is given without a metric, with a
+        target or with another level.
     """
     if metric is not None:
         check_choice("metric", metric, get_metric_registry().names())
@@ -238,6 +245,12 @@ def get_data_version(
         check_choice("level", level, tuple(member.value for member in SubjectLevel))
     if target is not None and not isinstance(target, Target):
         raise InvalidArgumentError("Pass the Target itself; turn an id into one with targets.get(id).")
+    if subject_ids is not None:
+        if metric is None or target is not None or level not in (None, SubjectLevel.FRAME.value):
+            raise InvalidArgumentError("subject_ids needs a metric, and takes no target and no other level.")
+        from astrometricslib.pipelines.shared.data_version_texts import get_frame_group_data_version
+
+        return get_frame_group_data_version(config, metric, subject_ids)
     return _store(config).data_version(
         metric=metric,
         level=None if level is None else SubjectLevel(level),

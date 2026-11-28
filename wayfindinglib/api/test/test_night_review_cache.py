@@ -20,6 +20,7 @@ from astrometricslib.drivers import VersionedCache
 from astrometricslib.foundation.storage.data_versions import bump_data_version
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.analytics import night_index
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.analytics.test.night_quality_helpers import (
     REVIEWED,
     STAR,
@@ -92,7 +93,9 @@ def review(control: ObservatoryControl) -> ObservationReview:
         version can be worked out.
     """
     target = make_target(STAR, 5)
-    control._context._astrometrics = FakeLibrary([target], make_rows(target, REVIEWED))
+    control._context._astrometrics = attach_library_versions(
+        FakeLibrary([target], make_rows(target, REVIEWED)), control._context.config
+    )
     return ObservationReview(control)
 
 

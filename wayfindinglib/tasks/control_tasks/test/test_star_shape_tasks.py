@@ -116,9 +116,7 @@ def counts(monkeypatch: pytest.MonkeyPatch) -> _Counts:
     monkeypatch.setattr(
         star_shape_tasks, "roundness_limit_data_version", lambda _context, _night: counts.review_version
     )
-    monkeypatch.setattr(
-        star_shape_tasks, "get_stack_quality_data_version", lambda _config: counts.stack_version
-    )
+    monkeypatch.setattr(star_shape_tasks, "library_data_version", lambda _read, _what: counts.stack_version)
     return counts
 
 

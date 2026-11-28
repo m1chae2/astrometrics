@@ -30,6 +30,7 @@ from astrometricslib.reports import (
     SetAsideFrame,
     SubjectLevel,
 )
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.target_report import (
     ForecastBasis,
@@ -455,7 +456,11 @@ def _report(library: _Library, butler: DiskButler) -> Any:
         The report.
     """
     return build_target_dataset_report(
-        library.target, astrometrics=library, butler=butler, config=butler.config, at=NOW
+        library.target,
+        astrometrics=attach_library_versions(library, butler.config),
+        butler=butler,
+        config=butler.config,
+        at=NOW,
     )
 
 
@@ -726,7 +731,7 @@ def test_a_lower_target_noise_ratio_asks_for_more_frames(
     (default,) = _of_rule(_report(library, isolated_butler), "more_frames")
     deeper = build_target_dataset_report(
         library.target,
-        astrometrics=library,
+        astrometrics=attach_library_versions(library, isolated_butler.config),
         butler=isolated_butler,
         config=isolated_butler.config,
         at=NOW,
@@ -1071,7 +1076,11 @@ def test_the_starting_point_follows_the_equipments_own_sky_and_read_noise(
     library.set_aside = []
     new_target = Target(id="NEW", ra="09:55:33", dec="+69:03:55")
     report = build_target_dataset_report(
-        new_target, astrometrics=library, butler=isolated_butler, config=isolated_butler.config, at=NOW
+        new_target,
+        astrometrics=attach_library_versions(library, isolated_butler.config),
+        butler=isolated_butler,
+        config=isolated_butler.config,
+        at=NOW,
     )
     point = report.starting_point
     assert point is not None

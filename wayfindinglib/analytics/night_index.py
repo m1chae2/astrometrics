@@ -35,7 +35,6 @@ from itertools import chain
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.arguments import observing_night_id
-from astrometricslib.drivers import get_target_document_signs
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.analytics.data_versions import nights_context_signs
@@ -197,8 +196,9 @@ class TargetFrameMemo:
 
     Reading every target's document takes about 0.4 s. A new frame changes
     one target's document only. So the frames found for each target are kept
-    with the size and hash of the document they were read from, and only a
-    target whose document changed is read again.
+    with the science library's opaque version of the record they were read
+    from (``targets.get_record_versions``), and only a target whose record
+    changed is read again.
 
     Attributes
     ----------
@@ -206,13 +206,36 @@ class TargetFrameMemo:
         The equipment and configuration signs the frames were found with.
         The frames are found again when they change.
     frames : `dict` [`str`, `tuple`]
-        For each target id: the document's signs, then the target's frames.
+        For each target id: the record's opaque version, then the target's
+        frames.
     """
 
     def __init__(self) -> None:
         """Start with nothing remembered."""
         self.context_signs: Hashable | None = None
         self.frames: dict[str, tuple[tuple[int, str], tuple[NightFrame, ...]]] = {}
+
+
+def target_record_versions(context: Any) -> dict[str, str] | None:
+    """Read the science library's opaque version of each target's record.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the science library (``astrometrics``).
+
+    Returns
+    -------
+    versions : `dict` [`str`, `str`] or `None`
+        Each stored target's id and the opaque version of its record
+        (``targets.get_record_versions``). `None` when the library could not
+        be read; every target is read again then.
+    """
+    try:
+        return dict(context.astrometrics.targets.get_record_versions().versions)
+    except AstrometricsError as error:
+        logger.warning("Could not read the versions of the target records: %s", error)
+        return None
 
 
 def read_night_frames(context: Any) -> list[NightFrame]:
@@ -245,7 +268,7 @@ def read_night_frames(context: Any) -> list[NightFrame]:
         return []
     memo = context.night_frame_memo
     context_signs = nights_context_signs(context.config)
-    document_signs = get_target_document_signs(context.config)
+    document_signs = target_record_versions(context)
     if memo.context_signs != context_signs or document_signs is None:
         memo.context_signs, memo.frames = context_signs, {}
     memo.frames = {

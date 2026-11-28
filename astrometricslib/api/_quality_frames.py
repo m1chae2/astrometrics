@@ -389,6 +389,28 @@ class QualityStacks(MovedNames):
         self._config = config
         self._drivers = drivers
 
+    def get_data_version(self) -> str:
+        """Give a short text that changes whenever the library's stack data do.
+
+        Owner:
+            astrometricslib.pipelines.shared.data_version_texts.get_stack_data_version
+
+        The stack data are the stored stack-level measurements of every
+        target, the calibration records of the stacks and the capture
+        settings. A result pooled over every library stack (a noise model,
+        the stack roundness baseline) can keep its answer while this text
+        stays the same. A new frame leaves it as it is; a stack run changes
+        it. The text is opaque: compare it with an earlier one.
+
+        Returns
+        -------
+        version : `str`
+            The text.
+        """
+        from astrometricslib.pipelines.shared.data_version_texts import get_stack_data_version
+
+        return get_stack_data_version(self._config)
+
     @background_job("diagnostics", grace_period_seconds=20.0)
     def measure(
         self,

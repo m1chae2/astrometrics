@@ -23,7 +23,7 @@ Frame state (statuses, the set-aside frames and putting them back) lives on
 function, which its docstring names.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from typing import Any
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
@@ -188,7 +188,12 @@ class QualityMeasurements(MovedNames):
         return row
 
     def get_data_version(
-        self, *, metric: str | None = None, level: str | None = None, target: Target | None = None
+        self,
+        *,
+        metric: str | None = None,
+        level: str | None = None,
+        target: Target | None = None,
+        subject_ids: Collection[str] | None = None,
     ) -> str:
         """Give a short text that changes whenever the matching rows change.
 
@@ -207,6 +212,9 @@ class QualityMeasurements(MovedNames):
             Only subjects of this level, as in `query`.
         target : `Target`, optional
             Only this target.
+        subject_ids : `~collections.abc.Collection` [`str`], optional
+            Only the frame rows of the metric about these frames (their
+            subject ids). It needs ``metric`` and takes no ``target``.
 
         Returns
         -------
@@ -217,12 +225,55 @@ class QualityMeasurements(MovedNames):
 
         Notes
         -----
-        Raises `InvalidArgumentError` if ``metric`` is not registered or
-        ``level`` is unknown.
+        Raises `InvalidArgumentError` if ``metric`` is not registered,
+        ``level`` is unknown, or ``subject_ids`` comes without a metric or
+        with a target.
         """
         from astrometricslib.pipelines.shared.quality.stored_measurements import get_data_version
 
-        return get_data_version(self._config, metric=metric, level=level, target=target)
+        return get_data_version(
+            self._config, metric=metric, level=level, target=target, subject_ids=subject_ids
+        )
+
+    def get_camera_data_version(
+        self, *, camera: str | None = None, target: Target | None = None, before_night: str | None = None
+    ) -> str:
+        """Give a short text that changes whenever a camera's data change.
+
+        Owner:
+            astrometricslib.pipelines.shared.data_version_texts.get_camera_data_version
+
+        A camera's data are the stored measurements made with it, at every
+        level, and the calibration records of its stacks. A result that
+        compares a target with the other frames of its camera (a sky model,
+        an efficiency baseline) can keep its answer while this text stays
+        the same. The text is opaque: compare it with an earlier one.
+
+        Parameters
+        ----------
+        camera : `str`, optional
+            The camera name, as the capture settings store it.
+        target : `Target`, optional
+            Cover every camera the target's measurements were made with.
+            Give exactly one of ``camera`` and ``target``.
+        before_night : `str`, optional
+            Count only the measurements of nights before this observing
+            night (``YYYY-MM-DD``). Pass the night of now to leave out the
+            night in progress. Every measurement counts when omitted.
+
+        Returns
+        -------
+        version : `str`
+            The text.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` unless exactly one of ``camera`` and
+        ``target`` is given.
+        """
+        from astrometricslib.pipelines.shared.data_version_texts import get_camera_data_version
+
+        return get_camera_data_version(self._config, camera=camera, target=target, before_night=before_night)
 
     def get_paths(self, row_ids: Sequence[int]) -> QualityRowResolution:
         """Find the picture behind each stored quality row.

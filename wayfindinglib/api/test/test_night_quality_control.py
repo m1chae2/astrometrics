@@ -9,6 +9,7 @@ import pytest
 
 from astrometricslib.exceptions import NotFoundError
 from wayfindinglib import ObservatoryControl
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.analytics.test.night_quality_helpers import (
     REVIEWED,
     STAR,
@@ -30,7 +31,9 @@ def _no_guiding(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_serves_the_night_review(control: ObservatoryControl) -> None:
     """`nights.get` returns the typed review of the night."""
     target = make_target(STAR, 5)
-    control._context._astrometrics = FakeLibrary([target], make_rows(target, REVIEWED))
+    control._context._astrometrics = attach_library_versions(
+        FakeLibrary([target], make_rows(target, REVIEWED)), control._context.config
+    )
 
     quality = ObservationReview(control).nights.get(REVIEWED)
 

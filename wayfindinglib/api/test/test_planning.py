@@ -19,6 +19,7 @@ from astrometricslib._internal.results import RestoreReport
 from astrometricslib.arguments import Page
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.models.observatory_configuration import Camera
+from wayfindinglib.analytics.test.library_version_helpers import attach_library_versions
 from wayfindinglib.api.planning import ObservationPlanning
 from wayfindinglib.api.review import ObservationReview
 from wayfindinglib.drivers.butler import DiskButler
@@ -222,7 +223,11 @@ def _planning(butler: DiskButler, *targets: Target) -> ObservationPlanning:
     planning : `ObservationPlanning`
         The API under test.
     """
-    return ObservationPlanning(butler.config, butler, astrometrics=_FakeAstrometrics(list(targets)))
+    return ObservationPlanning(
+        butler.config,
+        butler,
+        astrometrics=attach_library_versions(_FakeAstrometrics(list(targets)), butler.config),
+    )
 
 
 def _review(butler: DiskButler, *targets: Target) -> ObservationReview:
@@ -243,7 +248,10 @@ def _review(butler: DiskButler, *targets: Target) -> ObservationReview:
     from wayfindinglib.api.control import ObservatoryControl
 
     control = ObservatoryControl(
-        butler.config, butler=butler, astrometrics=_FakeAstrometrics(list(targets)), simulated=True
+        butler.config,
+        butler=butler,
+        astrometrics=attach_library_versions(_FakeAstrometrics(list(targets)), butler.config),
+        simulated=True,
     )
     return ObservationReview(control)
 

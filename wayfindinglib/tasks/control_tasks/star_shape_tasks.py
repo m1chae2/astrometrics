@@ -22,8 +22,8 @@ its slow parts are kept in the context's `star_shape_cache` (a
   so while no frame row and no frame changes, no frame row is read.
   Live guiding samples are counted only in coarse steps, as for a target
   report, so live guiding does not rebuild it on every call;
-* the stack baseline, until any stack-level quality row changes
-  (`get_stack_quality_data_version`).
+* the stack baseline, until any stack-level quality row changes (the
+  science library's opaque ``quality.stacks.get_data_version``).
 
 The set-aside listing is not kept here; it is read once per review.
 """
@@ -37,10 +37,9 @@ from typing import TYPE_CHECKING
 
 from astrometricslib import Target
 from astrometricslib.arguments import FrameChoice, Page, observing_night_id
-from astrometricslib.drivers import get_stack_quality_data_version
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, InvalidArgumentError
 from wayfindinglib.analytics.capture_history import roundness_baseline_signature
-from wayfindinglib.analytics.data_versions import report_context_version
+from wayfindinglib.analytics.data_versions import library_data_version, report_context_version
 from wayfindinglib.analytics.night_index import NightFrame, build_night_index
 from wayfindinglib.analytics.star_shape_review import (
     ROUNDNESS_LIMIT_NAME,
@@ -366,7 +365,7 @@ def kept_stack_roundness_low_limit(context: ControlContext, stack_subject: str) 
 
     The baseline reads the stored elongation of every library stack, so it
     is kept until any stack-level quality row changes
-    (`get_stack_quality_data_version`). A new frame does not change it.
+    (``quality.stacks.get_data_version``). A new frame does not change it.
 
     Parameters
     ----------
@@ -382,6 +381,8 @@ def kept_stack_roundness_low_limit(context: ControlContext, stack_subject: str) 
     """
     return context.star_shape_cache.get_or_build(
         ("stack_roundness_low_limit", stack_subject),
-        lambda: get_stack_quality_data_version(context.config),
+        lambda: library_data_version(
+            lambda: context.astrometrics.quality.stacks.get_data_version(), "the stack data"
+        ),
         lambda: read_stack_roundness_low_limit(context.astrometrics, stack_subject),
     )

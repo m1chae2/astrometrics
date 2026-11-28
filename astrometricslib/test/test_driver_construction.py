@@ -32,6 +32,7 @@ BUILT_IN_DRIVER_CLASSES = frozenset({
     "AstroqueryGaiaReddeningDriver",
     "AstroqueryGaiaXpDriver",
     "AstroquerySimbadDriver",
+    "SirilPlateSolveDriver",
     "SirilStackingDriver",
 })
 

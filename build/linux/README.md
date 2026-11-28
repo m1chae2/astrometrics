@@ -83,6 +83,17 @@ The user is present when the main window has focus and is not minimized, the scr
 
 The page reads the answer through `window.astrometrics.app.getPresence()` and `onPresenceChange()`. A notification marked `notify: true` goes to the desktop only when the user is away. It stays until dismissed, and the main process closes it when the user returns. In a plain browser the page falls back to focus and visibility. See `ui/common/utils/README.md`.
 
+## setup_siril_catalog.sh: Siril's Gaia star catalog
+
+`setup_siril_catalog.sh` sets up the Gaia astrometry catalog that Siril's plate solver reads from the disk, a file of about 1.5 GB. It downloads Siril's catalog from Zenodo (the record Siril's own installer uses), decompresses it as it arrives and checks the size and the SHA-256 checksum of the decompressed file against the pinned ones in `astrometricslib/_internal/drivers/siril/core/catalog_setup.py`. A file that does not match is refused and deleted. The catalog goes in `~/.local/share/astrometrics/siril`. A matching catalog that Siril's own installer made is kept. It changes only files in your home folder, so run it as your own user, not with `sudo`.
+
+```bash
+build/linux/setup_siril_catalog.sh --check   # report whether the catalog is installed and matches; change nothing
+build/linux/setup_siril_catalog.sh           # download and set it up if it is missing
+```
+
+The Python module behind it, `astrometricslib.scripts.set_up_siril_catalog`, is the same on Windows, where `setup_windows.ps1` runs it.
+
 ## setup_siril_gpu.sh: Siril's tools on the graphics card
 
 `setup_siril_gpu.sh` makes the Flatpak Siril's GPU tools use an NVIDIA graphics card (GPU): GraXpert, StarNet2, and the Python scripts Siril runs, such as GraXpert-AI and Cosmic Clarity. Each tool needs several pieces in place. The script puts each piece in place from pinned versions, so the setup is the same on every machine. It changes only files in your home folder, so run it as your own user, not with `sudo`.

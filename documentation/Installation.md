@@ -1,6 +1,6 @@
 # Installation
 
-*Version 2.3 · 2026-11-27 · Status: current*
+*Version 2.4 · 2026-11-28 · Status: current*
 
 This page shows how to install the Astrometrics desktop app from source on Linux, check that it works, update it, and remove it. Windows 11 has its own setup, described in the note below. It is for people who want to run the app. To use only the Python library, see the [library quick start](how_to/library_quick_start.md).
 
@@ -77,9 +77,18 @@ Node.js 24 is the version the project's own tests use. On Ubuntu under WSL (Wind
 
    The script makes a `.venv` folder in the repository, installs the app and its Python packages, and copies the configuration template to `~/.config/astrometrics/astrometrics.config.toml` if you have no configuration yet. Running it again is safe. It skips steps that are already done.
 
-5. Edit the configuration file. See the next section.
+5. Set up Siril's star catalog. Siril's plate solver, which works out where each image points, reads the Gaia star catalog (about 1.5 GB) from your disk. The script downloads it, checks it against a pinned size and checksum, and refuses a file that does not match. A matching catalog that Siril's own installer made is kept. Without the catalog, a frame with a header position is not solved; a frame with no position goes to the online service.
 
-6. Start the app.
+   ```bash
+   ./build/linux/setup_siril_catalog.sh --check   # report only; changes nothing
+   ./build/linux/setup_siril_catalog.sh           # download it if it is missing
+   ```
+
+   Run it as your own user, not with `sudo`. On Windows, `setup_windows.ps1` does this step.
+
+6. Edit the configuration file. See the next section.
+
+7. Start the app.
 
    ```bash
    ./astrometrics.sh start

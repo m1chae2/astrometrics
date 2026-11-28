@@ -1205,7 +1205,7 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
 def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerFixture) -> None:
     """Verify one session's plate-solve failure only excludes that session.
 
-    `AstrometryNetPlateSolveDriver.solve()` returns `None` on an ordinary
+    `SirilPlateSolveDriver.solve()` returns `None` on an ordinary
     solve failure (no matching field), but a genuinely unexpected
     exception (a config error, a malformed header, etc.) must also be
     caught rather than propagating and taking down every other,
@@ -1219,14 +1219,14 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerF
     target = Target(id="MatchTestTarget")
 
     mocker.patch(
-        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.siril.astrometry.solve_driver.SirilPlateSolveDriver.solve",
         return_value=None,
     )
     result_a = _solve_session_wcs(session_a, target)
     assert result_a is None  # ordinary solve failure -- no exception at all
 
     mocker.patch(
-        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.siril.astrometry.solve_driver.SirilPlateSolveDriver.solve",
         side_effect=RuntimeError("unexpected local solver failure"),
     )
     result_b = _solve_session_wcs(session_b, target)

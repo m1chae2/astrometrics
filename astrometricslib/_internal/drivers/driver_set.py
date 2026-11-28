@@ -71,18 +71,18 @@ class Drivers:
         Parameters
         ----------
         api_key : `str`, optional
-            The Astrometry.net online key. Only the built-in solver uses it.
+            The Astrometry.net online key. Only the built-in solvers use it.
 
         Returns
         -------
         solver : `PlateSolveDriver`
-            The chosen solver, or a new `AstrometryNetPlateSolveDriver`.
+            The chosen solver, or a new `SirilPlateSolveDriver`.
         """
         if self.plate_solve is not None:
             return self.plate_solve
-        from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+        from astrometricslib._internal.drivers.siril.astrometry.solve_driver import SirilPlateSolveDriver
 
-        return AstrometryNetPlateSolveDriver(api_key=api_key)
+        return SirilPlateSolveDriver(api_key=api_key)
 
     def stacking_or_default(self) -> StackingDriver:
         """Give the chosen stacking program, or build the built-in one.

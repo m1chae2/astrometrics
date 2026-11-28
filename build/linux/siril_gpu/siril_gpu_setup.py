@@ -23,7 +23,15 @@ place from the pins in ``siril_gpu_pins.py``:
    ``graxpert_path``) only where they are empty.
 
 ``--check`` reports the state of each piece and changes nothing.
-``--dry-run`` reports the state and prints what a real run would do. Without
+``--dry-run`` reports the state and prints what a real run would do.
+
+The CUDA and cuDNN wheels are under NVIDIA's license agreements, which are
+not open source. Before a real run downloads the first of them, the program
+shows each agreement's address and asks the user to accept it (y/N). Without
+a terminal to ask on, it downloads them only with
+``--accept-nvidia-license``. A refusal downloads nothing from NVIDIA, and the
+parts that need those files fail. ``--check`` and ``--dry-run`` only say that
+a run would ask. Without
 an NVIDIA graphics card, or without the Flatpak Siril, the program says so
 and exits without error: Siril and its tools still work on the processor.
 
@@ -76,6 +84,10 @@ installed packages as JSON. It reads only."""
 
 class SetupError(Exception):
     """A piece of the setup could not be put in place."""
+
+
+class LicenseNotAcceptedError(SetupError):
+    """The user did not accept a license that a download needs."""
 
 
 class ChecksumMismatchError(SetupError):
@@ -644,6 +656,92 @@ def pip_download_command(wheel: pins.PinnedWheel, folder: Path) -> list[str]:
     return command
 
 
+def license_notice(licenses: Sequence[pins.License]) -> str:
+    """Write the notice shown before a wheel under these licenses downloads.
+
+    Parameters
+    ----------
+    licenses : `Sequence` [`License`]
+        The licenses to accept.
+
+    Returns
+    -------
+    notice : `str`
+        The notice, one license per line with its address.
+    """
+    lines = [
+        "The NVIDIA CUDA and cuDNN libraries are NVIDIA's software, under NVIDIA's own license",
+        "agreements. They are not open source. Read them before you accept:",
+    ]
+    lines += [f"  - {license_.name}: {license_.url}" for license_ in licenses]
+    lines.append("Astrometrics does not include these libraries; this setup downloads them from PyPI.")
+    return "\n".join(lines)
+
+
+class LicenseGate:
+    """Ask once per run for the user's acceptance of NVIDIA's licenses.
+
+    Parameters
+    ----------
+    accepted : `bool`
+        `True` when ``--accept-nvidia-license`` was given.
+    interactive : `bool`
+        Whether there is a terminal to ask on.
+    ask : `Callable` [[`str`], `str`]
+        Reads the answer to a question; `input` by default.
+    licenses : `Sequence` [`License`]
+        The licenses to accept; `siril_gpu_pins.LICENSES_TO_ACCEPT` by default.
+    """
+
+    def __init__(
+        self,
+        accepted: bool,
+        interactive: bool,
+        ask: Callable[[str], str] = input,
+        licenses: Sequence[pins.License] = pins.LICENSES_TO_ACCEPT,
+    ) -> None:
+        """Remember the answer given on the command line and how to ask."""
+        self.accepted = accepted
+        self.interactive = interactive
+        self.ask = ask
+        self.licenses = tuple(licenses)
+        self.refused = False
+
+    def require(self) -> None:
+        """Make sure the user has accepted the licenses, asking if needed.
+
+        The question is asked at most once per run. A refusal is remembered,
+        so later downloads are refused without asking again.
+
+        Raises
+        ------
+        LicenseNotAcceptedError
+            The user said no, or there is no terminal to ask on and
+            ``--accept-nvidia-license`` was not given.
+        """
+        if self.accepted:
+            return
+        if not self.refused:
+            print("\n" + license_notice(self.licenses), flush=True)
+            if self.interactive:
+                try:
+                    answer = self.ask("Do you accept these NVIDIA license agreements? [y/N] ")
+                except EOFError:
+                    answer = ""
+                if answer.strip().lower() in {"y", "yes"}:
+                    self.accepted = True
+                    return
+            self.refused = True
+        if self.interactive:
+            raise LicenseNotAcceptedError(
+                "NVIDIA's license agreements were not accepted; nothing was downloaded from NVIDIA"
+            )
+        raise LicenseNotAcceptedError(
+            "NVIDIA's license agreements must be accepted before their libraries are downloaded. "
+            "Read them, then run again with --accept-nvidia-license"
+        )
+
+
 class WheelCache:
     """Download each pinned wheel once per run, into one work folder.
 
@@ -652,11 +750,15 @@ class WheelCache:
     folder : `Path`
         The work folder. It must be on disk, not in the RAM-backed ``/tmp``,
         because the CUDA wheels are several hundred megabytes each.
+    license_gate : `LicenseGate`, optional
+        Asked before a wheel whose license is not open source is
+        downloaded. Without one, such a wheel is refused.
     """
 
-    def __init__(self, folder: Path) -> None:
-        """Remember the work folder."""
+    def __init__(self, folder: Path, license_gate: LicenseGate | None = None) -> None:
+        """Remember the work folder and the license gate."""
         self.folder = folder
+        self.license_gate = license_gate
         self._wheels: dict[str, Path] = {}
 
     def get(self, wheel: pins.PinnedWheel) -> Path:
@@ -674,12 +776,18 @@ class WheelCache:
 
         Raises
         ------
+        LicenseNotAcceptedError
+            The wheel's license is not open source and was not accepted.
         SetupError
             pip failed or saved no matching file.
         """
         key = f"{wheel.project}=={wheel.version}"
         if key in self._wheels:
             return self._wheels[key]
+        if wheel.needs_license_acceptance:
+            if self.license_gate is None:
+                raise LicenseNotAcceptedError(f"{key} needs its license accepted, and nothing can ask")
+            self.license_gate.require()
         self.folder.mkdir(parents=True, exist_ok=True)
         print(f"  downloading {key} with pip ...", flush=True)
         result = run_command(pip_download_command(wheel, self.folder), timeout=INSTALL_TIMEOUT_SECONDS)
@@ -757,6 +865,14 @@ def check_folder(folder: pins.LibraryFolder, home: Path, force: bool) -> tuple[P
             report.add("missing", f"{link} -> {link_target}")
             plan.links.append((link, link_target))
     wheels = sorted({f"{wheel.project}=={wheel.version}" for wheel, _ in plan.install})
+    licenses = list(
+        dict.fromkeys(
+            wheel.license for wheel, _ in plan.install if wheel.license and wheel.needs_license_acceptance
+        )
+    )
+    if licenses:
+        names = "; ".join(f"{license_.name} ({license_.url})" for license_ in licenses)
+        report.actions.append(f"ask you to accept {names} (or use --accept-nvidia-license)")
     if wheels:
         report.actions.append(f"download {', '.join(wheels)} with pip and check each file's SHA-256")
         report.actions.append(f"put {len(plan.install)} file(s) in {target}")
@@ -1507,6 +1623,15 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Also replace library files and wrappers that differ from the pins (keeps old ones as .bak-*).",
     )
     parser.add_argument(
+        "--accept-nvidia-license",
+        action="store_true",
+        help=(
+            "Accept NVIDIA's CUDA and cuDNN license agreements without being asked "
+            f"({'; '.join(license_.url for license_ in pins.LICENSES_TO_ACCEPT)}). "
+            "Needed when no terminal can ask."
+        ),
+    )
+    parser.add_argument(
         "--graxpert",
         type=Path,
         help=f"The GraXpert program the wrapper starts (default: ~/{pins.GRAXPERT_WRAPPER.default_program}).",
@@ -1559,7 +1684,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         pins.STARNET_WRAPPER.name: arguments.starnet or home / pins.STARNET_WRAPPER.default_program,
     }
     work_folder = home / ".var/app" / pins.SIRIL_APP_ID / "cache/tmp/astrometrics-gpu-setup"
-    cache = WheelCache(work_folder)
+    gate = LicenseGate(accepted=arguments.accept_nvidia_license, interactive=sys.stdin.isatty())
+    cache = WheelCache(work_folder, gate)
     reports: list[PartReport] = []
     failed: list[str] = []
 

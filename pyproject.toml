@@ -11,7 +11,7 @@ name = "astrometrics"
 version = "0.2.0"
 description = "Integrated image processing, photometry, spectroscopy, and telescope control for amateur astronomy and citizen science."
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Michael Coelho", email = "macoelho25@gmail.com" }]
 keywords = [

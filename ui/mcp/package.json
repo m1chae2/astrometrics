@@ -1,7 +1,7 @@
 {
   "name": "astrometrics-ui-mcp",
   "version": "1.0.0",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "description": "Native Node.js Model Context Protocol server for Astrometrics UI diagnostics and testing.",
   "main": "dist/index.js",
   "type": "module",

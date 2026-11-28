@@ -10,6 +10,25 @@
 # behavior carry a `linux_only` marker; the root conftest.py lists both, with
 # their reasons. The frontend job runs the Windows-sensitive UI tests.
 #
+# How much of the Python suite runs depends on what started the workflow
+# (`github.event_name`):
+#   - pull_request: only the Windows-sensitive tests, which takes a few
+#     minutes:
+#       python -m pytest -n auto -q -p no:cacheprovider -o addopts="" \
+#         -m "windows_sensitive and not trio" -rfE
+#     The root conftest.py gives a test the `windows_sensitive` marker when
+#     its file mentions something that behaves differently on Windows (the
+#     per-system modules, sys.platform, path separators, links, processes,
+#     file replacement and locks, settings folders, line endings), plus a
+#     short list of extra files. A new test of these things is picked up
+#     without editing a list.
+#   - push to main or master, workflow_dispatch and the weekly schedule
+#     (Monday 04:17 UTC): the whole suite, which takes 20 to 30 minutes:
+#       python -m pytest -n auto -q -p no:cacheprovider -o addopts="" \
+#         -m "not trio" -rfE
+#     This catches a Windows break in a test the marker does not pick.
+# backend/tests/test_windows_ci_selection.py checks both on Linux.
+#
 # The paths below start the workflow; the `changes` job then runs each job
 # only when its own files changed, so an npm-only change does not run the
 # Python suite and a Python-only change does not run the UI tests.
@@ -39,6 +58,9 @@ on:
     branches: [ main, master ]
     paths: *paths
   workflow_dispatch:
+  # The whole Windows suite once a week, Monday 04:17 UTC.
+  schedule:
+    - cron: '17 4 * * 1'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -90,7 +112,10 @@ jobs:
   python:
     name: Run Windows Python Tests
     needs: changes
-    if: needs.changes.outputs.python == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      needs.changes.outputs.python == 'true'
+      || github.event_name == 'workflow_dispatch'
+      || github.event_name == 'schedule'
     runs-on: windows-latest
     steps:
       - name: Checkout Repository
@@ -109,8 +134,20 @@ jobs:
           python -m pip install --upgrade pip hatchling editables setuptools_scm Cython numpy
           python -m pip install --no-build-isolation -e ".[mcp,dev]"
 
-      # The whole suite, as on Linux, with one worker per processor core.
+      # A pull request runs only the Windows-sensitive tests (see the
+      # header), with one worker per processor core.
+      - name: Run the Windows-sensitive tests
+        if: github.event_name == 'pull_request'
+        timeout-minutes: 30
+        env:
+          PYTHONPATH: .
+          ASTROMETRICS_TESTING: "1"
+        run: python -m pytest -n auto -q -p no:cacheprovider -o addopts="" -m "windows_sensitive and not trio" -rfE
+
+      # Every other start (push to main, by hand, the weekly schedule) runs
+      # the whole suite, as on Linux, with one worker per processor core.
       - name: Run the test suites
+        if: github.event_name != 'pull_request'
         timeout-minutes: 60
         env:
           PYTHONPATH: .

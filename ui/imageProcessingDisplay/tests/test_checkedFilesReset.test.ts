@@ -11,13 +11,14 @@ vi.mock('../../common/services/imaging/imageService', () => ({ deleteFiles: vi.f
 vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
+import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 
 describe('useTargetFilesLogic ticked frames', () => {
     /** Ticked frames from M 31 must not carry over to M 57. */
     it('clears the ticked frames when the target changes', () => {
         const { result, rerender } = renderHook(
             ({ target }: { target: string }) => useTargetFilesLogic(target, 0, false),
-            { initialProps: { target: 'M 31' } },
+            { wrapper: createQueryClientTestWrapper().wrapper, initialProps: { target: 'M 31' } },
         );
         act(() => { result.current.toggleFile('/lib/M_31_Light_001.fits'); });
         expect(result.current.checkedFiles.size).toBe(1);
@@ -31,7 +32,7 @@ describe('useTargetFilesLogic ticked frames', () => {
     it('keeps the ticked frames while the target stays the same', () => {
         const { result, rerender } = renderHook(
             ({ target }: { target: string }) => useTargetFilesLogic(target, 0, false),
-            { initialProps: { target: 'M 31' } },
+            { wrapper: createQueryClientTestWrapper().wrapper, initialProps: { target: 'M 31' } },
         );
         act(() => { result.current.toggleFile('/lib/M_31_Light_001.fits'); });
 

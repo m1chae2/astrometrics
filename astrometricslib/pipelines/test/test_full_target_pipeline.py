@@ -60,6 +60,37 @@ class _StubConfig:
         return self._library_path
 
 
+def _solved_astrometry(target: Target) -> dict[str, Any]:
+    """Leave a solved astrometry result on the target, as a real run does.
+
+    Photometry reads this result and is skipped without it, so a stand-in
+    astrometry stage must record one.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target the stand-in stage ran on.
+
+    Returns
+    -------
+    result : `dict` [`str`, `Any`]
+        A stand-in astrometry result.
+    """
+    from datetime import UTC, datetime
+
+    from astrometricslib.models.quality.quality_summary import (
+        AstrometryPipelineQualityMetrics,
+        AstrometryQualitySummary,
+    )
+
+    target.quality.astrometry = AstrometryQualitySummary.model_construct(
+        created_at=datetime.now(UTC),
+        upstream_entity_id=None,
+        astrometry_metrics=AstrometryPipelineQualityMetrics.model_construct(plate_solve_succeeded=True),
+    )
+    return {"wcs": object()}
+
+
 def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -126,7 +157,7 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(
         """
         pipeline_type_calls.append(pipeline_type)
         if pipeline_type == "astrometry":
-            return {"wcs": object()}
+            return _solved_astrometry(target)
         if pipeline_type == "photometry":
             return {"starsFound": 0}
         raise AssertionError(f"Unexpected pipeline_type for this target: {pipeline_type}")
@@ -217,7 +248,7 @@ def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(
             If any other stage runs.
         """
         if pipeline_type == "astrometry":
-            return {"wcs": object()}
+            return _solved_astrometry(target)
         if pipeline_type == "photometry":
             raise FileNotFoundError("Image not found at /fake/stale/frame.fits")
         raise AssertionError(f"Unexpected pipeline_type for this target: {pipeline_type}")
@@ -290,7 +321,7 @@ def test_frames_the_stacking_stage_removed_are_not_handed_to_photometry(
         if pipeline_type == "photometry":
             frames_seen_by_photometry.append([frame.path for frame in frames])
             return {"starsFound": 0}
-        return {"wcs": object()}
+        return _solved_astrometry(target)
 
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
     tasks.run_full_pipeline(target, _StubCatalogAccess(), _StubConfig(tmp_path), camera_name="TestCam")

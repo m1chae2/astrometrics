@@ -42,13 +42,21 @@ from backend.container import container
 from backend.routers import figures, rpc_router, startup_routes, static_files, websockets
 from backend.services.infrastructure.heavy_lane import run_heavy
 from backend.services.infrastructure.host_check import HostCheckMiddleware
+from backend.services.infrastructure.rpc_timing import VERBOSE, VERBOSE_LEVEL_NAME
 from backend.services.infrastructure.session_auth import ALLOWED_ORIGINS, LAN_ORIGIN_REGEX
 from backend.services.infrastructure.socket_manager import SocketLoggingHandler
 
-# Configure Logging
+# Configure Logging. VERBOSE, the lowest level (below DEBUG), carries the
+# per-call RPC timing lines (see `backend.services.infrastructure.rpc_timing`);
+# the TPM harness starts the backend with ASTROMETRICS_LOG_LEVEL=VERBOSE.
+logging.addLevelName(VERBOSE, VERBOSE_LEVEL_NAME)
 app_configuration = get_configuration()
+_requested_level = os.environ.get("ASTROMETRICS_LOG_LEVEL", "INFO").upper()
 configure_logging(
-    "backend", level=getattr(logging, os.environ.get("ASTROMETRICS_LOG_LEVEL", "INFO").upper(), logging.INFO)
+    "backend",
+    level=VERBOSE
+    if _requested_level == VERBOSE_LEVEL_NAME
+    else getattr(logging, _requested_level, logging.INFO),
 )
 
 logger = logging.getLogger(__name__)
@@ -148,6 +156,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.warning("%s", not_mounted)
     app.state.telemetry_task = asyncio.create_task(startup.periodic_telemetry_loop())
     app.state.sky_warmup_task = asyncio.create_task(_warm_up_in_order())
+    # Reads a changed target's Image Processing reviews again during the
+    # night. It waits for the start-up warm-up before reading anything.
+    app.state.review_rewarm_task = asyncio.create_task(startup.keep_target_reviews_warm())
     try:
         yield
     finally:
@@ -155,23 +166,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # A warm-up step that has not started yet must not start while the
         # services are stopping. One that is running ends on its own.
         app.state.sky_warmup_task.cancel()
-        await asyncio.gather(app.state.sky_warmup_task, return_exceptions=True)
+        app.state.review_rewarm_task.cancel()
+        await asyncio.gather(app.state.sky_warmup_task, app.state.review_rewarm_task, return_exceptions=True)
         detach_log_handlers()
         container.shutdown_resources()
 
 
 async def _warm_up_in_order() -> None:
-    """Warm the start-up caches, then the depth goals, then the night reviews.
+    """Warm the caches, depth goals, target reviews, then night reviews.
 
     Each step waits for the one before, so none delays the splash screen or
-    competes with it for the disk. The depth goals (one target at a time, about
-    2 s) come before the slower night reviews (about 6.6 s), so they are ready
-    about 4 to 5 s after the app is ready. Each step runs in the heavy lane,
-    the same limited set of places the heavy RPC calls use, so the warm-up
-    never adds to the user's first heavy calls.
+    competes with it for the disk. The splash waits only for the first step
+    (`startup.warm_start_up_caches`), so the later steps never delay the app
+    being ready. The depth goals (one target at a time, about 2 s) come next.
+    Then the Image Processing reviews of the same targets, one target per
+    step, newest first. The slower night reviews (about 6.6 s) come last.
+    Each step runs in the heavy lane, the same limited set of places the
+    heavy RPC calls use, so the warm-up never adds to the user's first heavy
+    calls.
     """
     await run_heavy(startup.warm_start_up_caches)
-    await run_heavy(startup.warm_depth_goals)
+    targets = await run_heavy(startup.warm_depth_goals)
+    for target_id in targets or []:
+        await run_heavy(startup.warm_target_reviews, target_id)
     await run_heavy(startup.warm_night_reviews)
 
 

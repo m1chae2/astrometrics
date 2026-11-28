@@ -18,6 +18,13 @@ A night review (`review_data_version`) watches the counters of the guiding
 samples, the guiding runs, the Ekos sessions and the site, plus the library
 counters, the equipment and the configuration sections.
 
+The guiding baselines of the nights (`guiding_baseline_data_version`) read
+only wayfinding records, so they do not watch the library counters. They
+watch the counters of the Ekos session records, the guiding runs and the
+guide log syncs, and the row number of the newest guide sample. The stored
+Ekos session records and guiding runs themselves are kept until their two
+counters change (`recorded_sessions_data_version`).
+
 A target report (`report_data_version`) reads a narrower set: the Ekos
 session records, the site and the guiding runs. Guiding samples are written
 every few seconds during a night, and a report reads only the samples inside
@@ -56,7 +63,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import (
@@ -401,6 +408,103 @@ def nights_data_versions(
         # A version that cannot be worked out only means no result is kept.
         logger.warning("Could not work out the data versions of the list of nights.", exc_info=True)
         return None
+
+
+GUIDING_BASELINE_TABLES = ("ekos_session_contexts", "guiding_runs", BULK_GUIDING_SAMPLES_KIND)
+"""The ``wayfinding.db`` counters the nights' guiding baselines watch.
+
+The baselines read the Ekos session records (their time windows), the
+guiding runs (their lost frames) and the guide samples. Live guiding only
+adds samples; those are followed by the newest sample row instead
+(`guiding_baseline_data_version`). A guide log sync replaces samples, so it
+is followed by its own counter.
+"""
+
+
+class GuidingBaselineVersion(NamedTuple):
+    """The parts of the version of the nights' guiding baselines.
+
+    Attributes
+    ----------
+    records : `tuple` [`tuple` [`str`, `int`], ...]
+        The counter of each table in `GUIDING_BASELINE_TABLES`, sorted.
+    newest_sample_id : `int`
+        The row number of the newest guide sample
+        (`ControlRecordStore.newest_guiding_sample_id`).
+    configuration : `str`
+        The configuration fingerprint (`config_signs`).
+    """
+
+    records: tuple[tuple[str, int], ...]
+    newest_sample_id: int
+    configuration: str
+
+
+def guiding_baseline_data_version(context: Any) -> GuidingBaselineVersion | None:
+    """Work out the version of the inputs of the nights' guiding baselines.
+
+    The baselines (`collect_night_baselines`) read only wayfinding records:
+    the Ekos session records, the guiding runs and the guide samples. Unlike
+    `review_data_version`, this does not watch the science library, so a new
+    frame does not change it. It watches the counters of the session records,
+    the guiding runs and the guide log syncs exactly, and the newest guide
+    sample, so every new live sample changes it. A cache that keeps the
+    baselines can then work out again only the nights that changed
+    (`update_night_baseline_table`).
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the configuration (``config``) and the record store
+        (``records``).
+
+    Returns
+    -------
+    version : `GuidingBaselineVersion` or `None`
+        A value that is equal for two calls only when none of those inputs
+        changed between them. `None` when it cannot be worked out, in which
+        case the caller must not keep a result.
+    """
+    try:
+        wayfinding = context.records.data_versions(GUIDING_BASELINE_TABLES)
+        newest = context.records.newest_guiding_sample_id()
+        if wayfinding is None or newest is None:
+            return None
+        return GuidingBaselineVersion(tuple(sorted(wayfinding.items())), newest, config_signs(context.config))
+    except Exception:
+        # A version that cannot be worked out only means no result is kept.
+        logger.warning("Could not work out the data version of the guiding baselines.", exc_info=True)
+        return None
+
+
+RECORDED_SESSION_TABLES = ("ekos_session_contexts", "guiding_runs")
+"""The ``wayfinding.db`` tables `recorded_sessions_data_version` watches."""
+
+
+def recorded_sessions_data_version(context: Any) -> Hashable | None:
+    """Work out the version of the stored Ekos sessions and guiding runs.
+
+    Every write of either table through the butler adds one to its counter,
+    so the two counters change exactly when the records do.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the record store (``records``).
+
+    Returns
+    -------
+    version : `~collections.abc.Hashable` or `None`
+        The two counters, or `None` when they cannot be read, in which case
+        the caller must not keep a result.
+    """
+    try:
+        versions = context.records.data_versions(RECORDED_SESSION_TABLES)
+    except Exception:
+        # A version that cannot be worked out only means no result is kept.
+        logger.warning("Could not work out the data version of the recorded sessions.", exc_info=True)
+        return None
+    return None if versions is None else tuple(sorted(versions.items()))
 
 
 def review_data_version(context: Any) -> Hashable | None:

@@ -5,22 +5,32 @@ stored profile, the star width taken from the stored measurements of the
 equipment's own frames
 (including which frames are left out and why), and the per-session
 baseline collected only from sessions of the same equipment. The baseline
-tests use a real `ControlRecordStore` on a temporary database.
+tests use a real `ControlRecordStore` on a temporary database. The last
+tests check that a kept table of the nights' baselines, brought up to date
+night by night (`update_night_baseline_table`), equals a full read after
+live samples, a changed session record and a new guiding run, and that only
+the changed nights are worked out again.
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from astrometricslib import AppConfiguration
 from astrometricslib._internal.frames import frame_is_spectral
 from astrometricslib.arguments import observing_night_id
+from wayfindinglib.analytics import envelope_assembly
 from wayfindinglib.analytics.capture_history import STAR_WIDTH_METRIC
 from wayfindinglib.analytics.envelope_assembly import (
+    NightBaselineTable,
     collect_baseline_values,
     collect_excursion_fraction_baseline,
+    collect_night_baselines,
     measure_image_quality,
+    read_night_baseline_table,
     sensor_limits_for_camera,
+    update_night_baseline_table,
 )
 from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION, MeasuredImageQuality
 from wayfindinglib.analytics.test.frame_measurement_helpers import FakeAstrometrics
@@ -430,3 +440,170 @@ def test_the_excursion_baseline_counts_samples_beyond_the_limit(records: Control
     )
 
     assert fractions == pytest.approx([0.1])
+
+
+def _live_samples(started_at: float, count: int, offset: int = 0) -> list[dict]:
+    """Build live guide samples, 2 seconds apart, as guiding stores them.
+
+    Returns
+    -------
+    samples : `list` [`dict`]
+        Samples ready for `ControlRecordStore.record_guiding_samples`.
+    """
+    return [
+        _sample(started_at + 100.0 + 2.0 * (offset + index), "phd2_live", error=0.5 + 0.01 * index)
+        for index in range(count)
+    ]
+
+
+def _three_nights(
+    records: ControlRecordStore,
+) -> tuple[list[EkosSessionContext], list[GuidingRunSummary], float]:
+    """Record two finished nights from a log sync and a live night tonight.
+
+    Returns
+    -------
+    contexts, runs, tonight : `tuple`
+        The session records, the guiding runs and the start of tonight.
+    """
+    contexts, runs = [], []
+    for day in range(2):
+        started_at = _NIGHT_START + day * 86400.0
+        _record_night(records, started_at, 300.0 + day, 1.0 + 0.1 * day)
+        contexts.append(_session_of(started_at))
+        runs.append(_run(started_at, 200, day))
+    tonight = _NIGHT_START + 5 * 86400.0
+    contexts.append(_session_of(tonight))
+    records.record_guiding_samples(_live_samples(tonight, 120))
+    return contexts, runs, tonight
+
+
+def _same_table(first: NightBaselineTable, second: NightBaselineTable) -> bool:
+    """Say whether two tables hold the same nights and numbers.
+
+    Returns
+    -------
+    same : `bool`
+        True when the nights, inputs and every baseline value agree
+        (including each night's guide errors).
+    """
+    if first.inputs != second.inputs or len(first.nights) != len(second.nights):
+        return False
+    for one, other in zip(first.nights, second.nights, strict=True):
+        if one._replace(total_errors=None) != other._replace(total_errors=None):
+            return False
+        if list(one.total_errors) != list(other.total_errors):
+            return False
+    return True
+
+
+def _count_night_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Count which nights' baselines are worked out.
+
+    Returns
+    -------
+    nights : `list` [`str`]
+        Filled with each night worked out, in order.
+    """
+    worked_out: list[str] = []
+    real = envelope_assembly.night_guiding_baseline
+
+    def counted(records: Any, night: str, *arguments: Any) -> Any:
+        """Note the night, then work it out.
+
+        Returns
+        -------
+        baseline : `NightGuidingBaseline` or `None`
+            As `night_guiding_baseline` gives it.
+        """
+        worked_out.append(night)
+        return real(records, night, *arguments)
+
+    monkeypatch.setattr(envelope_assembly, "night_guiding_baseline", counted)
+    return worked_out
+
+
+def test_the_table_lists_the_same_nights_as_collect_night_baselines(records: ControlRecordStore) -> None:
+    """The table's qualifying nights are exactly what the baselines were."""
+    contexts, runs, _ = _three_nights(records)
+
+    table = read_night_baseline_table(records, contexts, "fp-a", runs)
+
+    assert [night.night for night in table.nights] == [
+        night.night for night in collect_night_baselines(records, contexts, "fp-a", runs)
+    ]
+    assert len(table.nights) == 3
+
+
+def test_live_samples_work_out_only_tonight_again_and_equal_a_full_read(
+    records: ControlRecordStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live samples change only tonight, and the result equals a full read."""
+    contexts, runs, tonight = _three_nights(records)
+    kept_newest = records.newest_guiding_sample_id()
+    kept = read_night_baseline_table(records, contexts, "fp-a", runs)
+    records.record_guiding_samples(_live_samples(tonight, 60, offset=120))
+    worked_out = _count_night_reads(monkeypatch)
+
+    changed = records.guiding_sample_nights_after(kept_newest)
+    updated = update_night_baseline_table(records, contexts, "fp-a", runs, kept, changed)
+
+    assert changed == {observing_night_id(tonight)}
+    assert worked_out == [observing_night_id(tonight)]
+    assert _same_table(updated, read_night_baseline_table(records, contexts, "fp-a", runs))
+    assert updated.nights[-1].cadence_s == pytest.approx(2.0)
+    baselines = {"guide_cadence_seconds": [night.cadence_s for night in updated.nights]}
+    full = collect_baseline_values(records, contexts, "fp-a", runs)
+    assert baselines["guide_cadence_seconds"] == pytest.approx(full["guide_cadence_seconds"])
+
+
+def test_a_changed_session_or_run_works_out_only_that_night(
+    records: ControlRecordStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session record or guiding run of one night changes only that night."""
+    contexts, runs, _ = _three_nights(records)
+    kept = read_night_baseline_table(records, contexts, "fp-a", runs)
+    worked_out = _count_night_reads(monkeypatch)
+    first_night = observing_night_id(_NIGHT_START)
+
+    runs = [*runs, _run(_NIGHT_START + 600.0, 100, 50)]
+    with_run = update_night_baseline_table(records, contexts, "fp-a", runs, kept, frozenset())
+    assert worked_out == [first_night]
+    assert _same_table(with_run, read_night_baseline_table(records, contexts, "fp-a", runs))
+
+    worked_out.clear()
+    second_start = _NIGHT_START + 86400.0
+    contexts = [
+        _session(observing_night_id(second_start), second_start, "fp-a").model_copy(
+            update={"ended_at": second_start + 300.0}
+        )
+        if record.session_id == observing_night_id(second_start)
+        else record
+        for record in contexts
+    ]
+    with_session = update_night_baseline_table(records, contexts, "fp-a", runs, with_run, frozenset())
+    assert worked_out == [observing_night_id(second_start)]
+    assert _same_table(with_session, read_night_baseline_table(records, contexts, "fp-a", runs))
+
+
+def test_a_night_whose_session_record_is_gone_is_dropped(records: ControlRecordStore) -> None:
+    """A night with no session of this equipment left leaves the table."""
+    contexts, runs, _ = _three_nights(records)
+    kept = read_night_baseline_table(records, contexts, "fp-a", runs)
+
+    updated = update_night_baseline_table(records, contexts[1:], "fp-a", runs, kept, frozenset())
+
+    assert observing_night_id(_NIGHT_START) not in updated.by_night
+    assert _same_table(updated, read_night_baseline_table(records, contexts[1:], "fp-a", runs))
+
+
+def test_the_sample_nights_name_a_samples_session_and_night(records: ControlRecordStore) -> None:
+    """A sample counts for its session id and for the night it was taken in."""
+    newest = records.newest_guiding_sample_id()
+    assert newest == 0
+    records.record_guiding_samples([
+        {**_sample(_NIGHT_START + 100.0, "phd2_live"), "session_id": "2026-01-01"}
+    ])
+
+    assert records.guiding_sample_nights_after(newest) == {"2026-01-01", observing_night_id(_NIGHT_START)}
+    assert records.guiding_sample_nights_after(records.newest_guiding_sample_id()) == frozenset()

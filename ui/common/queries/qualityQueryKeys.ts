@@ -76,6 +76,26 @@ export const qualityQueryKeys = {
         [...QUALITY_QUERY_KEY_PREFIX, 'advisory-target-report', { target_id: targetId }] as const,
 
     /**
+     * The key of an `advisory:star_shapes` call.
+     * It names only the target: `invalidateTargetReads` (in `targetReadQueryKeys.ts`) marks it old
+     * when that target's data changes.
+     * @param targetId The target the verdicts are about.
+     * @return The key, with `target_id` so a measurement of that target refreshes it.
+     */
+    starShapes: (targetId: string) =>
+        [...QUALITY_QUERY_KEY_PREFIX, 'advisory-star-shapes', { target_id: targetId }] as const,
+
+    /**
+     * The key of a `target:get_frame_statuses` call. It sits with the quality keys
+     * because a frame is "flagged" from its stored star numbers. It names only the target:
+     * `invalidateTargetReads` (in `targetReadQueryKeys.ts`) marks it old when that target's data changes.
+     * @param targetId The target whose frames are listed.
+     * @return The key, with `target_id` so a measurement of that target refreshes it.
+     */
+    frameStatuses: (targetId: string) =>
+        [...QUALITY_QUERY_KEY_PREFIX, 'frame-statuses', { target_id: targetId }] as const,
+
+    /**
      * The key of an `advisory:tonight` call.
      * @param planningTime The planning time (ISO 8601 text), or `null` for Now.
      * @return The key. It does not start with the quality prefix: the ranking is

@@ -13,10 +13,13 @@ Three layers, smallest first:
 - `run_full_pipeline` runs every stage for one target, start to finish:
   stacks its raw frames, plate-solves the result, tracks star
   brightness (photometry), and pulls out light spectra (spectroscopy)
-  when there are any. It saves the target's record after each stage,
-  not just once at the end, so a later stage crashing (a bad frame, a
-  timed-out solve, an OOM kill) does not throw away an earlier stage's
-  results along with it -- the same per-stage save discipline
+  when there are any. Photometry and spectroscopy only read
+  astrometry's plate solution; without one they are skipped with the
+  reason ``needs astrometry: ...``. It saves the target's record after
+  each stage, not just once at the end, so a later stage crashing (a
+  bad frame, a timed-out solve, an OOM kill) does not throw away an
+  earlier stage's results along with it -- the same per-stage save
+  discipline
   `backend/services/analysis/analysis_orchestrator.py` already uses
   for UI-triggered single-stage runs. Its only caller is
   `target_batch.py`, which runs many targets through this same sequence
@@ -63,6 +66,10 @@ from astrometricslib.foundation.run_abandonment import (
 from astrometricslib.foundation.run_tally import RunTally
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
+from astrometricslib.models.quality.quality_summary import (
+    PHOTOMETRY_PIPELINE_VERSION,
+    SPECTROSCOPY_PIPELINE_VERSION,
+)
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.models.tuned_parameter import RunBasis
 from astrometricslib.pipelines.analysis_stage_names import ANALYSIS_STAGES
@@ -81,6 +88,13 @@ from astrometricslib.pipelines.shared.frame_grouping import (
     split_standard_and_spectral_frames,
 )
 from astrometricslib.pipelines.shared.provenance_recording import stacked_image_entity_id
+from astrometricslib.pipelines.shared.quality.notices import needs_astrometry_measurement
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    PipelineRunContext,
+    build_and_record_measurements,
+    make_run_id,
+)
+from astrometricslib.pipelines.shared.target_center_hint import resolve_spectral_stack_solution
 from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
 from astrometricslib.pipelines.spectroscopy.spectral_variation import run_spectral_variation_analysis
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -564,41 +578,50 @@ _PIPELINE_TYPES = {
 STAGE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     # Astrometry needs only a stack to solve.
     "astrometry": (),
-    # Photometry names its stars with the plate solution of the imaging stack:
-    # with `use_astrometry_seed` it borrows the solution of the solved stack
-    # of the same camera and focal length for a session's first frame when
-    # that frame has none (`photometry/batch.py`,
-    # `_run_variability_analysis_for_session`). Without it, photometry
-    # plate-solves each session itself, which costs more time and can fail
-    # on a sparse frame. The code can still run without astrometry. The
-    # rule is that photometry must not run on a guess: a project ruling of
-    # 2026-11-22 makes astrometry a hard prerequisite, enforced here in the
-    # stage order and not inside the pipelines (their fallbacks stay).
-    "photometry": ("astrometry",),
-    # Spectroscopy takes its field center from the solved imaging stack
-    # taken with the same camera and telescope
-    # (`shared/target_center_hint.py`, about lines 104-132; otherwise it
-    # uses the mount's position, up to about 24 arcminutes off), and it names
-    # the zero-order stars from the star list astrometry keeps next to the
-    # stack (`shared/solved_star_list.py`, read by `spectroscopy/runner.py`,
-    # `_registration_reference_candidates`). The spectral
-    # stack is never plate-solved. Same ruling as photometry.
-    "spectroscopy": ("astrometry",),
+    # Photometry and spectroscopy read astrometry's plate solution but never
+    # run astrometry: astrometry is the core layer (issue 182). Without a
+    # usable solution they are skipped (see `STAGES_THAT_READ_ASTROMETRY`
+    # and `missing_astrometry_reason`), so they have no stage to add here.
+    "photometry": (),
+    "spectroscopy": (),
     # The spectral variation stage follows each star's spectrum across the
     # raw spectral frames. It reads the stars the master-stack spectroscopy
     # found and must not overwrite that result, so it needs spectroscopy
-    # first (and spectroscopy needs astrometry, so the chain runs in order).
+    # first. Spectroscopy in turn needs astrometry's solution, and is
+    # skipped without one.
     "spectral_variation": ("spectroscopy",),
     # The asteroid search works on a stack and needs no solution.
     "asteroids": (),
 }
 """The stages each stage needs first, by stage name.
 
-Astrometry is a hard prerequisite of photometry and spectroscopy. A
-prerequisite runs before the stage that needs it only when its result is
-missing or out of date (see `stage_result_is_current`). Each stage appears
-as a key, so a missing key is a coding error.
+A prerequisite runs before the stage that needs it only when its result is
+missing or out of date (see `stage_staleness_reason`). Astrometry is never
+added: the stages that need it only read its result. Each stage appears as a
+key, so a missing key is a coding error.
 """
+
+STAGES_THAT_READ_ASTROMETRY = frozenset({"photometry", "spectroscopy"})
+"""The stages that read astrometry's plate solution and never run astrometry.
+
+Photometry names its stars with the solution of the imaging stack: with
+``use_astrometry_seed`` it borrows the solution of the solved stack of the
+same camera and focal length for a session's first frame when that frame has
+none (`photometry/batch.py`, `_run_variability_analysis_for_session`).
+Spectroscopy names its zero-order stars with the solution of the solved
+imaging stack of the same camera and optic, or with the spectral stack's own
+solution (`shared/target_center_hint.resolve_spectral_stack_solution`), and
+with the star list astrometry keeps next to a solved stack
+(`shared/solved_star_list.py`). When the solution is missing or out of date
+the stage is skipped, with the reason from `missing_astrometry_reason`, one
+job warning and one INFO log line (see `report_needs_astrometry`).
+"""
+
+_PIPELINE_VERSIONS = {
+    "photometry": PHOTOMETRY_PIPELINE_VERSION,
+    "spectroscopy": SPECTROSCOPY_PIPELINE_VERSION,
+}
+"""The pipeline version stamped on each stage's "needs astrometry" notice."""
 
 
 def imaging_stack_path(target: Target) -> str | None:
@@ -640,7 +663,8 @@ def _as_utc(moment: datetime) -> datetime:
 def stage_result_is_current(target: Target, stage: str, image_path: str | None = None) -> bool:
     """Say whether a stage's saved result matches the target's current stack.
 
-    The rule, for astrometry (the only stage that others depend on):
+    The rule, for astrometry (whose result photometry and spectroscopy
+    read, see `missing_astrometry_reason`):
 
     - The result is current when the target has an astrometry summary and an
       imaging stack on disk.
@@ -698,7 +722,7 @@ def stage_staleness_reason(target: Target, stage: str, image_path: str | None = 
     ------
     InvalidArgumentError
         If the stage is neither ``"astrometry"`` nor ``"spectroscopy"``, the
-        two stages another stage can need.
+        two stages whose results other stages read.
     """
     if stage == "spectroscopy":
         return _spectroscopy_staleness_reason(target, image_path)
@@ -792,8 +816,9 @@ def _spectroscopy_staleness_reason(target: Target, image_path: str | None) -> st
 def _prerequisite_blocker(target: Target, stage: str, options: dict[str, Any]) -> str | None:
     """Say why a prerequisite stage cannot run, or `None` when it can.
 
-    Astrometry runs on the image the caller names (``path`` in its options)
-    or, when none is named, on the imaging stack.
+    Spectroscopy, the only stage ever added as a prerequisite, runs on the
+    image the caller names (``path`` in its options) or on the spectral
+    stack.
 
     Parameters
     ----------
@@ -809,18 +834,186 @@ def _prerequisite_blocker(target: Target, stage: str, options: dict[str, Any]) -
     reason : `str` or `None`
         Why the stage cannot run, or `None`.
     """
-    if stage == "spectroscopy":
-        if options.get("path") or target.spectral_stacking.stacked_image:
-            return None
-        return "the target has no spectral stack to extract from and no image was given"
-    if stage != "astrometry":
+    if stage != "spectroscopy":
         return None
-    named_path = options.get("path")
-    if named_path:
-        return None if os.path.exists(named_path) else f"the image {named_path} does not exist"
-    if imaging_stack_path(target) is None:
-        return "the target has no imaging stack to solve and no image was given"
+    if options.get("path") or target.spectral_stacking.stacked_image:
+        return None
+    return "the target has no spectral stack to extract from and no image was given"
+
+
+def _file_is_plate_solved(path: str) -> bool:
+    """Say whether an image's header holds a plate solution.
+
+    Parameters
+    ----------
+    path : `str`
+        The image.
+
+    Returns
+    -------
+    solved : `bool`
+        `True` when the header carries a solution written by a plate solve
+        (see `header_is_plate_solved`). `False` when it has none or cannot be
+        read.
+    """
+    from astrometricslib._internal.drivers.fits_access import header_is_plate_solved, read_header
+
+    try:
+        return header_is_plate_solved(read_header(path))
+    except (OSError, *DATA_ERRORS):
+        return False
+
+
+def _imaging_stack_solution_problem(target: Target) -> str | None:
+    """Say why the imaging stack's astrometry result cannot be read, or `None`.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+
+    Returns
+    -------
+    problem : `str` or `None`
+        A short phrase, such as "its result is older than the stack" or "the
+        stack could not be plate solved", or `None` when the result is
+        current and holds a plate solution.
+    """
+    staleness = stage_staleness_reason(target, "astrometry")
+    if staleness is not None:
+        return staleness
+    metrics = getattr(target.quality.astrometry, "astrometry_metrics", None)
+    if metrics is None or not getattr(metrics, "plate_solve_succeeded", False):
+        return "the stack could not be plate solved"
     return None
+
+
+def _spectroscopy_image_path(target: Target, options: dict[str, Any]) -> str | None:
+    """Give the image the spectroscopy stage would read.
+
+    It is chosen as `analyze_target` chooses it: the image named in the
+    options, else the spectral stack, else the target's first frame.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    options : `dict`
+        The spectroscopy stage's options.
+
+    Returns
+    -------
+    path : `str` or `None`
+        The image, or `None` when there is none.
+    """
+    path = options.get("path") or target.spectral_stacking.stacked_image
+    if path:
+        return str(path)
+    return target.frames[0].path if target.frames else None
+
+
+def missing_astrometry_reason(
+    target: Target, stage: str, stage_options: dict[str, dict[str, Any]]
+) -> str | None:
+    """Say why a stage cannot read the plate solution it needs, or `None`.
+
+    Astrometry is the core layer. Photometry and spectroscopy only read its
+    plate solution, and never run astrometry themselves.
+
+    - Photometry reads the solution of the imaging stack. Its astrometry
+      result must be current (see `stage_staleness_reason`) and say the
+      stack was solved. When the caller names another image in
+      ``stage_options["astrometry"]["path"]`` (another camera's stack, or a
+      frame of a target with no stack), that image's header must hold a
+      plate solution instead.
+    - Spectroscopy reads the solution of the solved imaging stack of the
+      same camera and optic, else the spectral stack's own solution (see
+      `resolve_spectral_stack_solution`).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    stage : `str`
+        The stage, from `STAGES_THAT_READ_ASTROMETRY`.
+    stage_options : `dict` [`str`, `dict`]
+        Each stage's options, by stage name.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        The skip sentence, ``needs astrometry: <why>; run
+        processing.astrometry.run(target) first``, or `None` when the
+        solution can be read. When the solution must come from a named
+        image, the sentence names it in the call.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the stage does not read astrometry's result.
+    """
+    if stage == "photometry":
+        named_path = (stage_options.get("astrometry") or {}).get("path")
+        if named_path and not _is_same_file(named_path, target.stacking.stacked_image):
+            if not os.path.exists(named_path):
+                problem = f"the image {named_path} does not exist"
+            elif not _file_is_plate_solved(named_path):
+                problem = f"the image {named_path} has no plate solution"
+            else:
+                return None
+            return f"needs astrometry: {problem}; run processing.astrometry.run(target, {named_path!r}) first"
+        problem = _imaging_stack_solution_problem(target)
+        if problem is None:
+            return None
+        return f"needs astrometry: {problem}; run processing.astrometry.run(target) first"
+    if stage == "spectroscopy":
+        image_path = _spectroscopy_image_path(target, dict(stage_options.get("spectroscopy") or {}))
+        if image_path and resolve_spectral_stack_solution(target, image_path) is not None:
+            return None
+        problem = (
+            "no imaging stack of the same camera and optic has a plate solution, "
+            "and the spectral image has none of its own"
+        )
+        if imaging_stack_path(target) is not None or not image_path:
+            return f"needs astrometry: {problem}; run processing.astrometry.run(target) first"
+        return f"needs astrometry: {problem}; run processing.astrometry.run(target, {image_path!r}) first"
+    raise InvalidArgumentError(f"The {stage!r} stage does not read astrometry's result.")
+
+
+def report_needs_astrometry(target: Target, stage: str, reason: str, measured_at: datetime | None) -> None:
+    """Record that a stage was skipped because it needs astrometry.
+
+    The skip gives one INFO log line and one job warning: a notice row
+    (``<stage>.notice_needs_astrometry``) carrying the job id, so
+    `Jobs.query(detail="warnings")` lists it. Storing never fails the run.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    stage : `str`
+        The skipped stage, from `STAGES_THAT_READ_ASTROMETRY`.
+    reason : `str`
+        The skip sentence from `missing_astrometry_reason`.
+    measured_at : `datetime` or `None`
+        The time stamped on the row. `None` (for tests only) stores no row.
+    """
+    logger.info("[%s] Skipping %s: %s", target.id, stage, reason)
+    if measured_at is None:
+        return
+    job_id = current_job_id()
+    context = PipelineRunContext(
+        target_id=target.id,
+        pipeline_name=stage,
+        pipeline_version=_PIPELINE_VERSIONS[stage],
+        run_id=make_run_id(job_id),
+        job_id=job_id,
+        measured_at=measured_at,
+    )
+    build_and_record_measurements(
+        lambda: [needs_astrometry_measurement(reason, context, context.run_subject())],
+        f"needs-astrometry notice for {stage} on {target.id}",
+    )
 
 
 def _has_spectral_input(
@@ -942,13 +1135,21 @@ def run_target_stages(
     has no spectral data, and spectral variation when it has no raw
     spectral frames.
 
-    With ``run_prerequisites``, a stage that another stage needs (see
-    `STAGE_PREREQUISITES`) is added to the run when its result is missing or
-    out of date for the current stack (see `stage_result_is_current`). A
-    prerequisite that cannot run, because there is neither an imaging stack
-    nor an image named in the stage's options, or the stage fails, blocks the
-    stages that need it: they are skipped, with
-    the reason ``needs astrometry: <why>``, and are not run on a guess.
+    Astrometry is the core layer. Photometry and spectroscopy read its plate
+    solution and never run astrometry (`STAGES_THAT_READ_ASTROMETRY`). When
+    the solution they need is missing or out of date, the stage is skipped,
+    with the reason ``needs astrometry: <why>; run
+    processing.astrometry.run(target) first`` (see
+    `missing_astrometry_reason`), one job warning and one INFO log line (see
+    `report_needs_astrometry`). Asked for together, astrometry runs first,
+    since the order is fixed, and the later stages read its new result.
+
+    With ``run_prerequisites``, spectroscopy is added before spectral
+    variation when its result is missing or out of date (see
+    `STAGE_PREREQUISITES` and `stage_staleness_reason`). An added stage that
+    cannot run, is skipped for want of astrometry, or fails, blocks spectral
+    variation: it is skipped with the reason ``needs spectroscopy: <why>``,
+    and is not run on a guess.
 
     Parameters
     ----------
@@ -976,8 +1177,8 @@ def run_target_stages(
         not read the clock. `None` (for tests only) stores no measurements.
     run_prerequisites : `bool`, optional
         Whether to add the prerequisite stages that are missing or out of
-        date. Pass `False` only when astrometry has just been run for this
-        stack, or when a stage is meant to run alone.
+        date. Pass `False` only when a stage is meant to run alone. It never
+        adds astrometry.
     on_stages_planned : `Callable`, optional
         Called once before the first stage runs, as ``(requested, added)``:
         the stages asked for and the prerequisites that will be added, both
@@ -988,9 +1189,9 @@ def run_target_stages(
     -------
     result : `ProcessTargetResult`
         One result per stage that ran, keyed by stage name, the prerequisites
-        added (``prerequisites_run``), the stages skipped because a
-        prerequisite could not run (``stages_skipped``), and the target's
-        quality summaries afterwards.
+        added (``prerequisites_run``), the stages skipped because astrometry's
+        solution was missing or a prerequisite could not run
+        (``stages_skipped``), and the target's quality summaries afterwards.
 
     Raises
     ------
@@ -1068,6 +1269,22 @@ def run_target_stages(
                 blocked[stage] = blocker
                 logger.info("[%s] Could not run %s first: %s", target.id, stage, blocker)
                 continue
+        # Photometry and spectroscopy only read astrometry's solution; they
+        # never run astrometry. Without one the stage is skipped.
+        missing_astrometry = (
+            missing_astrometry_reason(target, stage, stage_options)
+            if stage in STAGES_THAT_READ_ASTROMETRY
+            else None
+        )
+        if missing_astrometry is not None:
+            report_needs_astrometry(target, stage, missing_astrometry, measured_at)
+            if stage in added:
+                blocked[stage] = missing_astrometry
+            else:
+                result.results[stage] = {"status": "skipped", "reason": missing_astrometry}
+                result.stages_skipped[stage] = missing_astrometry
+            continue
+        if stage in added:
             try:
                 stage_result = analyze_target(
                     target,
@@ -1083,10 +1300,6 @@ def run_target_stages(
                     "[%s] The %s stage added as a prerequisite failed: %s", target.id, stage, error
                 )
                 blocked[stage] = f"it failed ({error})"
-                continue
-            if isinstance(stage_result, dict) and "wcs" in stage_result and stage_result["wcs"] is None:
-                blocked[stage] = "the stack could not be plate solved"
-                logger.info("[%s] Could not run %s first: %s", target.id, stage, blocked[stage])
                 continue
             result.results[stage] = stage_result
             result.stages_run.append(stage)
@@ -1332,11 +1545,21 @@ def _run_photometry_stage(
 ) -> dict[str, Any]:
     """Run photometry/variability analysis on the target's camera frames.
 
+    Photometry reads astrometry's plate solution of the stack and never runs
+    astrometry. When the solution is missing or out of date (the astrometry
+    stage just before could not solve the stack), the stage is skipped with
+    the reason, one job warning and one INFO log line.
+
     Returns
     -------
     photometry_results : `dict`
-        The photometry pipeline's result dict.
+        The photometry pipeline's result dict, or ``{"status": "skipped",
+        "reason": ...}`` when astrometry's solution is missing.
     """
+    missing_astrometry = missing_astrometry_reason(target, "photometry", {})
+    if missing_astrometry is not None:
+        report_needs_astrometry(target, "photometry", missing_astrometry, measured_at)
+        return {"status": "skipped", "reason": missing_astrometry}
     logger.info("[%s] Running Photometry/Variability Analysis...", target.id)
     with acquire_resource_slot(config, "job", max_concurrent_jobs, work_name=f"photometry {target.id}"):
         photometry_results = analyze_target(
@@ -1365,6 +1588,11 @@ def _run_spectroscopy_stage(
 ) -> None:
     """Run spectroscopy analysis when the target has SPEC frames.
 
+    Spectroscopy reads astrometry's plate solution (the solved imaging
+    stack's, else the spectral stack's own) and never runs astrometry.
+    Without one the stage is skipped with the reason, one job warning and
+    one INFO log line.
+
     Raises
     ------
     ProcessingError
@@ -1372,6 +1600,10 @@ def _run_spectroscopy_stage(
     """
     if not spectral_frames:
         logger.info("[%s] No SPEC frames found for this target. Skipping spectroscopy analysis.", target.id)
+        return
+    missing_astrometry = missing_astrometry_reason(target, "spectroscopy", {})
+    if missing_astrometry is not None:
+        report_needs_astrometry(target, "spectroscopy", missing_astrometry, measured_at)
         return
 
     logger.info("[%s] Running Spectroscopy Analysis...", target.id)

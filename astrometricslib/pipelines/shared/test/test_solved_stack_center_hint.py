@@ -22,8 +22,19 @@ from astrometricslib.pipelines.shared.target_center_hint import (
 CAMERA = "ZWO CCD ASI533MM Pro"
 
 
-def _write_stack(path: Path, focal_length: float = 405.0, camera: str = CAMERA, solved: bool = True) -> str:
+def _write_stack(
+    path: Path,
+    focal_length: float = 405.0,
+    camera: str = CAMERA,
+    solved: bool = True,
+    mount_map_only: bool = False,
+) -> str:
     """Write a small stack with optional celestial WCS keywords.
+
+    With ``solved`` the header holds a plate solution as astrometry writes
+    it (the sky map and the ``PLTSOLVD`` card). With ``mount_map_only`` it
+    holds the same sky map without the card, as a map written from the
+    mount's pointing.
 
     Returns
     -------
@@ -33,13 +44,15 @@ def _write_stack(path: Path, focal_length: float = 405.0, camera: str = CAMERA, 
     header = fits.Header()
     header["INSTRUME"] = camera
     header["FOCALLEN"] = focal_length
-    if solved:
+    if solved or mount_map_only:
         # The reference pixel is the image centre, so the centre coordinate
         # is exactly CRVAL.
         header["CTYPE1"], header["CTYPE2"] = "RA---TAN", "DEC--TAN"
         header["CRPIX1"], header["CRPIX2"] = 50.0, 50.0
         header["CRVAL1"], header["CRVAL2"] = 279.2414, 38.7530
         header["CD1_1"], header["CD1_2"], header["CD2_1"], header["CD2_2"] = -5e-4, 0.0, 0.0, 5e-4
+    if solved and not mount_map_only:
+        header["PLTSOLVD"] = True
     fits.PrimaryHDU(np.zeros((100, 100), dtype=np.float32), header=header).writeto(path)
     return str(path)
 
@@ -128,3 +141,12 @@ def test_no_plate_solution_is_returned_without_a_matching_solved_stack(tmp_path:
     other_scope = _write_stack(tmp_path / "L.fits", focal_length=1000.0)
 
     assert resolve_solved_stack_wcs(_target(other_scope), spectral) is None
+
+
+def test_a_stack_with_only_the_mounts_sky_map_is_not_borrowed(tmp_path: Path) -> None:
+    """Verify a sky map without a plate solve gives no hint and no solution."""
+    mount_only = _write_stack(tmp_path / "mount_only.fits", solved=False, mount_map_only=True)
+    spectral = _write_stack(tmp_path / "spectral.fits", solved=False)
+
+    assert resolve_solved_stack_center_hint(_target(mount_only), spectral) == (None, None)
+    assert resolve_solved_stack_wcs(_target(mount_only), spectral) is None

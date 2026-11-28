@@ -20,6 +20,8 @@ from astrometricslib.pipelines.shared.quality.notices import (
     camera_without_profile_measurement,
     camera_without_profile_metric_name,
     camera_without_profile_reason,
+    needs_astrometry_measurement,
+    needs_astrometry_metric_name,
     notice_limit,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
@@ -59,6 +61,26 @@ def test_every_pipeline_declares_its_camera_notice(pipeline: str) -> None:
     spec = get_metric_registry().get(camera_without_profile_metric_name(pipeline))
     assert spec.purpose.value == "decision"
     assert spec.checkpoint.value == pipeline
+
+
+@pytest.mark.parametrize("pipeline", ["photometry", "spectroscopy"])
+def test_the_stages_that_read_astrometry_declare_the_needs_astrometry_notice(pipeline: str) -> None:
+    """Each reading stage registers its skip notice as a decision metric."""
+    spec = get_metric_registry().get(needs_astrometry_metric_name(pipeline))
+    assert spec.purpose.value == "decision"
+    assert spec.checkpoint.value == pipeline
+
+
+def test_the_needs_astrometry_notice_carries_the_skip_sentence() -> None:
+    """The row is a warning of its job, with the skip sentence and action."""
+    context = _context("spectroscopy")
+    reason = "needs astrometry: its result is missing; run processing.astrometry.run(target) first"
+    row = needs_astrometry_measurement(reason, context, context.run_subject())
+    assert row.metric == "spectroscopy.notice_needs_astrometry"
+    assert row.check_outcome == GateStatus.FAILED
+    assert row.job_id == "job-9"
+    assert row.reason == reason
+    assert row.action_taken == "stage skipped"
 
 
 def test_the_camera_notice_is_a_failed_check_with_the_job_and_sentence() -> None:

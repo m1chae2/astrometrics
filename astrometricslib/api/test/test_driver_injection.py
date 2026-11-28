@@ -314,8 +314,8 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
     target = Target(id="Injection Field", frames=frames)
-    # Photometry alone, as if astrometry had just run.
-    monkeypatch.setattr("astrometricslib.pipelines.tasks.stage_staleness_reason", lambda *_a, **_k: None)
+    # Photometry alone, as if astrometry had just solved the stack.
+    monkeypatch.setattr("astrometricslib.pipelines.tasks.missing_astrometry_reason", lambda *_a, **_k: None)
 
     result = astrometrics.processing.photometry.run(target, frames=frames)
 

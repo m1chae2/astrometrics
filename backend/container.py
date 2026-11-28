@@ -75,6 +75,7 @@ class Container:
         self.job_repository = None
         self.job_service = None
         self.maintenance_service = None
+        self.target_review_rewarmer = None
         self.library_backup_service = None
         self.target_imaging_executor = None
         self.stellar_service = None
@@ -134,7 +135,8 @@ class Container:
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
-        Stops the maintenance thread, the library backup schedule (after one
+        Stops the maintenance thread, the background re-reads of the target
+        reviews, the library backup schedule (after one
         last backup when ``backup_path`` is set), the observatory control's
         background
         readers (such as the PHD2 event reader) and INDI worker process, and
@@ -146,6 +148,8 @@ class Container:
         """
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
+        if self.target_review_rewarmer is not None:
+            self.target_review_rewarmer.stop()
         if self.library_backup_service is not None:
             # Stops the schedule and makes one last backup if one is set up.
             try:
@@ -201,7 +205,15 @@ class Container:
             open_port_forwards=not testing,
         )
 
-        self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)
+        # Reads a changed target's Image Processing reviews again in the
+        # background. Its loop is started in the app's lifespan
+        # (`startup.keep_target_reviews_warm`); the services only call it.
+        from backend.services.infrastructure.target_review_rewarm import TargetReviewRewarmer
+
+        self.target_review_rewarmer = TargetReviewRewarmer()
+        self.target_service = TargetService(
+            self.config_service, astrometrics=self.astrometrics, review_rewarmer=self.target_review_rewarmer
+        )
         self.stellar_object_service = StellarService(
             self.config_service, astrometrics=self.astrometrics, wayfinder=self.wayfinder
         )
@@ -291,6 +303,7 @@ class Container:
             job_service=self.job_service,
             astrometrics_service=self.astrometrics_service,
             socket_manager=self.socket_manager,
+            review_trigger=self.target_review_rewarmer.request,
         )
 
         self.analysis_orchestrator = AnalysisOrchestrator(
@@ -318,6 +331,7 @@ class Container:
             astrometrics=self.astrometrics,
             socket_manager=self.socket_manager,
             suggestion_trigger=self.suggestion_refresh_worker.request,
+            review_trigger=self.target_review_rewarmer.request,
         )
         self.sync_service = SyncService(
             observatory_api=self.wayfinder.control,
@@ -326,6 +340,7 @@ class Container:
             socket_manager=self.socket_manager,
             calibration_trigger=self.image_processing_service.measure_new_calibration_frames,
             targets=self.astrometrics.targets,
+            review_trigger=self.target_review_rewarmer.request,
         )
 
         # The telescope status reports a running copy of new frames.
@@ -372,7 +387,9 @@ class Container:
 
         from backend.services.observatory.advisory_service import AdvisoryService
 
-        self.advisory_service = AdvisoryService(wayfinder=self.wayfinder)
+        self.advisory_service = AdvisoryService(
+            wayfinder=self.wayfinder, review_rewarmer=self.target_review_rewarmer
+        )
         self.target_imaging_executor = TargetImagingExecutor(
             wayfinder=self.wayfinder, plan_service=self.plan_service
         )

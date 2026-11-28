@@ -6,6 +6,7 @@ files happens somewhere else.
 """
 
 import logging
+from typing import NamedTuple
 
 import numpy as np
 
@@ -173,6 +174,19 @@ _SKY_MINIMUM_SAMPLE_PIXELS = 25
 # cache and the result is identical. About one million pixels was fastest on
 # the two real frames it was timed on.
 _SCALING_BLOCK_PIXELS = 1_000_000
+
+# The autostretch counts a whole-number image (every camera frame) as a
+# histogram instead of sorting its pixels, which gives the same median and MAD
+# exactly and is several times faster (0.53 s against 0.08 s for a
+# 24-megapixel 16-bit frame). A float image is first probed on every n-th
+# pixel in each direction, so a stack, whose pixels are not whole numbers, is
+# turned away after a few thousand pixels. The histogram is used only while
+# its levels span at most about a million (8 MB of counts; a 16-bit camera
+# spans 65536) and every pixel is at most 2**31 in size, where float sums of
+# two pixels are still exact.
+_HISTOGRAM_PROBE_STRIDE = 16
+_HISTOGRAM_MOST_LEVELS = 1 << 20
+_HISTOGRAM_LARGEST_MAGNITUDE = float(2**31)
 
 
 def _midtones_transfer_function(x: np.ndarray, midtones: float) -> np.ndarray:
@@ -524,38 +538,254 @@ def _full_scale_of(data: np.ndarray) -> float:
     return _FULL_SCALE_16_BIT
 
 
-def _channel_median_and_spread(channel: np.ndarray, full_scale: float) -> tuple[float, float] | None:
-    """Measure one channel's median and spread the way Siril does.
+class _ChannelStatistics(NamedTuple):
+    """The raw statistics of one channel's usable pixels.
 
-    Siril takes the median and the median absolute deviation (MAD) of every
-    pixel that is not exactly 0 and not a NaN (`src/algos/statistics.c` and
-    `statistics_float.c`), not of a sample of empty sky.
+    The usable pixels are those that are neither exactly 0 nor NaN (Siril's
+    rule). Every value is in the image's own units.
+
+    Attributes
+    ----------
+    median : `float`
+        The median of the usable pixels.
+    median_absolute_deviation : `float`
+        The median of their distances from `median`.
+    minimum, maximum : `float`
+        The smallest and largest usable pixel.
+    histogram : `tuple` [`numpy.ndarray`, `int`] or `None`
+        The pixel count at each whole-number level and the level of the first
+        count, when the channel was counted as a histogram; else `None`.
+    """
+
+    median: float
+    median_absolute_deviation: float
+    minimum: float
+    maximum: float
+    histogram: tuple[np.ndarray, int] | None
+
+
+def _integer_histogram(channel: np.ndarray, known_integer: bool) -> tuple[np.ndarray, int] | None:
+    """Count how many pixels sit at each whole-number level of a channel.
+
+    Exact zeros get no count, since Siril leaves them out of its statistics.
+    A channel of float numbers is counted only when every pixel is a whole
+    number: a sparse probe catches most non-whole images at once, and each
+    block of rows is checked before it is counted.
 
     Parameters
     ----------
     channel : `numpy.ndarray`
-        One channel, 2-D.
+        One channel, 2-D, as float.
+    known_integer : `bool`
+        Whether the image was read as an integer type, so every pixel is
+        already known to be a whole number.
+
+    Returns
+    -------
+    histogram : `tuple` [`numpy.ndarray`, `int`] or `None`
+        The count at each level from the smallest pixel to the largest, and
+        the smallest pixel's level. `None` when a pixel is not a whole number
+        or is NaN or infinite, when a pixel is larger in size than
+        `_HISTOGRAM_LARGEST_MAGNITUDE`, or when the levels span more than
+        `_HISTOGRAM_MOST_LEVELS`. The caller then uses `numpy.median`.
+    """
+    if channel.ndim != 2 or channel.size == 0:
+        return None
+    if not known_integer:
+        probe = channel[::_HISTOGRAM_PROBE_STRIDE, ::_HISTOGRAM_PROBE_STRIDE]
+        if not np.array_equal(probe, np.rint(probe)):
+            return None
+    minimum = float(np.min(channel))
+    maximum = float(np.max(channel))
+    if not (np.isfinite(minimum) and np.isfinite(maximum)):
+        return None
+    if max(abs(minimum), abs(maximum)) > _HISTOGRAM_LARGEST_MAGNITUDE:
+        return None
+    level_count = int(maximum - minimum) + 1
+    if level_count > _HISTOGRAM_MOST_LEVELS:
+        return None
+    counts = np.zeros(level_count, dtype=np.int64)
+    rows_per_block = max(1, _SCALING_BLOCK_PIXELS // max(1, channel.shape[1]))
+    for first_row in range(0, channel.shape[0], rows_per_block):
+        # Subtracting the smallest pixel is exact for whole numbers this size.
+        shifted = channel[first_row : first_row + rows_per_block] - minimum
+        levels = shifted.astype(np.intp)
+        if not known_integer and not np.array_equal(levels, shifted):
+            return None
+        counts += np.bincount(levels.ravel(), minlength=level_count)
+    first_level = int(minimum)
+    if first_level <= 0 <= first_level + level_count - 1:
+        counts[-first_level] = 0
+    return counts, first_level
+
+
+def _median_of_counts(counts: np.ndarray, first_level: int) -> float:
+    """Find the median of the values a histogram counts, exactly.
+
+    The result is the number `numpy.median` gives for the same values: the
+    middle value for an odd count, and the mean of the two middle values for
+    an even count.
+
+    Parameters
+    ----------
+    counts : `numpy.ndarray`
+        How many values sit at each whole-number level, 1-D. The total must be
+        above zero.
+    first_level : `int`
+        The level of ``counts[0]``.
+
+    Returns
+    -------
+    median : `float`
+        The median of the counted values.
+    """
+    cumulative = np.cumsum(counts)
+    total = round(float(cumulative[-1]))
+    upper_rank = total // 2
+    # The value at sorted position r is the first level whose running count
+    # is above r.
+    upper = float(int(np.searchsorted(cumulative, upper_rank, side="right")) + first_level)
+    if total % 2 == 1:
+        return upper
+    lower = float(int(np.searchsorted(cumulative, upper_rank - 1, side="right")) + first_level)
+    return (lower + upper) / 2.0
+
+
+def _statistics_from_histogram(counts: np.ndarray, first_level: int) -> _ChannelStatistics | None:
+    """Measure the median, MAD and range of the values a histogram counts.
+
+    The distance of each value from the median is a whole number or a whole
+    number plus one half, so twice the distance is a whole number. The
+    distances are counted as twice their size in a second histogram, and its
+    median is halved. Every step is exact, so the numbers equal those
+    `numpy.median` gives on the pixels themselves.
+
+    Parameters
+    ----------
+    counts : `numpy.ndarray`
+        How many usable pixels sit at each whole-number level, 1-D.
+    first_level : `int`
+        The level of ``counts[0]``.
+
+    Returns
+    -------
+    statistics : `_ChannelStatistics` or `None`
+        The statistics, or `None` when no pixel is counted.
+    """
+    occupied = np.flatnonzero(counts)
+    if occupied.size == 0:
+        return None
+    median = _median_of_counts(counts, first_level)
+    twice_median = round(2.0 * median)
+    twice_distances = np.abs(2 * (occupied.astype(np.int64) + first_level) - twice_median)
+    distance_counts = np.bincount(twice_distances, weights=counts[occupied].astype(np.float64))
+    median_absolute_deviation = _median_of_counts(distance_counts, 0) / 2.0
+    return _ChannelStatistics(
+        median=median,
+        median_absolute_deviation=median_absolute_deviation,
+        minimum=float(occupied[0] + first_level),
+        maximum=float(occupied[-1] + first_level),
+        histogram=(counts, first_level),
+    )
+
+
+def _channel_statistics(channel: np.ndarray, known_integer: bool = False) -> _ChannelStatistics | None:
+    """Measure one channel's usable pixels the way Siril does.
+
+    Siril takes the median and the median absolute deviation (MAD) of every
+    pixel that is not exactly 0 and not a NaN (`src/algos/statistics.c` and
+    `statistics_float.c`), not of a sample of empty sky. A channel of whole
+    numbers (any camera frame read from a file) is counted as a histogram,
+    which is several times faster than sorting the pixels and gives exactly
+    the same numbers. Any other channel uses `numpy.median`.
+
+    Parameters
+    ----------
+    channel : `numpy.ndarray`
+        One channel, 2-D, as float.
+    known_integer : `bool`, optional
+        Whether the image was read as an integer type. Defaults to `False`.
+
+    Returns
+    -------
+    statistics : `_ChannelStatistics` or `None`
+        The median, MAD and range of the usable pixels, or `None` when the
+        channel has no usable pixel.
+    """
+    histogram = _integer_histogram(channel, known_integer)
+    if histogram is not None:
+        return _statistics_from_histogram(*histogram)
+    values = channel[np.isfinite(channel) & (np.abs(channel) > 0.0)]
+    if values.size == 0:
+        return None
+    median = float(np.median(values))
+    return _ChannelStatistics(
+        median=median,
+        median_absolute_deviation=float(np.median(np.abs(values - median))),
+        minimum=float(np.min(values)),
+        maximum=float(np.max(values)),
+        histogram=None,
+    )
+
+
+def _median_of_all_channels(arr: np.ndarray, statistics: list[_ChannelStatistics]) -> float:
+    """Find the median of every usable pixel of an image, channels together.
+
+    Parameters
+    ----------
+    arr : `numpy.ndarray`
+        The image, 2-D or colour (colour axis last).
+    statistics : `list` [`_ChannelStatistics`]
+        The statistics of each channel of `arr`, in order.
+
+    Returns
+    -------
+    median : `float`
+        The median, in the image's own units. A 2-D image reuses its one
+        channel's median. A colour image whose channels were all counted as
+        histograms adds the histograms together; any other colour image uses
+        `numpy.median`.
+    """
+    if len(statistics) == 1:
+        return statistics[0].median
+    histograms = [measured.histogram for measured in statistics]
+    if all(histogram is not None for histogram in histograms):
+        counted = [histogram for histogram in histograms if histogram is not None]
+        first_level = min(start for _, start in counted)
+        last_level = max(start + counts.size - 1 for counts, start in counted)
+        combined = np.zeros(last_level - first_level + 1, dtype=np.int64)
+        for counts, start in counted:
+            combined[start - first_level : start - first_level + counts.size] += counts
+        return _median_of_counts(combined, first_level)
+    return float(np.median(arr[np.isfinite(arr) & (np.abs(arr) > 0.0)]))
+
+
+def _channel_median_and_spread(measured: _ChannelStatistics, full_scale: float) -> tuple[float, float]:
+    """Turn one channel's raw statistics into Siril's median and spread.
+
+    Parameters
+    ----------
+    measured : `_ChannelStatistics`
+        The channel's statistics (see `_channel_statistics`).
     full_scale : `float`
         The brightness that counts as 1.0 (see `_full_scale_of`).
 
     Returns
     -------
-    median_and_spread : `tuple` [`float`, `float`] or `None`
+    median_and_spread : `tuple` [`float`, `float`]
         The median and the MAD scaled to a standard deviation, both as
         fractions of full scale. The spread is Siril's guard value when the
-        MAD is exactly 0. `None` when the channel has no usable pixel.
+        MAD is exactly 0.
     """
-    values = channel[np.isfinite(channel) & (np.abs(channel) > 0.0)]
-    if values.size == 0:
-        return None
-    median = float(np.median(values))
-    spread = float(np.median(np.abs(values - median))) / full_scale * MAD_TO_SIGMA
+    spread = measured.median_absolute_deviation / full_scale * MAD_TO_SIGMA
     if not spread > 0.0:
         spread = resolve(_AUTOSTRETCH_ZERO_SPREAD_GUARD).value
-    return median / full_scale, spread
+    return measured.median / full_scale, spread
 
 
-def _autostretch_parameters(arr: np.ndarray, full_scale: float = 1.0) -> tuple[float, float, float] | None:
+def _autostretch_parameters(
+    arr: np.ndarray, full_scale: float = 1.0, known_integer: bool = False
+) -> tuple[float, float, float] | None:
     """Choose the black point, white point and midtones balance for an image.
 
     This is Siril's autostretch with its channels linked
@@ -577,6 +807,10 @@ def _autostretch_parameters(arr: np.ndarray, full_scale: float = 1.0) -> tuple[f
         `_full_scale_of`). Floating-point data whose median is above 1.0 is
         in counts, not normalized, so it uses the 16-bit full scale instead.
         Defaults to 1.0.
+    known_integer : `bool`, optional
+        Whether the image was read as an integer type, so its statistics can
+        be counted as a histogram without first checking for whole numbers.
+        It never changes the result. Defaults to `False`.
 
     Returns
     -------
@@ -590,21 +824,20 @@ def _autostretch_parameters(arr: np.ndarray, full_scale: float = 1.0) -> tuple[f
     if arr.size == 0:
         return None
     channels = [arr] if arr.ndim == 2 else [arr[..., index] for index in range(arr.shape[-1])]
-    if full_scale <= 1.0:
-        finite_values = arr[np.isfinite(arr) & (np.abs(arr) > 0.0)]
-        if finite_values.size and float(np.median(finite_values)) > 1.0:
-            full_scale = _FULL_SCALE_16_BIT
-    statistics = [_channel_median_and_spread(channel, full_scale) for channel in channels]
-    if any(measured is None for measured in statistics):
+    measured_channels = [_channel_statistics(channel, known_integer) for channel in channels]
+    if any(measured is None for measured in measured_channels):
         logger.debug("Image has no usable pixels in a channel; using a percentile stretch instead.")
         return None
-    nonzero_pixels = arr[np.isfinite(arr) & (np.abs(arr) > 0.0)]
-    if not float(np.max(nonzero_pixels)) > float(np.min(nonzero_pixels)):
+    measured = [channel for channel in measured_channels if channel is not None]
+    if full_scale <= 1.0 and _median_of_all_channels(arr, measured) > 1.0:
+        full_scale = _FULL_SCALE_16_BIT
+    if not max(channel.maximum for channel in measured) > min(channel.minimum for channel in measured):
         logger.debug("Image has a single brightness; using a percentile stretch instead.")
         return None
+    statistics = [_channel_median_and_spread(channel, full_scale) for channel in measured]
 
-    medians = [measured[0] for measured in statistics if measured is not None]
-    spreads = [measured[1] for measured in statistics if measured is not None]
+    medians = [median for median, _ in statistics]
+    spreads = [spread for _, spread in statistics]
     mean_median = float(np.mean(medians))
     shadows_clip = resolve(_AUTOSTRETCH_SHADOWS_CLIP_SIGMA).value
     target = resolve(_AUTOSTRETCH_TARGET_BACKGROUND).value
@@ -722,6 +955,106 @@ def _display_array(data: np.ndarray) -> np.ndarray:
     return arr
 
 
+class ScaledPicture(NamedTuple):
+    """An image scaled to 0-255, with the numbers it was scaled with.
+
+    Attributes
+    ----------
+    picture : `numpy.ndarray`
+        The image as unsigned 8-bit numbers.
+    black, white : `float`
+        The brightness drawn as 0 and as 255.
+    stretch_parameters : `StretchParameters` or `None`
+        The automatic stretch the picture was drawn with, or `None` when it
+        was drawn with a plain linear scaling.
+    """
+
+    picture: np.ndarray
+    black: float
+    white: float
+    stretch_parameters: StretchParameters | None
+
+
+def scale_with_parameters(
+    data: np.ndarray,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    stretch: bool = True,
+    percentiles: tuple[float, float] = (1.0, 99.0),
+) -> ScaledPicture:
+    """Scale an image to 0-255 and give back the stretch it used.
+
+    This is `ImageScaler.scale_to_uint8` that also returns the automatic
+    stretch, so a caller that needs both measures the image once instead of
+    twice (the median and MAD of a 24-megapixel frame take a large part of a
+    render). The parameters and the picture are those of
+    `ImageScaler.scale_to_uint8` and `ImageScaler.autostretch_parameters`.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The raw image data, 2-D or colour.
+    vmin, vmax : `float`, optional
+        A fixed brightness range to map to 0-255.
+    stretch : `bool`, optional
+        Whether to apply the automatic stretch. Defaults to `True`.
+    percentiles : `tuple` [`float`, `float`], optional
+        Percentiles used for the plain linear stretch.
+
+    Returns
+    -------
+    scaled : `ScaledPicture`
+        The picture, the black and white points, and the automatic stretch
+        (`None` when the picture was not drawn with it).
+    """
+    # Handle multi-channel data (e.g. RGB FITS)
+    arr = _display_array(data)
+
+    autostretch = (
+        _autostretch_parameters(arr, _full_scale_of(data), np.issubdtype(np.asarray(data).dtype, np.integer))
+        if stretch and vmin is None and vmax is None
+        else None
+    )
+    midtones: float | None = None
+    stretch_parameters: StretchParameters | None = None
+    if autostretch is not None:
+        vmin, vmax, midtones = autostretch
+        stretch_parameters = StretchParameters(black_point=vmin, white_point=vmax, midtones=midtones)
+
+    if vmin is None or vmax is None:
+        if stretch:
+            try:
+                # Sampling for large arrays to improve performance
+                if arr.size > 100000:
+                    sample = percentile_sample(arr)
+                    calc_vmin, calc_vmax = np.percentile(sample, percentiles)
+                else:
+                    calc_vmin, calc_vmax = np.percentile(arr, percentiles)
+
+                if vmin is None:
+                    vmin = calc_vmin
+                if vmax is None:
+                    vmax = calc_vmax
+            except DATA_ERRORS as e:
+                logger.warning("Error calculating percentiles for scaling: %s", e)
+
+        # Fallback to absolute min/max if stretch is off or failed
+        if vmin is None:
+            vmin = float(np.nanmin(arr))
+        if vmax is None:
+            vmax = float(np.nanmax(arr))
+
+    if not np.isfinite(vmin):
+        vmin = 0.0
+    if not np.isfinite(vmax) or vmax == vmin:
+        vmax = vmin + 1.0
+
+    # Clip and scale
+    return ScaledPicture(
+        _scale_to_uint8_in_blocks(arr, vmin, vmax, midtones), float(vmin), float(vmax), stretch_parameters
+    )
+
+
 class ImageScaler:
     """Adjust an astronomy image's brightness and contrast for viewing."""
 
@@ -741,7 +1074,9 @@ class ImageScaler:
             when the image has no measurable sky (then `scale_to_uint8`
             uses a plain percentile stretch).
         """
-        autostretch = _autostretch_parameters(_display_array(data), _full_scale_of(data))
+        autostretch = _autostretch_parameters(
+            _display_array(data), _full_scale_of(data), np.issubdtype(np.asarray(data).dtype, np.integer)
+        )
         if autostretch is None:
             return None
         black_point, white_point, midtones = autostretch
@@ -770,7 +1105,8 @@ class ImageScaler:
         stretch. Passing an explicit `vmin`/`vmax` (e.g. to keep several
         frames on one fixed scale) always gets plain linear scaling
         instead, since that is a deliberate choice of absolute brightness
-        range, not a request for the automatic display stretch.
+        range, not a request for the automatic display stretch. A caller
+        that also needs the stretch uses `scale_with_parameters`.
 
         Parameters
         ----------
@@ -789,45 +1125,5 @@ class ImageScaler:
             The new image data, the black point used, and the white
             point used.
         """
-        # Handle multi-channel data (e.g. RGB FITS)
-        arr = _display_array(data)
-
-        autostretch = (
-            _autostretch_parameters(arr, _full_scale_of(data))
-            if stretch and vmin is None and vmax is None
-            else None
-        )
-        midtones: float | None = None
-        if autostretch is not None:
-            vmin, vmax, midtones = autostretch
-
-        if vmin is None or vmax is None:
-            if stretch:
-                try:
-                    # Sampling for large arrays to improve performance
-                    if arr.size > 100000:
-                        sample = percentile_sample(arr)
-                        calc_vmin, calc_vmax = np.percentile(sample, percentiles)
-                    else:
-                        calc_vmin, calc_vmax = np.percentile(arr, percentiles)
-
-                    if vmin is None:
-                        vmin = calc_vmin
-                    if vmax is None:
-                        vmax = calc_vmax
-                except DATA_ERRORS as e:
-                    logger.warning("Error calculating percentiles for scaling: %s", e)
-
-            # Fallback to absolute min/max if stretch is off or failed
-            if vmin is None:
-                vmin = float(np.nanmin(arr))
-            if vmax is None:
-                vmax = float(np.nanmax(arr))
-
-        if not np.isfinite(vmin):
-            vmin = 0.0
-        if not np.isfinite(vmax) or vmax == vmin:
-            vmax = vmin + 1.0
-
-        # Clip and scale
-        return _scale_to_uint8_in_blocks(arr, vmin, vmax, midtones), float(vmin), float(vmax)
+        scaled = scale_with_parameters(data, vmin=vmin, vmax=vmax, stretch=stretch, percentiles=percentiles)
+        return scaled.picture, scaled.black, scaled.white

@@ -1,13 +1,15 @@
 """Purpose: Measure the throwaway backend's RPC timings, CPU and memory.
 
-Description: The backend does not log how long each RPC call takes (its log
-has only failures and warnings, and the HTTP access log is off). So the
-per-method timings come from the other end: `flow.mjs` records the round-trip
-time of every `/api/rpc` call the page makes. This script turns those records
-into count, median (p50) and 95th percentile (p95) per method. It also
-samples the backend process from `/proc` while the run goes on, to get its
-CPU seconds and peak resident memory, and counts failed RPC calls in the
-backend log.
+Description: Per-method timings come from both ends. `flow.mjs` records the
+round-trip time of every `/api/rpc` call the page makes. The throwaway
+backend runs with ``ASTROMETRICS_LOG_LEVEL=VERBOSE``, so it also logs one
+``RPC_TIMING`` line per call to its log, with the time the call waited for a
+worker (``wait_ms``: a heavy-lane place or a free thread) and the time its
+work ran (``run_ms``); see ``backend/services/infrastructure/rpc_timing.py``.
+This script turns both into count, median (p50) and 95th percentile (p95)
+per method. It also samples the backend process from `/proc` while the run
+goes on, to get its CPU seconds and peak resident memory, and counts failed
+RPC calls in the backend log.
 
 Two commands:
 
@@ -45,6 +47,10 @@ from pathlib import Path
 
 #: The real backend's port. The sampler refuses to look at a process using it.
 REAL_BACKEND_PORT = 5000
+
+#: The word that starts each backend timing line (``RPC_TIMING_MARKER`` in
+#: ``backend/services/infrastructure/rpc_timing.py``).
+RPC_TIMING_MARKER = "RPC_TIMING"
 
 _running = True
 
@@ -161,6 +167,72 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
+def read_backend_timings(log_text: str) -> list[dict[str, object]]:
+    """Read the backend's per-call timing lines from its log.
+
+    Parameters
+    ----------
+    log_text : `str`
+        The whole backend log. Lines without the timing marker, and timing
+        lines that do not hold a JSON object, are skipped.
+
+    Returns
+    -------
+    timings : `list` [`dict`]
+        One entry per call: ``method``, ``lane``, ``wait_ms``, ``run_ms`` and
+        ``ok``.
+    """
+    timings: list[dict[str, object]] = []
+    for line in log_text.splitlines():
+        marker_at = line.find(RPC_TIMING_MARKER + " ")
+        if marker_at < 0:
+            continue
+        try:
+            # The backend's log format may add context after the message, so
+            # read only the JSON object that follows the marker.
+            entry, _ = json.JSONDecoder().raw_decode(line[marker_at + len(RPC_TIMING_MARKER) + 1 :])
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and "method" in entry and "run_ms" in entry and "wait_ms" in entry:
+            timings.append(entry)
+    return timings
+
+
+def summarize_backend_timings(timings: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    """Give each method's backend run time and lane wait, p50 and p95.
+
+    Parameters
+    ----------
+    timings : `list` [`dict`]
+        The entries from `read_backend_timings`.
+
+    Returns
+    -------
+    methods : `dict` [`str`, `dict`]
+        For each method, in name order: ``count``, ``lane`` (the lanes its
+        calls used, joined by ``+`` when more than one), ``failed`` (calls
+        that raised), ``run_p50_ms``, ``run_p95_ms``, ``wait_p50_ms`` and
+        ``wait_p95_ms``.
+    """
+    by_method: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for entry in timings:
+        by_method[str(entry["method"])].append(entry)
+    summary: dict[str, dict[str, object]] = {}
+    for method, entries in sorted(by_method.items()):
+        run_times = [float(entry["run_ms"]) for entry in entries]
+        wait_times = [float(entry["wait_ms"]) for entry in entries]
+        summary[method] = {
+            "count": len(entries),
+            "lane": "+".join(sorted({str(entry.get("lane", "")) for entry in entries})),
+            "failed": sum(1 for entry in entries if entry.get("ok") is False),
+            "run_p50_ms": statistics.median(run_times),
+            "run_p95_ms": percentile(run_times, 0.95),
+            "wait_p50_ms": statistics.median(wait_times),
+            "wait_p95_ms": percentile(wait_times, 0.95),
+        }
+    return summary
+
+
 def summarize_command(arguments: argparse.Namespace) -> int:
     """Write per-method timings, CPU seconds and peak memory.
 
@@ -192,18 +264,21 @@ def summarize_command(arguments: argparse.Namespace) -> int:
     peak_rss_kb = max((sample["peak_rss_kb"] for sample in samples), default=None)
     cpu_seconds = (samples[-1]["cpu_seconds"] - samples[0]["cpu_seconds"]) if len(samples) > 1 else None
     failures = 0
+    backend_methods: dict[str, dict[str, object]] = {}
     log_path = Path(arguments.log)
     if log_path.exists():
-        failures = sum(
-            1
-            for line in log_path.read_text(errors="replace").splitlines()
-            if " RPC " in line and " failed " in line
-        )
+        log_text = log_path.read_text(errors="replace")
+        failures = sum(1 for line in log_text.splitlines() if " RPC " in line and " failed " in line)
+        backend_methods = summarize_backend_timings(read_backend_timings(log_text))
     Path(arguments.out).write_text(
         json.dumps(
             {
-                "note": "Per-method times are the page's round trips (the backend logs no timing).",
+                "note": (
+                    "methods: the page's round trips. backend_methods: the backend's own time per call, "
+                    "split into the wait for a worker (wait_*) and the run (run_*) (RPC_TIMING lines)."
+                ),
                 "methods": methods,
+                "backend_methods": backend_methods,
                 "backend_peak_rss_mb": None if peak_rss_kb is None else peak_rss_kb / 1024.0,
                 "backend_cpu_seconds": cpu_seconds,
                 "sample_count": len(samples),

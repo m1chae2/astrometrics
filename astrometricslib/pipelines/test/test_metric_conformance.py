@@ -259,6 +259,18 @@ def _with_notice_rows(pipeline: str, rows: list[QualityMeasurement]) -> list[Qua
     from astrometricslib.pipelines.shared.quality.notices import camera_without_profile_measurement
 
     notice_rows = [camera_without_profile_measurement("Acme Imager 9000", context, context.run_subject())]
+    if pipeline in ("photometry", "spectroscopy"):
+        # Stored by the stage runner when it skips the stage for want of
+        # astrometry's solution (`tasks.report_needs_astrometry`).
+        from astrometricslib.pipelines.shared.quality.notices import needs_astrometry_measurement
+
+        notice_rows.append(
+            needs_astrometry_measurement(
+                "needs astrometry: its result is missing; run processing.astrometry.run(target) first",
+                context,
+                context.run_subject(),
+            )
+        )
     if pipeline == "astrometry":
         from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
             gaia_tiles_missing_notice_measurement,

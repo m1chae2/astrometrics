@@ -7,11 +7,12 @@ import { useEffect, useSyncExternalStore } from 'react';
  * then (see electron/main.js and ui/App.tsx). Module state is naturally
  * scoped per window (each BrowserWindow's renderer is its own JS context),
  * so this only ever completes in the main window, which is the only window
- * App.tsx force-mounts every mode in.
+ * App.tsx mounts every mode in at start-up (the shown mode first, the rest when
+ * the browser is next idle; see ui/common/hooks/useMountedModes.ts).
  */
 
 /**
- * Every mode App.tsx's MODE_PANELS force-mounts in the main window at boot.
+ * Every mode App.tsx's MODE_PANELS mounts in the main window at boot.
  * Keep this in sync with MODE_PANELS in ui/App.tsx.
  */
 const APP_MODE_NAMES = [
@@ -70,6 +71,17 @@ export function useIsModeReady(mode: string): boolean {
 }
 
 /**
+ * Hook form of `isAppReady`: re-renders when start-up is over. Work that must not slow the
+ * start of the app, such as reading data ahead for a hidden display, waits for this.
+ * In an extra window it stays false, because only the main window mounts every display.
+ *
+ * @return True once every mode has reported ready.
+ */
+export function useIsAppReady(): boolean {
+    return useSyncExternalStore(subscribeToReadiness, isAppReady);
+}
+
+/**
  * Called by a mode's top-level component once its initial/critical data has
  * loaded. Once every mode has reported, tells the main process so it can
  * dismiss the splash screen and reveal the main window. Safe to call more
@@ -79,11 +91,10 @@ export function useIsModeReady(mode: string): boolean {
 export function reportModeReady(mode: string): void {
     if (reported) return;
     const wasPending = pendingModes.delete(mode);
+    // Mark the whole app ready before telling the watchers, so `useIsAppReady` sees it on this change.
+    if (pendingModes.size === 0) reported = true;
     if (wasPending) readyListeners.forEach((listener) => listener());
-    if (pendingModes.size === 0) {
-        reported = true;
-        window.astrometrics?.app?.reportAppFullyLoaded?.();
-    }
+    if (reported) window.astrometrics?.app?.reportAppFullyLoaded?.();
 }
 
 /**

@@ -1027,6 +1027,109 @@ print(median_signal_to_noise(table)[:10])
 - **Guarded by tests:** None.
 - **Raw record:** None kept outside the scratch folder of the run.
 
+### PHO-23
+
+**Siril's aperture photometry against ours on one M 13 session, and the faint stars' errors**
+
+- **Claim:** With the same circle, sky ring, gain and saturation level, Siril's `seqpsf` photometry gives the same fluxes as ours to 0.14% on the bright stars and the same bright-star scatter (0.0073 against 0.0070 mag). On the faint stars Siril's scatter is about 10% lower. Our errors with the scintillation term match the bright stars' scatter, while Siril's bright stars scatter 1.7 times their errors. Our faint stars scatter about 16% more than their errors predict, a finding whose cause is open. With its default settings Siril measured a neighbor in place of 12 of the 44 stars, and it passed on wrong points with small errors. On these results the user decided that our photometry measuring stays and that Siril is not used for photometry.
+- **Settings it supports:**
+  - Code constants `APERTURE_RADIUS_PX`, `SKY_ANNULUS_INNER_RADIUS_PX` and `SKY_ANNULUS_OUTER_RADIUS_PX` in `astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py` (4 px and 7 to 12 px at this star width; design estimate [PHO-D01](#design-estimates)). Relation: sanity check only. Siril measured the same circle and ring to the same flux, which checks how they are measured, not the choice of radius. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.APERTURE_RADIUS_PX --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
+  - The scintillation term's per-session coefficient (`processing/scintillation_term.py`; its limits are design estimate [PHO-D38](#design-estimates)). Relation: sanity check only. On this session it was measured as 1.11 from 20 comparison stars and 39 frames, and it brought the bright stars' scatter over their errors from 1.53 to 1.61 down to 1.00 to 1.03. <!-- impl: astrometricslib.pipelines.photometry.processing.scintillation_term.MINIMUM_MEMBERS_FOR_COEFFICIENT -->
+  - Config key `[Observatory.Camera.ZWO ASI533MM Pro] sensor_noise`, the gain of 0.783 e-/ADU and read noise of 3.8 e- of [PHO-03](#pho-03). Relation: sanity check only. The frames were taken at offset 0, and the run used the offset-10 values, as its own note says. <!-- impl: astrometricslib.models.camera_profile.CameraProfile -->
+- **Status:** Partly measured. One session of one target from one camera, 44 stars of which 12 are faint, and Siril ran from the study scripts, not through the app.
+- **Data you need:** One session of 30 or more light frames of a rich field from one camera with a measured gain and read noise. The field needs bright unsaturated stars for a comparison ensemble, faint isolated stars, a few catalog variables with periods under a day and a few saturated stars. You also need Siril 1.4 with its local Gaia astrometry catalog.
+- **Procedure:** The scripts are in the study folder, outside the repository (see **Regenerate with**). They read and write only that folder, and the frames are copies taken out of the library. Steps 1 and 5 call internal functions, not part of the public API, which may change.
+  1. Run our measuring step on the copied frames inside the equipment context of the camera and optic, as the pipeline's task runner does (`run_ours.py`). This is `VariabilityAnalyzer.process` with 8 workers and then `normalize_light_curves`. A second pass runs the per-frame worker one frame at a time on one core, to record every star's aperture position and the single-core time. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.process --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.normalize_light_curves -->
+  2. Plate-solve every frame with Siril, headless and offline, with a private copy of the user's Siril settings that holds `update_default_scale=false`: `link m13`, then `seqplatesolve m13 <ra>,<dec> -focal=405 -pixelsize=3.76 -force`.
+  3. Choose the study stars and give each one its sky position from the reference frame's Siril solution (`select_stars.py`). Ten of our 20 comparison stars, every second one by brightness, form a common ensemble. The other ten are the bright constant stars. Twelve faint stars are spread in brightness rank from about 150 to 1,500, isolated (no star within 20 pixels), not crowded, at least 400 pixels from the cluster core and 150 pixels from the frame edge. The variables are our stars within 3 arcsec of 8 short-period catalog variables (VSX types and periods from the library). Four stars reach the clip.
+  4. Run Siril's `seqpsf <sequence> -wcs=<ra>,<dec>` once for each star in one Siril session, in two modes (`run_siril_phot.py`). Matched mode first sets `setphot -inner=7 -outer=12 -aperture=4 -dyn_ratio=0 -gain=0.783 -max_val=65000`, our circle, ring, gain and saturation level. Default mode sets Siril's documented defaults: a ring of 20 to 30 pixels, a circle of 2 FWHM (`-dyn_ratio=4`), a gain of 2.3 and a pixel limit of 60,000.
+  5. Compare the two (`compare.py`). Divide every star by the common ensemble (inverse-variance weighted, each ensemble star measured against the other nine) on the 37 frames our run kept, for both methods. Then take each star's flux ratio, its RMS scatter in magnitudes, its RMS over the median predicted error and the slope of each variable over the run. A Siril star whose position in the first frame lies more than 2 pixels from the requested one is counted as a neighbor and left out.
+- **Acceptance criterion:** Not recorded (set after the result). The study compared the two methods side by side and set no limit in advance.
+- **What to look at:** The median Siril over ours flux ratio and its frame-to-frame robust scatter (1.4826 times the median absolute deviation); a ratio near 1 with a small scatter means the two measure the same light. The RMS of each constant star's normalized light curve, in magnitudes; lower is better. That RMS over the median predicted error; near 1 means the errors describe the scatter, above 1 means they are too small. The slope of each variable, in magnitudes per hour, against its standard error.
+- **Our result:** 2026-11-27. Code version: commit 1257e980 for the photometry code. Siril 1.4.5 (Flatpak), offline, with its Gaia DR3 astrometry catalog. Data: M 13, ZWO ASI 533MM Pro on the 405 mm Apertura 75Q, 39 raw luminance frames of 30 s at gain 0 and offset 0, dated 2026-05-24 and spanning 24 min. Our run found 2,000 stars and dropped 2 of the 39 frames as outliers, and the comparison uses the other 37 for both methods. Sample size: 44 stars, namely the 10-star common ensemble, 10 bright constant stars, 12 faint stars, 8 catalog variables and 4 saturated stars. Uncertainty: each number is a median over the stars of a group; no confidence interval was estimated. Data split: no value was tuned on these frames.
+
+  **Table A.** Siril over ours flux ratio: the median over the stars of each star's median ratio, and the median of each star's frame-to-frame robust scatter.
+
+  | Group | Matched mode | Default mode, stars found correctly |
+  | --- | --- | --- |
+  | Common ensemble (10) | 0.9986, scatter 0.14% | 1.0234, scatter 1.1% |
+  | Bright constant stars (10) | 0.9987, scatter 0.16% | 1.025, scatter 1.1% |
+  | Faint stars (12) | 0.9956, scatter 4.6% | 1.0205, scatter 2.5% |
+  | Catalog variables (8) | 0.9873, scatter 3.1% | 1.016, scatter 4.7% |
+
+  In matched mode Siril found every star within 2 pixels of its position. In default mode it locked on a neighbor 18 to 51 pixels away for 12 stars: 1 bright constant star, 8 of the 12 faint stars and 3 of the 8 variables.
+
+  **Table B.** Constant stars against the common ensemble, 37 frames: median RMS and median RMS over the predicted error. Our errors are given with and without the scintillation term (CCD only).
+
+  | Group | Ours | Ours, CCD only | Siril, matched | Siril, default |
+  | --- | --- | --- | --- | --- |
+  | Common ensemble (10) | 0.0067 mag; 1.00 | 1.53 | 0.0069 mag; 1.68 | 0.0165 mag; 5.77 |
+  | Bright constant stars (10) | 0.0070 mag; 1.03 | 1.61 | 0.0073 mag; 1.75 | 0.0220 mag; 6.83 (9 stars) |
+  | Faint stars (12) | 0.0843 mag; 1.16 | 1.19 | 0.0799 mag; 0.96 | 0.0443 mag; 1.31 (4 stars) |
+
+  Star by star, the median ratio of Siril's matched RMS to ours is 1.017 for the ensemble, 1.013 for the bright stars, 0.896 for the faint stars and 0.899 for the variables. Siril's default RMS is 2.37 times ours on the ensemble and 3.64 times on the bright stars. Our pipeline's own light curves, normalized by its full 20-star ensemble, give the same picture: bright 0.0070 mag and 1.05, faint 0.0842 mag and 1.17.
+
+  The faint-star errors. Our RMS over the predicted error on the 12 faint stars runs from 0.77 to 1.33, and 10 of the 12 lie above 1.05. Our predicted errors and Siril's are close on the same stars (for example 0.0129 and 0.0119 mag on the brightest faint star). Siril's measured scatter is lower, which points to our faint-star measurement rather than the error formula. Measuring with our code at three positions per frame left the faint scatter unchanged (0.0843, 0.0862 and 0.0836 mag; see [PHO-24](#pho-24)). The star positions therefore do not explain it. The sky estimate and the pixel handling in the circle are the parts this study did not compare.
+
+  The variables. The slopes of all 8 agree between ours and Siril's matched mode within one standard error. The two with a clear slope: the EW variable with a period of 0.375 d changed by -0.317 ± 0.042 mag/h (ours) and -0.305 ± 0.040 mag/h (Siril), and the EW variable of 0.280 d by 0.186 ± 0.060 and 0.193 ± 0.052 mag/h. A negative slope means the star brightened. Siril's default mode gave -0.180 ± 0.068 and 0.350 ± 0.138 mag/h.
+
+  Saturation. The four saturated stars reach 65,532 ADU in 38, 25, 21 and 1 of the 39 frames. Our run removed exactly those points, and Siril's matched mode refused the same frames ("pixel out of range"). On the frames left for the other three, the flux ratios are 1.0012, 0.9986 and 0.9969.
+
+  Wrong points with small errors. In matched mode Siril measured one bright constant star (Star_26) 0.66 and 0.62 mag too faint in frames 022 and 027 (file numbers), with errors of 0.0053 mag and no message. It refused frames 028 and 029 ("not in area"). Its RMS on that star is 0.158 mag against our 0.0070. In default mode one variable (Star_441) is 1.05 mag too faint in frame 025 with an error of 0.066 mag. Our run has no such point on these stars.
+
+  Run time. Our measuring step took 36.9 s for the 39 frames and 2,000 stars with 8 workers, or 1.57 ms per star and frame on one core. Siril's `seqplatesolve` took 3.6 s for the 39 frames with 12 threads. Its `seqpsf` measures one star per command: 2.45 s for the 44 stars in matched mode (0.043 s per star over the 39 frames, 1.10 ms per star and frame) and 9.0 s in default mode. At the matched rate, 2,000 stars would take about 90 s; this is a scaling of the measured rate, not a measurement.
+
+  **Decision.** The user decided on 2026-11-27, on these results, that our photometry measuring stays and that Siril is not used for photometry.
+- **Verdict:** Not judged.
+- **Limits:** One session of 24 min, one target, one camera and one optic, on raw frames that were not flat-fielded. Twelve faint stars are a small sample for a 16% effect: the median ratio of 1.16 rests on stars that range from 0.77 to 1.33. Siril ran from the study scripts with one star per command, so the app's own Siril driver was not tested. The comparison divides both methods by one common 10-star ensemble, not by each method's own ensemble. Two frames our run dropped are left out of both. The run time of 2,000 stars in Siril is scaled from 44 stars. What would settle the faint-star finding: compare our sky value and Siril's for each faint star and frame; add stars of known flux to copies of the frames and compare their scatter with their errors; and repeat on another session and target with 100 or more faint stars.
+- **To tune for your setup:** Run the study on one session of your own camera. If your bright stars' scatter over their errors is far from 1, check the gain and read noise first ([PHO-03](#pho-03)) and then the scintillation term ([PHO-17](#pho-17)). If your faint stars also show a ratio above 1, compare the sky values before changing the error formula. If you run Siril's `seqpsf` yourself, set its ring and circle to match the stars, because its defaults locked on neighbors here.
+- **Regenerate with:** The study scripts in `~/.cache/astrometrics/photometry-study/scripts/` on the observatory computer, outside the repository, in the order `run_ours.py`, the Siril plate solve of step 2, `select_stars.py`, `run_siril_phot.py matched`, `run_siril_phot.py default` and `compare.py`. `compare.py` prints `summary.json` and writes the tables. `env.sh` points the run at a copy of the library, which the folder no longer holds, so a rerun starts by making one. No script in the folder writes `timing.json`; its times were collected by hand.
+- **Guarded by tests:** None.
+- **Raw record:** Not in the repository. The study folder's `out/` folder on the observatory computer (`~/.cache/astrometrics/photometry-study/out/`) holds `summary.json`, `flux_ratio_per_star.csv`, `differential_rms.csv`, `variables.csv`, `light_curves_mag.json`, `timing.json`, `ours.json`, `stars.json`, `siril_matched.json`, `siril_default.json` and each Siril run's log.
+
+### PHO-24
+
+**Star positions from per-frame Siril plate solutions against the drift tracking (M 13)**
+
+- **Claim:** On one M 13 session whose field drifted by up to 16 pixels, the star positions that each frame's own Siril plate solution predicts agree with those of our drift tracking to a median of 0.064 pixels. Each lies about as close to the stars' measured centers as the other. Photometry measured at either position has the same scatter as photometry at our re-centered positions. On this result the user decided that per-frame Siril plate solutions replace the drift tracking. The result shows that the two agree on this session; it does not show that the plate solutions are better.
+- **Settings it supports:**
+  - Code constants `ALIGNMENT_ANCHOR_REACH_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.ALIGNMENT_ANCHOR_REACH_PX --> and `MAX_CENTROID_SHIFT_PX` <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX --> in `astrometricslib/pipelines/photometry/pre_processing/frame_photometry.py`, which the drift tracking (`FrameAlignment`, fitted by `calculate_frame_alignment`) uses. Relation: sanity check only. The tracking matched the plate solutions here, and the largest move from a tracked position to the measured center was 1.50 pixels, at the 1.5 pixel limit. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.FrameAlignment.predict_many --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.calculate_frame_alignment -->
+- **Status:** Partly measured. One session of one target with a steady field; a field that turns during the session was not tested.
+- **Data you need:** One session of 30 or more frames whose field drifts across the sensor, plate-solved frame by frame, and our photometry run on the same frames. A second session whose field turns, such as the NGC 2403 night of [PHO-04](#pho-04), tests the case this one does not.
+- **Procedure:** The same study folder and scripts as [PHO-23](#pho-23), after its steps 1 and 2. The steps call internal functions, not part of the public API, which may change.
+  1. For every star of our run, take its position in the reference frame, turn it into a sky position with the reference frame's Siril solution, and turn that back into a position in each later frame with that frame's own solution (`compare.py`).
+  2. In each frame, compare three positions of every star: that plate-solution position, our drift-tracking prediction (`FrameAlignment.predict_many`) and our re-centered position. Measurements whose re-centering fell back are left out of the comparisons with the re-centered position.
+  3. Measure every study star with our aperture code (`measure_aperture_photometry`, the run's circle, ring, neighbor mask, gain and read noise) at each of the three positions with no re-centering (`forced_positions.py`). Then compute each star's RMS against the common ensemble as in [PHO-23](#pho-23) (`compare_forced.py`).
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The distance between each pair of positions, in pixels: its median, its 95th percentile and its largest value. Distances well under the star width (an FWHM of about 2.4 pixels here, as Siril measured it) mean the apertures fall on the same pixels. The median photometric RMS at each position, in magnitudes.
+- **Our result:** 2026-11-27, on the session, frames and code version of [PHO-23](#pho-23): 38 frames after the reference frame. Our drift tracking moved the field by -2.5 to 2.1 pixels in x and -15.7 to 0.7 pixels in y, at most 15.9 pixels in all. Its fitted rotation stayed under 2.5e-5 rad and its scale change under 1.3e-4. Siril solved all 39 frames. Sample size: 11,400 star positions of the 300 brightest stars, and 74,784 of all stars. Uncertainty: medians and percentiles over star positions; no confidence interval was estimated.
+
+  **Table A.** Distance between positions, in pixels: median, 95th percentile and largest.
+
+  | Pair | 300 brightest stars | All stars |
+  | --- | --- | --- |
+  | Siril solution against our tracking | 0.064; 0.245; 0.53 | 0.066; 0.235; 0.555 |
+  | Our tracking against the re-centered position | 0.085; 0.58; 1.50 | 0.26; 0.98; 1.50 |
+  | Siril solution against the re-centered position | 0.102; 0.573; 1.54 | 0.265; 0.983; 1.79 |
+
+  **Table B.** Median RMS against the common ensemble of photometry measured with our code at each position, 37 frames.
+
+  | Group | Re-centered | Tracked | Siril solution |
+  | --- | --- | --- | --- |
+  | Bright constant stars (10) | 0.00695 mag | 0.00690 mag | 0.00697 mag |
+  | Faint stars (12) | 0.0843 mag | 0.0862 mag | 0.0836 mag |
+  | Catalog variables (8) | 0.0649 mag | 0.0656 mag | 0.0660 mag |
+
+  Star by star, the median RMS over that at the re-centered position is 0.995 (tracked) and 1.003 (Siril solution) for the bright stars, and 1.007 and 0.999 for the faint stars.
+
+  **Decision.** The user decided on 2026-11-27, on this result, that per-frame Siril plate solutions replace the drift tracking for placing the photometry's apertures. The code is not yet changed.
+- **Verdict:** Not judged.
+- **Limits:** One session of 24 min with a drift of about 16 pixels, mostly along one axis, and almost no rotation or scale change. A field that turns during the session, the case the rotation fit of [PHO-04](#pho-04) was built for, was not tested. Neither was a frame that Siril cannot solve, such as a cloudy or trailed one. The positions of the plate solutions and of the tracking both start from the same reference positions, so an error in those is common to both. Siril ran from the study scripts, not through the app.
+- **To tune for your setup:** Repeat the comparison on a session whose field turns and on one with poor frames before relying on either method alone. If the plate-solution positions and the tracked positions differ by more than a few tenths of a pixel, compare each with the re-centered positions of the bright stars to see which one is off.
+- **Regenerate with:** The study scripts of [PHO-23](#pho-23), outside the repository: `compare.py` for Table A and `forced_positions.py`, then `compare_forced.py`, for Table B.
+- **Guarded by tests:** None.
+- **Raw record:** Not in the repository. The study's `out/` folder (`~/.cache/astrometrics/photometry-study/out/`) holds `positions_per_frame.csv`, `forced.json`, `forced_rms.csv`, the position summary in `summary.json`, and the per-frame Siril solutions in `siril_wcs/`.
+
 ## Design estimates
 
 These tuned values have not been measured. They are reasoned choices.

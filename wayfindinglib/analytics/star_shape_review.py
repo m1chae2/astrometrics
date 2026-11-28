@@ -31,11 +31,29 @@ star-shape rows; when it has none, the median of the frames is used.
 `judge_star_shape` is pure: it takes plain rows and limits, so it is easy to
 test. `read_star_shape_rows` and `read_stack_roundness_low_limit` read the
 stored rows.
+
+Reading is the slow part. `read_stored_shape_rows` reads a target's stored
+numbers once (one query per frame metric, one query for all the stack's
+rows) into a `StoredShapeRows` of plain numbers, which does not depend on
+the night or the frames asked about. A caller can keep it until the target's
+data change and pass it to `read_star_shape_rows`. The set-aside listing is
+read once per call.
+
+During a night a new frame adds rows about once a minute. Reading every row
+of the target again each time grows with the target's history. So
+`update_stored_shape_rows` brings kept numbers up to date by reading only the
+rows added since they were read, and merging them in with the same rule the
+full read uses (`_merge_frame_row`). It does this only when the target's
+data version shows that rows were only added: the count and the sum of the
+row numbers grew by exactly the rows it found, and the newest row it started
+from is still there unchanged. Anything else (a deleted frame, a row it
+could not find) makes it give up, and the caller reads everything again.
 """
 
 import math
 import statistics
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -49,7 +67,17 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import MeasurementStatus
+from astrometricslib.reports import MeasurementStatus, SubjectLevel
+from wayfindinglib.analytics.capture_history import (
+    ROW_READ_MARGIN,
+    RecencyKey,
+    RowMark,
+    StoredValue,
+    merge_newest_frame_row,
+    read_row_mark,
+    row_mark,
+    row_recency,
+)
 from wayfindinglib.analytics.performance_envelope import (
     BASELINE_SPREAD_MULTIPLIER,
     MINIMUM_BASELINE_SESSIONS,
@@ -63,10 +91,13 @@ from wayfindinglib.models.session.star_shape_review import (
 )
 
 __all__ = [
+    "StoredShapeRows",
     "judge_star_shape",
     "read_stack_roundness_low_limit",
     "read_star_shape_rows",
+    "read_stored_shape_rows",
     "stack_roundness_low_limit",
+    "update_stored_shape_rows",
 ]
 
 FRAME_ELONGATION_METRIC = "frame.star_elongation"
@@ -145,11 +176,227 @@ Design estimate, register row WAY-D148. It is not yet measured on real frames.
 """
 
 
+@dataclass(frozen=True)
+class StoredShapeRows:
+    """The stored star-shape numbers of one target, read once.
+
+    Only plain numbers are kept, so a cache can hold many targets cheaply.
+    Treat the mappings as read-only: a cache may hand the same object to
+    every caller.
+
+    Attributes
+    ----------
+    frames : `~collections.abc.Mapping` [`str`, `~collections.abc.Mapping`]
+        By frame subject id (see ``Target.frame_subject_id``), then by frame
+        metric: the value and row id of the newest usable row at the pinned
+        definition version (`PINNED_FRAME_SHAPE_METRICS`). Holds every frame
+        subject of the target that has a row, including frames that are no
+        longer in the target's frame list (such as set-aside ones).
+    stack : `FrameStarShape` or `None`
+        The shape of the target's newest library stack, when it has stored
+        star-shape rows and the stack was read.
+    recency : `~collections.abc.Mapping` [`str`, `~collections.abc.Mapping`]
+        By frame subject id, then by frame metric: the `RecencyKey` of the
+        newest whole-frame row (no color channel), usable or not. A newer
+        row that is not usable hides an older usable one, so this is what
+        `update_stored_shape_rows` compares a new row against.
+    version : `Any`
+        The target's data version (``get_target_data_version``) that these
+        numbers match exactly, or `None` when that is not known (the data
+        changed while they were read, or no version was asked for). Only
+        numbers with a version can be brought up to date.
+    mark : `RowMark` or `None`
+        The target's newest row at `version`. If it is gone or changed
+        later, a row was removed and the numbers must be read again.
+    """
+
+    frames: Mapping[str, Mapping[str, StoredValue]]
+    stack: FrameStarShape | None
+    recency: Mapping[str, Mapping[str, RecencyKey]] = field(default_factory=dict)
+    version: Any = None
+    mark: RowMark | None = None
+
+
+def read_stored_shape_rows(
+    astrometrics: Any,
+    target_id: str,
+    include_stack: bool = True,
+    read_version: Callable[[], Any] | None = None,
+) -> StoredShapeRows:
+    """Read the stored star-shape numbers of a target's frames and stack.
+
+    This is the slow part of `read_star_shape_rows`. It does not depend on
+    the night or the frame list asked about, so a caller may keep its answer
+    until the target's data change (``get_target_data_version``) and pass it
+    back as ``stored``.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+    target_id : `str`
+        The target's id.
+    include_stack : `bool`, optional
+        Also read the target's stack rows. Defaults to true.
+    read_version : `~collections.abc.Callable`, optional
+        Gives the target's data version (``get_target_data_version``). When
+        given, the version is read before and after the rows. If it did not
+        change, the answer records it, so `update_stored_shape_rows` can
+        later read only newer rows. Only a read that includes the stack
+        records it.
+
+    Returns
+    -------
+    stored : `StoredShapeRows`
+        The numbers, by frame subject and metric, and the stack's shape.
+    """
+    before = read_version() if read_version is not None and include_stack else None
+    frames: dict[str, dict[str, StoredValue]] = {}
+    recency: dict[str, dict[str, RecencyKey]] = {}
+    for metric in PINNED_FRAME_SHAPE_METRICS:
+        for row in _query_metric_rows(astrometrics, metric, "frame", target_id):
+            _merge_frame_row(frames, recency, row)
+    stack = _read_stack(astrometrics, target_id) if include_stack else None
+    version, mark = None, None
+    if before is not None and _version_parts(before) is not None and before.measurement_count > 0:
+        mark = read_row_mark(astrometrics, before.newest_row_id)
+        if mark is not None and read_version is not None and read_version() == before:
+            version = before
+    return StoredShapeRows(
+        frames=frames, stack=stack, recency=recency, version=version, mark=None if version is None else mark
+    )
+
+
+def update_stored_shape_rows(
+    astrometrics: Any, target_id: str, kept: StoredShapeRows, version: Any
+) -> StoredShapeRows | None:
+    """Bring kept star-shape numbers up to date by reading only new rows.
+
+    The quality store only adds rows; the one exception is a deleted frame,
+    whose rows are removed. So when the rows of the target were only added
+    since the kept numbers were read, reading the added rows and merging
+    them in gives the same answer as reading everything again. This checks
+    that, in order:
+
+    1. The kept newest row (`StoredShapeRows.mark`) is still there and
+       unchanged. Then no row at or below it was used again, and every
+       added row has a larger row id.
+    2. The rows of the target with a larger row id, up to the newest one in
+       `version`, are read (by measurement time from just before the kept
+       newest time, then by row id). Their count and the sum of their row
+       ids must equal the growth of the count and the sum in `version`. A
+       removed row lowers both, and an added row measured earlier than the
+       kept newest time is not found, so either shows as a mismatch.
+
+    The new frame rows are merged with the full read's rule
+    (`_merge_frame_row`). When a stack row was added, the stack's shape is
+    read again with the full read's code. The target's document and
+    calibration records are not read by the numbers, so a change to them
+    alone needs no new read.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+    target_id : `str`
+        The target's id.
+    kept : `StoredShapeRows`
+        The numbers kept from an earlier read. They are not changed.
+    version : `Any`
+        The target's data version now (``get_target_data_version``).
+
+    Returns
+    -------
+    stored : `StoredShapeRows` or `None`
+        The numbers for `version`, or `None` when they cannot be brought up
+        to date this way and must be read again.
+    """
+    base, now = _version_parts(kept.version), _version_parts(version)
+    if base is None or now is None or kept.mark is None or not base.newest_measured_at:
+        return None
+    added_count = now.measurement_count - base.measurement_count
+    added_sum = now.measurement_row_id_sum - base.measurement_row_id_sum
+    if added_count < 0 or now.newest_row_id < base.newest_row_id:
+        return None
+    if read_row_mark(astrometrics, base.newest_row_id) != kept.mark:
+        return None
+    since = datetime.fromisoformat(base.newest_measured_at) - ROW_READ_MARGIN
+    added = [
+        row
+        for row in astrometrics.quality.records.query(
+            target=Target(id=target_id), since=since, latest_only=False
+        )
+        if row.row_id is not None and base.newest_row_id < row.row_id <= now.newest_row_id
+    ]
+    if len(added) != added_count or sum(row.row_id for row in added) != added_sum:
+        return None
+    newest = max(added, key=lambda row: row.row_id, default=None)
+    if (newest.row_id if newest is not None else base.newest_row_id) != now.newest_row_id:
+        return None
+    frames = dict(kept.frames)
+    recency = dict(kept.recency)
+    for subject in {row.subject.subject_id for row in added}:
+        # Copy only the subjects that may change, so the kept numbers, which
+        # other callers may still hold, stay as they were.
+        if subject in frames:
+            frames[subject] = dict(frames[subject])
+        if subject in recency:
+            recency[subject] = dict(recency[subject])
+    for row in sorted(added, key=row_recency):
+        _merge_frame_row(frames, recency, row)
+    stack_changed = any(row.subject.level == SubjectLevel.STACK for row in added)
+    return StoredShapeRows(
+        frames=frames,
+        stack=_read_stack(astrometrics, target_id) if stack_changed else kept.stack,
+        recency=recency,
+        version=version,
+        mark=kept.mark if newest is None else row_mark(newest),
+    )
+
+
+def _merge_frame_row(frames: dict[str, Any], recency: dict[str, Any], row: Any) -> None:
+    """Add one stored row to the numbers, as the store's latest view would.
+
+    Both the full read and `update_stored_shape_rows` use this, so they keep
+    the same rule. It is the capture history's rule
+    (`capture_history.merge_newest_frame_row`) for the pinned shape metrics
+    (`PINNED_FRAME_SHAPE_METRICS`) and the rows this module can use
+    (`_usable`).
+
+    Parameters
+    ----------
+    frames : `dict`
+        The numbers by subject and metric (`StoredShapeRows.frames`). A
+        subject left with no number is removed.
+    recency : `dict`
+        The newest row of each subject and metric
+        (`StoredShapeRows.recency`).
+    row : `Any`
+        A stored row (`QualityMeasurement`).
+    """
+    merge_newest_frame_row(frames, recency, row, PINNED_FRAME_SHAPE_METRICS, _usable)
+
+
+def _version_parts(version: Any) -> Any:
+    """Check that a data version has the named parts this module reads.
+
+    Returns
+    -------
+    version : `Any`
+        The version itself when it has the count, newest row id, newest time
+        and row-id sum of the target's measurements, else `None` (an older or
+        stand-in version, which only allows a full read).
+    """
+    names = ("measurement_count", "newest_row_id", "newest_measured_at", "measurement_row_id_sum")
+    return version if version is not None and all(hasattr(version, name) for name in names) else None
+
+
 def read_star_shape_rows(
     astrometrics: Any,
     target: Any,
     night: str | None = None,
     frame_paths: Sequence[str] | None = None,
+    stored: StoredShapeRows | None = None,
 ) -> tuple[list[FrameStarShape], FrameStarShape | None, list[StandoutFrame]]:
     """Read the stored star-shape rows of a target's light frames and stack.
 
@@ -163,6 +410,9 @@ def read_star_shape_rows(
         Only frames of this observing night (such as ``"2026-09-24"``).
     frame_paths : `Sequence` [`str`], optional
         Only these frames.
+    stored : `StoredShapeRows`, optional
+        The target's stored numbers, when the caller kept them from
+        `read_stored_shape_rows`. Read here when omitted.
 
     Returns
     -------
@@ -174,9 +424,13 @@ def read_star_shape_rows(
         stack covers all of the target's frames.
     set_aside : `list` [`StandoutFrame`]
         The frames the quarantine set aside as trailed, oldest first, with
-        their stored elongation when there is one.
+        their stored elongation when there is one. The set-aside listing is
+        read once per call.
     """
     wanted = None if frame_paths is None else set(frame_paths)
+    narrowed = night is not None or wanted is not None
+    if stored is None:
+        stored = read_stored_shape_rows(astrometrics, target.id, include_stack=not narrowed)
     subjects = {}
     for frame in target.frames:
         if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
@@ -186,34 +440,22 @@ def read_star_shape_rows(
         if night is not None and observing_night_id(frame.timestamp) != night:
             continue
         subjects[target.frame_subject_id(frame)] = frame
-    values: dict[str, dict[str, Any]] = {subject: {} for subject in subjects}
-    elongation_rows: dict[str, Any] = {}
-    for metric, version in PINNED_FRAME_SHAPE_METRICS.items():
-        for row in _query_rows(astrometrics, metric, "frame", target.id):
-            if row.definition_version != version:
-                continue
-            if metric == FRAME_ELONGATION_METRIC:
-                elongation_rows[row.subject.subject_id] = row
-            if row.subject.subject_id in values:
-                values[row.subject.subject_id][metric] = row
     frames = []
     for subject, frame in subjects.items():
-        elongation_row = values[subject].get(FRAME_ELONGATION_METRIC)
-        if elongation_row is None:
+        values = stored.frames.get(subject, {})
+        if FRAME_ELONGATION_METRIC not in values:
             continue
-        frames.append(_shape_from_rows(frame.path, float(frame.timestamp), values[subject], _frame_names()))
+        frames.append(_shape_from_values(frame.path, float(frame.timestamp), values, _frame_names()))
     frames.sort(key=lambda shape: shape.timestamp or 0.0)
-    stack = None
-    if night is None and wanted is None:
-        stack = _read_stack(astrometrics, target.id)
-    set_aside = _read_set_aside_trailed(astrometrics, target, elongation_rows, night, wanted)
+    stack = None if narrowed else stored.stack
+    set_aside = _read_set_aside_trailed(astrometrics, target, stored.frames, night, wanted)
     return frames, stack, set_aside
 
 
 def _read_set_aside_trailed(
     astrometrics: Any,
     target: Any,
-    elongation_rows: dict[str, Any],
+    frame_values: Mapping[str, Mapping[str, StoredValue]],
     night: str | None,
     wanted: set[str] | None,
 ) -> list[StandoutFrame]:
@@ -225,8 +467,9 @@ def _read_set_aside_trailed(
         The science library's high-level interface.
     target : `Any`
         The resolved target.
-    elongation_rows : `dict` [`str`, `Any`]
-        The stored elongation rows of the target's frames, by subject id.
+    frame_values : `~collections.abc.Mapping`
+        The stored numbers of the target's frames, by subject id and metric
+        (`StoredShapeRows.frames`).
     night : `str` or `None`
         Only frames of this observing night.
     wanted : `set` [`str`] or `None`
@@ -247,12 +490,13 @@ def _read_set_aside_trailed(
         timestamp = _capture_timestamp(record.date)
         if night is not None and (timestamp is None or observing_night_id(timestamp) != night):
             continue
-        row = elongation_rows.get(record.subject_id) if record.subject_id else None
+        stored = frame_values.get(record.subject_id, {}) if record.subject_id else {}
+        elongation = stored.get(FRAME_ELONGATION_METRIC)
         found.append(
             StandoutFrame(
                 path=path,
                 timestamp=timestamp,
-                elongation=None if row is None else float(row.value),
+                elongation=None if elongation is None else elongation[0],
                 reason=record.reason,
             )
         )
@@ -340,7 +584,7 @@ def stack_roundness_low_limit(elongations: Sequence[float]) -> float | None:
 
 
 def _frame_names() -> tuple[str, str, str, str, dict[str, str]]:
-    """Name the frame metrics in the order `_shape_from_rows` reads them.
+    """Name the frame metrics in the order `_shape_from_values` reads them.
 
     Returns
     -------
@@ -357,29 +601,98 @@ def _frame_names() -> tuple[str, str, str, str, dict[str, str]]:
     )
 
 
-def _query_rows(astrometrics: Any, metric: str, level: str, target_id: str) -> list[Any]:
-    """Read the usable stored rows of one metric.
+def _usable(row: Any) -> bool:
+    """Say whether a stored row can be used here.
+
+    Returns
+    -------
+    usable : `bool`
+        True for a row that has a value, is not a color channel, is not
+        about a subset stack and is not marked not measured.
+    """
+    return (
+        row.subject.channel is None
+        and row.status != MeasurementStatus.NOT_MEASURED
+        and row.value is not None
+        and getattr(row.subject, "variant", None) is None
+    )
+
+
+def _stored_value(row: Any) -> StoredValue:
+    """Keep the value and row id of a stored row.
+
+    Returns
+    -------
+    stored : `tuple` [`float`, `int` or `None`]
+        The value as a `float`, and the row id.
+    """
+    return float(row.value), row.row_id
+
+
+def _query_metric_rows(astrometrics: Any, metric: str, level: str, target_id: str) -> list[Any]:
+    """Read the newest stored rows of one metric.
+
+    The frame metrics are read one by one. A target can have tens of
+    thousands of frame rows across all metrics, and the review needs only a
+    few metrics, so reading each wanted metric decodes far fewer rows than
+    reading all of them at once.
 
     Returns
     -------
     rows : `list`
-        Newest row of each subject that has a value and is not a color
-        channel. Empty when the metric is not registered (yet).
+        Newest row of each subject and channel, usable or not, oldest first.
+        The caller picks the usable ones (`_merge_frame_row`), because an
+        unusable newest row still hides an older usable one. Empty when the
+        metric is not registered (yet).
     """
     try:
-        result = astrometrics.quality.records.query(
-            metric=metric, level=level, target=Target(id=target_id), latest_only=True
+        return list(
+            astrometrics.quality.records.query(
+                metric=metric, level=level, target=Target(id=target_id), latest_only=True
+            )
         )
     except InvalidArgumentError:
         return []
-    return [
-        row
-        for row in result
-        if row.subject.channel is None
-        and row.status != MeasurementStatus.NOT_MEASURED
-        and row.value is not None
-        and getattr(row.subject, "variant", None) is None
-    ]
+
+
+def _query_level_rows(
+    astrometrics: Any, level: str, target_id: str, metrics: Iterable[str]
+) -> dict[str, list[Any]]:
+    """Read the usable stored rows of several metrics of one level at once.
+
+    Each query of the quality store looks through the whole table, however
+    few rows the target has. A target has only a few stacks, so one query of
+    all its stack rows is much faster than one query for each stack metric.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface.
+    level : `str`
+        The subject level, such as ``"stack"``.
+    target_id : `str`
+        The target's id.
+    metrics : `~collections.abc.Iterable` [`str`]
+        The metrics wanted.
+
+    Returns
+    -------
+    rows : `dict` [`str`, `list`]
+        For each wanted metric, the newest row of each subject that is
+        usable (`_usable`), oldest first. A metric with no such row has an
+        empty list.
+    """
+    rows: dict[str, list[Any]] = {metric: [] for metric in metrics}
+    try:
+        result = astrometrics.quality.records.query(
+            level=level, target=Target(id=target_id), latest_only=True
+        )
+    except InvalidArgumentError:
+        return rows
+    for row in result:
+        if row.metric in rows and _usable(row):
+            rows[row.metric].append(row)
+    return rows
 
 
 def _read_stack(astrometrics: Any, target_id: str) -> FrameStarShape | None:
@@ -390,21 +703,25 @@ def _read_stack(astrometrics: Any, target_id: str) -> FrameStarShape | None:
     stack : `FrameStarShape` or `None`
         The shape of the stack with the newest elongation row, or `None`.
     """
-    elongation_rows = _query_rows(astrometrics, STACK_ELONGATION_METRIC, "stack", target_id)
-    if not elongation_rows:
-        return None
-    newest = max(elongation_rows, key=lambda row: row.measured_at)
-    subject = newest.subject.subject_id
-    values: dict[str, Any] = {STACK_ELONGATION_METRIC: newest}
-    for metric in (
+    other_metrics = (
         STACK_ANGLE_METRIC,
         STACK_COHERENCE_METRIC,
         STACK_CENTER_WIDTH_METRIC,
         *STACK_CORNER_WIDTH_METRICS.values(),
-    ):
-        for row in _query_rows(astrometrics, metric, "stack", target_id):
+    )
+    stack_rows = _query_level_rows(
+        astrometrics, "stack", target_id, (STACK_ELONGATION_METRIC, *other_metrics)
+    )
+    elongation_rows = stack_rows[STACK_ELONGATION_METRIC]
+    if not elongation_rows:
+        return None
+    newest = max(elongation_rows, key=lambda row: row.measured_at)
+    subject = newest.subject.subject_id
+    values: dict[str, StoredValue] = {STACK_ELONGATION_METRIC: _stored_value(newest)}
+    for metric in other_metrics:
+        for row in stack_rows[metric]:
             if row.subject.subject_id == subject:
-                values[metric] = row
+                values[metric] = _stored_value(row)
     names = (
         STACK_ELONGATION_METRIC,
         STACK_ANGLE_METRIC,
@@ -412,13 +729,16 @@ def _read_stack(astrometrics: Any, target_id: str) -> FrameStarShape | None:
         STACK_CENTER_WIDTH_METRIC,
         STACK_CORNER_WIDTH_METRICS,
     )
-    return _shape_from_rows(subject, None, values, names)
+    return _shape_from_values(subject, None, values, names)
 
 
-def _shape_from_rows(
-    path: str, timestamp: float | None, rows: dict[str, Any], names: tuple[str, str, str, str, dict[str, str]]
+def _shape_from_values(
+    path: str,
+    timestamp: float | None,
+    values: Mapping[str, StoredValue],
+    names: tuple[str, str, str, str, dict[str, str]],
 ) -> FrameStarShape:
-    """Gather one subject's stored rows into a `FrameStarShape`.
+    """Gather one subject's stored numbers into a `FrameStarShape`.
 
     Returns
     -------
@@ -426,23 +746,23 @@ def _shape_from_rows(
         The subject's numbers; a number with no stored row is `None`.
     """
     elongation_name, angle_name, coherence_name, center_name, corner_names = names
-    elongation_row, angle_row, coherence_row, center_row = (
-        rows.get(elongation_name),
-        rows.get(angle_name),
-        rows.get(coherence_name),
-        rows.get(center_name),
+    elongation, angle, coherence, center = (
+        values.get(elongation_name),
+        values.get(angle_name),
+        values.get(coherence_name),
+        values.get(center_name),
     )
     return FrameStarShape(
         path=path,
         timestamp=timestamp,
-        elongation=None if elongation_row is None else float(elongation_row.value),
-        angle_deg=None if angle_row is None else float(angle_row.value),
-        direction_coherence=None if coherence_row is None else float(coherence_row.value),
-        center_width_px=None if center_row is None else float(center_row.value),
+        elongation=None if elongation is None else elongation[0],
+        angle_deg=None if angle is None else angle[0],
+        direction_coherence=None if coherence is None else coherence[0],
+        center_width_px=None if center is None else center[0],
         corner_widths_px={
-            region: float(rows[metric].value) for region, metric in corner_names.items() if metric in rows
+            region: values[metric][0] for region, metric in corner_names.items() if metric in values
         },
-        elongation_row_id=None if elongation_row is None else elongation_row.row_id,
+        elongation_row_id=None if elongation is None else elongation[1],
     )
 
 

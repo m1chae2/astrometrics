@@ -24,7 +24,9 @@ missing; remeasuring the frames brings it back (issue #95).
 import re
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from astrometricslib import Target
@@ -36,7 +38,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import MeasurementStatus
+from astrometricslib.reports import MeasurementStatus, SubjectLevel
 from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.performance_envelope import (
     MINIMUM_ATTEMPTS_PER_NIGHT,
@@ -134,9 +136,157 @@ def _positive(value: float | None) -> float | None:
     return value if value is not None and value > 0 else None
 
 
+RecencyKey = tuple[int, int]
+"""When a stored row was measured and its row id, in the store's order.
+
+The time is in whole microseconds since 1970, so it compares exactly. The
+store's latest view picks, for each subject, metric and channel, the row
+with the latest measurement time, and of those the largest row id. Comparing
+these keys gives the same choice.
+"""
+
+RowMark = tuple[int, str, str, str, datetime]
+"""What identifies one stored row: its id, metric, subject, run and time."""
+
+StoredValue = tuple[float, int | None]
+"""A stored number and the id of the row it came from."""
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+"""The start of the Unix clock, for `RecencyKey` times."""
+
+ROW_READ_MARGIN = timedelta(seconds=1)
+"""How far before the kept newest time a read of new rows starts.
+
+The quality query turns its ``since`` time into seconds and back, which can
+move it by a microsecond. Starting a second early cannot miss a new row;
+rows that were already read are then left out by their row id.
+"""
+
+
+def row_recency(row: Any) -> RecencyKey:
+    """Give the order key of a stored row (see `RecencyKey`).
+
+    Returns
+    -------
+    key : `RecencyKey`
+        The measurement time in whole microseconds since 1970, and the row
+        id (0 when it has none).
+    """
+    return ((row.measured_at - _EPOCH) // timedelta(microseconds=1), int(row.row_id or 0))
+
+
+def row_mark(row: Any) -> RowMark:
+    """Describe a stored row well enough to see whether it was replaced.
+
+    Returns
+    -------
+    mark : `RowMark`
+        The row's id, metric, subject, run and measurement time.
+    """
+    return (int(row.row_id), row.metric, row.subject.subject_id, row.run_id, row.measured_at)
+
+
+def read_row_mark(astrometrics: Any, row_id: int) -> RowMark | None:
+    """Read the `RowMark` of one stored row by its id.
+
+    Returns
+    -------
+    mark : `RowMark` or `None`
+        The row's mark, or `None` when no row has this id.
+    """
+    row = astrometrics.quality.records.get(int(row_id))
+    return None if row is None else row_mark(row)
+
+
+def merge_newest_frame_row(
+    values: dict[str, Any],
+    recency: dict[str, Any],
+    row: Any,
+    pinned: Mapping[str, int],
+    usable: Callable[[Any], bool],
+) -> None:
+    """Add one stored row to kept numbers, as the store's latest view would.
+
+    A full read (of the newest rows) and an update that reads only added rows
+    both use this, so they keep the same rule. Only whole-frame rows (no
+    color channel) of the pinned metrics count. A row replaces the held one
+    only when it is newer (`RecencyKey`). The newest row then gives the
+    number when it is usable and at the pinned definition version; otherwise
+    the subject has no number for that metric, as in a full read.
+
+    Parameters
+    ----------
+    values : `dict`
+        The numbers by subject and metric: the value and row id of each. A
+        subject left with no number is removed.
+    recency : `dict`
+        The `RecencyKey` of the newest row of each subject and metric,
+        usable or not.
+    row : `Any`
+        A stored row (`QualityMeasurement`).
+    pinned : `~collections.abc.Mapping` [`str`, `int`]
+        The metrics that count, each with its pinned definition version.
+    usable : `~collections.abc.Callable`
+        Says whether a row holds a number that can be used (it has a value
+        and is not marked not measured, and any other rule of the caller).
+    """
+    version = pinned.get(row.metric)
+    if version is None or row.subject.level != SubjectLevel.FRAME or row.subject.channel is not None:
+        return
+    subject, key = row.subject.subject_id, row_recency(row)
+    held = recency.get(subject, {}).get(row.metric)
+    if held is not None and held >= key:
+        return
+    recency.setdefault(subject, {})[row.metric] = key
+    if usable(row) and row.definition_version == version:
+        values.setdefault(subject, {})[row.metric] = (float(row.value), row.row_id)
+        return
+    held_values = values.get(subject)
+    if held_values is not None:
+        held_values.pop(row.metric, None)
+        if not held_values:
+            del values[subject]
+
+
+def _has_value(row: Any) -> bool:
+    """Say whether a stored frame row holds a number the capture history uses.
+
+    Returns
+    -------
+    usable : `bool`
+        True for a row that has a value and is not marked not measured.
+    """
+    return row.status != MeasurementStatus.NOT_MEASURED and row.value is not None
+
+
+def _read_newest_frame_rows(
+    astrometrics: Any, metrics: Mapping[str, int], target_id: str | None
+) -> tuple[dict[str, dict[str, StoredValue]], dict[str, dict[str, RecencyKey]]]:
+    """Read the newest stored frame row of each frame and metric.
+
+    Returns
+    -------
+    values, recency : `tuple` [`dict`, `dict`]
+        The numbers and the `RecencyKey` of the newest whole-frame rows,
+        each by frame subject id and then by metric (see
+        `merge_newest_frame_row`).
+    """
+    values: dict[str, dict[str, StoredValue]] = {}
+    recency: dict[str, dict[str, RecencyKey]] = {}
+    for metric in metrics:
+        for row in astrometrics.quality.records.query(
+            metric=metric,
+            level="frame",
+            target=None if target_id is None else Target(id=target_id),
+            latest_only=True,
+        ):
+            merge_newest_frame_row(values, recency, row, metrics, _has_value)
+    return values, recency
+
+
 def read_frame_measurements(
     astrometrics: Any, metrics: Mapping[str, int] | None = None, target_id: str | None = None
-) -> dict[str, dict[str, tuple[float, int | None]]]:
+) -> dict[str, dict[str, StoredValue]]:
     """Read the stored frame measurements the capture analysis uses.
 
     Only the newest row of each frame and metric is read, only for the
@@ -160,23 +310,176 @@ def read_frame_measurements(
         Keyed by frame key (see `Target.frame_subject_id`), then by metric: the
         `tuple` of each metric's value (`float`) and row id (`int` or `None`)
         of the stored measurement it came from.
-        and the row id of the stored measurement it came from.
     """
-    by_frame: dict[str, dict[str, tuple[float, int | None]]] = defaultdict(dict)
-    for metric, version in (PINNED_FRAME_METRICS if metrics is None else metrics).items():
+    values, _ = _read_newest_frame_rows(
+        astrometrics, PINNED_FRAME_METRICS if metrics is None else metrics, target_id
+    )
+    return values
+
+
+@dataclass(frozen=True)
+class FrameMeasurements:
+    """The stored measurements of every frame in the library, read once.
+
+    The capture history reads four metrics of every frame
+    (`PINNED_FRAME_METRICS`). Reading them takes about half a second for a
+    library of a few thousand frames, and a new frame adds only a few rows.
+    So a cache keeps this and brings it up to date with
+    `update_frame_measurements`, which reads only the rows added since.
+    Treat the mappings as read-only: a cache may hand the same object to
+    every caller.
+
+    Attributes
+    ----------
+    values : `~collections.abc.Mapping` [`str`, `~collections.abc.Mapping`]
+        By frame subject id, then by metric: the value and row id of the
+        newest usable row, as `read_frame_measurements` gives them.
+    recency : `~collections.abc.Mapping` [`str`, `~collections.abc.Mapping`]
+        By frame subject id, then by metric: the `RecencyKey` of the newest
+        whole-frame row, usable or not. A newer row that is not usable hides
+        an older usable one, so this is what an added row is compared with.
+    version : `Mapping` or `None`
+        The data version of each metric
+        (``astrometricslib.drivers.get_frame_metric_data_versions``) that
+        these numbers match exactly, or `None` when that is not known (the
+        rows changed while they were read). Only numbers with a version can
+        be brought up to date.
+    marks : `~collections.abc.Mapping` [`str`, `RowMark`]
+        For each metric that has rows at `version`, the mark of its newest
+        row. If that row is gone or changed later, a row was removed and its
+        row id may have been used again, so everything is read again.
+    """
+
+    values: Mapping[str, Mapping[str, StoredValue]]
+    recency: Mapping[str, Mapping[str, RecencyKey]] = field(default_factory=dict)
+    version: Mapping[str, Any] | None = None
+    marks: Mapping[str, RowMark] = field(default_factory=dict)
+
+
+def read_frame_measurement_table(
+    astrometrics: Any, read_version: Callable[[], Mapping[str, Any] | None] | None = None
+) -> FrameMeasurements:
+    """Read the pinned measurements of every frame, ready to be kept.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+    read_version : `~collections.abc.Callable`, optional
+        Gives the data version of each pinned metric
+        (``get_frame_metric_data_versions``). When given, it is read before
+        and after the rows. If it did not change, the answer records it, so
+        `update_frame_measurements` can later read only newer rows.
+
+    Returns
+    -------
+    measurements : `FrameMeasurements`
+        The numbers, the same as `read_frame_measurements` gives.
+    """
+    before = read_version() if read_version is not None else None
+    values, recency = _read_newest_frame_rows(astrometrics, PINNED_FRAME_METRICS, None)
+    if before is None or read_version is None:
+        return FrameMeasurements(values=values, recency=recency)
+    marks = {}
+    for metric, part in before.items():
+        if part.measurement_count > 0:
+            mark = read_row_mark(astrometrics, part.newest_row_id)
+            if mark is None:
+                return FrameMeasurements(values=values, recency=recency)
+            marks[metric] = mark
+    if read_version() != before:
+        return FrameMeasurements(values=values, recency=recency)
+    return FrameMeasurements(values=values, recency=recency, version=before, marks=marks)
+
+
+def update_frame_measurements(
+    astrometrics: Any, kept: FrameMeasurements, version: Mapping[str, Any]
+) -> FrameMeasurements | None:
+    """Bring kept frame measurements up to date by reading only new rows.
+
+    The quality store only adds rows; the one exception is a deleted frame,
+    whose rows are removed. So when the rows of the pinned metrics were only
+    added since the kept numbers were read, reading the added rows and
+    merging them in (`merge_newest_frame_row`) gives the same answer as
+    reading everything again. This checks that for each metric whose
+    version changed, in order:
+
+    1. The kept newest row of the metric (`FrameMeasurements.marks`) is
+       still there and unchanged. Then no row id at or below it was used
+       again, and every added row of the metric has a larger row id.
+    2. The frame rows of the metric with a larger row id, up to the newest
+       one in `version`, are read (by measurement time from just before the
+       kept newest time, then by row id). Their count and the sum of their
+       row ids must equal the growth of the count and the sum in `version`.
+       A removed row lowers both, and an added row measured earlier than the
+       kept newest time is not found, so either shows as a mismatch.
+
+    Parameters
+    ----------
+    astrometrics : `Any`
+        The science library's high-level interface (``Astrometrics``).
+    kept : `FrameMeasurements`
+        The numbers kept from an earlier read. They are not changed.
+    version : `~collections.abc.Mapping`
+        The data version of each pinned metric now
+        (``get_frame_metric_data_versions``).
+
+    Returns
+    -------
+    measurements : `FrameMeasurements` or `None`
+        The numbers for `version`, or `None` when they cannot be brought up
+        to date this way and must be read again.
+    """
+    base = kept.version
+    if base is None or version is None or set(base) != set(version):
+        return None
+    grown = {}
+    for metric, now in version.items():
+        before = base[metric]
+        if now == before:
+            continue
+        if before.measurement_count == 0 or not before.newest_measured_at:
+            return None
+        if now.measurement_count < before.measurement_count or now.newest_row_id < before.newest_row_id:
+            return None
+        if read_row_mark(astrometrics, before.newest_row_id) != kept.marks.get(metric):
+            return None
+        grown[metric] = (before, now)
+    if not grown:
+        return replace(kept, version=version)
+    since = min(datetime.fromisoformat(before.newest_measured_at) for before, _ in grown.values())
+    added = [
+        row
         for row in astrometrics.quality.records.query(
-            metric=metric,
-            level="frame",
-            target=None if target_id is None else Target(id=target_id),
-            latest_only=True,
-        ):
-            if row.definition_version != version:
-                continue
-            if row.subject.channel is not None or row.status == MeasurementStatus.NOT_MEASURED:
-                continue
-            if row.value is not None:
-                by_frame[row.subject.subject_id][metric] = (row.value, row.row_id)
-    return by_frame
+            level="frame", since=since - ROW_READ_MARGIN, latest_only=False
+        )
+        if row.metric in grown
+        and row.row_id is not None
+        and grown[row.metric][0].newest_row_id < row.row_id <= grown[row.metric][1].newest_row_id
+    ]
+    marks = dict(kept.marks)
+    for metric, (before, now) in grown.items():
+        rows = [row for row in added if row.metric == metric]
+        if len(rows) != now.measurement_count - before.measurement_count:
+            return None
+        if sum(row.row_id for row in rows) != now.measurement_row_id_sum - before.measurement_row_id_sum:
+            return None
+        newest = max(rows, key=lambda row: row.row_id, default=None)
+        if newest is None or newest.row_id != now.newest_row_id:
+            return None
+        marks[metric] = row_mark(newest)
+    values = dict(kept.values)
+    recency = dict(kept.recency)
+    for subject in {row.subject.subject_id for row in added}:
+        # Copy only the subjects that may change, so the kept numbers, which
+        # other callers may still hold, stay as they were.
+        if subject in values:
+            values[subject] = dict(values[subject])
+        if subject in recency:
+            recency[subject] = dict(recency[subject])
+    for row in sorted(added, key=row_recency):
+        merge_newest_frame_row(values, recency, row, PINNED_FRAME_METRICS, _has_value)
+    return FrameMeasurements(values=values, recency=recency, version=version, marks=marks)
 
 
 def equipment_light_frames(
@@ -219,7 +522,11 @@ def equipment_light_frames(
 
 
 def collect_capture_frames(
-    astrometrics: Any, telescope_name: str, camera_name: str, targets: Sequence[Any] | None = None
+    astrometrics: Any,
+    telescope_name: str,
+    camera_name: str,
+    targets: Sequence[Any] | None = None,
+    stored: Mapping[str, Mapping[str, StoredValue]] | None = None,
 ) -> list[CaptureFrame]:
     """Read every light frame taken with this telescope and camera.
 
@@ -231,6 +538,12 @@ def collect_capture_frames(
         Name of the imaging telescope.
     camera_name : `str`
         Name of the imaging camera, in any spelling its profile knows.
+    targets : `Sequence` [`Target`], optional
+        The library's targets, when the caller has just listed them.
+    stored : `~collections.abc.Mapping`, optional
+        The frames' stored measurements, as `read_frame_measurements` gives
+        them, when the caller keeps them (`FrameMeasurements.values`). Read
+        here when omitted.
 
     Returns
     -------
@@ -241,7 +554,8 @@ def collect_capture_frames(
         A measurement the frame lacks (or has only at another definition
         version) stays `None`.
     """
-    stored = read_frame_measurements(astrometrics)
+    if stored is None:
+        stored = read_frame_measurements(astrometrics)
     frames = []
     for target, frame in equipment_light_frames(astrometrics, telescope_name, camera_name, targets):
         values = stored.get(target.frame_subject_id(frame), {})
@@ -495,3 +809,66 @@ def collect_capture_baseline_values(
         "night_star_roundness": roundnesses,
         "capture_abort_fraction": abort_fractions,
     }
+
+
+def roundness_baseline_signature(
+    frames: Iterable[Any],
+    stored: Mapping[str, Mapping[str, StoredValue]],
+    before_night: str | None = None,
+) -> tuple[Any, ...]:
+    """Describe every frame that can change a night's median roundness.
+
+    `collect_capture_baseline_values` adds a night's median roundness only
+    when the night has at least ``MINIMUM_FRAMES_PER_NIGHT`` frames that are
+    not spectral, have a positive star width, have a roundness (an
+    elongation of at least 1) and are long enough. A frame that lacks any of
+    the first three cannot be one of them, whatever its exposure time, and a
+    night with fewer such frames than the minimum adds nothing. So this
+    lists only the frames that have all three, of the nights with enough of
+    them: each frame's night, subject, exposure time and elongation. When
+    this signature is the same, the roundness series is the same for every
+    shortest exposure time (which comes from the guiding records).
+
+    A frame that was just indexed and not yet measured, a frame whose width
+    or elongation is missing or unusable, and a spectral frame leave the
+    signature as it is. A frame that gains both rows, changes its exposure
+    time, spectral flag or night, or is removed or set aside (it leaves the
+    target's frame list) changes it.
+
+    Parameters
+    ----------
+    frames : `~collections.abc.Iterable`
+        The equipment's light frames, each with ``night``, ``subject_id``,
+        ``exposure_s`` and ``is_spectral`` (a ``NightFrame``). They must be
+        the frames `collect_capture_frames` reads.
+    stored : `~collections.abc.Mapping`
+        The frames' stored measurements (`read_frame_measurements`).
+    before_night : `str` or `None`, optional
+        Leave out this night and later ones, as
+        `collect_capture_baseline_values` does.
+
+    Returns
+    -------
+    signature : `tuple`
+        The minimum frame count, then, for each night with enough frames,
+        the night and its sorted frames.
+    """
+    minimum = resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value
+    by_night: dict[str, list[tuple[str, float, float]]] = defaultdict(list)
+    for frame in frames:
+        if frame.is_spectral or (before_night is not None and frame.night >= before_night):
+            continue
+        values = stored.get(frame.subject_id, {})
+        width = _positive(values.get(STAR_WIDTH_METRIC, (None, None))[0])
+        elongation = values.get(STAR_ELONGATION_METRIC, (None, None))[0]
+        if width is None or elongation is None or elongation < 1.0:
+            continue
+        by_night[frame.night].append((frame.subject_id, float(frame.exposure_s), elongation))
+    return (
+        minimum,
+        tuple(
+            (night, tuple(sorted(night_frames)))
+            for night, night_frames in sorted(by_night.items())
+            if len(night_frames) >= minimum
+        ),
+    )

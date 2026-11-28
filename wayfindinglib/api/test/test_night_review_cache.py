@@ -11,6 +11,7 @@ the envelope uses are built once and shared by every night.
 import sqlite3
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -320,11 +321,11 @@ def test_the_guiding_baselines_are_built_once_for_every_night(
     cache = VersionedCache()
     context = type("Context", (), {"review_cache": cache, "records": object()})()
     calls: list[str] = []
-    monkeypatch.setattr(night_analysis, "review_data_version", lambda context: "v1")
+    monkeypatch.setattr(night_analysis, "guiding_baseline_data_version", lambda context: "v1")
     monkeypatch.setattr(
         night_analysis,
-        "collect_night_baselines",
-        lambda records, contexts, fingerprint, runs: calls.append(fingerprint) or [],
+        "read_night_baseline_table",
+        lambda records, contexts, fingerprint, runs: calls.append(fingerprint) or SimpleNamespace(nights=()),
     )
     provide = night_analysis._night_baseline_provider(context, [], [])
 
@@ -332,6 +333,8 @@ def test_the_guiding_baselines_are_built_once_for_every_night(
     night_analysis._night_baseline_provider(context, [], [])("rig")  # another night, same data
     assert calls == ["rig"]
 
-    monkeypatch.setattr(night_analysis, "review_data_version", lambda context: "v2")
+    # A version the update cannot use (here: not a baseline version at all)
+    # works every night out again.
+    monkeypatch.setattr(night_analysis, "guiding_baseline_data_version", lambda context: None)
     provide("rig")
     assert calls == ["rig", "rig"]

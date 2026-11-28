@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib._internal.drivers import calibration_library
 from astrometricslib._internal.drivers.calibration_library import (
     BIAS_FRAME_PATHS_KEY,
     CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
@@ -25,6 +26,7 @@ from astrometricslib._internal.drivers.calibration_library import (
     FLAT_FRAME_PATHS_KEY,
     CalibrationLibrary,
     calibration_setting_key,
+    clear_dark_temperature_cache,
     dark_temperature_flag,
     format_binning,
     header_binning,
@@ -384,6 +386,81 @@ def test_a_rescan_moves_a_dark_filed_under_an_older_key(tmp_path: Path) -> None:
     library.add_dark_frame(dark)
 
     assert library.dark_frames == {CAMERA: {"100@offset=30@temp=-9": {"30.0": [dark]}}}
+
+
+def _count_header_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every header the calibration library reads from a file.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The pytest fixture used to wrap the library's header reader.
+
+    Returns
+    -------
+    header_reads : `list` [`str`]
+        A list that gains the file's path on each header read.
+    """
+    header_reads: list[str] = []
+    original_read_header = calibration_library.read_header
+
+    def _counting_read_header(path: str, *, first_hdu_only: bool = False) -> fits.Header:
+        """Record which file is read, then read its header as usual.
+
+        Returns
+        -------
+        header : `astropy.io.fits.Header`
+            The file's header.
+        """
+        header_reads.append(path)
+        return original_read_header(path, first_hdu_only=first_hdu_only)
+
+    monkeypatch.setattr(calibration_library, "read_header", _counting_read_header)
+    return header_reads
+
+
+def test_repeated_dark_selection_reads_each_dark_header_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Picking darks again and again opens each dark's header only once.
+
+    The darks sit under a key with no temperature, so every pick reads each
+    dark's own header, and the temperature check reads them all again.
+    """
+    clear_dark_temperature_cache()
+    library = make_library(tmp_path)
+    cold = [write_frame(tmp_path / f"cold_{i}.fits", temperature_c=-10.0) for i in range(2)]
+    warm = [write_frame(tmp_path / f"warm_{i}.fits", temperature_c=0.0) for i in range(3)]
+    library.deserialize({"dark_frames": {CAMERA: {"100@offset=30": {"30.0": cold + warm}}}})
+    header_reads = _count_header_reads(monkeypatch)
+
+    for _ in range(3):
+        selection = library.select_dark_frames(
+            camera=CAMERA, exposure=30.0, iso="100", offset="30", temperature_c=-12.0
+        )
+        assert selection.frames == cold
+
+    assert sorted(header_reads) == sorted(cold + warm)
+    clear_dark_temperature_cache()
+
+
+def test_a_changed_dark_is_read_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dark whose file changed gives its new temperature, not the old one."""
+    clear_dark_temperature_cache()
+    dark = write_frame(tmp_path / "dark.fits", temperature_c=-10.0)
+    assert calibration_library._read_dark_temperature(dark) == pytest.approx(-10.0)
+
+    status = os.stat(dark)
+    with fits.open(dark, mode="update", memmap=False) as hdu_list:
+        hdu_list[0].header["CCD-TEMP"] = 5.0
+    # Make sure the modification time moves even on a coarse clock.
+    os.utime(dark, ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000_000))
+    header_reads = _count_header_reads(monkeypatch)
+
+    assert calibration_library._read_dark_temperature(dark) == pytest.approx(5.0)
+    assert calibration_library._read_dark_temperature(dark) == pytest.approx(5.0)
+    assert header_reads == [dark]
+    clear_dark_temperature_cache()
 
 
 # ------------------------------------------------------------ binning

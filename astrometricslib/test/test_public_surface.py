@@ -225,6 +225,7 @@ EXPECTED_MODULE_NAMES = {
         "existing_stack_path",
         "file_lock",
         "get_camera_data_versions",
+        "get_frame_metric_data_versions",
         "get_frame_metric_signs",
         "get_gaia_archive",
         "get_library_data_version",

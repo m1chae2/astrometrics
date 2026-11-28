@@ -6,7 +6,10 @@ brightness range is given, and plain linear scaling when one is. These tests
 pin the curve's maths against numbers computed here with numpy, and the edge
 cases found on real data: images that are mostly exact zeros or float dust
 must not blow out to white, and an image Siril's curve cannot be drawn for
-must fall back to the old percentile stretch rather than fail.
+must fall back to the old percentile stretch rather than fail. The median
+and MAD of a whole-number image are counted from a histogram; tests check that
+they equal the `numpy.median` numbers exactly and that the drawn picture does
+not change by a single byte.
 """
 
 from pathlib import Path
@@ -18,12 +21,15 @@ from astrometricslib.pipelines.shared.image_scaling import (
     PREVIEW_SAMPLE_SEED,
     ImageScaler,
     _autostretch_parameters,
+    _channel_statistics,
     _full_scale_of,
+    _integer_histogram,
     _midtones_transfer_function,
     _scale_to_uint8_in_blocks,
     _solve_midtones_balance,
     midtones_balance_for,
     percentile_sample,
+    scale_with_parameters,
     white_fraction_after_autostretch,
 )
 
@@ -438,3 +444,147 @@ def test_autostretch_command_uses_measured_sky() -> None:
     assert command[0] == "mtf" and command[3] == "1"
     assert float(command[1]) == pytest.approx(0.01 - 2.8e-4)
     assert choose_sky_stretch(0.2).command().startswith("autostretch")
+
+
+def _sorted_median_statistics(channel: np.ndarray) -> tuple[float, float, float, float]:
+    """Measure a channel the way the autostretch did before histograms.
+
+    Parameters
+    ----------
+    channel : `numpy.ndarray`
+        One channel, 2-D.
+
+    Returns
+    -------
+    statistics : `tuple` [`float`, `float`, `float`, `float`]
+        The median, the median absolute deviation, the smallest and the
+        largest of the pixels that are neither 0 nor NaN, from
+        `numpy.median`.
+    """
+    values = channel[np.isfinite(channel) & (np.abs(channel) > 0.0)]
+    median = float(np.median(values))
+    return (
+        median,
+        float(np.median(np.abs(values - median))),
+        float(np.min(values)),
+        float(np.max(values)),
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "columns", "low", "high", "dtype"),
+    [
+        (7, 9, 0, 65535, np.uint16),
+        (8, 8, 0, 65535, np.uint16),
+        (31, 17, -400, 400, np.int16),
+        (10, 10, 0, 4, np.uint8),
+        (33, 64, -5, 3000, np.float64),
+        (64, 64, 0, 2, np.float64),
+    ],
+)
+def test_histogram_statistics_equal_the_sorted_ones(
+    rows: int, columns: int, low: int, high: int, dtype: type
+) -> None:
+    """Check the histogram median and MAD equal `numpy.median` exactly.
+
+    The sizes are odd and even, so both the middle value and the mean of the
+    two middle values are tried. Some images have zeros, which are left out.
+
+    Parameters
+    ----------
+    rows, columns : `int`
+        The image size.
+    low, high : `int`
+        The range of the random whole numbers.
+    dtype : `type`
+        The data type the image is made in.
+    """
+    rng = np.random.default_rng(rows * 1000 + columns)
+    for _ in range(20):
+        image = rng.integers(low, high, size=(rows, columns), endpoint=True).astype(dtype)
+        image[rng.random(image.shape) < 0.2] = 0
+        channel = image.astype(float)
+        if not np.any(channel):
+            continue
+        known_integer = np.issubdtype(image.dtype, np.integer)
+
+        assert _integer_histogram(channel, known_integer) is not None
+        measured = _channel_statistics(channel, known_integer)
+
+        assert measured is not None
+        assert (
+            measured.median,
+            measured.median_absolute_deviation,
+            measured.minimum,
+            measured.maximum,
+        ) == _sorted_median_statistics(channel)
+
+
+def test_images_that_are_not_whole_numbers_are_not_counted_as_histograms() -> None:
+    """Check NaN, infinite, fractional and wide images use `numpy.median`."""
+    whole = np.arange(1.0, 101.0).reshape(10, 10)
+    with_nan = whole.copy()
+    with_nan[3, 4] = np.nan
+    with_infinity = whole.copy()
+    with_infinity[5, 5] = np.inf
+    # One fractional pixel that the sparse probe does not look at.
+    one_fraction = whole.copy()
+    one_fraction[5, 7] = 2.5
+    too_wide = whole.copy()
+    too_wide[0, 0] = 1e7
+
+    for image in (with_nan, with_infinity, one_fraction, too_wide):
+        assert _integer_histogram(image, False) is None
+    measured = _channel_statistics(with_nan)
+    assert measured is not None
+    assert (measured.median, measured.median_absolute_deviation) == _sorted_median_statistics(with_nan)[:2]
+
+
+def test_scale_with_parameters_reports_the_stretch_it_drew() -> None:
+    """Check the one-pass scaling matches the two public calls exactly."""
+    image = np.random.default_rng(3).integers(800, 1400, size=(120, 90)).astype(np.uint16)
+
+    scaled = scale_with_parameters(image)
+    picture, black, white = ImageScaler.scale_to_uint8(image)
+
+    assert np.array_equal(scaled.picture, picture)
+    assert (scaled.black, scaled.white) == (black, white)
+    assert scaled.stretch_parameters == ImageScaler.autostretch_parameters(image)
+    assert scale_with_parameters(image, stretch=False).stretch_parameters is None
+    assert scale_with_parameters(image, vmin=0.0, vmax=10.0).stretch_parameters is None
+
+
+@pytest.mark.parametrize("shape", [(301, 257), (64, 48, 3), (3, 40, 50)])
+@pytest.mark.parametrize("dtype", [np.uint16, np.float64])
+def test_histogram_route_draws_the_same_bytes_as_the_sorted_route(
+    monkeypatch: pytest.MonkeyPatch, shape: tuple[int, ...], dtype: type
+) -> None:
+    """Check a whole-number render is byte-identical without histograms.
+
+    The sorted route is forced by making the histogram step decline every
+    channel, which is what the code did before histograms were added.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Swaps the histogram step for one that declines.
+    shape : `tuple` [`int`, ...]
+        The image shape, 2-D or colour.
+    dtype : `type`
+        The data type the image is made in.
+    """
+    from astrometricslib.pipelines.shared import image_scaling
+
+    rng = np.random.default_rng(11)
+    image = (1000 + rng.poisson(40.0, size=shape)).astype(dtype)
+    image.flat[::53] = 0
+    image.flat[::997] = 60000
+
+    fast = scale_with_parameters(image)
+    monkeypatch.setattr(image_scaling, "_integer_histogram", lambda channel, known_integer: None)
+    sorted_route = scale_with_parameters(image)
+
+    assert fast.stretch_parameters is not None
+    assert fast.picture.tobytes() == sorted_route.picture.tobytes()
+    assert (fast.black, fast.white) == (sorted_route.black, sorted_route.white)
+    assert fast.stretch_parameters == sorted_route.stretch_parameters

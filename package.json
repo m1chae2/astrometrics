@@ -33,7 +33,7 @@
   },
   "keywords": [],
   "author": "Michael Coelho <macoelho25@gmail.com>",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/m1chae2/astrometrics/issues"
   },

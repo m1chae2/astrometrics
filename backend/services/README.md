@@ -63,7 +63,7 @@ The star catalog listings and counts use it (`data/stellar_service.py`). The num
 
 Python lets only one thread run Python code at a time. When a view opens and a dozen calls that scan the whole library run together, every call, even a light one, waits behind them each time it needs a turn. A TPM run measured calls that should take a millisecond waiting more than a second. `backend/routers/rpc_router.py` lists these scanning methods in `HEAVY_METHODS` (for example `history:nights` and `astronomy:list`). Only `HEAVY_LANE_SLOTS` of them run at once, and the rest wait without taking a worker thread. All other methods run freely. Add a method to the list when a trace shows it busy for more than about 100 ms.
 
-The lane itself lives in `infrastructure/heavy_lane.py`, so the start-up warm-ups can use it too. Encoding a finished reply (`encode_rpc_success_body` in `rpc_protocol.py`) does not use the lane. It runs in the ordinary thread pool, so a finished result never waits behind queued heavy builds.
+The lane itself lives in `infrastructure/heavy_lane.py`, so the start-up warm-ups can use it too. `infrastructure/rpc_timing.py` times each call in its lane: the wait for a heavy-lane place or a worker thread, and the run. It logs one `RPC_TIMING` line per call at the backend's `VERBOSE` level through its ordinary logging. `VERBOSE` (5) is the lowest level, below DEBUG, INFO, WARNING and ERROR. The app runs at INFO and logs none; the TPM harness starts its backend with `ASTROMETRICS_LOG_LEVEL=VERBOSE` (`build/tpm/run_tpm.sh`), which shows them and every level above, DEBUG included. The entry point registers the level's name; the module sets up no logging. Encoding a finished reply (`encode_rpc_success_body` in `rpc_protocol.py`) does not use the lane. It runs in the ordinary thread pool, so a finished result never waits behind queued heavy builds.
 
 For exact behavior, read the code.
 
@@ -71,13 +71,24 @@ For exact behavior, read the code.
 
 After the app is ready, `backend/startup.py` fills caches in the background, one step after another (the steps are chained in `_warm_up_in_order` in `backend/main_backend.py`). None of them delays `/api/ready`, except the first group.
 
-1. `warm_start_up_caches` loads the star catalog, the Earth-orientation table and the stellar summaries side by side. The splash screen waits for these.
+1. `warm_start_up_caches` loads the star catalog, the Earth-orientation table, the stellar summaries and the list of quality metrics side by side. The splash screen waits for these. The metric list comes from the public `astrometrics.quality.records.get_metrics()`; building it imports every pipeline's metric list and SciPy's statistics module, about half a second that the first star-shape or quality request would otherwise pay.
 2. `warm_depth_goals` builds the depth goal status of up to three targets, one at a time, by calling the same function as `advisory:depth_goal`. The first target is the one the telescope points at, when the telemetry loop already knows it. The others are the targets with a stacked picture, newest imaged first, which is the target the Image Processing screen opens on. A target appears once. A failure is logged at debug level and skipped.
-3. `warm_night_reviews` builds the three newest night reviews.
+3. `warm_target_reviews` runs once for each target that `warm_depth_goals` chose, in the same order, each target as its own heavy-lane step. It makes the three calls Image Processing makes when it opens a target: the star-shape review (`advisory:star_shapes`: the roundness limit and the star-shape rows), the frame states (`target:get_frame_statuses`: the set-aside listing) and the grouped frames (`target:get_frames_grouped`: the dark-frame temperature cache). A failed call is logged at debug level and the others still run.
+4. `warm_night_reviews` builds the three newest night reviews.
 
 Each step runs in the heavy lane (`run_heavy`), so a warm-up never adds to the user's first heavy calls. Leaving the app cancels the warm-up before the next step starts. The target the telescope points at is looked up in the library first; a name that is not a library target is skipped.
 
 A failed step only makes the first visit slower, so it is logged as a warning, not an error. The steps read and never write.
+
+## Night-time review re-reads
+
+During a night, new frames arrive and are measured. Each change makes the kept star-shape review, frame states and grouped frames of that target old, so the next Image Processing visit waited seconds for them. `TargetReviewRewarmer` (`infrastructure/target_review_rewarm.py`) reads them again in the background, with the same `warm_target_reviews` the start-up uses.
+
+1. A service that changes a target's data calls `request` with the target. The callers are the quality measurement announcement (new quality rows), the frame sync (new frames; a calibration folder sync names no target), the end of a stacking job (a new stack, frames set aside) and putting frames back. `request` never waits and never raises.
+2. The three Image Processing reads (`advisory:star_shapes` for the whole target, `target:get_frame_statuses`, `target:get_frames_grouped`) call `note_requested`, which keeps the last three targets the app asked about. Every change also re-reads those. The warm-ups' own reads run inside `background_reads`, so they do not count.
+3. A target waits for 3 s with no new change, so a burst of changes gives one re-read. A target that keeps changing is still read after 30 s.
+4. The loop (`startup.keep_target_reviews_warm`, started and cancelled by the app's lifespan) reads nothing until `sky_catalog_warmup_finished` is set. It reads one target at a time, each as one heavy-lane step, and only when `heavy_lane_has_room` says a place is free and no request is waiting. So a user's heavy request waits for at most the one target being read.
+5. A failed read is logged at debug level. Nothing is shown to the user. At shutdown the container's `shutdown_resources` drops the waiting targets.
 
 ## Host check and CORS
 

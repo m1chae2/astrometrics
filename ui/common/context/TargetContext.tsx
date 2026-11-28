@@ -10,9 +10,24 @@ import { observeHandoffs } from '../utils/displayHandoffStore';
 import { socketClient } from '../utils/socketClient';
 import { UI_EVENTS } from '../types/backendTypes';
 import { DisplayActiveContext } from './DisplayActiveContext';
+import { QueryClientContext } from '@tanstack/react-query';
+import { invalidateTargetReads } from '../queries/targetReadQueryKeys';
 import { useOptionalHandoff } from './HandoffContext';
 
 export type InvalidationScope = 'targets' | 'frames' | 'all';
+
+/** The payload of the `targetsUpdated` app event. `id` names the target that changed, when one did. */
+interface TargetsUpdatedPayload {
+    id?: string;
+}
+
+/** The payload of the backend's `library:frames_updated` event. */
+interface FramesUpdatedPayload {
+    targetId?: string;
+    framesAdded?: number;
+    /** True when the sync was of a calibration folder (bias, dark or flat), not a target. */
+    isCalibration?: boolean;
+}
 
 /**
  * Interface defining the shape of the TargetContext state.
@@ -25,7 +40,14 @@ export interface TargetContextValue {
     reloadKey: number;
     framesReloadKey: number;
     forceReload: () => void;
-    invalidate: (scope?: InvalidationScope) => void;
+    /**
+     * Tells the screens that library data changed, so they read it again.
+     * @param scope Which reload count goes up: target data, frame lists, or both.
+     * @param targetIds The targets that changed. Only their kept reads (star shapes, frame statuses,
+     *     grouped frames) are marked old. Leave it out when the change names no target: then every
+     *     target's kept reads are marked old.
+     */
+    invalidate: (scope?: InvalidationScope, targetIds?: readonly string[]) => void;
     // Shared editing state
     catalogId: string;
     setCatalogId: (val: string) => void;
@@ -59,6 +81,8 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     });
     const [reloadKey, setReloadKey] = useState<number>(0);
     const [framesReloadKey, setFramesReloadKey] = useState<number>(0);
+    // Read without `useQueryClient`, so the provider still works where there is no query client.
+    const queryClient = useContext(QueryClientContext);
 
     const handoff = useOptionalHandoff();
     const publishHandoff = handoff?.publish;
@@ -105,14 +129,17 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     const [catalogId, setCatalogId] = useState<string>('');
     const [commonName, setCommonName] = useState<string>('');
 
-    const invalidate = useCallback((scope: InvalidationScope = 'all') => {
+    const invalidate = useCallback((scope: InvalidationScope = 'all', targetIds?: readonly string[]) => {
         if (scope === 'targets' || scope === 'all') {
             setReloadKey((prev) => prev + 1);
         }
         if (scope === 'frames' || scope === 'all') {
             setFramesReloadKey((prev) => prev + 1);
         }
-    }, []);
+        // The kept target reads do not use the reload counts. Only the named targets' reads are
+        // marked old, so the other targets keep theirs.
+        if (queryClient) void invalidateTargetReads(queryClient, targetIds);
+    }, [queryClient]);
 
     const forceReload = useCallback(() => {
         invalidate('targets');
@@ -133,8 +160,9 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     }, [setSelectedTarget, setPendingTarget]);
 
     useEffect(() => {
-        const detach = onEvent('targetsUpdated', () => {
-            invalidate('targets');
+        const detach = onEvent('targetsUpdated', (payload) => {
+            const targetId = (payload as TargetsUpdatedPayload | undefined)?.id;
+            invalidate('targets', targetId ? [targetId] : undefined);
         });
         return () => {
             try {
@@ -145,10 +173,15 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
         };
     }, [invalidate]);
 
-    // An automatic download added frames to the library: read the frame lists again.
+    // A download added frames to the library: read the frame lists again. Only the synced
+    // target's kept reads are marked old. A calibration folder sync changes every target's
+    // calibration matches, so it marks them all old.
     useEffect(() => {
-        const onAction = (action: string): void => {
-            if (action === UI_EVENTS['library:frames_updated']) invalidate('frames');
+        const onAction = (action: string, payload?: unknown): void => {
+            if (action !== UI_EVENTS['library:frames_updated']) return;
+            const framesUpdated = (payload ?? {}) as FramesUpdatedPayload;
+            const isOneTarget = Boolean(framesUpdated.targetId) && !framesUpdated.isCalibration;
+            invalidate('frames', isOneTarget ? [framesUpdated.targetId as string] : undefined);
         };
         socketClient.on('action', onAction);
         return () => {

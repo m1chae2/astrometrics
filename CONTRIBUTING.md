@@ -37,6 +37,8 @@ Ubuntu is the main system, and every test runs there. The Python tests also run 
 .venv-win\Scripts\python -m pytest -n auto -o addopts="" -m "not trio"
 ```
 
+On a pull request, the workflow runs only the tests marked `windows_sensitive`, which takes a few minutes. A push to main, a manual start and a weekly run (Monday, early morning UTC) run the whole suite, which takes 20 to 30 minutes. You do not add the marker by hand. The root `conftest.py` adds it to every test in a file whose text mentions something that works differently on Windows: the per-system modules, `sys.platform`, path separators, links, processes, file replacement and locks, settings folders or line endings (`WINDOWS_SENSITIVE_PATTERNS`). A short list, `WINDOWS_SENSITIVE_EXTRA_TEST_PATHS`, adds files the patterns miss. To see what a pull request runs, use `.venv/bin/pytest -m windows_sensitive --collect-only -q`. `backend/tests/test_windows_ci_selection.py` checks the workflow and the selection.
+
 Windows leaves out the tests of parts that exist only on Linux. The root `conftest.py` holds the list, `LINUX_ONLY_TEST_PATHS`, with the reason for each folder or file: the simulator, the TPM harness and INDI, which Windows does not have, and Siril's Linux pipes and process cleanup, whose Windows versions have their own tests. A run on Windows names each left-out path at the top of its output.
 
 A single test of Linux-only behavior carries the `linux_only` marker with its reason, and Windows skips it:

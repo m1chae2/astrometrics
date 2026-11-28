@@ -17,6 +17,7 @@ import {
   getTargetImageCacheVersion,
   subscribeToTargetImageCache,
 } from './targetImageCache';
+import { runWhenIdle } from '../../common/utils/runWhenIdle';
 
 /** One row of the target list, as far as the prefetch cares. */
 export interface PrefetchCandidate {
@@ -32,21 +33,8 @@ const IDLE_TIMEOUT_MS = 2000;
 /** Wait, in milliseconds, used where the browser has no idle callback. */
 const IDLE_FALLBACK_DELAY_MS = 300;
 
-/**
- * Runs a function when the browser is idle, or after a short delay where idle
- * callbacks do not exist.
- *
- * @param callback The work to run.
- * @return A function that cancels the wait.
- */
-function runWhenIdle(callback: () => void): () => void {
-  if (typeof window.requestIdleCallback === 'function') {
-    const handle = window.requestIdleCallback(callback, { timeout: IDLE_TIMEOUT_MS });
-    return () => window.cancelIdleCallback(handle);
-  }
-  const handle = window.setTimeout(callback, IDLE_FALLBACK_DELAY_MS);
-  return () => window.clearTimeout(handle);
-}
+/** How long the prefetch waits for the browser to be idle. */
+const PREFETCH_IDLE_WAIT = { timeoutMs: IDLE_TIMEOUT_MS, fallbackDelayMs: IDLE_FALLBACK_DELAY_MS } as const;
 
 /**
  * Fetches one target's picture into the picture cache and has the viewer decode it.
@@ -114,7 +102,7 @@ export function useNeighborPrefetch(
             }
           }
         })();
-      });
+      }, PREFETCH_IDLE_WAIT);
     };
 
     const onVisibilityChange = () => {

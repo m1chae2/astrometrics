@@ -707,7 +707,10 @@ if [ "$OBSERVATORY_PROFILE" = "offline" ]; then
 fi
 
 echo "== Starting the throwaway backend on port $BACKEND_PORT (mode: $MODE, observatory profile: $OBSERVATORY_PROFILE)"
-ASTROMETRICS_PORT="$BACKEND_PORT" "${BACKEND_COMMAND[@]}" > "$SANDBOX/backend.log" 2>&1 &
+# ASTROMETRICS_LOG_LEVEL=VERBOSE (the lowest level, below DEBUG) makes the backend log one RPC_TIMING line per
+# RPC call (its lane wait and run time) to backend.log, along with every DEBUG line; rpc_timings.py summarize reads
+# them. A normal backend runs at INFO and logs none.
+ASTROMETRICS_PORT="$BACKEND_PORT" ASTROMETRICS_LOG_LEVEL=VERBOSE "${BACKEND_COMMAND[@]}" > "$SANDBOX/backend.log" 2>&1 &
 BACKEND_PID=$!
 for _ in $(seq 1 120); do
   if curl -fs -m 2 "http://127.0.0.1:$BACKEND_PORT/api/ready" 2>/dev/null | grep -q '"ready":true'; then

@@ -49,7 +49,7 @@ from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_cat
 from wayfindinglib.drivers.control_record_store import BULK_GUIDING_SAMPLES_KIND
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Sequence
+    from collections.abc import Callable, Collection, Mapping, Sequence
 
     from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
@@ -107,7 +107,32 @@ def capture_library(
     return library_cache[key]
 
 
-def kept_frame_measurements(context: ControlContext) -> capture_history.FrameMeasurements:
+def frame_measurement_version(context: ControlContext) -> dict[str, Any] | None:
+    """Read the data version of the stored frame measurements.
+
+    This is one short query per pinned metric
+    (`capture_history.PINNED_FRAME_METRICS`), with no frame rows read. It
+    changes whenever a frame row of one of those metrics is added or
+    removed, so equal versions mean `kept_frame_measurements` gives the same
+    numbers.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the configuration.
+
+    Returns
+    -------
+    version : `dict` or `None`
+        See ``get_frame_metric_data_versions``. `None` when the database
+        could not be read.
+    """
+    return get_frame_metric_data_versions(context.config, tuple(capture_history.PINNED_FRAME_METRICS))
+
+
+def kept_frame_measurements(
+    context: ControlContext, version: Mapping[str, Any] | None = None
+) -> capture_history.FrameMeasurements:
     """Give the stored measurements of every frame, read again only on change.
 
     The capture history reads four metrics of every frame in the library
@@ -124,6 +149,10 @@ def kept_frame_measurements(context: ControlContext) -> capture_history.FrameMea
     ----------
     context : `ControlContext`
         Supplies the science library, the configuration and the cache.
+    version : `~collections.abc.Mapping`, optional
+        The data version the caller has just read
+        (`frame_measurement_version`), so it is not read again. It is read
+        here when omitted.
 
     Returns
     -------
@@ -145,7 +174,7 @@ def kept_frame_measurements(context: ControlContext) -> capture_history.FrameMea
         version : `Any`
             See ``get_frame_metric_data_versions``.
         """
-        return get_frame_metric_data_versions(context.config, tuple(capture_history.PINNED_FRAME_METRICS))
+        return frame_measurement_version(context)
 
     def update(
         _kept_version: Any, kept: capture_history.FrameMeasurements, version: Any
@@ -161,7 +190,7 @@ def kept_frame_measurements(context: ControlContext) -> capture_history.FrameMea
 
     return context.review_cache.get_or_build(
         ("frame_measurements",),
-        read_version,
+        read_version if version is None else version,
         lambda: capture_history.read_frame_measurement_table(context.astrometrics, read_version),
         copy_result=False,
         update=update,

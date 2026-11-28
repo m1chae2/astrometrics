@@ -6,7 +6,8 @@ Python code at a time (the global interpreter lock), so every extra busy
 thread slows the event loop and the light calls. All heavy work therefore
 shares `HEAVY_LANE_SLOTS` places. The RPC router and the start-up warm-ups
 both use `run_heavy`, so a warm-up that is still running cannot add to the
-user's first heavy calls.
+user's first heavy calls. Background work that can wait asks
+`heavy_lane_has_room` first, so it never queues in front of a user's call.
 """
 
 import asyncio
@@ -58,3 +59,19 @@ async def run_heavy(function: Callable[..., Any], *args: Any, **kwargs: Any) -> 
     return await anyio.to_thread.run_sync(
         functools.partial(function, *args, **kwargs), limiter=heavy_lane_limiter()
     )
+
+
+def heavy_lane_has_room() -> bool:
+    """Say whether heavy work could start now without making anyone wait.
+
+    Background work that can wait (`target_review_rewarm`) asks this before
+    it takes a place, so it never queues in front of a user's heavy request.
+    Call it on the event loop thread.
+
+    Returns
+    -------
+    has_room : `bool`
+        `True` when a place is free and no call is waiting for one.
+    """
+    statistics = heavy_lane_limiter().statistics()
+    return statistics.tasks_waiting == 0 and statistics.borrowed_tokens < statistics.total_tokens

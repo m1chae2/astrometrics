@@ -6,15 +6,21 @@
  * already opened does not ask the backend again. A change to this target's data, or `reload`, reads
  * again. Another target's statuses are never shown while this target's are read. A read that fails
  * leaves the value `null`, which the screen shows as "Included", never as an error.
+ *
+ * The read waits until the display is on screen (`useIsDisplayActive`). Every display is mounted at
+ * start-up, so a hidden Image Processing display must not slow the start of the app. A kept answer
+ * still shows while the display is hidden, and a change (or `reload`) marked while it is hidden is
+ * read once it is shown. Once start-up is over, the selected target's statuses are also read ahead
+ * while the browser is idle (`useTargetReadPrefetch.ts`), so the first visit shows them at once.
  */
 
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { readFrameStatuses } from '../../common/services/imaging/frameReviewService';
 import { qualityQueryKeys } from '../../common/queries/qualityQueryKeys';
 import type { FrameStatusReport } from '../../common/types/backendTypes';
 import { buildFrameStatusLookup, type FrameStatusInfo } from '../utils/frameStatus';
-import { TARGET_READ_QUERY_OPTIONS } from './targetReadQueryPolicy';
+import { frameStatusesQuery } from './targetReadQueryPolicy';
+import { useIsDisplayActive } from '../../common/context/DisplayActiveContext';
 
 /** What {@link useFrameStatuses} gives back. */
 export interface FrameStatuses {
@@ -38,11 +44,11 @@ export function useFrameStatuses(
 ): FrameStatuses {
     const queryClient = useQueryClient();
     const isWanted = Boolean(targetId) && shouldFetch;
+    // Ask the backend only while the display is on screen. A kept answer shows either way.
+    const isDisplayActive = useIsDisplayActive();
     const statusQuery = useQuery({
-        queryKey: qualityQueryKeys.frameStatuses(targetId),
-        queryFn: () => readFrameStatuses(targetId),
-        enabled: isWanted,
-        ...TARGET_READ_QUERY_OPTIONS,
+        ...frameStatusesQuery(targetId),
+        enabled: isWanted && isDisplayActive,
     });
 
     /** Marks the kept statuses of this target as old, so they are read again now. */

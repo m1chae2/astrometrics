@@ -5,16 +5,19 @@
  * mounts its hooks, so each test mounts a hook, unmounts it and mounts it again with the same cache. The
  * same target must not ask the backend again, marking that target's reads old must, and going back to a
  * target already read must show its kept answer at once. Marking one target's reads old must leave the
- * other targets' reads alone.
+ * other targets' reads alone. The star-shape and frame-status reads wait while the display is hidden,
+ * show a kept answer while hidden, and read once the display is shown.
  */
-import { act, renderHook, waitFor } from '@testing-library/react';
+import React from 'react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 import { useStarShapeReview } from '../hooks/useStarShapeReview';
 import { useFrameStatuses } from '../hooks/useFrameStatuses';
 import { useGroupedFrameStats } from '../hooks/useGroupedFrameStats';
 import { invalidateTargetReads } from '../../common/queries/targetReadQueryKeys';
+import { DisplayActiveContext } from '../../common/context/DisplayActiveContext';
 
 const callBackendMock = vi.fn();
 vi.mock('../../common/services/backendApi', () => ({
@@ -211,5 +214,94 @@ describe('useGroupedFrameStats keeps its answer', () => {
         await waitFor(() => expect(stackingPanel.result.current.groups).toHaveLength(1));
         await waitFor(() => expect(calibrationLine.result.current.groups).toHaveLength(1));
         expect(countCalls('target:get_frames_grouped', 'M 81')).toBe(1);
+    });
+});
+
+/** What the hidden-display tests read from their probe on each render. */
+interface ProbeReads {
+    review: ReturnType<typeof useStarShapeReview>;
+    statuses: ReturnType<typeof useFrameStatuses>;
+}
+
+/**
+ * Mounts both slow reads of M 81 with the test's cache, inside a display that is shown or hidden.
+ * @param queryClient The cache to use.
+ * @param latest Filled with the reads of the newest render.
+ * @return A function that draws the probe with the display shown or hidden; call it again to change it.
+ */
+function mountProbe(queryClient: QueryClient, latest: { current: ProbeReads | null }) {
+    /**
+     * Reads star shapes and frame statuses, and keeps the newest answers in `latest`.
+     * @return Nothing on screen.
+     */
+    const Probe: React.FC = () => {
+        latest.current = { review: useStarShapeReview('M 81'), statuses: useFrameStatuses('M 81') };
+        return null;
+    };
+    /**
+     * The probe inside the cache and the "display is on screen" flag.
+     * @param props.isActive Whether the display is shown.
+     * @return The probe inside both providers.
+     */
+    const Slot: React.FC<{ isActive: boolean }> = ({ isActive }) => (
+        <QueryClientProvider client={queryClient}>
+            <DisplayActiveContext.Provider value={isActive}><Probe /></DisplayActiveContext.Provider>
+        </QueryClientProvider>
+    );
+    let rendered: ReturnType<typeof render> | null = null;
+    return (isActive: boolean) => {
+        if (rendered) rendered.rerender(<Slot isActive={isActive} />);
+        else rendered = render(<Slot isActive={isActive} />);
+        return rendered;
+    };
+}
+
+describe('the slow reads wait while the display is hidden', () => {
+    /** A hidden display asks nothing, and showing it reads both. */
+    it('asks nothing while hidden and reads once shown', async () => {
+        const latest: { current: ProbeReads | null } = { current: null };
+        const show = mountProbe(new QueryClient(), latest);
+        show(false);
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+        expect(countCalls('advisory:star_shapes', 'M 81')).toBe(0);
+        expect(countCalls('target:get_frame_statuses', 'M 81')).toBe(0);
+        expect(latest.current?.review).toBeNull();
+
+        show(true);
+        await waitFor(() => expect(latest.current?.review).toMatchObject({ target: 'M 81' }));
+        await waitFor(() => expect(latest.current?.statuses.statuses.size).toBe(1));
+        expect(countCalls('advisory:star_shapes', 'M 81')).toBe(1);
+        expect(countCalls('target:get_frame_statuses', 'M 81')).toBe(1);
+    });
+
+    /** A kept answer shows at once while the display is hidden, with no new call. */
+    it('shows the kept answer while hidden', async () => {
+        const queryClient = new QueryClient();
+        const firstReads: { current: ProbeReads | null } = { current: null };
+        const first = mountProbe(queryClient, firstReads)(true);
+        await waitFor(() => expect(firstReads.current?.review).not.toBeNull());
+        first.unmount();
+
+        const secondReads: { current: ProbeReads | null } = { current: null };
+        mountProbe(queryClient, secondReads)(false);
+        expect(secondReads.current?.review).toMatchObject({ target: 'M 81' });
+        expect(countCalls('advisory:star_shapes', 'M 81')).toBe(1);
+    });
+
+    /** A change marked while hidden is read once the display is shown, not before. */
+    it('reads a change marked while hidden once shown', async () => {
+        const queryClient = new QueryClient();
+        const latest: { current: ProbeReads | null } = { current: null };
+        const show = mountProbe(queryClient, latest);
+        show(true);
+        await waitFor(() => expect(latest.current?.statuses.report).not.toBeNull());
+        show(false);
+        await act(async () => { await invalidateTargetReads(queryClient, ['M 81']); });
+        expect(countCalls('target:get_frame_statuses', 'M 81')).toBe(1);
+        // The kept statuses stay while hidden.
+        expect(latest.current?.statuses.report).not.toBeNull();
+
+        show(true);
+        await waitFor(() => expect(countCalls('target:get_frame_statuses', 'M 81')).toBe(2));
     });
 });

@@ -90,7 +90,7 @@
       "scope": {
         "per": "run"
       },
-      "method": "performance mark in the page",
+      "method": "performance.now() in the page from the start of the navigation, at the first moment a target list row is visible and no RPC call is in flight; checked on a 25 ms timer, each time the last call in flight ends, and in the flow's own wait for the app, so it is always recorded",
       "statistic": "single value",
       "threshold": 5000,
       "objective": 2000,
@@ -114,7 +114,7 @@
       "scope": {
         "per": "run"
       },
-      "method": "performance mark in the page, first load of the run; the limit applies only to a --cold run (files dropped from the page cache before the run)",
+      "method": "the same in-page ready time as time_to_app_ready, first load of the run; the limit applies only to a --cold run (files dropped from the page cache before the run)",
       "statistic": "single value",
       "threshold": 10000,
       "objective": 5000,

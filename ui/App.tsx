@@ -19,6 +19,7 @@ import { HandoffProvider } from './common/context/HandoffContext';
 import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { PlanningTimeProvider } from './common/context/PlanningTimeContext';
 import { CurrentTargetAnnouncer } from './common/components/CurrentTargetAnnouncer';
+import { TargetReadPrefetcher } from './imageProcessingDisplay/hooks/useTargetReadPrefetch';
 import { handlePlanChanged, PLAN_UPDATED_FROM_ANOTHER_WINDOW, PlanChangedPayload } from './common/utils/planChanged';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { IngestionJobsProvider } from './common/context/IngestionJobsContext';
@@ -27,6 +28,7 @@ import { AstrometricsProvider, useAstrometrics } from './common/context/Astromet
 import { fallbackDisplayMode } from './common/constants/displayFlags';
 import { normalizeAppMode } from './common/utils/normalizeAppMode';
 import { useIsModeReady } from './common/utils/appBootReadiness';
+import { useMountedModes } from './common/hooks/useMountedModes';
 import { postHandoff } from './common/utils/displayHandoffStore';
 import { COMMAND_CONSOLE_EVENT_KIND } from './common/utils/commandConsoleEvents';
 // Listens for "Show these frames" from the start, so the Image Viewer also
@@ -132,11 +134,12 @@ const onRenderProfile: ProfilerOnRenderCallback = (
 };
 
 // All mode panels, keyed by the `mode` value that makes them the active/visible
-// one. Only panels the user has actually visited are mounted (see visitedModes
-// below) — once visited, a panel stays mounted and is hidden via CSS when
-// inactive, so switching back to it doesn't lose its local state or refetch
-// its data. Adding a future display here automatically gets this same
-// on-demand mounting for free; no other file needs to change.
+// one. Only mounted panels are drawn (see useMountedModes below): the main window
+// mounts the shown one first and the rest when the browser is next idle; an extra
+// window mounts only the ones it shows. Once mounted, a panel stays mounted and is
+// hidden via CSS when inactive, so switching back to it doesn't lose its local
+// state or refetch its data. Adding a future display here automatically gets this
+// same mounting for free (also add it to APP_MODE_NAMES in appBootReadiness.ts).
 const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[] = [
   { mode: 'Image Viewer', id: 'ImageViewerDisplay', Component: ImageViewerDisplay },
   { mode: 'Astronomy Manager', id: 'AstronomyManager', Component: AstronomyManager },
@@ -146,6 +149,9 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
   { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
+
+/** Every display, in screen order. One array for the app's lifetime, as useMountedModes needs. */
+const ALL_MODE_NAMES: readonly string[] = MODE_PANELS.map((panel) => panel.mode);
 
 /**
  * Socket actions the Command Console shows: what an AI agent ran in the
@@ -198,6 +204,21 @@ export const PAUSABLE_MODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Calls `onMounted` once the content beside it is on the page. Inside a display's
+ * loading boundary it runs only after the display's code has loaded and the
+ * display has been built, after the display's own start-up effects.
+ *
+ * @param props.onMounted Called when the content is on the page.
+ * @return Nothing on screen.
+ */
+const ContentMountedSignal: React.FC<{ onMounted?: () => void }> = ({ onMounted }) => {
+  useEffect(() => {
+    onMounted?.();
+  }, [onMounted]);
+  return null;
+};
+
+/**
  * One display's slot in the app. Shows it, or hides it with CSS and (for the
  * displays in `PAUSABLE_MODES`) pauses it with `Activity`.
  *
@@ -205,13 +226,24 @@ export const PAUSABLE_MODES: ReadonlySet<string> = new Set([
  * loaded. The startup splash screen waits for that report, and a paused
  * display does not run its effects, so pausing early would hang the splash.
  *
+ * Each slot has its own loading boundary (`Suspense`), so a display whose code
+ * is still loading never hides a display that is already on screen.
+ *
  * @param props.panelMode The mode this slot belongs to.
  * @param props.activeMode The mode the user is looking at.
+ * @param props.onContentMounted Called once the display is on the page (its code
+ *     has loaded and it has been built).
  * @param props.children The display.
  */
-export const ModePanel: React.FC<{ panelMode: string; activeMode: string; children: React.ReactNode }> = ({
+export const ModePanel: React.FC<{
+  panelMode: string;
+  activeMode: string;
+  onContentMounted?: () => void;
+  children: React.ReactNode;
+}> = ({
   panelMode,
   activeMode,
+  onContentMounted,
   children,
 }) => {
   const isActive = activeMode === panelMode;
@@ -221,7 +253,10 @@ export const ModePanel: React.FC<{ panelMode: string; activeMode: string; childr
     <div className={isActive ? 'app__mode-panel--visible' : 'app__mode-panel--hidden'}>
       <Activity mode={paused ? 'hidden' : 'visible'}>
         <PanelErrorBoundary panelName={panelMode}>
-          <DeferWhileHidden active={isActive}>{children}</DeferWhileHidden>
+          <Suspense fallback={<Skeleton variant="block" label="Loading this display" />}>
+            <DeferWhileHidden active={isActive}>{children}</DeferWhileHidden>
+            <ContentMountedSignal onMounted={onContentMounted} />
+          </Suspense>
         </PanelErrorBoundary>
       </Activity>
     </div>
@@ -232,8 +267,8 @@ export const ModePanel: React.FC<{ panelMode: string; activeMode: string; childr
  * Internal layout wrapper that handles dynamic mode switching,
  * URL parameter parsing, and WebSocket action routing (e.g. forced navigation).
  *
- * Uses `visitedModes` to mount heavy components lazily on first visit,
- * keeping them mounted (but hidden) to preserve state during navigation.
+ * Uses `useMountedModes` to mount the shown display first and the hidden ones
+ * right after, keeping them mounted (but hidden) to preserve state during navigation.
  */
 // Whether this window is an auxiliary/secondary display (opened via "Open in
 // new window") rather than the main window. Read once at module scope since
@@ -266,25 +301,14 @@ const AppContent: React.FC = () => {
   const [requestedMode, setRequestedMode] = useState<string | null>(null);
   const [planNotice, setPlanNotice] = useState<string>('');
 
-  // Tracks every mode that's been mounted (and thus stays mounted, hidden via
-  // CSS, rather than remounting from scratch when revisited). The main
-  // window force-mounts every mode immediately at boot, so the splash screen
-  // (gated on every mode reporting its data loaded — see
-  // ui/common/utils/appBootReadiness.ts) covers the whole app, not just the
-  // first view shown. Auxiliary windows keep the original on-demand
-  // behavior: they only ever show one mode, so mounting the rest would be
-  // pure waste.
-  const [visitedModes, setVisitedModes] = useState<Set<string>>(
-    () => (isAuxWindow ? new Set([mode]) : new Set(MODE_PANELS.map((p) => p.mode)))
-  );
-  useEffect(() => {
-    setVisitedModes((previouslyVisitedModes) => {
-      if (previouslyVisitedModes.has(mode)) return previouslyVisitedModes;
-      const nextVisitedModes = new Set(previouslyVisitedModes);
-      nextVisitedModes.add(mode);
-      return nextVisitedModes;
-    });
-  }, [mode]);
+  // Every mode that has been mounted (and thus stays mounted, hidden via CSS,
+  // rather than remounting from scratch when revisited). The main window mounts
+  // the shown mode first and every other mode when the browser is next idle,
+  // still behind the splash screen (which waits for every mode to report its
+  // data loaded — see ui/common/utils/appBootReadiness.ts), so the splash still
+  // covers the whole app. Auxiliary windows only ever show one mode, so they
+  // mount the rest only when opened.
+  const { mountedModes, reportDisplayMounted } = useMountedModes(ALL_MODE_NAMES, mode, !isAuxWindow);
 
   useEffect(() => {
     if (!config || !config['Frontend']) return;
@@ -458,6 +482,9 @@ const AppContent: React.FC = () => {
     <div className="app">
       <TitleBar />
       <CurrentTargetAnnouncer />
+      {/* Once start-up is over, reads the selected target's slow Image Processing data while the
+          browser is idle, so the first visit to that display shows it at once. */}
+      <TargetReadPrefetcher />
       <div
         aria-live="polite"
         role="status"
@@ -471,19 +498,15 @@ const AppContent: React.FC = () => {
           <StatusHeader />
         </Profiler>
         <div className="app__content">
-          <Suspense
-            fallback={<Skeleton variant="block" label="Loading this display" />}
-          >
-            {MODE_PANELS.filter(({ mode: panelMode }) => visitedModes.has(panelMode)).map(
-              ({ mode: panelMode, id, Component }) => (
-                <ModePanel key={id} panelMode={panelMode} activeMode={mode}>
-                  <Profiler id={id} onRender={onRenderProfile}>
-                    <Component />
-                  </Profiler>
-                </ModePanel>
-              )
-            )}
-          </Suspense>
+          {MODE_PANELS.filter(({ mode: panelMode }) => mountedModes.has(panelMode)).map(
+            ({ mode: panelMode, id, Component }) => (
+              <ModePanel key={id} panelMode={panelMode} activeMode={mode} onContentMounted={reportDisplayMounted}>
+                <Profiler id={id} onRender={onRenderProfile}>
+                  <Component />
+                </Profiler>
+              </ModePanel>
+            )
+          )}
         </div>
       </TerminalProvider>
     </div>

@@ -41,15 +41,24 @@ MAXIMUM_LIMIT = 50
 class AdvisoryService:
     """Read quality advice and night history from the wayfinding library."""
 
-    def __init__(self, wayfinder: Any) -> None:
+    #: Told about star-shape reads (see `__init__`). A class-level `None`
+    #: keeps a service built without `__init__` (in tests) working.
+    _review_rewarmer: Any = None
+
+    def __init__(self, wayfinder: Any, review_rewarmer: Any = None) -> None:
         """Keep the Wayfinder that does the work.
 
         Parameters
         ----------
         wayfinder : `wayfindinglib.Wayfinder`
             The shared Wayfinder.
+        review_rewarmer : `TargetReviewRewarmer`, optional
+            Told which target the app asked the star-shape review of, so it
+            is read again in the background after that target's data
+            changes. None tells nothing.
         """
         self.wayfinder = wayfinder
+        self._review_rewarmer = review_rewarmer
 
     @property
     def _resolver(self) -> SubjectResolver:
@@ -98,6 +107,9 @@ class AdvisoryService:
             each with a sentence and its numbers, and the per-frame series
             for a chart.
         """
+        if self._review_rewarmer is not None and night is None and frame_paths is None:
+            # Image Processing opens with the whole-target review.
+            self._review_rewarmer.note_requested(target)
         return self.wayfinder.review.targets.get_star_shapes(
             self._resolver.target(target), frame_paths, night=night
         )

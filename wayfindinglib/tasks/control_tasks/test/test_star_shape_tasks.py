@@ -9,13 +9,16 @@ every time when the version cannot be worked out. The set-aside listing is
 read once per review. Further tests check that the kept rows are brought up
 to date instead of read again when the update can do it, and what the
 version of the roundness limit follows: live guiding samples and frames of
-nights the limit does not use leave it as it is.
+nights the limit does not use leave it as it is. A randomized test checks
+that the kept roundness signature gives equal versions exactly when fresh
+signatures are equal, and that an unchanged library reads no measurements.
 """
 
 import dataclasses
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 
 from astrometricslib.arguments import observing_night_id
@@ -25,6 +28,7 @@ from wayfindinglib.analytics.capture_history import (
     STAR_ELONGATION_METRIC,
     STAR_WIDTH_METRIC,
     FrameMeasurements,
+    roundness_baseline_signature,
 )
 from wayfindinglib.analytics.night_index import NightFrame, NightIndex
 from wayfindinglib.analytics.star_shape_review import StoredShapeRows
@@ -271,6 +275,38 @@ class _VersionInputs:
             for frame in self.frames
         }
         self.measurement_reads = 0
+        self.context = SimpleNamespace(config=object(), butler=object(), star_shape_cache=VersionedCache())
+
+    def measurement_version(self) -> dict[str, Any]:
+        """Give the stand-in data version of the stored measurements.
+
+        It is made from the stored values themselves, so it changes exactly
+        when they do, as the real version changes with every added or
+        removed row.
+
+        Returns
+        -------
+        version : `dict`
+            One entry holding every stored value.
+        """
+        return {
+            "rows": tuple(
+                sorted((subject, tuple(sorted(values.items()))) for subject, values in self.values.items())
+            )
+        }
+
+    def version(self, night: str | None) -> Any:
+        """Work out the limit version with the stand-in context.
+
+        The context, and so its `star_shape_cache`, is the same for every
+        call, as in the running app.
+
+        Returns
+        -------
+        version : `Any`
+            See `roundness_limit_data_version`.
+        """
+        return star_shape_tasks.roundness_limit_data_version(self.context, night)
 
     def add_frame(self, night: str, number: int, **fields: Any) -> NightFrame:
         """Index one more frame of a night, not yet measured.
@@ -326,7 +362,7 @@ def version_inputs(monkeypatch: pytest.MonkeyPatch) -> _VersionInputs:
             tonight=tonight, frames=tuple(frames), ekos_nights=frozenset(), guiding_nights=frozenset()
         )
 
-    def kept_measurements(_context: Any) -> FrameMeasurements:
+    def kept_measurements(_context: Any, _version: Any = None) -> FrameMeasurements:
         """Give the stand-in stored values of the frames.
 
         Returns
@@ -340,86 +376,78 @@ def version_inputs(monkeypatch: pytest.MonkeyPatch) -> _VersionInputs:
     monkeypatch.setattr(star_shape_tasks, "report_context_version", lambda *_: inputs.records)
     monkeypatch.setattr(star_shape_tasks, "build_night_index", night_index)
     monkeypatch.setattr(star_shape_tasks.night_analysis, "kept_frame_measurements", kept_measurements)
-    return inputs
-
-
-def _version(night: str | None) -> Any:
-    """Work out the limit version with a stand-in context.
-
-    Returns
-    -------
-    version : `Any`
-        See `roundness_limit_data_version`.
-    """
-    return star_shape_tasks.roundness_limit_data_version(
-        SimpleNamespace(config=object(), butler=object()), night
+    monkeypatch.setattr(
+        star_shape_tasks.night_analysis,
+        "frame_measurement_version",
+        lambda _context: inputs.measurement_version(),
     )
+    return inputs
 
 
 def test_an_indexed_frame_that_is_not_measured_leaves_the_version(version_inputs: _VersionInputs) -> None:
     """A new frame changes nothing until it has width and elongation rows."""
-    before = _version(None)
+    before = version_inputs.version(None)
     frame = version_inputs.add_frame(TONIGHT, 50)
-    assert _version(None) == before
+    assert version_inputs.version(None) == before
 
     # A width row alone still cannot make the frame count for roundness.
     version_inputs.values[frame.subject_id] = {STAR_WIDTH_METRIC: (2.5, 5)}
-    assert _version(None) == before
+    assert version_inputs.version(None) == before
 
     version_inputs.measure(frame.subject_id)
-    assert _version(None) != before
+    assert version_inputs.version(None) != before
 
 
 def test_a_measured_frames_exposure_spectral_flag_and_night_count(version_inputs: _VersionInputs) -> None:
     """Editing a measured frame changes the version; an unmeasured one not."""
     measured = _subject(OLD_NIGHT, 0)
     unmeasured = version_inputs.add_frame(OLD_NIGHT, 50).subject_id
-    before = _version(None)
+    before = version_inputs.version(None)
 
     version_inputs.replace_frame(unmeasured, exposure_s=5.0, is_spectral=True)
-    assert _version(None) == before
+    assert version_inputs.version(None) == before
 
     version_inputs.replace_frame(measured, exposure_s=5.0)
-    after_exposure = _version(None)
+    after_exposure = version_inputs.version(None)
     assert after_exposure != before
 
     version_inputs.replace_frame(measured, is_spectral=True)
-    after_spectral = _version(None)
+    after_spectral = version_inputs.version(None)
     assert after_spectral != after_exposure
 
     version_inputs.replace_frame(measured, is_spectral=False, exposure_s=60.0, night=TONIGHT)
-    assert _version(None) not in (before, after_exposure, after_spectral)
+    assert version_inputs.version(None) not in (before, after_exposure, after_spectral)
 
 
 def test_a_removed_or_set_aside_frame_changes_the_version(version_inputs: _VersionInputs) -> None:
     """A measured frame that is deleted or set aside changes the version."""
-    before = _version(None)
+    before = version_inputs.version(None)
     version_inputs.frames = [
         frame for frame in version_inputs.frames if frame.subject_id != _subject(OLD_NIGHT, 3)
     ]
 
-    assert _version(None) != before
+    assert version_inputs.version(None) != before
 
 
 def test_a_night_with_too_few_measured_frames_leaves_the_version(version_inputs: _VersionInputs) -> None:
     """A night counts only once it has the minimum of measured frames."""
-    before = _version(None)
+    before = version_inputs.version(None)
     for number in range(MEASURED_FRAMES - 1):
         frame = version_inputs.add_frame("2026-11-27", number)
         version_inputs.measure(frame.subject_id)
-        assert _version(None) == before
+        assert version_inputs.version(None) == before
 
     frame = version_inputs.add_frame("2026-11-27", MEASURED_FRAMES)
     version_inputs.measure(frame.subject_id)
-    assert _version(None) != before
+    assert version_inputs.version(None) != before
 
 
 def test_a_new_elongation_of_a_measured_frame_changes_the_version(version_inputs: _VersionInputs) -> None:
     """A frame measured again with a new elongation changes the version."""
-    before = _version(None)
+    before = version_inputs.version(None)
     version_inputs.measure(_subject(OLD_NIGHT, 1), elongation=1.6)
 
-    assert _version(None) != before
+    assert version_inputs.version(None) != before
 
 
 def test_the_limit_version_ignores_what_the_limit_does_not_read(version_inputs: _VersionInputs) -> None:
@@ -429,12 +457,12 @@ def test_the_limit_version_ignores_what_the_limit_does_not_read(version_inputs: 
     them in coarse steps (`report_context_version`), so they are not
     watched here.
     """
-    before = _version(TONIGHT)
+    before = version_inputs.version(TONIGHT)
 
     version_inputs.measure(_subject(TONIGHT, 0), elongation=1.7)
     version_inputs.measure(version_inputs.add_frame(TONIGHT, 50).subject_id)
 
-    assert _version(TONIGHT) == before
+    assert version_inputs.version(TONIGHT) == before
 
 
 def test_the_limit_version_follows_what_the_limit_reads(version_inputs: _VersionInputs) -> None:
@@ -442,26 +470,26 @@ def test_the_limit_version_follows_what_the_limit_reads(version_inputs: _Version
 
     Without a night every frame counts, so tonight's frame changes it too.
     """
-    night_before = _version(TONIGHT)
-    all_before = _version(None)
+    night_before = version_inputs.version(TONIGHT)
+    all_before = version_inputs.version(None)
 
     version_inputs.measure(_subject(TONIGHT, 0), elongation=1.7)
-    assert _version(TONIGHT) == night_before
-    assert _version(None) != all_before
+    assert version_inputs.version(TONIGHT) == night_before
+    assert version_inputs.version(None) != all_before
 
     version_inputs.measure(_subject(OLD_NIGHT, 0), elongation=1.7)
-    assert _version(TONIGHT) != night_before
-    night_before = _version(TONIGHT)
+    assert version_inputs.version(TONIGHT) != night_before
+    night_before = version_inputs.version(TONIGHT)
 
     version_inputs.records = ("records", 2)
-    assert _version(TONIGHT) != night_before
+    assert version_inputs.version(TONIGHT) != night_before
 
 
 def test_the_limit_version_is_unknown_when_the_records_are(version_inputs: _VersionInputs) -> None:
     """A records version that cannot be read means the limit is not kept."""
     version_inputs.records = None
 
-    assert _version(None) is None
+    assert version_inputs.version(None) is None
 
 
 def test_the_limit_version_is_unknown_when_the_measurements_cannot_be_read(
@@ -469,7 +497,7 @@ def test_the_limit_version_is_unknown_when_the_measurements_cannot_be_read(
 ) -> None:
     """Unreadable measurements mean the limit is not kept."""
 
-    def fail(_context: Any) -> None:
+    def fail(_context: Any, _version: Any = None) -> None:
         """Fail as an unreadable quality store does.
 
         Raises
@@ -481,7 +509,7 @@ def test_the_limit_version_is_unknown_when_the_measurements_cannot_be_read(
 
     monkeypatch.setattr(star_shape_tasks.night_analysis, "kept_frame_measurements", fail)
 
-    assert _version(None) is None
+    assert version_inputs.version(None) is None
 
 
 def test_indexing_a_frame_does_not_rebuild_the_limit_but_measuring_it_does(
@@ -514,3 +542,146 @@ def test_indexing_a_frame_does_not_rebuild_the_limit_but_measuring_it_does(
     star_shape_tasks.kept_roundness_limit(context, None)
     star_shape_tasks.kept_roundness_limit(context, None)
     assert len(builds) == 2
+
+
+def _fresh_signature(inputs: _VersionInputs, night: str | None) -> Any:
+    """Work out the roundness signature from scratch, with no cache.
+
+    Returns
+    -------
+    signature : `tuple`
+        `roundness_baseline_signature` of the frames the limit for `night`
+        uses, as the version worked it out before it kept the signature.
+    """
+    frames = [frame for frame in inputs.frames if night is None or frame.night < night]
+    return roundness_baseline_signature(frames, inputs.values, night)
+
+
+def _pick(generator: np.random.Generator, choices: list[Any]) -> Any:
+    """Pick one item of a list.
+
+    Returns
+    -------
+    choice : `Any`
+        One of `choices`.
+    """
+    return choices[int(generator.integers(len(choices)))]
+
+
+def _random_change(inputs: _VersionInputs, generator: np.random.Generator, step: int) -> str:
+    """Make one random change to the frames or their stored values.
+
+    Returns
+    -------
+    change : `str`
+        The kind of change made. ``"nothing"`` changes nothing.
+    """
+    change = _pick(
+        generator,
+        [
+            "nothing",
+            "nothing",
+            "index",
+            "width_only",
+            "measure",
+            "measure",
+            "exposure",
+            "spectral",
+            "night",
+            "remove",
+            "copy",
+        ],
+    )
+    nights = [OLD_NIGHT, "2026-11-23", TONIGHT, "2026-11-27"]
+    if change == "index" or not inputs.frames:
+        inputs.add_frame(_pick(generator, nights), 100 + step)
+        return "index"
+    frame = _pick(generator, inputs.frames)
+    if change == "width_only":
+        inputs.values[frame.subject_id] = {STAR_WIDTH_METRIC: (2.5, step)}
+    elif change == "measure":
+        inputs.measure(
+            frame.subject_id,
+            width=_pick(generator, [-1.0, 2.0, 2.5, 3.0]),
+            elongation=_pick(generator, [0.9, 1.0, 1.1, 1.3, 1.6]),
+        )
+    elif change == "exposure":
+        inputs.replace_frame(frame.subject_id, exposure_s=_pick(generator, [5.0, 30.0, 60.0]))
+    elif change == "spectral":
+        inputs.replace_frame(frame.subject_id, is_spectral=not frame.is_spectral)
+    elif change == "night":
+        inputs.replace_frame(frame.subject_id, night=_pick(generator, nights))
+    elif change == "remove":
+        inputs.frames = [held for held in inputs.frames if held is not frame]
+    elif change == "copy":
+        # The same frame read again from its document: equal, but a new object.
+        inputs.replace_frame(frame.subject_id)
+    return change
+
+
+@pytest.mark.parametrize("night", [None, TONIGHT])
+def test_the_kept_signature_changes_exactly_when_a_fresh_one_does(
+    version_inputs: _VersionInputs, night: str | None
+) -> None:
+    """Two versions are equal exactly when fresh signatures would be equal.
+
+    Random changes are made one at a time: frames indexed, measured (with
+    usable or unusable rows), edited, moved, removed or read again, and
+    steps with no change. After each one, the version (which keeps the
+    signature in the cache) is compared with every earlier version, and
+    fresh signatures of the same states are compared the same way. The two
+    comparisons must agree every time. A step that changes nothing must
+    not read the stored measurements.
+    """
+    generator = np.random.default_rng(20261127)
+    # Nights a little above and just at the minimum, so single changes
+    # move them across it in both directions.
+    for number in range(MEASURED_FRAMES, MEASURED_FRAMES + 2):
+        version_inputs.measure(version_inputs.add_frame(OLD_NIGHT, number).subject_id)
+    for number in range(MEASURED_FRAMES):
+        version_inputs.measure(version_inputs.add_frame("2026-11-23", number).subject_id)
+    history: list[tuple[Any, Any]] = []
+    equal_pairs = 0
+    for step in range(250):
+        reads = version_inputs.measurement_reads
+        change = _random_change(version_inputs, generator, step)
+        version = version_inputs.version(night)
+        if change == "nothing" and history:
+            assert version_inputs.measurement_reads == reads
+        fresh = _fresh_signature(version_inputs, night)
+        for earlier_version, earlier_fresh in history:
+            assert (version == earlier_version) == (fresh == earlier_fresh)
+            equal_pairs += fresh == earlier_fresh
+        history.append((version, fresh))
+    # Both kinds of pair happened, so the check above was not empty.
+    assert 0 < equal_pairs < len(history) * (len(history) - 1) // 2
+
+
+def test_an_unchanged_library_reads_no_measurements_for_the_version(version_inputs: _VersionInputs) -> None:
+    """While the frames and the measurements' version stay, nothing is read.
+
+    This holds even when the kept measurements were dropped elsewhere,
+    because the signature itself is kept.
+    """
+    first = version_inputs.version(None)
+    reads = version_inputs.measurement_reads
+
+    assert version_inputs.version(None) == first
+    assert version_inputs.measurement_reads == reads
+
+    version_inputs.measure(_subject(OLD_NIGHT, 2), elongation=1.4)
+    assert version_inputs.version(None) != first
+    assert version_inputs.measurement_reads == reads + 1
+
+
+def test_without_a_measurement_version_the_signature_is_not_kept(
+    version_inputs: _VersionInputs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable data version still gives a version, worked out fresh."""
+    monkeypatch.setattr(star_shape_tasks.night_analysis, "frame_measurement_version", lambda _context: None)
+
+    first = version_inputs.version(None)
+    second = version_inputs.version(None)
+
+    assert first == second == (version_inputs.records, None, _fresh_signature(version_inputs, None))
+    assert version_inputs.measurement_reads == 2

@@ -18,6 +18,8 @@ its slow parts are kept in the context's `star_shape_cache` (a
   (`roundness_limit_data_version`): the session and guiding records, the
   equipment, site and configuration, and the measured frames of the nights
   it uses. A frame that is indexed but not yet measured does not rebuild it.
+  The frames' part of that version is kept too (`kept_roundness_signature`),
+  so while no frame row and no frame changes, no frame row is read;
   Live guiding samples are counted only in coarse steps, as for a target
   report, so live guiding does not rebuild it on every call;
 * the stack baseline, until any stack-level quality row changes
@@ -39,7 +41,7 @@ from astrometricslib.drivers import get_stack_quality_data_version, get_target_d
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError, InvalidArgumentError
 from wayfindinglib.analytics.capture_history import roundness_baseline_signature
 from wayfindinglib.analytics.data_versions import report_context_version
-from wayfindinglib.analytics.night_index import build_night_index
+from wayfindinglib.analytics.night_index import NightFrame, build_night_index
 from wayfindinglib.analytics.star_shape_review import (
     ROUNDNESS_LIMIT_NAME,
     StoredShapeRows,
@@ -220,7 +222,10 @@ def roundness_limit_data_version(context: ControlContext, night: str | None) -> 
     with its night, exposure time and elongation. The frames come from the
     index of the nights (`build_night_index`, which keeps each target's
     frames until its document changes) and the kept measurements of every
-    frame (`night_analysis.kept_frame_measurements`). So a frame that has
+    frame (`night_analysis.kept_frame_measurements`). The signature itself
+    is kept until the frames or the measurements' data version change
+    (`kept_roundness_signature`), so an unchanged library reads no frame
+    rows here. So a frame that has
     just been indexed and not yet measured leaves the version as it is;
     its width and elongation rows, or a change of exposure time, spectral
     flag or night of a measured frame, change it. A frame that is removed
@@ -244,13 +249,84 @@ def roundness_limit_data_version(context: ControlContext, night: str | None) -> 
     index = build_night_index(context, observing_night_id(time.time()) if night is None else night)
     if records is None or index is None:
         return None
+    frames = index.frames if night is None else index.finished_frames
     try:
-        stored = night_analysis.kept_frame_measurements(context)
+        signature = kept_roundness_signature(context, night, frames)
     except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:
         logger.warning("Could not read the frames' stored measurements: %s", error)
         return None
-    frames = index.frames if night is None else index.finished_frames
-    return (records, night, roundness_baseline_signature(frames, stored.values, night))
+    return (records, night, signature)
+
+
+def kept_roundness_signature(
+    context: ControlContext, night: str | None, frames: tuple[NightFrame, ...]
+) -> Hashable:
+    """Give the roundness signature, worked out again only on change.
+
+    The signature (`roundness_baseline_signature`) is made from the frames
+    and the stored measurements of every frame. Getting those measurements
+    can mean reading every frame row of the library (about 0.75 s on the
+    real library), for example the first time, or after the shared review
+    cache dropped them. So the signature is kept in the context's
+    `star_shape_cache` with a key made of two parts:
+
+    * the data version of the stored frame measurements
+      (`night_analysis.frame_measurement_version`), a few short queries
+      that read no frame rows. Equal versions mean the measurements are the
+      same, as `night_analysis.kept_frame_measurements` also assumes;
+    * the frames themselves. The night index hands over the same frame
+      objects while the targets' documents stay the same, so comparing them
+      is quick.
+
+    While both stay the same, the kept signature is given and no frame row
+    is read. When either changes, the signature is worked out again from
+    the kept measurements (which then read only the added rows when they
+    can). So the answer always equals a fresh
+    `roundness_baseline_signature`, and two calls give equal signatures
+    exactly when fresh ones would be equal.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the configuration, the science library and the caches.
+    night : `str` or `None`
+        Leave out this night and later ones, as in
+        `roundness_baseline_signature`.
+    frames : `tuple` [`NightFrame`, ...]
+        The frames the limit uses, from the night index.
+
+    Returns
+    -------
+    signature : `~collections.abc.Hashable`
+        See `roundness_baseline_signature`.
+
+    Notes
+    -----
+    When the stored measurements must be read and cannot be, the library's
+    error (`AstrometricsError`, `sqlite3.Error` or a file error) comes
+    through to the caller, and nothing is kept. When the data version
+    cannot be read, the signature is worked out from the measurements and
+    not kept, as before this cache existed.
+    """
+    measurement_version = night_analysis.frame_measurement_version(context)
+
+    def build() -> Hashable:
+        """Work out the signature from the kept frame measurements.
+
+        Returns
+        -------
+        signature : `~collections.abc.Hashable`
+            See `roundness_baseline_signature`.
+        """
+        stored = night_analysis.kept_frame_measurements(context, measurement_version)
+        return roundness_baseline_signature(frames, stored.values, night)
+
+    version = None
+    if measurement_version is not None:
+        version = (tuple(sorted(measurement_version.items())), frames)
+    return context.star_shape_cache.get_or_build(
+        ("roundness_signature", night), version, build, copy_result=False
+    )
 
 
 def kept_roundness_limit(context: ControlContext, night: str | None) -> float | None:

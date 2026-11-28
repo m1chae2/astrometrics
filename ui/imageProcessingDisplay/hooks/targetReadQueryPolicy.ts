@@ -14,9 +14,20 @@
  *   names no target marks every target's reads as old. Putting a frame back reads the frame
  *   statuses again on purpose.
  * - A measurement job (`quality:measured`) refreshes the quality reads of its target.
+ * - The star-shape and frame-status reads ask the backend only while the display is on screen, so a
+ *   hidden display does not slow the start of the app. A kept answer still shows while it is hidden.
+ * - Once start-up is over, the selected target's star shapes and frame statuses are read ahead
+ *   while the browser is idle (`useTargetReadPrefetch.ts`), so the first visit shows them at once.
+ *   The read-ahead and the display use the same key and read from `starShapesQuery` and
+ *   `frameStatusesQuery` below, so the two can never ask for different things.
  * - A failed call is not kept. The read throws, React Query does not retry it, and the next visit
  *   asks again. The hooks show a failure the same as "nothing yet", never as an error.
  */
+
+import { queryOptions } from '@tanstack/react-query';
+import { qualityQueryKeys } from '../../common/queries/qualityQueryKeys';
+import { readStarShapeReview } from '../../common/services/imaging/starShapeReviewService';
+import { readFrameStatuses } from '../../common/services/imaging/frameReviewService';
 
 /** How long a kept answer counts as fresh, and how long an unused one is kept: 30 minutes. */
 export const TARGET_READ_KEEP_MS = 30 * 60 * 1000;
@@ -29,3 +40,31 @@ export const TARGET_READ_QUERY_OPTIONS = {
     // A failed read is asked again on the next visit or after the next change to its target, not in a loop.
     retry: false,
 } as const;
+
+/**
+ * The key, the read and the keep rules of a target's star-shape verdicts (`advisory:star_shapes`).
+ * The Frame Analysis panel and the read-ahead both use it.
+ * @param targetId The target.
+ * @return The query options, without `enabled`, which each user sets.
+ */
+export function starShapesQuery(targetId: string) {
+    return queryOptions({
+        queryKey: qualityQueryKeys.starShapes(targetId),
+        queryFn: () => readStarShapeReview(targetId),
+        ...TARGET_READ_QUERY_OPTIONS,
+    });
+}
+
+/**
+ * The key, the read and the keep rules of a target's frame statuses (`target:get_frame_statuses`).
+ * The File Browser and the read-ahead both use it.
+ * @param targetId The target.
+ * @return The query options, without `enabled`, which each user sets.
+ */
+export function frameStatusesQuery(targetId: string) {
+    return queryOptions({
+        queryKey: qualityQueryKeys.frameStatuses(targetId),
+        queryFn: () => readFrameStatuses(targetId),
+        ...TARGET_READ_QUERY_OPTIONS,
+    });
+}

@@ -97,7 +97,7 @@ The run takes about two minutes. It writes `build/tpm/results/<timestamp>/` (not
 | `tpm.json` | One entry per TPM: name, catalog id, unit, value, `n` (number of samples), status and limit report. |
 | `flow-report.html` and `flow-report.json` | The Lighthouse user-flow report: one step for the load and one for each display and lap. |
 | `flow-metrics.json` | The raw page measurements: every click time, every RPC call, heap sizes. |
-| `backend-metrics.json`, `backend-samples.jsonl` | Backend CPU seconds, peak memory and per-method RPC times. |
+| `backend-metrics.json`, `backend-samples.jsonl` | Backend CPU seconds, peak memory and per-method RPC times: the page's round trips (`methods`) and the backend's own time per call (`backend_methods`), split into the wait for a heavy-lane place or worker thread (`wait_p50_ms`, `wait_p95_ms`) and the run (`run_p50_ms`, `run_p95_ms`). The backend logs these as `RPC_TIMING` lines at its `VERBOSE` level, which `run_tpm.sh` turns on with `ASTROMETRICS_LOG_LEVEL=VERBOSE`. |
 | `observatory-metrics.json`, `observatory-sim-stats.json`, `observatory-phd2-stats.json`, `indiserver.log`, `mock_phd2.log`, `exposure_driver.log` | Only with `--observatory simulated` or `replay`: what the simulated observatory did (see below). The replay driver's log is also called `exposure_driver.log`. |
 | `replay-plan.json`, `replay-summary.json` | Only with `--observatory replay`: the plan (window, frames, every planned guide event and log line) and the facts that also go into `info.replay` of `tpm.json`. |
 | `resource-samples.jsonl` | Every second: CPU, memory and disk bytes of the backend, of every program under it (grouped), and of Electron and the browser when they run (see "Resource TPMs"). |
@@ -213,7 +213,7 @@ The `data_size` block in `tpm.json` holds the counts the table uses.
 
 | TPM | What it means | Lower or higher is better |
 | --- | --- | --- |
-| `time_to_app_ready` | Time from starting the page load until the first display shows its target list and no backend call is waiting. | Lower |
+| `time_to_app_ready` | Time from starting the page load until the first display shows its target list and no backend call is waiting. The page checks this on a timer, each time the last call in flight ends, and in the flow's own wait for the app, so every run records it (`readyVia` in `flow-metrics.json` says which check saw it first). | Lower |
 | `time_to_app_ready_cold` | The same time as `time_to_app_ready`, held to a cold-start limit. Every run measures it; only a `--cold` run compares it with the limit (see "Cold start"). Limit TBR, proposed 2026-11-06. | Lower |
 | `first_display_open[<display>]` | Time of the first visit to each display in lap 1, the same click-to-settled time as `display_switch_median[<display>]` but for the first visit only. Cold-start limit (proposed 2026-11-06). | Lower |
 | `first_rpc[<rpc>]` | Latency of the first call of the night review, the target list and the stack summary in the run. The first query on real data reads database pages that may not be in memory. Cold-start limit (proposed 2026-11-06). | Lower |

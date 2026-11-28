@@ -33,10 +33,10 @@ from astrometricslib.foundation.config import AppConfiguration, get_configuratio
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stack_prediction
 from astrometricslib.pipelines.stacking.frame_screening import screen_frames
-from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-    QuarantineDecision,
-    QuarantineReport,
+from astrometricslib.pipelines.stacking.pre_processing import frame_set_aside
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
+    SetAsideDecision,
+    SetAsideReport,
 )
 from astrometricslib.pipelines.stacking.stack_prediction import predict_stack
 
@@ -103,7 +103,7 @@ def make_target(folder: Path, bad_names: tuple[str, ...] = ("cloud_03", "trail_0
 
 
 def fake_measurer(_target_id: str | None) -> Any:
-    """Stand in for the frame measurement the quarantine step makes.
+    """Stand in for the frame measurement the set-aside step makes.
 
     Returns
     -------
@@ -140,8 +140,8 @@ def stand_in_measurement(monkeypatch: pytest.MonkeyPatch) -> None:
     it would read every frame's pixels.
     """
     configuration = get_configuration()
-    monkeypatch.setattr(frame_quarantine, "make_quarantine_measurer", fake_measurer)
-    monkeypatch.setattr(configuration, "get_quarantine_bad_frames_enabled", lambda: True)
+    monkeypatch.setattr(frame_set_aside, "make_set_aside_measurer", fake_measurer)
+    monkeypatch.setattr(configuration, "get_set_aside_bad_frames_enabled", lambda: True)
     monkeypatch.setattr(configuration, "get_background_homogeneity_check_enabled", lambda: False)
 
 
@@ -224,21 +224,19 @@ def test_a_check_that_sets_every_frame_aside_does_not_raise(
 
     def set_every_frame_aside(
         frames: list[FrameRecord], _measure: Any = None, _target_id: str | None = None
-    ) -> QuarantineReport:
+    ) -> SetAsideReport:
         """Judge every frame cloudy.
 
         Returns
         -------
-        report : `QuarantineReport`
+        report : `SetAsideReport`
             A report that moves every frame.
         """
-        return QuarantineReport(
-            moved=[
-                QuarantineDecision(frame.path, "clouded", "stand-in", 1, 1.0, None, 1.0) for frame in frames
-            ]
+        return SetAsideReport(
+            moved=[SetAsideDecision(frame.path, "clouded", "stand-in", 1, 1.0, None, 1.0) for frame in frames]
         )
 
-    monkeypatch.setattr(frame_quarantine, "find_frames_to_quarantine", set_every_frame_aside)
+    monkeypatch.setattr(frame_set_aside, "find_frames_to_set_aside", set_every_frame_aside)
     prediction = predict_stack(target, list(target.frames), "imaging", make_library(tmp_path / "library"))
     assert prediction.frames_kept == 0
     assert prediction.nothing_left

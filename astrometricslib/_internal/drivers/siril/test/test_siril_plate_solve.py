@@ -210,7 +210,7 @@ def test_a_solve_runs_its_own_short_siril_and_returns_the_solution(
     fake = FakeSiril([True])
     fake.install(monkeypatch)
 
-    solved = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog)
+    solved = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog).header
 
     assert isinstance(solved, PlateSolveHeader)
     assert solved["CRVAL1"] == pytest.approx(250.4)
@@ -234,6 +234,25 @@ def test_a_solve_runs_its_own_short_siril_and_returns_the_solution(
     assert frame.read_bytes() == before
 
 
+def focal_lengths_tried(fake: FakeSiril) -> list[str]:
+    """Read the focal length of each Siril run a fake was given.
+
+    Parameters
+    ----------
+    fake : `FakeSiril`
+        The stand-in that recorded the runs.
+
+    Returns
+    -------
+    words : `list` [`str`]
+        The ``-focal=`` word of each run's plate-solve command.
+    """
+    return [
+        next(word for word in call["commands"][3].split() if word.startswith("-focal="))
+        for call in fake.calls
+    ]
+
+
 def test_a_failed_solve_is_retried_with_a_shorter_focal_length(
     tmp_path: Path, catalog: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -242,14 +261,27 @@ def test_a_failed_solve_is_retried_with_a_shorter_focal_length(
     fake = FakeSiril([False, True])
     fake.install(monkeypatch)
 
-    solved = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog)
+    solved = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog).header
 
     assert solved is not None
-    focal_words = [
-        next(word for word in call["commands"][3].split() if word.startswith("-focal="))
-        for call in fake.calls
-    ]
-    assert focal_words == ["-focal=300.000", "-focal=240.000"]
+    assert focal_lengths_tried(fake) == ["-focal=300.000", "-focal=240.000"]
+
+
+def test_a_header_focal_length_that_is_too_short_is_retried_longer(
+    tmp_path: Path, catalog: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the third attempt, after 1.0 and 0.8, is 1.25 of the header's."""
+    frame = write_frame(tmp_path / "frame.fits", FOCALLEN=300.0)
+    fake = FakeSiril([False, False, True])
+    fake.install(monkeypatch)
+
+    assert solve_image(str(frame), "siril-cli", {}, catalog_path=catalog).header is not None
+    assert focal_lengths_tried(fake) == ["-focal=300.000", "-focal=240.000", "-focal=375.000"]
+
+
+def test_the_retries_go_shorter_and_longer_in_turn() -> None:
+    """Verify the order: each shorter factor, then its longer twin."""
+    assert FOCAL_LENGTH_RETRY_FACTORS.default == (0.8, 1.25, 0.64, 1.5625)
 
 
 def test_every_attempt_failing_gives_no_solution(
@@ -260,11 +292,28 @@ def test_every_attempt_failing_gives_no_solution(
     fake = FakeSiril([False])
     fake.install(monkeypatch)
 
-    assert solve_image(str(frame), "siril-cli", {}, catalog_path=catalog) is None
+    outcome = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog)
 
+    assert outcome.header is None
     factors = FOCAL_LENGTH_RETRY_FACTORS.default
     assert len(fake.calls) == 1 + len(factors)
-    assert "-focal=192.000" in fake.calls[2]["commands"][3]
+    assert "-focal=192.000" in fake.calls[3]["commands"][3]
+    assert "-focal=468.750" in fake.calls[4]["commands"][3]
+
+
+def test_a_failed_solve_carries_siril_s_own_reason(
+    tmp_path: Path, catalog: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the outcome says why Siril failed, in Siril's words."""
+    frame = write_frame(tmp_path / "frame.fits", FOCALLEN=300.0)
+    fake = FakeSiril([False])
+    fake.install(monkeypatch)
+
+    outcome = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog)
+
+    assert outcome.failure_reason is not None
+    assert "Plate solving failed" in outcome.failure_reason
+    assert "300.0 mm" in outcome.failure_reason
 
 
 def test_an_image_with_no_position_is_not_given_to_siril(
@@ -275,7 +324,9 @@ def test_an_image_with_no_position_is_not_given_to_siril(
     fake = FakeSiril([True])
     fake.install(monkeypatch)
 
-    assert solve_image(str(frame), "siril-cli", {}, catalog_path=catalog) is None
+    outcome = solve_image(str(frame), "siril-cli", {}, catalog_path=catalog)
+
+    assert outcome.header is None and outcome.failure_reason is None
     assert fake.calls == []
 
 
@@ -286,7 +337,10 @@ def test_a_missing_catalog_gives_no_local_solution(tmp_path: Path, monkeypatch: 
     fake.install(monkeypatch)
     monkeypatch.setattr(plate_solve, "find_local_gaia_catalog", lambda: None)
 
-    assert solve_image(str(frame), "siril-cli", {}) is None
+    outcome = solve_image(str(frame), "siril-cli", {})
+
+    assert outcome.header is None
+    assert outcome.failure_reason is not None and "catalog" in outcome.failure_reason
     assert fake.calls == []
 
 
@@ -319,7 +373,7 @@ def test_siril_solves_a_real_m13_frame(tmp_path: Path, monkeypatch: pytest.Monke
     frame = tmp_path / "frame.fits"
     shutil.copy(SAMPLE_FRAME, frame)
 
-    solved = solve_image(str(frame), siril_executable, {})
+    solved = solve_image(str(frame), siril_executable, {}).header
 
     assert solved is not None
     assert solved["CRVAL1"] == pytest.approx(250.42, abs=0.1)

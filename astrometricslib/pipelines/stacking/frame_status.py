@@ -7,19 +7,20 @@ Description: A frame is in one of four states:
   reason it records elsewhere).
 * ``flagged``: an included frame whose stars are stretched. Its stored star
   elongation (long axis over short axis) is at least the warning level
-  (`STRETCHED_STAR_WARNING_ELONGATION`), but the quarantine kept it, because
-  it is not above the set-aside threshold of its session
+  (`STRETCHED_STAR_WARNING_ELONGATION`), but the set-aside check kept it,
+  because it is not above the set-aside threshold of its session
   (`set_aside_elongation_limit`). The reason gives the three numbers. A
   stacked frame above the threshold (put back by hand, or in a session too
-  small for the quarantine to judge) is flagged too, and its reason says so.
+  small for the set-aside check to judge) is flagged too, and its reason says
+  so.
 * ``not_stacked``: it was taken after the latest stack was made, or the
   target has no stack yet.
 * ``set_aside``: the stacker moved it into an `_excluded` folder. Such a frame
   is no longer part of the target's frame list, so it is listed from the
   folder, with the reason the stacker recorded.
 
-The set-aside threshold is found again here the way the quarantine found it:
-the stacked light frames are split into the quarantine's sessions
+The set-aside threshold is found again here the way the set-aside check found
+it: the stacked light frames are split into the set-aside check's sessions
 (`split_into_batches`), and each session's threshold comes from its frames'
 stored elongations. The frames already set aside are no longer in the list,
 so the session median can sit a little lower than when the stack was made.
@@ -39,7 +40,7 @@ from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.frame_status import FrameStatus, FrameStatusReport
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     MINIMUM_FRAMES_TO_JUDGE,
     STRETCHED_STAR_WARNING_ELONGATION,
     set_aside_elongation_limit,
@@ -83,13 +84,13 @@ def set_aside_limits_by_path(
     elongations: Mapping[str, float],
     colour_camera: Callable[[str], bool | None] = frame_uses_color_filter_array,
 ) -> dict[str, float | None]:
-    """Find the quarantine's set-aside threshold for each stacked light frame.
+    """Find the set-aside threshold of each stacked light frame.
 
     Parameters
     ----------
     frames : `Sequence` [`FrameRecord`]
         The frames that are in the stack. Spectroscopy frames and frames that
-        are not lights are left out, as the quarantine leaves them out.
+        are not lights are left out, as the set-aside check leaves them out.
     elongations : `Mapping` [`str`, `float`]
         The stored star elongation of each frame, by path.
     colour_camera : `Callable`, optional
@@ -102,7 +103,7 @@ def set_aside_limits_by_path(
     limits : `dict` [`str`, `float` or `None`]
         The threshold of each light frame's session, by path. `None` for a
         frame in a session with fewer than `MINIMUM_FRAMES_TO_JUDGE` frames,
-        which the quarantine does not judge, or with no stored elongation.
+        which the set-aside check does not judge, or with no stored elongation.
     """
     lights = [
         frame for frame in frames if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
@@ -131,7 +132,7 @@ def stretched_star_reason(elongation: float, warning: float, limit: float | None
         The warning level (`STRETCHED_STAR_WARNING_ELONGATION`).
     limit : `float` or `None`
         The set-aside threshold of the frame's session, or `None` when the
-        quarantine does not judge the session.
+        set-aside check does not judge the session.
 
     Returns
     -------
@@ -141,7 +142,7 @@ def stretched_star_reason(elongation: float, warning: float, limit: float | None
     """
     words = f"Stacked, but its stars are stretched: elongation {elongation:.2f}, warning level {warning:.2f}"
     if limit is None:
-        return f"{words}; its session is too small for the quarantine to judge."
+        return f"{words}; its session is too small for the set-aside check to judge."
     if elongation > limit:
         return (
             f"{words}, above the set-aside threshold {limit:.2f} "
@@ -163,7 +164,7 @@ def build_frame_statuses(
     ----------
     frames : `Iterable` [`FrameRecord`]
         The target's frame records (each with ``path``, ``timestamp`` and the
-        capture setting the quarantine groups by).
+        capture setting the set-aside check groups by).
     set_aside : `Sequence` [`SetAsideFrameRecord`]
         The frames in the target's `_excluded` folders.
     stacked_at : `float` or `None`
@@ -255,10 +256,10 @@ def list_set_aside_frames_with_reasons(target: Target, config: Any) -> list[SetA
     """
     from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
     from astrometricslib.pipelines.stacking.metrics import (
-        FRAME_QUARANTINE_ROUNDNESS,
-        FRAME_QUARANTINE_SKY_MEDIAN,
+        FRAME_SET_ASIDE_ROUNDNESS,
+        FRAME_SET_ASIDE_SKY_MEDIAN,
     )
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import target_folder_names
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import target_folder_names
     from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import (
         build_set_aside_records,
         find_excluded_folders,
@@ -270,7 +271,7 @@ def list_set_aside_frames_with_reasons(target: Target, config: Any) -> list[SetA
     store = QualityStore(quality_database_path(config))
     rows = [
         row
-        for metric in (FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN)
+        for metric in (FRAME_SET_ASIDE_ROUNDNESS, FRAME_SET_ASIDE_SKY_MEDIAN)
         for row in store.query(metric=metric, target_id=target.id, latest_only=True)
     ]
     setting_ids = sorted({
@@ -288,9 +289,9 @@ def report_frame_statuses(target: Target, config: Any) -> FrameStatusReport:
     Each frame of the target is ``not_stacked`` when it was taken after the
     newest stack file was written (or there is no stack), ``flagged`` when it
     is in the stack and its stored star elongation is at least the warning
-    level but the quarantine kept it, and ``included`` otherwise. The frames
-    in the target's `_excluded` folders follow as ``set_aside``, with the
-    stacker's kind and reason (`list_set_aside_frames_with_reasons`). The
+    level but the set-aside check kept it, and ``included`` otherwise. The
+    frames in the target's `_excluded` folders follow as ``set_aside``, with
+    the stacker's kind and reason (`list_set_aside_frames_with_reasons`). The
     newest stack file is looked for among the imaging stack, the spectral
     stack and each saved stack configuration. Nothing is written.
 
@@ -306,7 +307,7 @@ def report_frame_statuses(target: Target, config: Any) -> FrameStatusReport:
     report : `FrameStatusReport`
         ``frames`` and ``stacked_at``.
     """
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import stored_star_elongations
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import stored_star_elongations
     from astrometricslib.utilities.frame_identity import frame_subject_id
 
     stacked_at = latest_stack_time(target, str(config.get_stacks_path()))
@@ -354,8 +355,8 @@ def restore_set_aside_frames(catalog: Any, target: Target, frames: Sequence[Fram
     from astrometricslib.foundation.errors import InvalidArgumentError
     from astrometricslib.models.page import Page
     from astrometricslib.pipelines.shared.target_frames import scan_frames
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-        restore_quarantined_frames,
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
+        restore_set_aside_frames,
         target_folder_names,
     )
     from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import find_excluded_folders
@@ -377,7 +378,7 @@ def restore_set_aside_frames(catalog: Any, target: Target, frames: Sequence[Fram
         files_by_folder.setdefault(folders[folder], set()).add(os.path.basename(path))
     restored: list[str] = []
     for folder, file_names in files_by_folder.items():
-        restored.extend(restore_quarantined_frames(folder, file_names))
+        restored.extend(restore_set_aside_frames(folder, file_names))
     if restored:
         scan_frames(catalog, target)
     by_path = {os.path.realpath(frame.path): frame for frame in target.frames}

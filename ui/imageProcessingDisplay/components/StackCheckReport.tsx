@@ -19,6 +19,7 @@ import {
     frameKindWords,
     groupLabel,
     shortCalibrationFolder,
+    SET_ASIDE_PURPOSE,
     summarizeSetAside,
 } from '../utils/stackCheck';
 import './stackCheckReport.css';
@@ -116,6 +117,7 @@ export const StackCheckReport: React.FC<StackCheckReportProps> = ({ prediction }
             {setAside.length > 0 && (
                 <details className="stack-summary__details">
                     <summary>Set aside: {summarizeSetAside(setAside)}</summary>
+                    <div className="stack-summary--muted">{SET_ASIDE_PURPOSE}</div>
                     <FrameList label="Frames stacking would set aside" frames={setAside} />
                 </details>
             )}

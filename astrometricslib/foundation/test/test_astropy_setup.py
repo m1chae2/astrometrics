@@ -10,6 +10,8 @@ for past and future dates without the download.
 
 import subprocess
 import sys
+import threading
+import time
 
 import astropy.units as u
 import pytest
@@ -17,7 +19,10 @@ from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.time import Time
 from astropy.utils import iers
 
-from astrometricslib import configure_offline_iers, warm_earth_orientation_data
+import astrometricslib
+from astrometricslib import Astrometrics
+from astrometricslib.foundation import astropy_setup
+from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 
 
 @pytest.mark.parametrize("library", ["astrometricslib", "wayfindinglib"])
@@ -63,3 +68,71 @@ def test_warm_earth_orientation_data_runs_a_real_conversion() -> None:
 
     assert elapsed >= 0.0
     assert iers.conf.auto_download is False
+
+
+def test_creating_astrometrics_starts_the_warmup_once_without_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`Astrometrics(...)` starts one background warm-up, once.
+
+    The patched warm-up is slow. The constructor must still return
+    at once, and a second object must not start a second thread.
+    """
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[int] = []
+
+    def slow_warmup() -> float:
+        """Record the call, wait until released, then return.
+
+        Returns
+        -------
+        float
+            Always zero.
+        """
+        calls.append(1)
+        started.set()
+        release.wait(5.0)
+        return 0.0
+
+    monkeypatch.setattr(astropy_setup, "_warmup_started", False)
+    monkeypatch.setattr(astropy_setup, "warm_earth_orientation_data", slow_warmup)
+
+    began = time.monotonic()
+    Astrometrics()
+    Astrometrics()
+    elapsed = time.monotonic() - began
+
+    assert started.wait(5.0)
+    assert elapsed < 4.0
+    assert calls == [1]
+    release.set()
+    for thread in threading.enumerate():
+        if thread.name == "earth-orientation-warmup":
+            thread.join(5.0)
+    assert not any(t.name == "earth-orientation-warmup" for t in threading.enumerate())
+
+
+def test_a_failing_warmup_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A warm-up that fails inside its thread never raises."""
+
+    def broken() -> float:
+        """Stand in for a warm-up that cannot read the table.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("table unreadable")
+
+    monkeypatch.setattr(astropy_setup, "warm_earth_orientation_data", broken)
+
+    astropy_setup._run_earth_orientation_warmup()
+
+
+@pytest.mark.parametrize("name", ["configure_offline_iers", "warm_earth_orientation_data"])
+def test_the_old_public_names_raise_an_import_error_that_says_they_are_not_needed(name: str) -> None:
+    """Importing a removed name explains that nothing replaces it."""
+    with pytest.raises(ImportError, match="not needed"):
+        getattr(astrometricslib, name)

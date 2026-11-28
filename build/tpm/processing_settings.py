@@ -34,10 +34,9 @@ from pathlib import Path
 #: The setting that must be off so a repeat run stacks again.
 SKIP_UNCHANGED = ("Processing.Siril", "skip_unchanged_stacks_enabled", "false")
 #: Program settings copied from the user's file in the synthetic mode.
-#: Settings of the made-up library only. Its stars are random dots, so the
-#: plate solve of the stack can never succeed; an empty index folder makes
-#: the solver fail at once instead of waiting out its 300 s limit twice.
-SYNTHETIC_SETTINGS = (("Processing.Astrometry.Local Solver", "index_path", "/nonexistent-tpm-index"),)
+#: Settings of the made-up library only. There are none now: its stars are
+#: random dots, so Siril's plate solve of the stack fails after a few seconds.
+SYNTHETIC_SETTINGS: tuple[tuple[str, str, str], ...] = ()
 COPIED_SETTINGS = (
     ("Processing.Siril", "siril_executable"),
     ("Processing.GraXpert", "graxpert_executable"),

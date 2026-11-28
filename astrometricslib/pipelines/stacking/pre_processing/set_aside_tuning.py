@@ -1,8 +1,8 @@
-"""Tuners for the star-elongation limits of the frame quarantine.
+"""Tuners for the star-elongation limits of the set-aside check.
 
-The quarantine moves a frame aside as trailed when its star elongation (the
-long width of its stars divided by the short width) is above a limit (see
-`frame_quarantine.judge_batch`). Three tuned values set that limit: a fixed
+The set-aside check moves a frame aside as trailed when its star elongation
+(the long width of its stars divided by the short width) is above a limit (see
+`frame_set_aside.judge_batch`). Three tuned values set that limit: a fixed
 elongation (`TRAILED_ELONGATION_LIMIT`), and how far above the batch's median
 a frame must be (`ELONGATION_RISE_ABOVE_MEDIAN` for a monochrome camera,
 `COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN` for a colour camera, whose small,
@@ -35,7 +35,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_STAR_ELONGATION
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN,
     ELONGATION_RISE_ABOVE_MEDIAN,
     MINIMUM_FRAMES_TO_JUDGE,
@@ -87,7 +87,7 @@ def group_elongation_by_session(rows: Iterable[QualityMeasurement]) -> list[list
     """Gather the stored elongation of frames into sessions.
 
     A session is the frames of one target taken on one observing night with
-    one capture setting, which is what the quarantine judges as a batch.
+    one capture setting, which is what the set-aside check judges as a batch.
 
     Parameters
     ----------
@@ -99,7 +99,7 @@ def group_elongation_by_session(rows: Iterable[QualityMeasurement]) -> list[list
     sessions : `list` [`list` [`float`]]
         The elongation values of each session that has at least
         `MINIMUM_FRAMES_TO_JUDGE` frames. Smaller sessions are too small for
-        the quarantine to judge, so they say nothing about its limits.
+        the set-aside check to judge, so they say nothing about its limits.
     """
     minimum_frames = resolve(MINIMUM_FRAMES_TO_JUDGE).value
     sessions: dict[tuple[str | None, str | None, int | None], list[float]] = defaultdict(list)
@@ -277,7 +277,7 @@ TRAILED_LIMITS_TUNER = Tuner(
     parameters=(TRAILED_ELONGATION_LIMIT, ELONGATION_RISE_ABOVE_MEDIAN),
     method=(
         "Reads the stored star elongation of every frame of the setup's camera, groups the frames into "
-        "sessions (one target, night and capture setting, at least the quarantine's minimum batch), and "
+        "sessions (one target, night and capture setting, at least the set-aside check's minimum batch), and "
         "sets the rise above the session median a set number of robust standard deviations out (fewer for "
         "the rise than for the fixed limit). The fixed limit is the library median plus five spreads."
     ),

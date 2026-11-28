@@ -91,7 +91,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, list[P
     """
     configuration = get_configuration()
     monkeypatch.setattr(configuration, "get_stacks_path", lambda: tmp_path / "stacks")
-    monkeypatch.setattr(configuration, "get_quarantine_bad_frames_enabled", lambda: False)
+    monkeypatch.setattr(configuration, "get_set_aside_bad_frames_enabled", lambda: False)
     monkeypatch.setattr(configuration, "get_skip_unchanged_stacks_enabled", lambda: True)
     monkeypatch.delenv("ASTROMETRICS_FORCE_RESTACK", raising=False)
     folder = tmp_path / "stacks" / "lights" / "M 52"

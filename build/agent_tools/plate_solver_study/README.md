@@ -2,6 +2,8 @@
 
 These scripts compare two local plate solvers, astrometry.net's `solve-field` and Siril's own plate solver, on the same frames. A plate solver works out which part of the sky a frame shows: its center, pixel scale (arcseconds per pixel), rotation and parity (whether the image is mirrored). The scripts run both solvers, then judge every solution with the project's own measuring code against Gaia DR3 star positions. They are measurement tools, not part of the app. The results and the choice of solver they led to are in register entry AST-23 (partly measured; see [AST-23](../../../documentation/library_design/validation/astrometry.md#ast-23)).
 
+**solve-field is no longer in the app.** The app plate-solves with Siril alone (see register entry AST-23), and the code that ran `solve-field` and read its `.corr` table was removed. These scripts stay as the evidence for AST-23. `run_solvers.py` and `judge.py` import removed code (`read_corr_fit_statistics` and the Gaia refit's `refine_wcs_with_gaia`), so to rerun them check out commit `62906cee`, the last one that has it.
+
 Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What the study does, in order

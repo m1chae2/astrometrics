@@ -14,7 +14,7 @@ Results are sorted into three groups:
 
 A MISSING or CHANGED file under ``lights/``, ``darks/``, ``biases/`` or
 ``flats/`` is serious, unless it is derived output (stacks, rejection maps,
-processed pictures, JPEGs, ``.seq`` files, the frame-quarantine record
+processed pictures, JPEGs, ``.seq`` files, the frame-set-aside record
 ``excluded_frames.json``, or anything in a ``stacks/`` folder). Frames moved
 into an ``_excluded/`` folder are still checked as raw frames. Derived
 files are expected to be rebuilt, so they are only listed as
@@ -49,8 +49,8 @@ logger = logging.getLogger(__name__)
 
 RAW_TOP_FOLDERS = ("lights", "darks", "biases", "flats")
 SKIPPED_TOP_FOLDERS = ("_backup",)
-# "excluded_frames.json" is the stacking frame-quarantine record
-# (frame_quarantine.MANIFEST_FILE_NAME). The name is repeated here so this
+# "excluded_frames.json" is the stacking frame-set-aside record
+# (frame_set_aside.MANIFEST_FILE_NAME). The name is repeated here so this
 # light script does not import the stacking module.
 DERIVED_NAME_PATTERNS = (
     "*_Stacked*.fits",
@@ -79,7 +79,7 @@ def is_derived_path(path: str) -> bool:
     -------
     is_derived : `bool`
         True for stacks, rejection maps, processed pictures, JPEGs, ``.seq``
-        files, the frame-quarantine record ``excluded_frames.json`` and
+        files, the frame-set-aside record ``excluded_frames.json`` and
         anything inside a ``stacks`` folder.
     """
     parts = path.split("/")

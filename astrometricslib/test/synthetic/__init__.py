@@ -5,6 +5,7 @@ and spectroscopy frames with known answers, for use in tests. See the
 README.md in this folder for what each one produces and how to extend it.
 """
 
+from astrometricslib.test.synthetic.frame_solutions import drifted_frame_solves
 from astrometricslib.test.synthetic.photometry_frame import (
     SyntheticStar,
     drifted_stars,
@@ -31,6 +32,7 @@ __all__ = [
     "SyntheticSpectralFrame",
     "SyntheticStar",
     "SyntheticVariabilityField",
+    "drifted_frame_solves",
     "drifted_stars",
     "make_drifted_sequence",
     "make_photometry_fits",

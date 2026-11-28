@@ -16,7 +16,8 @@ numbers read as unknown.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from astropy.io import fits
@@ -132,8 +133,37 @@ def read_fit_statistics(header: object) -> tuple[float | None, int | None]:
     return None, None
 
 
+@dataclass(frozen=True)
+class FrameSolve:
+    """The plate solution of one frame of a session, or why it has none.
+
+    Attributes
+    ----------
+    header : `astropy.io.fits.Header` or `None`
+        The solved header, holding the frame's World Coordinate System.
+        `None` when the frame was not solved.
+    reason : `str` or `None`
+        A short sentence that says why the frame was not solved. `None` when
+        it was solved.
+    """
+
+    header: fits.Header | None
+    reason: str | None = None
+
+
 class PlateSolveDriver(ABC):
-    """What the astrometry pipeline needs from a plate solver."""
+    """What the astrometry pipeline needs from a plate solver.
+
+    Attributes
+    ----------
+    last_failure_reason : `str` or `None`
+        Why the latest `solve` call returned `None`, in the solver's own
+        words when it gave any. `None` when the call solved the image or the
+        solver gave no reason. A caller that raises or reports the failure
+        reads it right after `solve` returns (see `solve_failure_reason`).
+    """
+
+    last_failure_reason: str | None = None
 
     @abstractmethod
     def solve(
@@ -169,3 +199,48 @@ class PlateSolveDriver(ABC):
             `PlateSolveHeader`, which adds the fit residual and the
             matched-star count. A plain header is also valid.
         """
+
+    def solve_frames(self, image_paths: Sequence[str], **hints: Any) -> dict[str, FrameSolve]:
+        """Solve every frame of one session, each with its own solution.
+
+        The frames of a session share one camera and one optic and point at
+        the same field, so a solver may use what it learns from the first
+        frame for the others. This default solves each frame with `solve`,
+        one after the other. A solver with a faster way to solve many frames
+        overrides it.
+
+        Parameters
+        ----------
+        image_paths : `Sequence` [`str`]
+            The frames, the first of which is the session's reference frame.
+        **hints
+            The hints of `solve`.
+
+        Returns
+        -------
+        solves : `dict` [`str`, `FrameSolve`]
+            One entry for each frame, keyed by its path.
+        """
+        solves: dict[str, FrameSolve] = {}
+        for path in image_paths:
+            header = self.solve(image_path=path, **hints)
+            solves[path] = FrameSolve(header) if header is not None else FrameSolve(None, "not solved")
+        return solves
+
+
+def solve_failure_reason(solver: object) -> str | None:
+    """Read why a plate solver's latest solve failed, if it said.
+
+    Parameters
+    ----------
+    solver : `object`
+        A plate solver. A fake that has no `last_failure_reason` gives no
+        reason.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        The reason, or `None` when there is none.
+    """
+    reason = getattr(solver, "last_failure_reason", None)
+    return reason if isinstance(reason, str) and reason else None

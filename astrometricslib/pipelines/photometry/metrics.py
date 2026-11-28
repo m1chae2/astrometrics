@@ -1147,12 +1147,13 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
     _gate_metric(
         PHOTOMETRY_GATE_REGISTRATION_DRIFT,
         "px",
-        "Whether the frames stayed lined up with each other.",
-        "The value is the largest frame-to-frame alignment offset of any star, in pixels. The limit is "
-        "20 px. The check fails when that offset passes the limit, when the corner displacement or the "
-        "centroid fallback share passes its own limit (stored by their own metrics), so the outcome can "
-        "be failed with the value under the limit. It is not checked when no star recorded a drift and no "
-        "session has a per-star summary.",
+        "Whether each frame's plate solution placed the stars well enough.",
+        "The value is the largest 95th-percentile corner displacement of a frame beyond the shift of its "
+        "middle, in pixels. The limit is 1 px. The check fails when that passes the limit or when the "
+        "centroid fallback share passes its own limit (stored by its own metric), so the outcome can "
+        "be failed with the value under the limit. It is not checked when no session has a per-star "
+        "summary. Runs before 2026-11-28 stored the largest offset of any star from the first frame, "
+        "with a limit of 20 px.",
         "Every star of the run and the aligned frames of every session.",
         register_entry="PHO-04",
     ),

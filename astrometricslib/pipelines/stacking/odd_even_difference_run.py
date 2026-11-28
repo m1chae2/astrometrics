@@ -1191,7 +1191,7 @@ def run_odd_even_difference_noise(
     alternate in time (`split_into_halves`), with the library stack's
     registration reference frame in both. Each half is stacked into the
     target's ``_subsets`` folder with the library stack's weighting and
-    rejection, without the edge trim and the frame quarantine. The noise of
+    rejection, without the edge trim and the set-aside check. The noise of
     the difference of the two stacks is measured in the target's stored empty
     apertures (`difference_noise.measure_difference_noise`), and the rows are
     stored on the library stack's own subject: the difference noise in stack

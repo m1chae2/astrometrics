@@ -175,7 +175,7 @@ def test_a_flagged_frame_counts_and_carries_the_flag() -> None:
     count = count_request_frames(_request(count=2), target_frames, EQUIPMENT, START)
     assert (count.judged, count.flagged) == (2, 1)
     assert count.met
-    assert target_frames.judgments[frames[0].path].flags == ("frame.quarantine_roundness",)
+    assert target_frames.judgments[frames[0].path].flags == ("frame.set_aside_roundness",)
 
 
 def test_frames_not_yet_judged_do_not_complete_a_row() -> None:

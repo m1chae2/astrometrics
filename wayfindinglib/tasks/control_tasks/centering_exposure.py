@@ -104,11 +104,11 @@ TARGET_STAR_COUNT = TunedParameter(
     equipment=frozenset({EquipmentKind.TELESCOPE, EquipmentKind.CAMERA, EquipmentKind.FILTER_OR_GRATING}),
     register_entry="WAY-D122",
 )
-"""Detectable catalog stars the exposure should reach. The local solver
-needs at least 10 detected sources (`MINIMUM_SOURCES_FOR_LOCAL_SOLVE`), and a
-detection list also holds hot pixels and merged pairs and misses stars the
-model counts, so 15 leaves a margin of half again. Design estimate, register
-row WAY-D122."""
+"""Detectable catalog stars the exposure should reach. The plate solver
+tries a solve from 4 detected sources (the solver used before Siril needed
+10). A detection list also holds hot pixels and merged pairs and misses stars
+the model counts, so 15 leaves a margin of half again. Design estimate,
+register row WAY-D122."""
 
 DETECTION_SIGNAL_TO_NOISE = TunedParameter(
     name="wayfinding.detection_signal_to_noise",

@@ -2,7 +2,7 @@
 
 Description: One abstract base class per outside program or service the
 library uses: `StackingDriver` (a stacking program such as Siril),
-`PlateSolveDriver` (a plate solver such as Astrometry.net),
+`PlateSolveDriver` (a plate solver such as Siril's own),
 `SimbadDriver` (the SIMBAD database), `GaiaXpDriver` (Gaia DR3's
 low-resolution XP spectra) and `ReddeningDriver` (a catalog of
 interstellar reddening values). The rest of the library depends on

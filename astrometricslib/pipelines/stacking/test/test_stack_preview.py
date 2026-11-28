@@ -1582,8 +1582,9 @@ def test_a_flat_sky_gets_a_plane_and_graxpert_does_not_run(
     assert background["radial_used"] is False
     assert background["radial_fraction"] is None or abs(background["radial_fraction"]) < 0.002
     assert background["radial_reason"]
-    assert len(background_outcomes) == 1 and background_outcomes[0].gradient is None
-    assert "plane fit" in background_outcomes[0].reason
+    assert len(background_outcomes) == 1
+    assert background_outcomes[0].gradient is not None
+    assert background_outcomes[0].gradient.level == pytest.approx(0.05, rel=0.05)
 
 
 def test_a_strong_gradient_still_runs_graxpert(

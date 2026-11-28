@@ -124,13 +124,13 @@ def test_gaia_xp_download_refuses_without_pausing_downloads(tmp_path: Path) -> N
 
 def test_the_online_plate_solver_is_not_asked() -> None:
     """With an API key the online solves return nothing, unasked."""
-    from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+    from astrometricslib._internal.drivers.astrometry_net_client import AstrometryNetOnlineClient
 
-    driver = AstrometryNetPlateSolveDriver(api_key="a-key")
+    driver = AstrometryNetOnlineClient(api_key="a-key")
     driver.astrometry_net = MagicMock()
 
-    assert driver._solve_online_sources([{"x_centroid": 1.0, "y_centroid": 2.0}], 100, 100) is None
-    assert driver._solve_online_image("/does/not/exist.fits") is None
+    assert driver.solve_sources([{"x_centroid": 1.0, "y_centroid": 2.0}], 100, 100) is None
+    assert driver.solve_image("/does/not/exist.fits") is None
     assert not driver.astrometry_net.solve_from_source_list.called
     assert not driver.astrometry_net.solve_from_image.called
 

@@ -306,7 +306,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/pipelines/stacking/post_processing/preview_steps.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a preview step that timed out
 "astrometricslib/pipelines/stacking/post_processing/starnet_stretch.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a StarNet run that timed out
 "astrometricslib/pipelines/stacking/post_processing/color_from_other_stack.py" = ["suspicious-subprocess-import"] # imports only SubprocessError, to catch a Siril (StarNet) run that timed out; the run itself goes through the Siril driver's script_run.run_siril_script
-"astrometricslib/_internal/drivers/astrometry_net_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/phone_share.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]

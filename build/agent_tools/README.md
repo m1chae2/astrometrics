@@ -22,7 +22,7 @@ They were written during issue #94. The full test suites are left to continuous 
 | `dbq.sh "<select ...>"` | Read-only SQL on the copy database |
 | `validate_plate_solution_check.py` | Runs the plate-solution check on real frames with shifted solutions (run a copy of it through `realrun.sh`) |
 | `benchmark_star_query.py [--stars N] [--points P]` | Builds a made-up star library in a temporary folder and times `stars.query()` with and without light curves |
-| `plate_solver_study/` | Compares solve-field with Siril's own plate solver on copies of library frames and judges each solution against Gaia DR3; writes only into a study folder given with `--study` (see its README) |
+| `plate_solver_study/` | Evidence for AST-23: compares solve-field (no longer in the app) with Siril's own plate solver on copies of library frames and judges each solution against Gaia DR3; writes only into a study folder given with `--study` (see its README) |
 
 `<checkout>` is the folder name of a checkout that sits beside this one, such as `astrometrics` or
 a worktree named `astrometrics-<something>`. The full test suites are left to continuous

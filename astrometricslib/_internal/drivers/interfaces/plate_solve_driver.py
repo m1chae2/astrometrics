@@ -133,7 +133,18 @@ def read_fit_statistics(header: object) -> tuple[float | None, int | None]:
 
 
 class PlateSolveDriver(ABC):
-    """What the astrometry pipeline needs from a plate solver."""
+    """What the astrometry pipeline needs from a plate solver.
+
+    Attributes
+    ----------
+    last_failure_reason : `str` or `None`
+        Why the latest `solve` call returned `None`, in the solver's own
+        words when it gave any. `None` when the call solved the image or the
+        solver gave no reason. A caller that raises or reports the failure
+        reads it right after `solve` returns (see `solve_failure_reason`).
+    """
+
+    last_failure_reason: str | None = None
 
     @abstractmethod
     def solve(
@@ -169,3 +180,21 @@ class PlateSolveDriver(ABC):
             `PlateSolveHeader`, which adds the fit residual and the
             matched-star count. A plain header is also valid.
         """
+
+
+def solve_failure_reason(solver: object) -> str | None:
+    """Read why a plate solver's latest solve failed, if it said.
+
+    Parameters
+    ----------
+    solver : `object`
+        A plate solver. A fake that has no `last_failure_reason` gives no
+        reason.
+
+    Returns
+    -------
+    reason : `str` or `None`
+        The reason, or `None` when there is none.
+    """
+    reason = getattr(solver, "last_failure_reason", None)
+    return reason if isinstance(reason, str) and reason else None

@@ -182,7 +182,6 @@ export class LinuxPlatform extends BasePlatform {
   pauseBackgroundPipelines({ execFn = exec } = {}) {
     try {
       execFn('pkill -STOP -f siril-cli || true', () => {});
-      execFn('pkill -STOP -f solve-field || true', () => {});
       return true;
     } catch {
       return false;
@@ -199,7 +198,6 @@ export class LinuxPlatform extends BasePlatform {
   resumeBackgroundPipelines({ execFn = exec } = {}) {
     try {
       execFn('pkill -CONT -f siril-cli || true', () => {});
-      execFn('pkill -CONT -f solve-field || true', () => {});
       return true;
     } catch {
       return false;

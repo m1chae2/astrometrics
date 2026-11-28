@@ -1,8 +1,6 @@
 file,name,reason
-astrometricslib/_internal/drivers/astrometry_net_driver.py,AstrometryNetPlateSolveDriver.solve.image_height,Fallback image size used only when the caller gives none
-astrometricslib/_internal/drivers/astrometry_net_driver.py,AstrometryNetPlateSolveDriver.solve.image_width,Fallback image size used only when the caller gives none
-astrometricslib/_internal/drivers/astrometry_net_driver.py,ONLINE_SOLVE_ATTEMPT_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
-astrometricslib/_internal/drivers/astrometry_net_driver.py,ONLINE_SOLVE_RETRY_BACKOFF_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astrometry_net_client.py,ONLINE_SOLVE_ATTEMPT_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
+astrometricslib/_internal/drivers/astrometry_net_client.py,ONLINE_SOLVE_RETRY_BACKOFF_SECONDS,"Network retry, timeout or physical ratio; affects only failure handling"
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,A_G_PER_E_B_V,Physical reddening ratio from published literature
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,CONSECUTIVE_FAILURE_LIMIT,"Network retry, timeout or physical ratio; affects only failure handling"
 astrometricslib/_internal/drivers/astroquery_gaia_reddening_driver.py,E_BP_RP_PER_E_B_V,Physical reddening ratio from published literature

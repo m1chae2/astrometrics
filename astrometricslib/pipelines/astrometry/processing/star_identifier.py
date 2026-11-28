@@ -35,6 +35,7 @@ from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib._internal.drivers.interfaces.plate_solve_driver import (
     PlateSolveDriver,
     read_fit_statistics,
+    solve_failure_reason,
 )
 from astrometricslib._internal.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
@@ -446,9 +447,9 @@ class StarIdentifier(PlateSolutionSteps):
                 )
                 h, w = data.shape
 
-                # Determine scale hints dynamically. We
-                # use a very narrow 5% window here because the
-                # plate solve driver will relax it by another 20%.
+                # Determine scale hints dynamically. Siril uses them only to
+                # work out a focal length when the header has none; the
+                # online service takes the window as it is.
                 scale_lower, scale_upper = self._calculate_scale_hints(image_data_or_path)
 
                 solved_header = self.solver.solve(
@@ -487,8 +488,9 @@ class StarIdentifier(PlateSolutionSteps):
                     wcs = self._refine_wcs_against_gaia(wcs, all_detected_sources, h, w)
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
                 else:
-                    logger.error("Could not solve field.")
-                    raise PlateSolveFailedError("Plate solving failed: could not solve field.")
+                    reason = solve_failure_reason(self.solver) or "could not solve field"
+                    logger.error("Could not solve field: %s", reason)
+                    raise PlateSolveFailedError(f"Plate solving failed: {reason}.")
         else:
             # Not attempting plate solving, but we can still identify
             # if we have hints

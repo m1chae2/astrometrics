@@ -18,7 +18,7 @@ Installs the system-level dependencies required for Astrometrics on Ubuntu.
 
 Usage:
   sudo ./build/linux/install_ubuntu_deps.sh
-  sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak --with-local-solver
+  sudo ./build/linux/install_ubuntu_deps.sh --siril-source=flatpak
   sudo ./build/linux/install_ubuntu_deps.sh --indi-series=resolute
 
 Options:
@@ -30,19 +30,6 @@ Options:
         org.siril.Siril from it. This tracks Siril's latest release much
         more closely, and is the option that supports weighted stacking
         (stack_weight in astrometrics.config.toml).
-
-  --with-local-solver           (default: off)
-      Installs astrometry.net (the solve-field program) so that plate
-      solving runs on this machine instead of over the internet. Leave it
-      off if you would rather use the online astrometry.net service, which
-      needs an api_key under [Processing.Astrometry.Online Solver] in
-      astrometrics.config.toml. Plate solving needs one or the other.
-      The Tycho-2 index files this installs are sized for the camera and
-      telescope in the config template (a ZWO ASI533MM Pro at 405mm focal
-      length, which sees about 1.6 degrees of sky). A different camera or
-      telescope sees a different amount of sky and needs index files sized
-      to match, listed by field-of-view size at
-      https://data.astrometry.net or via `apt-cache search astrometry-data`.
 
   --indi-series=<codename>      (default: this Ubuntu release)
       Which release's build of the INDI PPA (ppa:mutlaqja/ppa) to use. INDI
@@ -59,7 +46,6 @@ EOF
 }
 
 SIRIL_SOURCE="apt"
-WITH_LOCAL_SOLVER=0
 INDI_SERIES=""
 for arg in "$@"; do
   case "$arg" in
@@ -70,9 +56,6 @@ for arg in "$@"; do
       echo "Invalid value for --siril-source: '${arg#--siril-source=}'." >&2
       echo "Valid values are 'apt' (default) or 'flatpak'." >&2
       exit 1
-      ;;
-    --with-local-solver)
-      WITH_LOCAL_SOLVER=1
       ;;
     --indi-series=?*)
       INDI_SERIES="${arg#--indi-series=}"
@@ -272,20 +255,6 @@ else
   SIRIL_EXECUTABLE_HINT="siril-cli"
 fi
 
-if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
-  echo "=== Installing local astrometry.net solver ==="
-  # Tycho-2 index scales 07-19 span quad diameters from 22 arcminutes up to
-  # 2000 arcminutes, covering the roughly 1.6 degree (96 arcminute) field of
-  # view of the config template's camera and telescope, plus everything
-  # smaller that solve-field would want to try below it.
-  sudo apt-get install -y \
-    astrometry.net \
-    astrometry-data-tycho2-07 \
-    astrometry-data-tycho2-08 \
-    astrometry-data-tycho2-09 \
-    astrometry-data-tycho2-10-19
-fi
-
 echo "=== Dependencies installed successfully! ==="
 echo "You can now run ./build/linux/setup_venv.sh to create the virtual environment."
 echo ""
@@ -311,17 +280,7 @@ echo "The plain 'siril' / 'flatpak run org.siril.Siril' command starts the"
 echo "graphical build, which needs a display even when stacking headlessly."
 echo "The -cli command does not, which is why it is the one to use."
 echo ""
-echo "Plate solving, under [Processing.Astrometry...]:"
-if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
-  echo "  Ready to use via [Processing.Astrometry.Local Solver]"
-  echo "  (index_path = /usr/share/astrometry, already the template default)."
-  echo "  The index files installed are sized for the camera and telescope in"
-  echo "  astrometrics.config.example.toml. If yours differ, install index files"
-  echo "  matching how much sky your setup actually sees"
-  echo "  (apt-cache search astrometry-data)."
-else
-  echo "  No local solver was installed. Set api_key under"
-  echo "  [Processing.Astrometry.Online Solver] to use the online"
-  echo "  astrometry.net service, or re-run this script with"
-  echo "  --with-local-solver to solve on this machine instead."
-fi
+echo "Plate solving uses Siril (1.4 or newer) and its Gaia catalog; the"
+echo "setup_siril_catalog.sh downloads it once. An image with no start position"
+echo "goes to the online astrometry.net service, which needs api_key under"
+echo "[Processing.Astrometry.Online Solver]."

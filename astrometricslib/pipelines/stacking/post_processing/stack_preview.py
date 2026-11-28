@@ -155,7 +155,7 @@ from astrometricslib.pipelines.shared.stack_preview_path import (
 from astrometricslib.pipelines.stacking.post_processing.background_gradient import (
     BackgroundGradientOutcome,
     not_measured_outcome,
-    write_binned_model,
+    write_binned_sky,
 )
 from astrometricslib.pipelines.stacking.post_processing.bright_object import (
     choose_bright_object_stretch_for_file,
@@ -191,6 +191,7 @@ from astrometricslib.pipelines.stacking.post_processing.preview_settings import 
 from astrometricslib.pipelines.stacking.post_processing.preview_steps import SkippedPreviewStep, next_source
 from astrometricslib.pipelines.stacking.post_processing.quarter_turn import read_quarter_turn
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
+from astrometricslib.pipelines.stacking.post_processing.sky_plane import choose_background_method_for_file
 from astrometricslib.pipelines.stacking.post_processing.stack_crop import CropBox, crop_file, turn_box
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
 from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import stretch_with_starnet
@@ -281,10 +282,9 @@ def _picture_script(
         If given, each cleanup step that failed and was skipped is added to
         it.
     background_outcomes : `list` [`BackgroundGradientOutcome`], optional
-        If given, the measurement of GraXpert's background model is added to
-        it: the numbers, or the reason there are none (GraXpert not
-        configured, skipped for a bright object, failed, or no model).
-        GraXpert's full-size model file is deleted either way.
+        If given, the measurement of the stack's own sky bins is added to it:
+        the numbers, or the reason there are none (a bright object, a stack
+        that could not be read, too few sky bins).
     object_category : `str` or `None`, optional
         The target's kind (`Target.object_category`). Only a nebula or a
         galaxy can get the masked stretch (see `masked_stretch`). `None`,
@@ -311,7 +311,9 @@ def _picture_script(
         )
         if background_outcomes is not None:
             background_outcomes.append(
-                not_measured_outcome("the preview of a bright object skips GraXpert, so there is no model")
+                not_measured_outcome(
+                    "the preview of a bright object skips the background step, so the sky was not measured"
+                )
             )
         if steps_log is not None:
             steps_log.append("Bright object: its own stretch, without GraXpert or the denoise")
@@ -348,8 +350,9 @@ def _picture_script(
         background_record = {"method": "none", "reason": "GraXpert is not configured"}
         steps.append("GraXpert not configured")
         if background_outcomes is not None:
+            # The sky is measured whether or not GraXpert is there.
             background_outcomes.append(
-                not_measured_outcome("GraXpert is not configured, so there is no model")
+                choose_background_method_for_file(os.path.join(scratch, name)).sky_background
             )
     colour = is_colour_image(os.path.join(scratch, name))
     if colour and configuration.get_preview_star_width_match_enabled():
@@ -741,10 +744,10 @@ def write_stack_preview(
         it, so the caller can record that the picture differs from its
         settings (see `preview_notices`).
     background_outcomes : `list` [`BackgroundGradientOutcome`], optional
-        If given, GraXpert's background model is measured and the result is
+        If given, the stack's own sky bins are measured and the result is
         added to it (see `background_gradient`), and the 64 by 64 map is saved
-        beside the picture (`background_model_path_for`). Left out, the model
-        is deleted unmeasured. A preview that was not made adds nothing.
+        beside the picture (`background_model_path_for`). Left out, the sky is
+        not measured. A preview that was not made adds nothing.
     object_category : `str` or `None`, optional
         The target's kind (`Target.object_category`), for the masked stretch
         (see `masked_stretch`). Left out, the stack is of an unknown kind and
@@ -831,7 +834,7 @@ def write_stack_preview(
             _copy_observation_header(scratch_stack, processed_path)
         write_preview_settings(stacked_path, settings or PreviewSettings(), settings_used, steps_taken)
         for background_outcome in background_outcomes or []:
-            write_binned_model(background_outcome, background_model_path)
+            write_binned_sky(background_outcome, background_model_path)
     except RunAbandonedError:
         # The job was cancelled. A picture only partly made is not left
         # beside the stack; the caller of a remake puts the old one back.

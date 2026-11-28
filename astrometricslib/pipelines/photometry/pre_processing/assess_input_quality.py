@@ -7,30 +7,6 @@ never needs to change when the variability-flagging logic does.
 """
 
 from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
-from astrometricslib.models.tuned_parameter import (
-    HardcodedKind,
-    ParameterRole,
-    ParameterSource,
-    TunedParameter,
-)
-
-# A frame whose middle sits this far from the reference frame's has moved a
-# long way for a mount that is tracking: the field drifted out of place or the
-# mount slipped. The plate solutions place every star wherever the field went,
-# so the measuring does not need the limit, but a drift this large is still a
-# mount problem the user should see. The value is the limit the earlier
-# frame-to-frame tracking used, half of its 40 px search box; the register
-# entry PHO-D16 holds it as a design estimate.
-UNSTABLE_TRACKING_DRIFT_PX = TunedParameter(
-    name="photometry.unstable_tracking_drift_px",
-    default=20.0,
-    unit="px",
-    description="Shift of the middle of a frame from the reference frame above which tracking is unstable.",
-    role=ParameterRole.JUDGMENT,
-    source=ParameterSource.HARDCODED,
-    kind=HardcodedKind.RELATIVE,
-    register_entry="PHO-D16",
-)
 
 
 def assess_input_quality(

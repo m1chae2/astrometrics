@@ -116,7 +116,6 @@ The report holds numbers only. It sets no yes/no flag for low coverage or unstab
 
 - **Frame solutions.** Siril solves the frames after the first in groups of 50. The group size only bounds the scratch space (about 1 GB for 9-megapixel frames); it does not change a result. No tuned value remains from the earlier frame tracking.
 - **Aperture and re-centering.** The aperture radius of 4 pixels, the 11-pixel re-centering box, the three re-centering passes and the largest move of 1.5 pixels (`MAX_CENTROID_SHIFT_PX`) are tuned values (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
-- **Input-quality limits.** `UNSTABLE_TRACKING_DRIFT_PX` is 20 pixels. The `registration_drift` gate compares the drift with it (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)).
 - **Camera numbers and times.** The gain and read noise come from the camera profile or the frame header (see [Flux uncertainties](#flux-uncertainties)). `latitude`, `longitude` and `elevation` in `[Observatory.Location]` set the observer for BJD_TDB.
 
 ## Quality metrics
@@ -129,9 +128,9 @@ The assessment builds one record per star.
 | `frames_available` | frames | None | The number of frames in the session | `coverage_fraction` |
 | `coverage_fraction` | none (0 to 1) | None | Low: the brightness history has many gaps | Reviewers |
 | `saturated_fraction` | none (0 to 1) | None | High: more measurements were too bright to measure accurately | Reviewers |
-| `max_registration_drift_px` | pixels | At most 20 (design estimate; see [photometry design estimates](../../../../documentation/library_design/validation/photometry.md#design-estimates)) | High: tracking, not the star, is the likely cause of anything unusual | `registration_drift` gate |
+| `max_registration_drift_px` | pixels | None | High: the field sat far from its place in the first frame. The solutions follow it, so this is a mount fact, not a measuring problem | Reviewers; the `registration_drift` gate quotes it |
 
-A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. The 20-pixel limit is a mount check. The solutions place every star wherever the field went, so a large drift does not spoil the measuring itself.
+A reviewer can use these values to tell a thin, gap-filled or poorly tracked brightness history apart from a solid one, before trusting what the later stages conclude about that star. No limit judges this offset: the solutions place every star wherever the field went, so a large drift does not spoil the measuring itself.
 
 ## Files
 

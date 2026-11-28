@@ -97,7 +97,11 @@ class FakeSiril:
             "options": options,
             "executable": siril_executable,
             "files": staged,
-            "were_links": [(folder / name).is_symlink() for name in staged],
+            # Linux stages a frame as a symbolic link, Windows as a hard link;
+            # either way it is the library's own file, not a copy.
+            "were_links": [
+                (folder / name).is_symlink() or (folder / name).stat().st_nlink > 1 for name in staged
+            ],
         })
         lines = []
         conversion = []

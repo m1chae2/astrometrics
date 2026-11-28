@@ -1117,8 +1117,7 @@ def _make_preview(run: StackRun, stacked_path: str) -> None:
     )
 
     skipped_steps: list[SkippedPreviewStep] = []
-    # A spectral stack has no sky gradient worth measuring: GraXpert's model
-    # is not measured for it.
+    # A spectral stack has no sky gradient worth measuring.
     background_outcomes: list[BackgroundGradientOutcome] | None = None if run.has_spectral else []
     run.preview_path = write_stack_preview(
         stacked_path,

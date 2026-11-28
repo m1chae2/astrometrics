@@ -14,6 +14,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { useStackingJob } from '../imageProcessingDisplay/hooks/useStackingJob';
+import { createQueryClientTestWrapper } from './queryClientTestWrapper';
 
 vi.mock('../common/context/TargetContext', () => ({
     useTargetContext: () => ({ framesReloadKey: 0, invalidate: vi.fn() }),
@@ -34,14 +35,14 @@ vi.mock('../common/services/imaging/processingService', () => ({
 }));
 
 vi.mock('../common/services/targetService', () => ({
-    fetchFrameStatsGrouped: vi.fn(() => new Promise(() => { /* never resolves in this test */ })),
+    requestFrameStatsGrouped: vi.fn(() => new Promise(() => { /* never resolves in this test */ })),
 }));
 
 describe('useStackingJob isLoadingFrames', () => {
     it('reads true the instant shouldFetch flips true, with no stale-false render', async () => {
         const { result, rerender } = renderHook(
             ({ shouldFetch }) => useStackingJob('M 81', shouldFetch),
-            { initialProps: { shouldFetch: false } }
+            { wrapper: createQueryClientTestWrapper().wrapper, initialProps: { shouldFetch: false } }
         );
 
         // While shouldFetch is false (e.g. the shared target list hasn't yet
@@ -51,7 +52,7 @@ describe('useStackingJob isLoadingFrames', () => {
 
         // shouldFetch flips true (e.g. the target list query resolved and
         // confirmed the target is local) -- the very next render must
-        // already report loading, synchronously, before fetchFrameStatsGrouped
+        // already report loading, synchronously, before requestFrameStatsGrouped
         // (mocked to hang forever above) has any chance to settle.
         rerender({ shouldFetch: true });
         expect(result.current.isLoadingFrames).toBe(true);
@@ -62,11 +63,11 @@ describe('useStackingJob isLoadingFrames', () => {
 
     it('settles to false once the frame fetch resolves', async () => {
         const targetService = await import('../common/services/targetService');
-        vi.mocked(targetService.fetchFrameStatsGrouped).mockResolvedValueOnce([
+        vi.mocked(targetService.requestFrameStatsGrouped).mockResolvedValueOnce([
             { gain: 800, exposureS: 30, count: 12 } as any,
         ]);
 
-        const { result } = renderHook(() => useStackingJob('M 81', true));
+        const { result } = renderHook(() => useStackingJob('M 81', true), { wrapper: createQueryClientTestWrapper().wrapper });
 
         expect(result.current.isLoadingFrames).toBe(true);
         await waitFor(() => expect(result.current.isLoadingFrames).toBe(false));

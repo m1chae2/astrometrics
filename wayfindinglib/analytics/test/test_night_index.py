@@ -88,7 +88,10 @@ class _Library:
         """
         return SimpleNamespace(
             id=target_id,
-            frames=[SimpleNamespace(timestamp=stamp, name=f"{stamp}") for stamp in self.frames[target_id]],
+            frames=[
+                SimpleNamespace(timestamp=stamp, name=f"{stamp}", exposure_s=60.0, is_spectral=False)
+                for stamp in self.frames[target_id]
+            ],
             frame_subject_id=lambda frame: f"{target_id}/{frame.name}",
         )
 

@@ -132,3 +132,47 @@ def test_filter_type_property_agrees_with_the_filter_detection_table(
     assert AstrometricsImage(str(path)).filter_type == get_filter_type({"FILTER": filter_value})
     if filter_value.upper().startswith("L"):
         assert get_filter_type({"FILTER": filter_value}) == FilterType.L
+
+
+def test_header_read_picks_the_right_hdu_without_reading_pixels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the header comes from the HDU with the image, pixels unread.
+
+    A plain file keeps its image in HDU 0. A file with a bare HDU 0 keeps
+    it in HDU 1. Both headers must come back without the pixel data being
+    read, since reading it is what made header-only visits slow.
+    """
+    from astropy.io.fits.hdu.image import _ImageBaseHDU
+
+    plain_path = str(tmp_path / "plain.fits")
+    fits.PrimaryHDU(np.zeros((300, 400), dtype=np.uint16)).writeto(plain_path)
+    two_hdu_path = str(tmp_path / "two.fits")
+    extension = fits.ImageHDU(np.zeros((30, 40), dtype=np.uint16))
+    extension.header["OBJECT"] = "In HDU 1"
+    fits.HDUList([fits.PrimaryHDU(), extension]).writeto(two_hdu_path)
+
+    reads: list[int] = []
+    original_reader = _ImageBaseHDU._get_scaled_image_data
+
+    def _counting_reader(self: _ImageBaseHDU, offset: int, shape: tuple[int, ...]) -> np.ndarray:
+        """Record one pixel read, then read the pixels as astropy would.
+
+        Returns
+        -------
+        pixels : `numpy.ndarray`
+            The pixels astropy's own reader gives.
+        """
+        reads.append(1)
+        return original_reader(self, offset, shape)
+
+    monkeypatch.setattr(_ImageBaseHDU, "_get_scaled_image_data", _counting_reader)
+
+    assert AstrometricsImage(plain_path).header["NAXIS1"] == 400
+    two_hdu_header = AstrometricsImage(two_hdu_path).header
+    assert two_hdu_header["NAXIS1"] == 40
+    assert two_hdu_header["OBJECT"] == "In HDU 1"
+    assert reads == []
+
+    assert AstrometricsImage(two_hdu_path).data.shape == (30, 40)
+    assert len(reads) == 1

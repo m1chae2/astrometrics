@@ -20,6 +20,7 @@ from backend.container import container
 from backend.public_interface import RPC_METHODS
 from backend.services.infrastructure.frontend_log import log_frontend_message
 from backend.services.infrastructure.heavy_lane import run_heavy
+from backend.services.infrastructure.rpc_timing import RpcTiming
 from backend.services.rpc_protocol import (
     RPCMethodNotFoundError,
     RPCRequest,
@@ -363,10 +364,21 @@ async def run_in_lane(method: str, function: Callable[..., Any], *args: Any, **k
     -------
     result : `~typing.Any`
         What `function` returns.
+
+    Notes
+    -----
+    The call's wait for a worker and its run time are written to the
+    ``backend.rpc_timing`` log when that log is on (`rpc_timing`).
     """
-    if method in HEAVY_METHODS and not kwargs.get(LIGHT_WHEN_NAMED.get(method, "")):
-        return await run_heavy(function, *args, **kwargs)
-    return await run_in_threadpool(function, *args, **kwargs)
+    heavy = method in HEAVY_METHODS and not kwargs.get(LIGHT_WHEN_NAMED.get(method, ""))
+    timing = RpcTiming(method, "heavy" if heavy else "light")
+    timed = timing.wrap(function)
+    try:
+        if heavy:
+            return await run_heavy(timed, *args, **kwargs)
+        return await run_in_threadpool(timed, *args, **kwargs)
+    finally:
+        timing.report()
 
 
 class RPCHandlerRegistry:
@@ -485,7 +497,7 @@ class RPCHandlerRegistry:
                     kwargs[k] = v
 
         if inspect.iscoroutinefunction(handler):
-            result = await handler(**kwargs)
+            result = await RpcTiming(method, "event-loop").run_coroutine(handler(**kwargs))
         else:
             result = await run_in_lane(method, handler, **kwargs)
 

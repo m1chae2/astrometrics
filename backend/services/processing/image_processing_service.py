@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from astrometricslib import CaptureSetting
@@ -78,6 +78,7 @@ class ImageProcessingService(BaseBackgroundService):
         job_service: Any = None,
         astrometrics_service: Any = None,
         socket_manager: Any = None,
+        review_trigger: Callable[[list[str]], None] | None = None,
     ) -> None:
         """Initialize the image processing orchestration service.
 
@@ -103,9 +104,15 @@ class ImageProcessingService(BaseBackgroundService):
         socket_manager : `Any`, optional
             Sends the ``calibration:measured`` event when the automatic
             measurement of new dark and bias frames ends. None sends nothing.
+        review_trigger : `Callable` [[`list` [`str`]], `None`], optional
+            Called with the target id when a stacking job ends, so the
+            target's Image Processing reviews (frame states, star shapes) are
+            read again in the background (`TargetReviewRewarmer.request`). It
+            must not raise; a failure is logged at debug level here too.
         """
         super().__init__(job_service=job_service, astrometrics_service=astrometrics_service)
         self._socket_manager = socket_manager
+        self._review_trigger = review_trigger
         self._calibration_measurement_lock = threading.Lock()
         self._calibration_measurement_running = False
         self._calibration_kinds_waiting: set[str] = set()
@@ -554,6 +561,7 @@ class ImageProcessingService(BaseBackgroundService):
             notification_service=self._notification_service,
             stack_options=stack_options,
         )
+        self._rewarm_reviews_when_done(job_id, target_id)
 
         return {
             "status": "started",
@@ -561,6 +569,37 @@ class ImageProcessingService(BaseBackgroundService):
             "expectedOutput": f"processed_{target_id}.png",
             "logFile": log_file,
         }
+
+    def _rewarm_reviews_when_done(self, job_id: str, target_id: str) -> None:
+        """Ask for the target's reviews to be read again after its stack job.
+
+        A stack sets frames aside and writes a new stack file, so the frame
+        states and star-shape rows change. The ask is made however the job
+        ends; a failure is logged at debug level.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The stacking job.
+        target_id : `str`
+            The target being stacked.
+        """
+        if self._review_trigger is None:
+            return
+        with self._lock:
+            future = self._jobs.get(job_id, {}).get("future")
+        if future is None:
+            return
+        review_trigger = self._review_trigger
+
+        def on_done(_future: Any) -> None:
+            """Send the ask; runs on the job's thread when the job ends."""
+            try:
+                review_trigger([target_id])
+            except Exception:  # background re-read only: a failure means a slower visit
+                logger.debug("Could not ask for a review re-read after stacking %s", target_id, exc_info=True)
+
+        future.add_done_callback(on_done)
 
 
 def _log_what_the_saved_record_names(

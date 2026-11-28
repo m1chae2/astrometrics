@@ -357,3 +357,85 @@ def test_the_public_name_is_the_same_function() -> None:
     from astrometricslib import drivers
 
     assert drivers.header_is_plate_solved is fits_access.header_is_plate_solved
+
+
+def _count_pixel_reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Count every time astropy reads an image's pixels from disk.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The pytest fixture used to wrap astropy's pixel reader.
+
+    Returns
+    -------
+    reads : `list` of `int`
+        A list that gains one entry per pixel read.
+    """
+    from astropy.io.fits.hdu.image import _ImageBaseHDU
+
+    reads: list[int] = []
+    original_reader = _ImageBaseHDU._get_scaled_image_data
+
+    def _counting_reader(self: _ImageBaseHDU, offset: int, shape: tuple[int, ...]) -> np.ndarray:
+        """Record one pixel read, then read the pixels as astropy would.
+
+        Returns
+        -------
+        pixels : `numpy.ndarray`
+            The pixels astropy's own reader gives.
+        """
+        reads.append(1)
+        return original_reader(self, offset, shape)
+
+    monkeypatch.setattr(_ImageBaseHDU, "_get_scaled_image_data", _counting_reader)
+    return reads
+
+
+def test_choose_pixel_hdu_picks_hdu0_for_a_plain_image(tmp_path: Path) -> None:
+    """Verify a single-HDU image gives HDU 0 without reading its pixels."""
+    path = _write_single_hdu_frame(tmp_path / "frame.fits", 20, 10)
+
+    with fits.open(path, memmap=False) as hdul:
+        assert fits_access.choose_pixel_hdu(hdul) is hdul[0]
+        assert "data" not in hdul[0].__dict__
+
+
+def test_choose_pixel_hdu_picks_hdu1_after_a_bare_hdu0(tmp_path: Path) -> None:
+    """Verify a bare HDU 0 followed by an image gives HDU 1."""
+    path = _write_two_hdu_frame(tmp_path / "frame.fits", 20, 10)
+
+    with fits.open(path, memmap=False) as hdul:
+        assert fits_access.choose_pixel_hdu(hdul) is hdul[1]
+        assert fits_access.choose_pixel_hdu(hdul, first_hdu_only=True) is hdul[0]
+
+
+def test_choose_pixel_hdu_picks_the_compressed_image(tmp_path: Path) -> None:
+    """Verify a compressed file (bare HDU 0, compressed image) gives HDU 1."""
+    path = tmp_path / "frame.fits.fz"
+    image = np.arange(200, dtype=np.int16).reshape(10, 20)
+    fits.HDUList([fits.PrimaryHDU(), fits.CompImageHDU(image)]).writeto(path)
+
+    with fits.open(path, memmap=False) as hdul:
+        chosen = fits_access.choose_pixel_hdu(hdul)
+        assert chosen is hdul[1]
+        assert chosen.header["NAXIS1"] == 20
+
+
+def test_read_header_does_not_read_the_pixels(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify reading a header leaves the pixel data on disk.
+
+    The spy is checked first on a real data read, so a zero count proves
+    the header read skipped the pixels rather than that the spy missed.
+    """
+    single_path = _write_single_hdu_frame(tmp_path / "single.fits", 200, 100)
+    two_hdu_path = _write_two_hdu_frame(tmp_path / "two.fits", 200, 100)
+    reads = _count_pixel_reads(monkeypatch)
+
+    assert fits_access.read_data(single_path) is not None
+    assert len(reads) == 1
+    reads.clear()
+
+    assert fits_access.read_header(single_path)["NAXIS1"] == 200
+    assert fits_access.read_header(two_hdu_path)["NAXIS1"] == 200
+    assert reads == []

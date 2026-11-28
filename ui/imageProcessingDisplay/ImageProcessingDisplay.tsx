@@ -674,7 +674,7 @@ const ImageProcessingDisplayInner: React.FC = () => {
       const paths = Array.from(files).map((f: File & { path?: string }) => f.path ?? f.name);
       await addTargetData(paths, selectedTarget);
       refreshFrames();
-      emitEvent('targetsUpdated');
+      emitEvent('targetsUpdated', { id: selectedTarget });
     } catch (err) {
       reportError(err, 'addImages');
     }

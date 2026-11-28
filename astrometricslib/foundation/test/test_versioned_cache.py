@@ -3,7 +3,8 @@
 Description: Checks that a result is built once while its data version stays
 the same, built again when the version changes, forgotten on request, never
 kept when the version is unknown, kept in a bounded number, handed out as a
-copy, and built only once when several threads ask for it together.
+copy, built only once when several threads ask for it together, and brought
+up to date by an ``update`` function when the caller gives one.
 """
 
 import threading
@@ -218,3 +219,64 @@ def test_a_lock_in_use_survives_eviction_of_its_result() -> None:
     assert builder.calls == 1
     assert len(results) == 2
     assert cache._build_locks == {}
+
+
+def test_an_update_brings_a_kept_result_up_to_date() -> None:
+    """With a kept result, ``update`` is used instead of building again."""
+    cache, builder = VersionedCache(), _Builder()
+    calls: list[tuple[Any, Any, Any]] = []
+
+    def update(kept_version: Any, kept: Any, version: Any) -> dict[str, Any]:
+        """Record the call and give a new result built from the kept one.
+
+        Returns
+        -------
+        result : `dict`
+            The kept value with the new version added.
+        """
+        calls.append((kept_version, kept, version))
+        return {**kept, "version": version}
+
+    first = cache.get_or_build("night", 1, builder, update=update)
+    second = cache.get_or_build("night", 2, builder, update=update)
+    third = cache.get_or_build("night", 2, builder, update=update)
+
+    assert builder.calls == 1
+    assert calls == [(1, first, 2)]
+    assert second == third == {"value": [1, 2, 3], "version": 2}
+
+
+def test_an_update_that_cannot_help_falls_back_to_a_build() -> None:
+    """``update`` giving `None` means the result is built from scratch."""
+    cache, builder = VersionedCache(), _Builder()
+
+    cache.get_or_build("night", 1, builder, update=lambda *_: None)
+    cache.get_or_build("night", 2, builder, update=lambda *_: None)
+    cache.get_or_build("night", 2, builder, update=lambda *_: None)
+
+    assert builder.calls == 2
+
+
+def test_an_update_error_keeps_the_old_result() -> None:
+    """An error in ``update`` reaches the caller and the old result stays.
+
+    The old result is still given for its own version afterwards.
+    """
+    cache, builder = VersionedCache(), _Builder()
+    cache.get_or_build("night", 1, builder)
+
+    def broken(*_arguments: Any) -> Any:
+        """Fail as a broken update would.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        raise RuntimeError("update failed")
+
+    with pytest.raises(RuntimeError):
+        cache.get_or_build("night", 2, builder, update=broken)
+    cache.get_or_build("night", 1, builder)
+
+    assert builder.calls == 1

@@ -3,12 +3,14 @@
  * @description Tests how App.tsx pauses hidden displays: a display is never paused
  * before it has reported ready (so the splash screen can finish), a ready hidden
  * display is paused (its effects clean up) and starts again when shown, and the
- * displays that cannot be paused safely stay running.
+ * displays that cannot be paused safely stay running. It also checks that a slot reports its display
+ * mounted only once the display's code has loaded, and that a display still loading in one slot never
+ * hides the display shown in another.
  */
 
 import React, { useEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 
 vi.mock('../common/context/TargetContext', () => ({
   TargetProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -94,5 +96,40 @@ describe('ModePanel pausing', () => {
       'Astronomy Manager', 'Command Console', 'Image Processing', 'Image Viewer',
       'Observation Manager', 'Observatory Manager', 'Planetarium',
     ]);
+  });
+
+  /** The slot says its display is mounted only after the display's code has loaded. */
+  it('reports the display mounted once its code has loaded', async () => {
+    const { ModePanel } = await import('../App');
+    let finishLoading: (module: { default: React.FC }) => void = () => {};
+    const SlowDisplay = React.lazy(() => new Promise<{ default: React.FC }>((resolve) => { finishLoading = resolve; }));
+    const onContentMounted = vi.fn();
+    render(
+      <ModePanel panelMode="Planetarium" activeMode="Planetarium" onContentMounted={onContentMounted}>
+        <SlowDisplay />
+      </ModePanel>
+    );
+    expect(onContentMounted).not.toHaveBeenCalled();
+    await act(async () => { finishLoading({ default: () => <p>Sky map</p> }); });
+    expect(screen.getByText('Sky map')).toBeTruthy();
+    expect(onContentMounted).toHaveBeenCalledTimes(1);
+  });
+
+  /** A hidden display that is still loading does not replace the shown display with a loading box. */
+  it('keeps the shown display on screen while a hidden one loads', async () => {
+    const { ModePanel } = await import('../App');
+    const NeverLoads = React.lazy(() => new Promise<{ default: React.FC }>(() => {}));
+    const { rerender } = render(
+      <>
+        <ModePanel panelMode="Image Viewer" activeMode="Image Viewer"><p>Shown display</p></ModePanel>
+      </>
+    );
+    rerender(
+      <>
+        <ModePanel panelMode="Image Viewer" activeMode="Image Viewer"><p>Shown display</p></ModePanel>
+        <ModePanel panelMode="Planetarium" activeMode="Image Viewer"><NeverLoads /></ModePanel>
+      </>
+    );
+    expect(screen.getByText('Shown display')).toBeTruthy();
   });
 });

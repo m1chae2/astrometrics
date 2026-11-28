@@ -55,6 +55,34 @@ _TRUE_TEXT = frozenset({"T", "TRUE", "1"})
 _SKY_AXIS_KEYWORDS = ("CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2")
 
 
+def choose_pixel_hdu(hdul: fits.HDUList, *, first_hdu_only: bool = False) -> fits.hdu.base._BaseHDU:
+    """Pick the HDU that holds the pixel data, reading only headers.
+
+    The choice uses the ``NAXIS`` card of HDU 0. ``NAXIS = 0`` means HDU 0
+    has no data array, which is exactly when astropy gives
+    ``hdul[0].data`` as `None`. Asking for ``.data`` to make this choice
+    would read the whole image from disk (the files are opened without a
+    memory map) and scale it, which is slow when only the header is needed.
+
+    Parameters
+    ----------
+    hdul : `astropy.io.fits.HDUList`
+        The open FITS file.
+    first_hdu_only : `bool`, optional
+        If True, always return HDU 0, even when it holds no data.
+
+    Returns
+    -------
+    hdu : `astropy.io.fits.hdu.base._BaseHDU`
+        HDU 1 when HDU 0 has no data array and a second HDU exists,
+        otherwise HDU 0.
+    """
+    primary_has_no_data = hdul[0].header.get("NAXIS", 0) == 0
+    if not first_hdu_only and len(hdul) > 1 and primary_has_no_data:
+        return hdul[1]
+    return hdul[0]
+
+
 @contextmanager
 def open_primary_hdu(path: str, *, first_hdu_only: bool = False) -> Generator[fits.hdu.base._BaseHDU]:
     """Open a FITS file and yield the HDU containing the pixel data.
@@ -76,10 +104,7 @@ def open_primary_hdu(path: str, *, first_hdu_only: bool = False) -> Generator[fi
         ``first_hdu_only`` is True).
     """
     with fits.open(path, memmap=False) as hdul:
-        if not first_hdu_only and len(hdul) > 1 and hdul[0].data is None:
-            yield hdul[1]
-        else:
-            yield hdul[0]
+        yield choose_pixel_hdu(hdul, first_hdu_only=first_hdu_only)
 
 
 def read_header(path: str, *, first_hdu_only: bool = False) -> fits.Header:

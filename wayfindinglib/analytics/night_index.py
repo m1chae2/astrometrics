@@ -62,11 +62,18 @@ class NightFrame:
     subject_id : `str`
         The name the frame's stored measurements carry
         (`Target.frame_subject_id`).
+    exposure_s : `float`
+        The exposure time, in seconds, as the capture history reads it (0
+        when the frame record has none).
+    is_spectral : `bool`
+        Whether the frame was taken through a spectroscopy filter.
     """
 
     night: str
     target_id: str
     subject_id: str
+    exposure_s: float = 0.0
+    is_spectral: bool = False
 
 
 def _digest(lines: Iterable[str]) -> str:
@@ -268,6 +275,8 @@ def read_night_frames(context: Any) -> list[NightFrame]:
                     night=observing_night_id(float(frame.timestamp)),
                     target_id=target.id,
                     subject_id=target.frame_subject_id(frame),
+                    exposure_s=float(frame.exposure_s or 0.0),
+                    is_spectral=bool(frame.is_spectral),
                 )
             )
     except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:

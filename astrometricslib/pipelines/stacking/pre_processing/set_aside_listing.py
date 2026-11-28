@@ -17,11 +17,16 @@ walk the folders themselves.
 
 import logging
 import os
+import threading
+from collections import OrderedDict
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from typing import Any
 
-from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.models.quality.excluded_frames import SetAsideFrameRecord
 from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
@@ -33,7 +38,7 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_set_aside_records", "find_excluded_folders"]
+__all__ = ["build_set_aside_records", "clear_set_aside_cache", "find_excluded_folders"]
 
 _FRAME_EXTENSIONS = (".fits", ".fit")
 """File name endings that mark a frame (the library's frame scan uses them)."""
@@ -70,35 +75,107 @@ def find_excluded_folders(frames_path: str, target_names: Iterable[str]) -> list
     return folders
 
 
-def _header_exposure_seconds(path: str) -> float | None:
-    """Read ``EXPTIME`` (or ``EXPOSURE``) from a frame's header.
+@dataclass(frozen=True)
+class _FrameHeaderFacts:
+    """What one set-aside frame's header says, before any setting is applied.
+
+    Attributes
+    ----------
+    exposure_s : `float` or `None`
+        ``EXPTIME`` (or ``EXPOSURE``), or `None` when the header has none.
+    camera_text : `str`
+        The camera as the header writes it, ``"Unknown"`` when it names none.
+        The record spelling is applied on each listing, because it depends
+        on the camera settings, which can change while a file does not.
+    filter_name : `str`
+        The filter name a frame record shows (``"None"`` when unknown).
+    date : `str`
+        The capture time as ``YYYY-MM-DD HH:MM:SS``, from the header, else
+        from the file name. When neither gives one, or the header cannot be
+        read, it is the frame record's own stand-in (``"Unknown"``).
+    readable : `bool`
+        False when the header could not be read. The camera then shows as
+        unknown, as it does on a frame record.
+    """
+
+    exposure_s: float | None
+    camera_text: str
+    filter_name: str
+    date: str
+    readable: bool
+
+
+@dataclass(frozen=True)
+class _FolderSnapshot:
+    """The parts of one `_excluded` folder that come from its files.
+
+    Attributes
+    ----------
+    state : `tuple`
+        The sorted ``(name, size, modification time in ns)`` of every file in
+        the folder when it was read. A different state means the folder must
+        be read again.
+    manifest : `dict` [`str`, `dict`]
+        The folder's `excluded_frames.json` entries by file name.
+    frames : `dict` [`str`, `_FrameHeaderFacts`]
+        The header facts of each frame file, by file name.
+    """
+
+    state: tuple[tuple[str, int, int], ...]
+    manifest: dict[str, dict[str, Any]]
+    frames: dict[str, _FrameHeaderFacts]
+
+
+_UNKNOWN_DATE: str = FrameRecord.model_fields["date"].default
+"""The capture time a frame record shows when none is known."""
+
+_SNAPSHOT_CACHE_SIZE = 64
+"""The most `_excluded` folders whose snapshots are kept in memory.
+
+A target has one or a few such folders, and each snapshot holds a few short
+strings per frame, so 64 covers every target opened in a session for well
+under a megabyte.
+"""
+
+_snapshot_cache: OrderedDict[str, _FolderSnapshot] = OrderedDict()
+_snapshot_cache_lock = threading.Lock()
+
+
+def clear_set_aside_cache() -> None:
+    """Forget every kept folder snapshot, so the next listing reads files."""
+    with _snapshot_cache_lock:
+        _snapshot_cache.clear()
+
+
+def _folder_state(folder: str) -> tuple[tuple[str, int, int], ...]:
+    """Describe a folder's files cheaply, without opening any of them.
 
     Parameters
     ----------
-    path : `str`
-        The frame file.
+    folder : `str`
+        The folder.
 
     Returns
     -------
-    exposure_s : `float` or `None`
-        The exposure, or `None` if the header has none or cannot be read.
+    state : `tuple`
+        The sorted ``(name, size, modification time in ns)`` of each file.
+        Adding, removing, rewriting or touching a file changes it.
     """
-    try:
-        header = read_header(path)
-    except (*FITS_READ_ERRORS, *DATA_ERRORS, OSError) as error:
-        logger.debug("Cannot read the header of '%s': %s", path, error)
-        return None
-    for card in ("EXPTIME", "EXPOSURE"):
-        value = header.get(card)
-        if isinstance(value, int | float):
-            return float(value)
-    return None
+    state: list[tuple[str, int, int]] = []
+    with os.scandir(folder) as entries:
+        for entry in entries:
+            if entry.is_file():
+                status = entry.stat()
+                state.append((entry.name, status.st_size, status.st_mtime_ns))
+    return tuple(sorted(state))
 
 
-def _header_identity(path: str) -> tuple[str, str, str]:
-    """Read a frame's camera, filter name and capture time from its file.
+def _read_frame_header_facts(path: str) -> _FrameHeaderFacts:
+    """Read a frame's exposure, camera, filter name and capture time.
 
-    This uses the same reader as the target's own frame records, so a
+    The header is read once, without the pixels or a sky map. The filter
+    and capture time go through the same helpers as the target's frame
+    records (`frame_scanning.create_frame_record_from_fits`), so a
     set-aside frame shows the same values a normal frame does.
 
     Parameters
@@ -108,22 +185,78 @@ def _header_identity(path: str) -> tuple[str, str, str]:
 
     Returns
     -------
-    identity : `tuple` [`str`, `str`, `str`]
-        The camera name, the filter name and the capture time as
-        ``YYYY-MM-DD HH:MM:SS`` (from the header, else from the file name).
-        Each is an empty string when it is not known.
+    facts : `_FrameHeaderFacts`
+        What the header says. A file that cannot be read gives what its
+        frame record gives: no exposure, and an unknown camera, filter and
+        capture time.
     """
+    from astrometricslib._internal.drivers.filter_detection import get_filter_type
+    from astrometricslib._internal.drivers.image import read_header_with_fixes, timestamp_from_header
     from astrometricslib.foundation.enums import FilterType
-    from astrometricslib.pipelines.shared.frame_scanning import (
-        capture_time_from_file_name,
-        create_frame_record_from_fits,
-    )
+    from astrometricslib.pipelines.shared.frame_scanning import frame_capture_date, header_camera_text
 
-    record = create_frame_record_from_fits(path)
-    camera = "" if record.camera == "Unknown" else record.camera
-    filter_name = "None" if record.filter == FilterType.NONE else record.filter.name
-    # A file with no capture time in its header may have one in its name.
-    return camera, filter_name, record.date or capture_time_from_file_name(os.path.basename(path))
+    file_name = os.path.basename(path)
+    header = read_header_with_fixes(path)
+    if header is None:
+        logger.debug("Cannot read the header of '%s'", path)
+        return _FrameHeaderFacts(None, "Unknown", "None", _UNKNOWN_DATE, False)
+    try:
+        exposure_s = None
+        for card in ("EXPTIME", "EXPOSURE"):
+            value = header.get(card)
+            if isinstance(value, int | float):
+                exposure_s = float(value)
+                break
+        filter_type = get_filter_type(header)
+        date = frame_capture_date(timestamp_from_header(header), file_name) or _UNKNOWN_DATE
+        camera_text = header_camera_text(header)
+    except (*FITS_READ_ERRORS, *DATA_ERRORS) as error:
+        logger.debug("Cannot read the header of '%s': %s", path, error)
+        return _FrameHeaderFacts(None, "Unknown", "None", _UNKNOWN_DATE, False)
+    filter_name = "None" if filter_type == FilterType.NONE else filter_type.name
+    return _FrameHeaderFacts(exposure_s, camera_text, filter_name, date, True)
+
+
+def _folder_snapshot(folder: str) -> _FolderSnapshot:
+    """Give a folder's manifest and frame header facts, reading only if needed.
+
+    The answer is kept in memory with the folder's state. While no file in
+    the folder is added, removed or changed, the kept answer is given and
+    no file is opened. The state is taken before the files are read, so a
+    file that changes during the read makes the next call read again.
+
+    Parameters
+    ----------
+    folder : `str`
+        An `_excluded` folder.
+
+    Returns
+    -------
+    snapshot : `_FolderSnapshot`
+        The folder's manifest entries and frame header facts.
+    """
+    key = os.path.abspath(folder)
+    state = _folder_state(folder)
+    with _snapshot_cache_lock:
+        kept = _snapshot_cache.get(key)
+        if kept is not None and kept.state == state:
+            _snapshot_cache.move_to_end(key)
+            return kept
+    manifest = {
+        entry["file"]: entry for entry in read_quarantine_manifest(os.path.join(folder, MANIFEST_FILE_NAME))
+    }
+    frames = {
+        name: _read_frame_header_facts(os.path.join(folder, name))
+        for name, _, _ in state
+        if name.lower().endswith(_FRAME_EXTENSIONS)
+    }
+    snapshot = _FolderSnapshot(state=state, manifest=manifest, frames=frames)
+    with _snapshot_cache_lock:
+        _snapshot_cache[key] = snapshot
+        _snapshot_cache.move_to_end(key)
+        while len(_snapshot_cache) > _SNAPSHOT_CACHE_SIZE:
+            _snapshot_cache.popitem(last=False)
+    return snapshot
 
 
 def build_set_aside_records(
@@ -161,15 +294,15 @@ def build_set_aside_records(
         if existing is None or row.measured_at > existing.measured_at:
             rows_by_subject[row.subject.subject_id] = row
 
+    from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.shared.frame_scanning import frame_camera_name
+
+    config = get_configuration()
     records: list[SetAsideFrameRecord] = []
     for folder in folders:
-        manifest = {
-            entry["file"]: entry
-            for entry in read_quarantine_manifest(os.path.join(folder, MANIFEST_FILE_NAME))
-        }
-        for file_name in sorted(os.listdir(folder)):
-            if not file_name.lower().endswith(_FRAME_EXTENSIONS):
-                continue
+        snapshot = _folder_snapshot(folder)
+        manifest = snapshot.manifest
+        for file_name, facts in snapshot.frames.items():
             path = os.path.join(folder, file_name)
             entry = manifest.get(file_name)
             original_path = entry["original_path"] if entry else None
@@ -195,8 +328,10 @@ def build_set_aside_records(
                     exposure_s = capture_exposure_seconds.get(capture_setting_id)
                 moved_at = moved_at or row.measured_at.isoformat(timespec="seconds")
             if exposure_s is None:
-                exposure_s = _header_exposure_seconds(path)
-            camera, filter_name, date = _header_identity(path)
+                exposure_s = facts.exposure_s
+            camera = frame_camera_name(facts.camera_text, config) if facts.readable else "Unknown"
+            camera = "" if camera == "Unknown" else camera
+            filter_name, date = facts.filter_name, facts.date
             records.append(
                 SetAsideFrameRecord(
                     file=file_name,

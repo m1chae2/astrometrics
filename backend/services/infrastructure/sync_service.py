@@ -63,6 +63,7 @@ class SyncService:
         socket_manager: Any = None,
         calibration_trigger: Callable[[Iterable[str]], Any] | None = None,
         targets: Any = None,
+        review_trigger: Callable[[list[str]], None] | None = None,
     ) -> None:
         """Keep the observatory control.
 
@@ -89,8 +90,15 @@ class SyncService:
         targets : `TargetCatalog`, optional
             ``astrometrics.targets``, which turns the id the UI sends into
             the `Target` the library copies frames for.
+        review_trigger : `Callable` [[`list` [`str`]], `None`], optional
+            Called when a sync added frames, so the Image Processing reviews
+            are read again in the background (`TargetReviewRewarmer.request`).
+            A target sync names its target; a calibration folder sync names
+            none, which re-reads only the targets the app asked about last.
+            It must not raise; a failure is logged at debug level here too.
         """
         self._calibration_trigger = calibration_trigger
+        self._review_trigger = review_trigger
         self._targets = targets
         self._observatory = observatory_api
         self._measurement_announcer = measurement_announcer
@@ -173,6 +181,7 @@ class SyncService:
                 added = getattr(result, "transferred", None) or 0
                 if added:
                     self._announce_frames_updated(object_id, added)
+                    self._trigger_review_rewarm(object_id)
                 self._announce_measurements(object_id, result)
                 self._trigger_calibration_measurement(object_id, result)
                 self._trigger_suggestions(object_id)
@@ -202,7 +211,11 @@ class SyncService:
         """Tell the app that frames were added, so its frame lists reload.
 
         This runs when the sync ends, after the new frames were measured.
-        A failure is logged and never changes the sync's result.
+        A failure is logged and never changes the sync's result. The payload
+        says whether the sync was of a calibration folder. The app then reads
+        every target's frame summaries again, because new calibration frames
+        can change the calibration match of any target. A target sync only
+        makes that one target's views read again.
 
         Parameters
         ----------
@@ -215,7 +228,12 @@ class SyncService:
             return
         try:
             self._socket_manager.broadcast_ui_event_sync(
-                "library:frames_updated", {"targetId": object_id, "framesAdded": int(frames_added)}
+                "library:frames_updated",
+                {
+                    "targetId": object_id,
+                    "framesAdded": int(frames_added),
+                    "isCalibration": object_id.strip().lower() in CALIBRATION_FOLDER_NAMES,
+                },
             )
         except Exception:  # an announcement must never fail the sync: log it
             logger.exception("Could not announce the new frames of the %s sync", object_id)
@@ -267,6 +285,25 @@ class SyncService:
             self._suggestion_trigger([object_id])
         except Exception:  # a refresh trigger must never fail the sync: log it
             logger.exception("Could not ask for a suggestion refresh after the %s sync", object_id)
+
+    def _trigger_review_rewarm(self, object_id: str) -> None:
+        """Ask for the Image Processing reviews to be read again after a sync.
+
+        A failure is logged at debug level and never changes the sync's
+        result.
+
+        Parameters
+        ----------
+        object_id : `str`
+            The target (or calibration folder) that was synced.
+        """
+        if self._review_trigger is None:
+            return
+        is_calibration = object_id.strip().lower() in CALIBRATION_FOLDER_NAMES
+        try:
+            self._review_trigger([] if is_calibration else [object_id])
+        except Exception:  # background re-read only: a failure means a slower visit
+            logger.debug("Could not ask for a review re-read after the %s sync", object_id, exc_info=True)
 
     def _announce_measurements(self, object_id: str, sync_result: Any) -> None:
         """Tell the app which quality rows the sync stored.

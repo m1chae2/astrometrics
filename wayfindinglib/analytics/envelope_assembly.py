@@ -18,7 +18,8 @@ the equipment without any step that updates stored limits.
 import logging
 import sqlite3
 import statistics
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Hashable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -275,6 +276,215 @@ class NightGuidingBaseline(NamedTuple):
     total_errors: np.ndarray
 
 
+def night_guiding_baseline(
+    records: Any,
+    night: str,
+    windows: Sequence[tuple[float, float]],
+    guiding_runs: Sequence[GuidingRunSummary],
+) -> NightGuidingBaseline | None:
+    """Reduce one night that used this equipment to its baseline values.
+
+    Takes the night's measured guide samples that fall inside `windows` and
+    reduces them to one median guide SNR, one guiding error, one cadence
+    and one share of lost frames.
+
+    Parameters
+    ----------
+    records : `ControlRecordStore`
+        Source of the recorded guiding samples.
+    night : `str`
+        The observing night.
+    windows : `Sequence` [`tuple` [`float`, `float`]]
+        The (start, end) of each session of the night that used this
+        equipment, widened by `SESSION_WINDOW_MARGIN_SECONDS`.
+    guiding_runs : `Sequence` [`GuidingRunSummary`]
+        Every recorded guiding run. Those of this night inside `windows`
+        give the night's share of lost frames.
+
+    Returns
+    -------
+    baseline : `NightGuidingBaseline` or `None`
+        The night's values, or `None` when it has too few samples.
+    """
+    samples = _night_samples(records, night, list(windows))
+    if len(samples) < resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value:
+        return None
+    snr = [sample["snr"] for sample in samples if sample.get("snr") is not None]
+    _, ra_spread = robust_median_and_spread([sample["dra"] for sample in samples])
+    _, dec_spread = robust_median_and_spread([sample["ddec"] for sample in samples])
+    star_mass = [sample["star_mass"] for sample in samples if sample.get("star_mass")]
+    times = np.sort([sample["timestamp"] for sample in samples])
+    gaps = np.diff(times)
+    night_runs = [
+        run
+        for run in guiding_runs
+        if run.session_id == night and any(start <= run.started_at <= end for start, end in windows)
+    ]
+    frames_total = sum(run.frames_total for run in night_runs)
+    return NightGuidingBaseline(
+        night=night,
+        snr=float(np.median(snr)) if snr else None,
+        star_mass=float(np.median(star_mass)) if star_mass else None,
+        rms=float(np.sqrt((ra_spread**2 + dec_spread**2) / 2.0)),
+        # A gap over a minute is a break between runs, not the cadence.
+        cadence_s=float(np.median(gaps[gaps < resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value])),
+        lost_fraction=(sum(run.frames_lost for run in night_runs) / frames_total) if frames_total else None,
+        total_errors=np.hypot([sample["dra"] for sample in samples], [sample["ddec"] for sample in samples]),
+    )
+
+
+@dataclass(frozen=True)
+class NightBaselineTable:
+    """Each night's guiding baseline, kept with what it was worked out from.
+
+    During a night only tonight's guide samples grow. The finished nights'
+    baselines change only when their session records, guiding runs or
+    samples do. So a cache keeps this table and brings it up to date with
+    `update_night_baseline_table`, which works out again only the nights
+    whose inputs changed. Treat the mappings as read-only: a cache may hand
+    the same object to every caller.
+
+    Attributes
+    ----------
+    by_night : `~collections.abc.Mapping`
+        For every night with a session record of this equipment, its
+        `NightGuidingBaseline`, or `None` when it has too few samples.
+    inputs : `~collections.abc.Mapping` [`str`, `~collections.abc.Hashable`]
+        For each night, the session windows and the guiding runs its
+        baseline was worked out from (`_night_inputs`).
+    nights : `tuple` [`NightGuidingBaseline`, ...]
+        The baselines of the nights with enough samples, oldest first. This
+        is what `collect_night_baselines` gives.
+    """
+
+    by_night: Mapping[str, NightGuidingBaseline | None]
+    inputs: Mapping[str, Hashable]
+    nights: tuple[NightGuidingBaseline, ...]
+
+
+def _night_inputs(
+    night: str, windows: Sequence[tuple[float, float]], guiding_runs: Sequence[GuidingRunSummary]
+) -> Hashable:
+    """Describe what one night's baseline reads, apart from its samples.
+
+    Returns
+    -------
+    inputs : `~collections.abc.Hashable`
+        The night's session windows, and the start, frame count and lost
+        frame count of each guiding run of the night, both sorted.
+    """
+    return (
+        tuple(sorted(windows)),
+        tuple(
+            sorted(
+                (run.started_at, run.frames_total, run.frames_lost)
+                for run in guiding_runs
+                if run.session_id == night
+            )
+        ),
+    )
+
+
+def _night_baseline_table(
+    by_night: dict[str, NightGuidingBaseline | None], inputs: dict[str, Hashable]
+) -> NightBaselineTable:
+    """Make a `NightBaselineTable` and its list of qualifying nights.
+
+    Returns
+    -------
+    table : `NightBaselineTable`
+        The table.
+    """
+    nights = tuple(baseline for _, baseline in sorted(by_night.items()) if baseline is not None)
+    return NightBaselineTable(by_night=by_night, inputs=inputs, nights=nights)
+
+
+def read_night_baseline_table(
+    records: Any,
+    session_contexts: Iterable[EkosSessionContext],
+    equipment_fingerprint: str,
+    guiding_runs: Iterable[GuidingRunSummary] = (),
+) -> NightBaselineTable:
+    """Work out the guiding baseline of every night that used this equipment.
+
+    Parameters
+    ----------
+    records : `ControlRecordStore`
+        Source of the recorded guiding samples.
+    session_contexts : `Iterable` [`EkosSessionContext`]
+        Every recorded session.
+    equipment_fingerprint : `str`
+        The equipment in use now.
+    guiding_runs : `Iterable` [`GuidingRunSummary`], optional
+        Every recorded guiding run.
+
+    Returns
+    -------
+    table : `NightBaselineTable`
+        Every such night's baseline and inputs.
+    """
+    return update_night_baseline_table(
+        records, session_contexts, equipment_fingerprint, guiding_runs, None, frozenset()
+    )
+
+
+def update_night_baseline_table(
+    records: Any,
+    session_contexts: Iterable[EkosSessionContext],
+    equipment_fingerprint: str,
+    guiding_runs: Iterable[GuidingRunSummary],
+    kept: NightBaselineTable | None,
+    sample_nights: Collection[str],
+) -> NightBaselineTable:
+    """Bring a kept table up to date, working out only the nights that changed.
+
+    A night's baseline is worked out again when the night is new, when its
+    session windows or guiding runs (`_night_inputs`) differ from the kept
+    ones, or when it is in `sample_nights`. Every other night keeps its
+    baseline. A night that no longer has a session record of this equipment
+    is dropped. The answer equals a full `read_night_baseline_table` as long
+    as `sample_nights` names every night whose guide samples changed.
+
+    Parameters
+    ----------
+    records : `ControlRecordStore`
+        Source of the recorded guiding samples.
+    session_contexts : `Iterable` [`EkosSessionContext`]
+        Every recorded session.
+    equipment_fingerprint : `str`
+        The equipment in use now.
+    guiding_runs : `Iterable` [`GuidingRunSummary`]
+        Every recorded guiding run.
+    kept : `NightBaselineTable` or `None`
+        The table kept from an earlier call, not changed here. `None` works
+        out every night.
+    sample_nights : `~collections.abc.Collection` [`str`]
+        The nights whose guide samples may have changed since `kept` was
+        worked out.
+
+    Returns
+    -------
+    table : `NightBaselineTable`
+        The table for the records as they are now.
+    """
+    windows_by_night = _matching_windows_by_night(session_contexts, equipment_fingerprint)
+    runs = list(guiding_runs)
+    by_night: dict[str, NightGuidingBaseline | None] = {}
+    inputs: dict[str, Hashable] = {}
+    for night, windows in sorted(windows_by_night.items()):
+        inputs[night] = _night_inputs(night, windows, runs)
+        if (
+            kept is not None
+            and night not in sample_nights
+            and night in kept.by_night
+            and kept.inputs.get(night) == inputs[night]
+        ):
+            by_night[night] = kept.by_night[night]
+        else:
+            by_night[night] = night_guiding_baseline(records, night, windows, runs)
+    return _night_baseline_table(by_night, inputs)
+
+
 def collect_night_baselines(
     records: Any,
     session_contexts: Iterable[EkosSessionContext],
@@ -286,9 +496,10 @@ def collect_night_baselines(
     For every observing night that has a session record with this
     equipment's fingerprint, takes the measured guide samples that fall
     inside those records' time spans and reduces them to one median guide
-    SNR, one guiding error, one cadence and one share of lost frames. Nights
-    with too few samples are left out. Sessions of other equipment are not
-    read at all, so a change of equipment starts with an empty history.
+    SNR, one guiding error, one cadence and one share of lost frames
+    (`night_guiding_baseline`). Nights with too few samples are left out.
+    Sessions of other equipment are not read at all, so a change of
+    equipment starts with an empty history.
 
     The result does not depend on which night is being judged, so one call
     serves every night and can be kept until the records change.
@@ -310,44 +521,9 @@ def collect_night_baselines(
     nights : `list` [`NightGuidingBaseline`]
         One entry per qualifying night, oldest first.
     """
-    windows_by_night = _matching_windows_by_night(session_contexts, equipment_fingerprint)
-    runs = list(guiding_runs)
-    nights: list[NightGuidingBaseline] = []
-    for night, windows in sorted(windows_by_night.items()):
-        samples = _night_samples(records, night, windows)
-        if len(samples) < resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value:
-            continue
-        snr = [sample["snr"] for sample in samples if sample.get("snr") is not None]
-        _, ra_spread = robust_median_and_spread([sample["dra"] for sample in samples])
-        _, dec_spread = robust_median_and_spread([sample["ddec"] for sample in samples])
-        star_mass = [sample["star_mass"] for sample in samples if sample.get("star_mass")]
-        times = np.sort([sample["timestamp"] for sample in samples])
-        gaps = np.diff(times)
-        night_runs = [
-            run
-            for run in runs
-            if run.session_id == night and any(start <= run.started_at <= end for start, end in windows)
-        ]
-        frames_total = sum(run.frames_total for run in night_runs)
-        nights.append(
-            NightGuidingBaseline(
-                night=night,
-                snr=float(np.median(snr)) if snr else None,
-                star_mass=float(np.median(star_mass)) if star_mass else None,
-                rms=float(np.sqrt((ra_spread**2 + dec_spread**2) / 2.0)),
-                # A gap over a minute is a break between runs, not the cadence.
-                cadence_s=float(
-                    np.median(gaps[gaps < resolve_parameter(_MAXIMUM_CADENCE_GAP_SECONDS).value])
-                ),
-                lost_fraction=(sum(run.frames_lost for run in night_runs) / frames_total)
-                if frames_total
-                else None,
-                total_errors=np.hypot(
-                    [sample["dra"] for sample in samples], [sample["ddec"] for sample in samples]
-                ),
-            )
-        )
-    return nights
+    return list(
+        read_night_baseline_table(records, session_contexts, equipment_fingerprint, guiding_runs).nights
+    )
 
 
 def collect_baseline_values(
@@ -450,7 +626,11 @@ def collect_excursion_fraction_baseline(
 
 
 def read_capture_frames(
-    astrometrics: Any, telescope_name: str, camera_name: str, targets: Sequence[Any] | None = None
+    astrometrics: Any,
+    telescope_name: str,
+    camera_name: str,
+    targets: Sequence[Any] | None = None,
+    read_measurements: Callable[[], Mapping[str, Any]] | None = None,
 ) -> list[CaptureFrame]:
     """Read the equipment's light frames, or none if they cannot be read.
 
@@ -465,6 +645,12 @@ def read_capture_frames(
     targets : `Sequence` [`Target`], optional
         The library's targets, when the caller has just listed them. The
         library is asked for them when omitted.
+    read_measurements : `Callable`, optional
+        Gives the frames' stored measurements, as
+        `capture_history.read_frame_measurements` gives them, when the
+        caller keeps them between calls. Called here, so an error it raises
+        is handled like a failed read. The measurements are read from the
+        library when omitted.
 
     Returns
     -------
@@ -474,7 +660,8 @@ def read_capture_frames(
         read.
     """
     try:
-        return collect_capture_frames(astrometrics, telescope_name, camera_name, targets)
+        stored = None if read_measurements is None else read_measurements()
+        return collect_capture_frames(astrometrics, telescope_name, camera_name, targets, stored)
     except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:
         logger.warning("Could not read this equipment's frames from the frame library: %s", error)
         return []

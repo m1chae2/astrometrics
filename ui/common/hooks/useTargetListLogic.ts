@@ -24,6 +24,7 @@ import {
     pickDefaultTargetId,
     sortTargets,
     targetListId,
+    isTargetInList,
 } from './targetListFiltering';
 import type { TargetListFilterPanelProps } from '../radioList/TargetListFilterPanel';
 
@@ -245,10 +246,6 @@ export const useTargetListLogic = (
         filterText,
         setFilterText,
         highlightedIds: highlightedIds,
-        isLocalTarget: !!selectedTarget && targets.some(t => {
-            const val = typeof t === 'string' ? t : targetListId(t);
-            const normalize = (s: string) => s.replace(/[_\s]/g, '').toLowerCase();
-            return normalize(val) === normalize(selectedTarget);
-        })
+        isLocalTarget: isTargetInList(targets, selectedTarget ?? '')
     };
 };

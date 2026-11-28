@@ -6893,7 +6893,7 @@ export const UI_EVENTS = {
   "catalog:changed": "catalog:changed",
   /** A frame measurement job stored new quality rows. The payload is {targetId, framesMeasured, rowsWritten, observingNightIds}. */
   "quality:measured": "quality:measured",
-  /** A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames into the library, before they are measured. The payload is {targetId, framesAdded}. */
+  /** A frame sync (the Download Frames button, an automatic download or an AI tool) copied new frames into the library, before they are measured. The payload is {targetId, framesAdded, isCalibration}, where isCalibration is true when the sync was of a calibration folder (bias, dark or flat) and not a target. */
   "library:frames_updated": "library:frames_updated",
   /** The background measuring of new dark and bias frames (it starts after an ingest or a calibration folder sync) has ended. The payload is empty. The calibration library reads the set health again. */
   "calibration:measured": "calibration:measured",

@@ -171,15 +171,31 @@ function pageRecorder() {
         window.addEventListener(type, () => recorder.events.push({ type, at: performance.now(), phase: recorder.phase, state: document.visibilityState }), true);
     }
     // Time to ready: the first moment a target list is on screen and no RPC call is waiting.
-    // Measured here, inside the page, from the start of the navigation, so Lighthouse's own
-    // wait for a quiet network does not count.
+    // Measured here, inside the page, from the start of the navigation (performance.now()), so
+    // Lighthouse's own wait for a quiet network does not count. A timer alone missed it in most
+    // runs: the calls overlap, so a 25 ms tick seldom lands in a quiet gap, and a hidden page's
+    // timers are slowed. So the same check also runs each time the last call in flight ends, and
+    // the flow's own wait for the app (`checkReady` in its waitForFunction) runs it too, so the
+    // time is always recorded. `readyVia` says which check saw it first.
     recorder.readyAt = null;
-    const readyTimer = setInterval(() => {
+    recorder.readyVia = null;
+    /**
+     * Records the ready time the first time the page is ready.
+     *
+     * @param {string} via - Which check is asking.
+     * @return {boolean} Whether the page is ready now.
+     */
+    recorder.checkReady = (via) => {
         const listShown = [...document.querySelectorAll('.selectable-list__item')].some((element) => element.offsetParent !== null);
-        if (listShown && recorder.inFlight === 0) {
+        const ready = listShown && recorder.inFlight === 0;
+        if (ready && recorder.readyAt === null) {
             recorder.readyAt = performance.now();
-            clearInterval(readyTimer);
+            recorder.readyVia = via;
         }
+        return ready;
+    };
+    const readyTimer = setInterval(() => {
+        if (recorder.checkReady('timer')) clearInterval(readyTimer);
     }, 25);
     const realFetch = window.fetch.bind(window);
     window.fetch = async (input, init) => {
@@ -250,6 +266,8 @@ function pageRecorder() {
             if (isRpc) {
                 recorder.inFlight -= 1;
                 recorder.rpc.push({ method, params: parameters, outcome, phase: recorder.phase, at: startedAt, ms: performance.now() - startedAt });
+                // The last call just ended: check at once, before another call can start.
+                if (recorder.inFlight === 0 && recorder.readyAt === null) recorder.checkReady('last-call-ended');
             }
         }
     };
@@ -807,8 +825,9 @@ async function main() {
     } else {
         await flow.navigate(`${uiUrl.replace(/\/$/, '')}/index.html`, { name: 'Load app' });
     }
-    await page.waitForFunction(() => window.__tpm.find('.selectable-list__item') && window.__tpm.inFlight === 0, { timeout: 60000 });
-    const timeToReadyMs = await page.evaluate(() => window.__tpm.readyAt);
+    // The same check as the page's own ready check, so the ready time is always set by the time this returns.
+    await page.waitForFunction(() => window.__tpm.checkReady('flow-wait'), { timeout: 60000 });
+    const { timeToReadyMs, readyVia } = await page.evaluate(() => ({ timeToReadyMs: window.__tpm.readyAt, readyVia: window.__tpm.readyVia }));
     // A simulated night must always be visibly marked. In a simulation-mode run the header chip has to appear;
     // the simulator may still be starting when the app opens, so give it time.
     const sourceChip = await checkSimulatorChip(page, options['expect-simulator-chip'] === '1');
@@ -942,6 +961,7 @@ async function main() {
         uiUrl,
         backendUrl,
         timeToReadyMs,
+        readyVia,
         sourceChip,
         loadWallMs,
         initialHeapBytes: initialHeap,

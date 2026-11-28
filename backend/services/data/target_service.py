@@ -85,7 +85,11 @@ class TargetService:
     astrolib high-level interfaces.
     """
 
-    def __init__(self, config: Any, astrometrics: Any = None) -> None:
+    #: Told about target reads and put-backs (see `__init__`). A class-level
+    #: `None` keeps a service built without `__init__` (in tests) working.
+    _review_rewarmer: Any = None
+
+    def __init__(self, config: Any, astrometrics: Any = None, review_rewarmer: Any = None) -> None:
         """Initialize TargetService.
 
         Wires it to the high-level interface library high-level interface.
@@ -97,8 +101,14 @@ class TargetService:
         astrometrics : `Any`, optional
             The Astrometrics facade. Injected for testability or loaded
             on-demand if omitted.
+        review_rewarmer : `TargetReviewRewarmer`, optional
+            Told which target the app asked about (frame states, grouped
+            frames) and which target had frames put back, so the target's
+            Image Processing reviews are read again in the background. None
+            tells nothing.
         """
         self.config = config
+        self._review_rewarmer = review_rewarmer
         if astrometrics is None:
             from astrometricslib import Astrometrics
 
@@ -514,6 +524,8 @@ class TargetService:
         A target that is not in the library raises the library's
         `NotFoundError`.
         """
+        if self._review_rewarmer is not None:
+            self._review_rewarmer.note_requested(target_id)
         return self.astrometrics.targets.frames.get_statuses(self.subjects.target(target_id)).model_dump(
             by_alias=True
         )
@@ -537,6 +549,9 @@ class TargetService:
 
         """
         restored = self.astrometrics.targets.frames.restore(self.subjects.target(target_id), paths)
+        if restored and self._review_rewarmer is not None:
+            # The frame states and star-shape rows changed: read them again.
+            self._review_rewarmer.request([target_id])
         return {"restored": [frame.path for frame in restored]}
 
     def get_set_aside_frames(self, target: str) -> list[Any]:
@@ -583,6 +598,8 @@ class TargetService:
             Grouped exposure statistics, empty if the target is not
             found.
         """
+        if self._review_rewarmer is not None and camera is None:
+            self._review_rewarmer.note_requested(target_id)
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return []

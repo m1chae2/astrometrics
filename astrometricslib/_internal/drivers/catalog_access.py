@@ -22,7 +22,12 @@ from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.storage.butler import Butler as _GenericButler
 from astrometricslib.foundation.storage.butler import DatasetSpec
-from astrometricslib.foundation.storage.data_versions import STARS_KIND, TARGETS_KIND, read_data_versions
+from astrometricslib.foundation.storage.data_versions import (
+    STARS_KIND,
+    TARGETS_KIND,
+    get_target_document_signs,
+    read_data_versions,
+)
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -976,12 +981,20 @@ def _keep_measured_stars(
     return guarded
 
 
+_NUMBER_KEYS_SAVED_BLANK_WHEN_UNKNOWN = ("ra", "dec", "flux", "magnitude", "bMinusV")
+"""Record keys of the star's number fields that older versions saved as
+blank text (``""``) when the value was not known. `stellar_object_from_row`
+reads such a blank as `None`."""
+
+
 def stellar_object_from_row(payload: dict[str, Any], columns: dict[str, Any]) -> Any:
     """Build a star from its stored record and its row's columns.
 
     Works for both stored forms: a full record (saved before records left
     out what the columns hold) is read as it is, and a short record gets the
-    missing fields from the columns.
+    missing fields from the columns. A number field saved as blank text
+    (see `_NUMBER_KEYS_SAVED_BLANK_WHEN_UNKNOWN`) is read as `None`; any
+    other text, such as a position saved as ``"12.5"``, is kept.
 
     Parameters
     ----------
@@ -997,6 +1010,14 @@ def stellar_object_from_row(payload: dict[str, Any], columns: dict[str, Any]) ->
     """
     from astrometricslib.models.stellar_source import StellarObject
 
+    # Older versions saved blank text for an unknown number (1452 stars of
+    # the real library hold ``"magnitude": ""``). Code that needs a number,
+    # such as the Planetarium's sky sources, rejects text, so a blank value
+    # is read as `None` ("not known"), the value the column holds for it.
+    for key in _NUMBER_KEYS_SAVED_BLANK_WHEN_UNKNOWN:
+        value = payload.get(key)
+        if isinstance(value, str) and not value.strip():
+            payload[key] = None
     payload.setdefault("id", columns["id"])
     for key, column in _STAR_FIELDS_HELD_IN_COLUMNS:
         if key not in payload and columns.get(column) is not None:
@@ -1067,6 +1088,31 @@ class CatalogAccess(AbstractCatalogAccess):
         if versions is None:
             return None
         return versions.get(kind, 0)
+
+    def get_document_signs(self, dataset_type: str) -> dict[str, tuple[int, str]] | None:
+        """Give a short value for each stored record that changes with it.
+
+        A caller that holds the records already can compare these values with
+        the ones it saw last time and read again only the records whose value
+        changed. Only the targets have such values (see
+        `astrometricslib.foundation.storage.data_versions.get_target_document_signs`).
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            The kind of data (only ``"target_catalog"`` is supported).
+
+        Returns
+        -------
+        signs : `dict` [`str`, `tuple` [`int`, `str`]] or `None`
+            For each record id, the size and the hash of its stored text, in
+            the order a full read of the table gives the records. `None` when
+            the kind has no such values or the database could not be read;
+            the caller must then read every record.
+        """
+        if dataset_type != "target_catalog":
+            return None
+        return get_target_document_signs(self.config)
 
     @staticmethod
     def _build_generic_butler(config: Any) -> _GenericButler:

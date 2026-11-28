@@ -8,6 +8,7 @@ import { emitToast } from '../../common/utils/emitToast';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStackingJob } from '../hooks/useStackingJob';
 import { cancelProcessing, fetchJobs } from '../../common/services/imaging/processingService';
+import { createQueryClientTestWrapper } from '../../tests/queryClientTestWrapper';
 
 type LineHandler = (line: string) => void;
 const streams: { jobId: string; push: LineHandler; cancel: ReturnType<typeof vi.fn> }[] = [];
@@ -31,7 +32,7 @@ vi.mock('../../common/services/imaging/processingService', () => ({
     }),
     openSiril: vi.fn(),
 }));
-vi.mock('../../common/services/targetService', () => ({ fetchFrameStatsGrouped: vi.fn(async () => []) }));
+vi.mock('../../common/services/targetService', () => ({ requestFrameStatsGrouped: vi.fn(async () => []) }));
 vi.mock('../../common/utils/emitToast', () => ({ emitToast: vi.fn() }));
 vi.mock('../../common/utils/reportError', () => ({ reportError: vi.fn() }));
 // One shared function, as in the app: a new one per render would rerun the hook's effects.
@@ -52,7 +53,7 @@ describe('useStackingJob log', () => {
 
     /** A new job starts with an empty log; the old job's lines never appear. */
     it('does not replay the previous job when a new job starts', async () => {
-        const { result } = renderHook(() => useStackingJob('M 81'));
+        const { result } = renderHook(() => useStackingJob('M 81'), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.activeJobId).toBe('old'));
         await waitFor(() => expect(result.current.logLines).toEqual(['old line']));
 
@@ -74,7 +75,7 @@ describe('useStackingJob log', () => {
     /** A line arriving from a stream that was already stopped is dropped. */
     it('ignores a late line from a cancelled stream', async () => {
         activeJobsRef.current = [{ id: 'old', targetId: 'M 81', jobType: 'stacking' }];
-        const { result, rerender } = renderHook(() => useStackingJob('M 81'));
+        const { result, rerender } = renderHook(() => useStackingJob('M 81'), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(streams.length).toBeGreaterThan(0));
         const first = streams[0];
         activeJobsRef.current = [{ id: 'new', targetId: 'M 81', jobType: 'stacking' }];
@@ -88,7 +89,7 @@ describe('useStackingJob log', () => {
 
     /** Choosing a job from the history shows that job's stored log. */
     it('shows the log of a job picked from the history', async () => {
-        const { result } = renderHook(() => useStackingJob('M 81'));
+        const { result } = renderHook(() => useStackingJob('M 81'), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.activeJobId).toBe('old'));
         act(() => result.current.onSelectJob(olderJob as never));
         await waitFor(() => expect(result.current.logLines).toEqual(['older line']));
@@ -97,7 +98,7 @@ describe('useStackingJob log', () => {
 
     /** A job appearing in the app-wide active-jobs feed reloads the history and is exposed for pinning. */
     it('reloads the history when a job starts for the target', async () => {
-        const { result, rerender } = renderHook(() => useStackingJob('M 81'));
+        const { result, rerender } = renderHook(() => useStackingJob('M 81'), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.activeJobId).toBe('old'));
         const callsBefore = vi.mocked(fetchJobs).mock.calls.length;
         activeJobsRef.current = [{ id: 'fresh', targetId: 'M 81', jobType: 'analysis' }];
@@ -112,7 +113,7 @@ describe('useStackingJob cancel', () => {
     it('shows the reason when the job runs in another process', async () => {
         const reason = 'This job runs in another process (process 42). Stop it there.';
         vi.mocked(cancelProcessing).mockResolvedValueOnce({ status: 'other_process', message: reason });
-        const { result } = renderHook(() => useStackingJob('M 81'));
+        const { result } = renderHook(() => useStackingJob('M 81'), { wrapper: createQueryClientTestWrapper().wrapper });
         await waitFor(() => expect(result.current.activeJobId).toBe('old'));
         await act(async () => { await result.current.cancelProcessingJob(); });
         expect(emitToast).toHaveBeenCalledWith(reason, 'warning', 'cancelProcessingJob');

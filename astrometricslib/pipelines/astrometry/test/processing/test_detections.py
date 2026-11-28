@@ -98,7 +98,7 @@ def test_public_call_matches_and_missing_file_is_refused(tmp_path: Path) -> None
     """The public call gives the same count; a missing file is refused."""
     path = tmp_path / "stars.fits"
     _write_image(path, STAR_POSITIONS)
-    through_api = Astrometrics().quality.measure_detections(str(path))
+    through_api = Astrometrics().quality.detections.measure_detections(str(path))
     assert through_api.detection_count == measure_detections_in_file(str(path)).detection_count
     with pytest.raises(NotFoundError):
         measure_detections_in_file(str(tmp_path / "missing.fits"))
@@ -110,7 +110,7 @@ def test_circle_is_sized_from_the_image_star_width(tmp_path: Path) -> None:
 
     path = tmp_path / "stars.fits"
     _write_image(path, STAR_POSITIONS)
-    through_api = Astrometrics().quality.measure_detections(str(path))
+    through_api = Astrometrics().quality.detections.measure_detections(str(path))
     # The stars are Gaussians of sigma 1.7 px: a 4.0 px FWHM.
     assert through_api.star_width_px == pytest.approx(4.0, rel=0.15)
     factor = float(APERTURE_RADIUS_PX.default)  # the radius per star width

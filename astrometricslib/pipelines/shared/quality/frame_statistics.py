@@ -1,13 +1,12 @@
 """Functions for checking and counting image frames.
 
-This file contains tools for calculating statistics about the images,
-such as counting how many images there are for different camera settings,
-and measuring basic quality metrics like the sky background brightness. It
+This file contains tools for calculating statistics about the images, such
+as counting the frames of each camera and measuring basic quality metrics
+like the sky background brightness. It
 also holds the seeded bootstrap error of a median, which the frame
 measurement and the photometry zero point both use.
 """
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -40,47 +39,6 @@ def bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -
     """
     draws = generator.integers(0, values.size, size=(BOOTSTRAP_RESAMPLE_COUNT, values.size))
     return float(np.std(np.median(values[draws], axis=1)))
-
-
-def get_frame_stats(target: Any) -> dict[str, Any]:
-    """Count how many images share the same camera settings.
-
-    Parameters
-    ----------
-    target : `Any`
-        The target to check.
-
-    Returns
-    -------
-    frame_stats : `dict`
-        A dictionary with a "lights" list. Each item in the list shows
-        the camera, telescope, ISO, exposure time, filter, and how many
-        images match those exact settings.
-    """
-    if not target:
-        return {"lights": []}
-
-    stats: list[dict[str, Any]] = []
-    if target.frames:
-        aggregates = {}
-        for frame in target.frames:
-            if frame.role != "LIGHT":
-                continue
-            filter_string = frame.filter.value if hasattr(frame.filter, "value") else str(frame.filter)
-            key = (frame.telescope, frame.camera, frame.iso, frame.exposure, filter_string)
-            aggregates[key] = aggregates.get(key, 0) + 1
-
-        for (telescope, camera, iso, exposure, filter_value), count in aggregates.items():
-            stats.append({
-                "telescope": telescope,
-                "camera": camera,
-                "iso": iso,
-                "exposure": exposure,
-                "filter": filter_value,
-                "count": count,
-            })
-
-    return {"lights": stats}
 
 
 def list_camera_names(targets: list) -> dict[str, int]:
@@ -193,148 +151,3 @@ def measure_frame_input_quality(
         counts["measured"] += 1
 
     return counts
-
-
-def _selection_to_match(selection: Any, kind: str, setting_text: str) -> dict[str, Any]:
-    """Turn one calibration selection into the match record a screen shows.
-
-    Parameters
-    ----------
-    selection : `CalibrationSelection`
-        What the library chose for the lights (frames and flags).
-    kind : `str`
-        ``"dark"``, ``"bias"`` or ``"flat"``.
-    setting_text : `str`
-        The light settings in words, such as ``"gain 100, offset 10"``.
-
-    Returns
-    -------
-    match : `dict`
-        The `CalibrationGroupMatch` fields (``count``, ``fallbacks``,
-        ``problem``). A blocking flag or an empty choice gives a ``problem``.
-    """
-    count = len(selection.frames)
-    blocking = list(selection.blocking_flags)
-    problem = ""
-    if blocking:
-        problem = "; ".join(blocking)
-    elif count == 0:
-        problem = f"no {kind} frames at {setting_text}"
-    return {"count": count, "fallbacks": [] if problem else list(selection.flags), "problem": problem}
-
-
-def _group_match(
-    calibration: Any, frames: list[Any], camera: str, exposure: float
-) -> dict[str, dict[str, Any]]:
-    """Run the stacker's own calibration selection for one group of lights.
-
-    This calls the same library selections as the stacking stage
-    (``_stack_one_batch`` in the Siril staging code), with the same inputs:
-    the camera, telescope, filter, exposure, gain, offset, binning and mean
-    sensor temperature of the lights. No matching rule is repeated here.
-
-    Parameters
-    ----------
-    calibration : `CalibrationLibrary`
-        The library of calibration frames.
-    frames : `list` [`FrameRecord`]
-        The light frames of one group.
-    camera : `str`
-        The camera name.
-    exposure : `float`
-        The exposure of the group in seconds.
-
-    Returns
-    -------
-    matches : `dict` [`str`, `dict`]
-        ``darkMatch``, ``flatMatch`` and ``biasMatch``, each a
-        `CalibrationGroupMatch` as a dictionary.
-    """
-    from astrometricslib._internal.drivers.batch_calibration import choose_batch_calibration
-
-    # This only shows the choice, and returns its fallbacks to the caller,
-    # so the flag sentences are not logged as warnings on every call.
-    chosen = choose_batch_calibration(calibration, frames, [], flag_log_level=logging.DEBUG)
-    gain, offset, binning = chosen.gain, chosen.offset, chosen.binning
-    filter_name = chosen.filter_name
-    setting_text = f"gain {gain}, offset {offset}, binning {binning}"
-    darks, biases, flats = chosen.dark, chosen.bias, chosen.flat
-    return {
-        "darkMatch": _selection_to_match(darks, "dark", f"{exposure:g} s, {setting_text}"),
-        "flatMatch": _selection_to_match(flats, "flat", f"filter {filter_name}, {setting_text}"),
-        "biasMatch": _selection_to_match(biases, "bias", setting_text),
-        "binning": binning,
-    }
-
-
-def get_frame_stats_grouped(target: Any, calibration: Any, camera: str | None = None) -> list[dict[str, Any]]:
-    """Group the light frames and say which calibration the stacker would use.
-
-    The lights are grouped by camera, optic, filter, gain, offset and exposure.
-    For each group, the calibration library runs the same dark, flat and bias
-    selection that the stacking stage runs, so a match here is a match when
-    stacking. A group says why when nothing matches (for example "no bias
-    frames at gain 100, offset 10, binning 1x1").
-
-    Parameters
-    ----------
-    target : `Any`
-        The target to summarize.
-    calibration : `CalibrationLibrary`
-        The library of calibration frames (dark frames, flat frames, etc).
-    camera : `str`, optional
-        Only check images from this camera.
-
-    Returns
-    -------
-    grouped_stats : `list` of `dict`
-        One dictionary per group: ``filter``, ``iso``, ``offset``,
-        ``exposure``, ``count``, ``camera``, ``focalLengthMm`` (the optic in
-        whole millimeters, or ``None``), ``binning``, ``darks`` (the dark
-        count as text, or ``"Missing"``) and the ``darkMatch``, ``flatMatch``
-        and ``biasMatch`` records.
-    """
-    if not target:
-        return []
-
-    groups: dict[tuple[str, str, str, str, float, int | None], list[Any]] = {}
-
-    for frame in target.frames:
-        if frame.role != "LIGHT":
-            continue
-        if camera and frame.camera != camera:
-            continue
-
-        filter_str = frame.filter.name if hasattr(frame.filter, "name") else str(frame.filter)
-        if filter_str == "NONE":
-            filter_str = "None"
-
-        try:
-            exp_float = float(frame.exposure)
-        except ValueError, TypeError:
-            exp_float = 1.0
-
-        focal_length = getattr(frame, "focal_length_mm", None)
-        optic = None if focal_length is None else round(float(focal_length))
-        key = (frame.camera, filter_str, str(frame.iso), str(frame.offset), exp_float, optic)
-        groups.setdefault(key, []).append(frame)
-
-    results = []
-    for key in sorted(groups, key=lambda item: (item[1], item[2], item[3], item[4], item[5] or 0)):
-        cam, filter_str, iso, offset, exposure, optic = key
-        frames = groups[key]
-        matches = _group_match(calibration, frames, cam or camera or "Unknown", exposure)
-        dark_count = matches["darkMatch"]["count"]
-        results.append({
-            "filter": filter_str,
-            "iso": iso,
-            "offset": offset,
-            "exposure": f"{exposure:g}",
-            "count": len(frames),
-            "darks": f"{dark_count}" if dark_count else "Missing",
-            "camera": cam or camera or "Unknown",
-            "focalLengthMm": optic,
-            **matches,
-        })
-
-    return results

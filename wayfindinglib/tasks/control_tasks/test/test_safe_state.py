@@ -20,7 +20,7 @@ def _enclosure(**overrides: Any) -> Enclosure:
         "park_azimuth_deg": 180.0,
         "park_altitude_deg": 0.0,
         "clearance_tolerance_deg": 2.0,
-        "motion_timeout_sec": 120,
+        "motion_timeout_s": 120,
     }
     defaults.update(overrides)
     return Enclosure(**defaults)

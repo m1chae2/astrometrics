@@ -47,7 +47,7 @@ def test_no_effect_finds_nothing(make_nights: Any) -> None:
     performance = measure_sky_performance(make_nights(bands={35.0: 1.0, 65.0: 1.0}), 0.0, 90.0, 0.10)
 
     assert not any(bin_.is_poor for metric in performance.metrics for bin_ in metric.bins)
-    assert performance.suggested_minimum_altitude_degrees is None
+    assert performance.suggested_minimum_altitude_deg is None
 
 
 def test_an_effect_smaller_than_the_tolerance_is_not_poor(make_nights: Any) -> None:
@@ -147,7 +147,7 @@ def test_the_suggested_minimum_altitude_is_the_top_of_the_highest_poor_band(make
 
     performance = measure_sky_performance(samples, 0.0, 90.0, 0.10)
 
-    assert performance.suggested_minimum_altitude_degrees == pytest.approx(45.0)
+    assert performance.suggested_minimum_altitude_deg == pytest.approx(45.0)
 
 
 def test_nights_with_too_few_measurements_are_left_out(make_night: Any) -> None:

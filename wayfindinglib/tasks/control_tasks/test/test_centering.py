@@ -19,10 +19,10 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import SkyPosition
 from astrometricslib.exceptions import PlateSolveFailedError
 from wayfindinglib.models.session.centering_exposure import CenteringExposure
 from wayfindinglib.models.session.correction_config import CorrectionConfig
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import centering, hardware_operations
 
 
@@ -57,7 +57,7 @@ def mount_calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[SkyPosition]]
         centering,
         "choose_centering_exposure",
         lambda context, position: CenteringExposure(
-            exposure_seconds=2.0, source="computed", reason="stand-in", target_star_count=15
+            exposure_s=2.0, source="computed", reason="stand-in", target_star_count=15
         ),
     )
     return calls
@@ -107,7 +107,7 @@ def _solving_to(monkeypatch: pytest.MonkeyPatch, *solutions: tuple[float, float]
             raise PlateSolveFailedError("No stars matched.")
         return solution
 
-    monkeypatch.setattr(centering, "_capture_frame", lambda context, exposure_seconds: Path("frame.fits"))
+    monkeypatch.setattr(centering, "_capture_frame", lambda context, exposure_s: Path("frame.fits"))
     monkeypatch.setattr(centering, "_solve", solve)
 
 
@@ -191,7 +191,7 @@ def test_failed_solves_are_recorded_and_retried(monkeypatch: pytest.MonkeyPatch,
 
 def test_a_missing_frame_is_a_failed_attempt(monkeypatch: pytest.MonkeyPatch, mount_calls: dict) -> None:
     """A camera that sends no frame gives a failed attempt."""
-    monkeypatch.setattr(centering, "_capture_frame", lambda context, exposure_seconds: None)
+    monkeypatch.setattr(centering, "_capture_frame", lambda context, exposure_s: None)
     context = _context()
 
     assert centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0), max_iterations=2) is False
@@ -226,7 +226,7 @@ def test_abort_motion_stops_the_loop(monkeypatch: pytest.MonkeyPatch, mount_call
         context.motion_stop.set()
         return 11.0, 20.0
 
-    monkeypatch.setattr(centering, "_capture_frame", lambda context_, exposure_seconds: Path("frame.fits"))
+    monkeypatch.setattr(centering, "_capture_frame", lambda context_, exposure_s: Path("frame.fits"))
     monkeypatch.setattr(centering, "_solve", solve_then_stop)
 
     assert centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0), max_iterations=5) is False
@@ -397,7 +397,7 @@ def test_a_given_exposure_is_not_replaced(monkeypatch: pytest.MonkeyPatch, mount
 
     monkeypatch.setattr(centering, "choose_centering_exposure", forbidden)
 
-    centering.center_on(_context(), SkyPosition(ra_deg=180.0, dec_deg=45.0), exposure_seconds=7.0)
+    centering.center_on(_context(), SkyPosition(ra_deg=180.0, dec_deg=45.0), exposure_s=7.0)
 
     assert exposures == [7.0]
 

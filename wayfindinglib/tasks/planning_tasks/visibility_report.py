@@ -34,8 +34,8 @@ from astropy.coordinates import AltAz, SkyCoord, get_body, get_sun
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
+from astrometricslib.arguments import to_epoch_seconds
 from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib._internal.arguments import to_epoch_seconds
 from wayfindinglib.models.planning.visibility import (
     HorizonZone,
     MeridianCrossing,
@@ -375,7 +375,7 @@ def _object_name(sky_object: Target | StellarObject) -> str | None:
 def _check_span_arguments(
     start_epoch: float,
     end_epoch: float | None,
-    step_minutes: float | None,
+    step_min: float | None,
     object_count: int,
     sections: frozenset[str],
 ) -> float | None:
@@ -387,7 +387,7 @@ def _check_span_arguments(
         Start of the span, in Unix seconds.
     end_epoch : `float` or `None`
         End of the span; `None` for one moment.
-    step_minutes : `float` or `None`
+    step_min : `float` or `None`
         Time between rows, or `None` for the default.
     object_count : `int`
         How many objects were asked about.
@@ -406,25 +406,24 @@ def _check_span_arguments(
         backwards, or it has too many rows or objects.
     """
     if end_epoch is None:
-        unused = ["step_minutes"] if step_minutes is not None else []
+        unused = ["step_min"] if step_min is not None else []
         unused += ['include=["samples"]'] if "samples" in sections else []
         if unused:
             raise InvalidArgumentError(
-                f"{' and '.join(unused)} need an end_time: they describe a span, not one moment."
+                f"{' and '.join(unused)} need an until time: they describe a span, not one moment."
             )
         return None
     if end_epoch < start_epoch:
-        raise InvalidArgumentError("end_time must not be before time.")
+        raise InvalidArgumentError("until must not be before time.")
     if object_count > MAXIMUM_SPAN_OBJECTS:
         raise InvalidArgumentError(
             f"At most {MAXIMUM_SPAN_OBJECTS} objects per time table; got {object_count}."
         )
-    step_seconds = max(1.0, float(step_minutes if step_minutes is not None else DEFAULT_STEP_MINUTES)) * 60.0
+    step_seconds = max(1.0, float(step_min if step_min is not None else DEFAULT_STEP_MINUTES)) * 60.0
     count = int((end_epoch - start_epoch) // step_seconds) + 1
     if count > MAXIMUM_TIME_STEPS:
         raise InvalidArgumentError(
-            f"{count} time steps is more than {MAXIMUM_TIME_STEPS}. "
-            "Use a larger step_minutes or a shorter span."
+            f"{count} time steps is more than {MAXIMUM_TIME_STEPS}. Use a larger step_min or a shorter span."
         )
     return step_seconds
 
@@ -434,7 +433,7 @@ def build_visibility_report(
     objects: list[Target | StellarObject],
     start: Time,
     end: Time | None,
-    step_minutes: float | None,
+    step_min: float | None,
     sections: frozenset[str],
     minimum_altitude_deg: float,
     horizon_zones: list[HorizonZone],
@@ -452,7 +451,7 @@ def build_visibility_report(
         The moment, or the start of the span.
     end : `astropy.time.Time` or `None`
         End of the span; `None` for one moment.
-    step_minutes : `float` or `None`
+    step_min : `float` or `None`
         Time between rows of the span table. Defaults to 30.
     sections : `frozenset` [`str`]
         Optional sections: ``"meridian"`` and ``"samples"``.
@@ -470,7 +469,7 @@ def build_visibility_report(
     """
     start_epoch = float(start.unix)
     end_epoch = float(end.unix) if end is not None else None
-    step_seconds = _check_span_arguments(start_epoch, end_epoch, step_minutes, len(objects), sections)
+    step_seconds = _check_span_arguments(start_epoch, end_epoch, step_min, len(objects), sections)
 
     positioned = [(item, position) for item in objects if (position := _object_coordinates(item))]
     report = VisibilityReport(
@@ -516,7 +515,7 @@ def build_visibility_report(
             entry.meridian = MeridianStatus(
                 hour_angle_hours=round(float(meridian["hour_angle"]), 4),
                 flip_required=bool(meridian["flip_required"]),
-                time_to_flip_seconds=round(float(meridian["time_to_flip_seconds"]), 0),
+                time_to_flip_s=round(float(meridian["time_to_flip_s"]), 0),
             )
         report.objects.append(entry)
 
@@ -567,7 +566,7 @@ def _add_span(
     report.night = NightConditions(
         start=_format_time(float(epochs[0]), offset_hours),
         end=_format_time(float(epochs[-1]), offset_hours),
-        step_minutes=step_seconds / 60.0,
+        step_min=step_seconds / 60.0,
         sun_events=_sun_events(epochs, sun_altitude, offset_hours),
         astronomical_night=_time_spans(_intervals_where_positive(epochs, dark_margin), offset_hours),
         moon=MoonConditions(

@@ -63,7 +63,7 @@ def _profile(with_qe: bool = True, with_noise: bool = True) -> CameraProfile:
     noise = (
         (
             SensorSettingNoise(
-                gain_setting="100",
+                gain="100",
                 offset="10",
                 binning="1x1",
                 read_noise_e=ProvenancedValue(value=READ_NOISE, provenance=_provenance()),
@@ -97,7 +97,7 @@ def _predict(profile: CameraProfile | None = None, **overrides: object) -> GaiaD
         The prediction.
     """
     arguments: dict[str, object] = {
-        "gain_setting": "100",
+        "gain": "100",
         "offset": "10",
         "binning": "1x1",
         "aperture_diameter_mm": 75.0,
@@ -200,7 +200,7 @@ def test_missing_input_falls_back_with_reason(
     if profile is None and not overrides:
         prediction = predict_gaia_query_depth(
             None,
-            gain_setting="100",
+            gain="100",
             offset="10",
             binning="1x1",
             aperture_diameter_mm=75.0,

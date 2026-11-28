@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import bump_data_version
-from astrometricslib.reports import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.api.test.capture_night_helpers import Library, add_frames, record_ekos_captures
@@ -38,8 +38,8 @@ TONIGHT_DAY = 5
 NOW = FIRST_NIGHT + TONIGHT_DAY * 86400.0 + 3600.0
 """A moment during the night in progress."""
 
-LIMIT = night_history.MAXIMUM_LIMIT
-"""The largest limit the night list takes, enough to list every test night."""
+LIMIT = 50
+"""Most nights a test lists, enough to list every test night."""
 
 
 class Rig:
@@ -121,7 +121,7 @@ class Rig:
         nights : `list` [`NightListEntry`]
             The list.
         """
-        return night_history.build_night_list(self.control._context, limit, now=self.now)
+        return night_history.build_night_list(self.control._context, now=self.now)[-limit:]
 
     def reference(self, limit: int = LIMIT) -> list[NightListEntry]:
         """Build the list the old way: every frame and session, in one go.
@@ -262,8 +262,8 @@ def test_a_new_guiding_run_tonight_rebuilds_only_tonight(rig: Rig) -> None:
                 ended_at=2.0,
                 pixel_scale_arcsec_per_px=6.445,
                 focal_length_mm=120.0,
-                ra_rate_arcsec_per_second=5.0,
-                dec_rate_arcsec_per_second=7.5,
+                ra_rate_arcsec_per_s=5.0,
+                dec_rate_arcsec_per_s=7.5,
                 frames_total=10,
                 frames_lost=0,
                 samples_stored=10,

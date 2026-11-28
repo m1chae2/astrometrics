@@ -3,8 +3,10 @@
 Description: `Astrometrics(config)` takes no driver or database arguments, so
 a program always runs the built-in plate solver, stacking program and catalog
 clients over the database its settings name. A test that needs a fake one, or
-a stand-in database, builds the root with `astrometrics_with_drivers`. Only
-tests, and the library's own scripts, may import this module.
+a stand-in database, builds the root with `astrometrics_with_drivers`.
+`read_saved_target` reads one target's stored record straight from storage,
+to check what a save wrote. Only tests, and the library's own scripts, may
+import this module.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from astrometricslib import Astrometrics
 from astrometricslib._internal.drivers.driver_set import Drivers
 
 if TYPE_CHECKING:
-    from astrometricslib import AppConfiguration
+    from astrometricslib import AppConfiguration, Target
     from astrometricslib._internal.drivers.interfaces import (
         GaiaXpDriver,
         PlateSolveDriver,
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
     )
     from astrometricslib.api import AbstractCatalogAccess
 
-__all__ = ["astrometrics_with_drivers"]
+__all__ = ["astrometrics_with_drivers", "read_saved_target"]
 
 
 def astrometrics_with_drivers(
@@ -80,3 +82,26 @@ def astrometrics_with_drivers(
         ),
     )
     return astrometrics
+
+
+def read_saved_target(astrometrics: Astrometrics, target_id: str) -> Target | None:
+    """Read one target's saved record straight from storage.
+
+    The targets held in memory are not used or changed, so the answer is
+    what another program would see.
+
+    Parameters
+    ----------
+    astrometrics : `Astrometrics`
+        The library whose storage to read.
+    target_id : `str`
+        The exact id of the target.
+
+    Returns
+    -------
+    target : `Target` or `None`
+        The stored target, or `None` if nothing is stored under that id.
+    """
+    from astrometricslib.pipelines.shared.target_records import read_saved_target as read_saved
+
+    return read_saved(astrometrics.targets, target_id)

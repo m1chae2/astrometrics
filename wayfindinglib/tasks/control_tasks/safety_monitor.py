@@ -19,7 +19,7 @@ Three properties are architectural rather than incidental
   determines the outcome.
 * **Reopening is not the inverse of closing.** An unsafe verdict takes
   effect immediately; returning to safe requires every rule to have read
-  safe continuously for `settling_period_sec`.
+  safe continuously for `settling_period_s`.
 * **Safety authority is not observing authority.** The assessment is
   computed here, in Control, whether or not a session exists.
 """
@@ -58,7 +58,7 @@ def _evaluate_rule(rule: SafetyRule, readings: SensorReadings, now: datetime) ->
     -------
     verdict : `SafetyVerdict`
         `UNKNOWN` if the named measurement is absent or its reading is
-        older than `rule.staleness_bound_sec`; otherwise `SAFE`,
+        older than `rule.staleness_bound_s`; otherwise `SAFE`,
         `MARGINAL`, or `UNSAFE` per the configured thresholds.
 
     Raises
@@ -71,7 +71,7 @@ def _evaluate_rule(rule: SafetyRule, readings: SensorReadings, now: datetime) ->
     if reading is None:
         return SafetyVerdict.UNKNOWN
     value, observed_at = reading
-    if (now - observed_at).total_seconds() > rule.staleness_bound_sec:
+    if (now - observed_at).total_seconds() > rule.staleness_bound_s:
         return SafetyVerdict.UNKNOWN
 
     if rule.comparison == "greater_than":
@@ -139,7 +139,7 @@ class SafetyMonitor:
     """Evaluates safety rules over time, applying asymmetric hysteresis.
 
     Holds the timestamp and verdict of the last non-safe evaluation so
-    a return to `SAFE` can be withheld until `settling_period_sec` has
+    a return to `SAFE` can be withheld until `settling_period_s` has
     elapsed since then -- state a pure per-call function cannot carry.
     """
 
@@ -168,7 +168,7 @@ class SafetyMonitor:
         assessment : `SafetyAssessment`
             The current verdict. An unsafe or unknown result takes
             effect immediately; a safe instantaneous reading is only
-            published once `settling_period_sec` has elapsed since the
+            published once `settling_period_s` has elapsed since the
             last non-safe reading.
         """
         raw_verdict, triggering_rule_id, oldest_reading_at = _evaluate_rules(rule_set, readings, now)
@@ -184,10 +184,10 @@ class SafetyMonitor:
                 oldest_reading_at=oldest_reading_at,
             )
 
-        settling_period_sec = rule_set.settling_period_sec if rule_set is not None else 0
+        settling_period_s = rule_set.settling_period_s if rule_set is not None else 0
         if (
             self._last_non_safe_at is None
-            or (now - self._last_non_safe_at).total_seconds() >= settling_period_sec
+            or (now - self._last_non_safe_at).total_seconds() >= settling_period_s
         ):
             return SafetyAssessment(
                 verdict=SafetyVerdict.SAFE,

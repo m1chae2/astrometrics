@@ -90,28 +90,29 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "guiding:start": ("guiding_service", "start_guiding"),
     "guiding:stop": ("guiding_service", "stop_guiding"),
     "guiding:capture_frame": ("guiding_service", "capture_frame"),
-    # Telescope mount, focuser, filter wheel and raw INDI properties
-    "telescope:connect": ("wayfinder.control.equipment", "connect"),
-    "telescope:abort_motion": ("wayfinder.control.mount", "abort_motion"),
-    "telescope:apply_promotion_decision": ("wayfinder.control.safety", "apply_promotion_decision"),
-    "telescope:focus_move": ("wayfinder.control.imaging", "focus_move"),
+    # Telescope mount, focuser, filter wheel and raw INDI properties. The
+    # service answers True for a command the library accepted.
+    "telescope:connect": ("telescope_service", "connect"),
+    "telescope:abort_motion": ("telescope_service", "abort_motion"),
+    "telescope:apply_promotion_decision": ("telescope_service", "apply_promotion_decision"),
+    "telescope:focus_move": ("telescope_service", "focus_move"),
     "telescope:get_focuser_position": ("telescope_service", "get_focuser_position"),
-    "telescope:manual_move": ("wayfinder.control.mount", "manual_move"),
-    "telescope:park": ("wayfinder.control.mount", "park"),
-    "telescope:set_filter": ("wayfinder.control.imaging", "set_filter"),
-    "telescope:set_slew_rate": ("wayfinder.control.mount", "set_slew_rate"),
-    "telescope:set_tracking": ("wayfinder.control.mount", "set_tracking"),
+    "telescope:manual_move": ("telescope_service", "manual_move"),
+    "telescope:park": ("telescope_service", "park_telescope"),
+    "telescope:set_filter": ("telescope_service", "set_filter"),
+    "telescope:set_slew_rate": ("telescope_service", "set_slew_rate"),
+    "telescope:set_tracking": ("telescope_service", "set_tracking"),
     # The UI sends RA in hours; the service sends degrees.
     "telescope:slew_coordinates": ("telescope_service", "slew_coordinates"),
     "telescope:slew_target": ("telescope_service", "slew_target"),
-    # The service adds the guiding history and alignment state to
-    # `control.mount.status`.
+    # The service writes the mount position as text and adds the guiding
+    # history and alignment state to `control.mount.get_status`.
     "telescope:status": ("telescope_service", "get_status"),
     # Frame syncs and their running state belong to the backend's
     # SyncService, which takes the UI's `object_id`.
     "telescope:sync": ("sync_service", "start_sync"),
     "telescope:is_syncing": ("sync_service", "is_syncing"),
-    "telescope:unpark": ("wayfinder.control.mount", "unpark"),
+    "telescope:unpark": ("telescope_service", "unpark_telescope"),
     "telescope:indi_devices": ("indi_diagnostics_service", "get_devices"),
     "telescope:indi_properties": ("indi_diagnostics_service", "get_properties"),
     "telescope:set_indi_property": ("indi_diagnostics_service", "set_property"),
@@ -124,7 +125,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:sync_logs": ("sync_service", "sync_telescope_logs"),
     # The equipment's limits, with the sky's tracking-risk grid that the
     # planetarium colors.
-    "telescope:get_performance_envelope": ("wayfinder.review", "get_performance_envelope"),
+    "telescope:get_performance_envelope": ("wayfinder.review.performance", "get_envelope"),
     # Equipment set-up and control mode
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),
@@ -135,8 +136,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "observatory:set_source": ("observatory_source_service", "set_source"),
     "observatory:enter_monitoring_mode": ("equipment_service", "enter_monitoring_mode"),
     "observatory:enter_controller_mode": ("equipment_service", "enter_controller_mode"),
-    "observatory:record_guider_calibration": ("wayfinder.control.guiding", "record_calibration"),
-    "observatory:record_focus_model": ("wayfinder.control.imaging", "record_focus_model"),
+    "observatory:record_guider_calibration": ("equipment_service", "record_guider_calibration"),
+    "observatory:record_focus_model": ("equipment_service", "record_focus_model"),
     # Ingestion of new frames
     "ingestion:start": ("ingestion_service", "start_ingestion_by_args"),
     "ingestion:status": ("ingestion_service", "get_ingestion_status"),
@@ -153,7 +154,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # A short answer about a target's current stack, read from the numbers the
     # stacking stage saved with it. Nothing is measured and nothing is written.
     # A target with no saved stack summary raises `NotFoundError`.
-    "processing:stack_summary": ("astrometrics.processing", "stack_summary"),
+    "processing:stack_summary": ("stack_review_service", "get_stack_summary"),
     # Makes a stack's preview picture again from the stack that is there. It
     # takes about a minute, so the service starts it as a background job and
     # answers at once with the result or the job to follow. A write (pictures
@@ -164,11 +165,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # its plate solution. A read: the answer is kept beside the stack, so
     # only the first call per stack file asks SIMBAD. SIMBAD out of reach or
     # a stack with no plate solution is a message in the answer, not an error.
-    "processing:list_bright_objects": ("astrometrics.processing", "list_preview_bright_objects"),
+    "processing:list_bright_objects": ("stack_review_service", "list_bright_objects"),
     # Saves the user's choice of the object the masked stretch protects on
     # the target. It makes no picture: the choice is read the next time the
     # target is stacked or its preview is made.
-    "processing:set_bright_object": ("astrometrics.processing", "set_preview_bright_object"),
+    "processing:set_bright_object": ("stack_review_service", "set_bright_object"),
     # What a stack would do with its frames: which it would set aside and why,
     # and which darks, flats and bias each exposure group would use. It reads
     # every frame, so the service runs it as a background job. Nothing is
@@ -176,10 +177,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:check_stack": ("stack_review_service", "start_stack_check"),
     # The frames the stacker set aside for a target, each with the reason.
     # Nothing is moved, measured or written.
-    "quality:set_aside_frames": ("astrometrics.quality", "set_aside_frames"),
+    "quality:set_aside_frames": ("target_service", "get_set_aside_frames"),
     # A typical frame and a reference star for the viewer's Blink button
     # (a read).
-    "quality:choose_blink_pair": ("astrometrics.quality", "choose_blink_pair"),
+    "quality:choose_blink_pair": ("quality_measurement_service", "choose_blink_pair"),
     # Compares a target's stack with the previous one. A failed plate solve can
     # take about ten minutes, so the service starts it as a background job.
     "quality:measure_stack": ("stack_review_service", "start_stack_comparison"),
@@ -197,11 +198,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # service gives the screens the plain list of rows) and `metrics` lists
     # the declared metrics. Neither writes anything.
     "quality:query": ("quality_measurement_service", "query_measurements"),
-    "quality:metrics": ("astrometrics.quality", "metrics"),
-    "quality:resolve_rows": ("astrometrics.quality", "resolve_rows"),
+    "quality:metrics": ("quality_measurement_service", "list_metrics"),
+    "quality:resolve_rows": ("quality_measurement_service", "resolve_rows"),
     # The job history, read-only. `detail="warnings"` lists the warnings one
     # job detected, from the stored quality rows that carry its id.
-    "jobs:query": ("astrometrics.jobs", "query"),
+    "jobs:query": ("job_history_service", "query"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "run_analysis"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),
@@ -266,21 +267,13 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     # Measures a camera setting's gain and read noise from the library's
     # flat and bias frames. With `save` true it writes the camera profile in
     # the config (after a backup), so the AI's read-only profile withholds it.
-    "calibration:measure_sensor_noise": ("astrometrics.processing.calibration", "measure_sensor_noise"),
+    "calibration:measure_sensor_noise": ("calibration_service", "measure_sensor_noise"),
     # Starts the job that measures the dark and bias frames and returns at
     # once with the job's id. It stores numbers; it never changes a frame.
     "calibration:measure_frames": ("image_processing_service", "start_calibration_measurement"),
     # Mosaics
     "mosaic:preview": ("mosaic_service", "preview_mosaic"),
     "mosaic:create": ("mosaic_service", "create_mosaic"),
-    # Observing sessions. Only the operations whose inputs are plain data;
-    # the rest take bundles of hardware-driving callables and belong to
-    # whatever owns the run loop (see ExecutionService's module docstring).
-    "execution:list_sessions": ("execution_service", "list_sessions"),
-    "execution:get_session": ("execution_service", "get_session"),
-    "execution:abort_session": ("execution_service", "abort_session"),
-    "execution:reconcile_session": ("execution_service", "reconcile_session"),
-    "execution:build_divergence_record": ("execution_service", "build_divergence_record"),
     # Night plan and observation packages. `plan:list_packages` lists the
     # package library and `plan:current_session` reads tonight's session.
     # `plan:tick_checklist_item` writes and sends the `plan:changed` event;
@@ -308,9 +301,9 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "history:target_changes": ("advisory_service", "list_target_changes"),
     "history:live_session_status": ("advisory_service", "get_live_session_status"),
     "observatory:safety_status": ("advisory_service", "get_safety_status"),
-    "calibration:query": ("astrometrics.processing.calibration", "query"),
+    "calibration:query": ("calibration_service", "query"),
     # Judges the sets of one kind from the stored numbers. A read.
-    "calibration:assess": ("astrometrics.processing.calibration", "assess"),
+    "calibration:assess": ("calibration_service", "assess"),
     # Sequencer queue
     "sequencer:get_queue": ("target_imaging_executor", "get_queue"),
     "sequencer:create_plan": ("target_imaging_executor", "create_plan"),
@@ -522,19 +515,15 @@ def _text_param(params: dict[str, Any], name: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
-#: Error codes that mean the caller or the current state is at fault. They are
-#: logged without a traceback, because the cause is already in the message.
-_EXPECTED_CODES = frozenset({
-    "invalid_argument",
-    "not_found",
-    "conflict",
-    "permission_denied",
-    "configuration",
-})
-
-
 def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
-    """Log a failed RPC call once, with a traceback if it is unexpected.
+    """Log a failed RPC call once, at the level the error asks for.
+
+    Each error says its own log level (``log_level``): a missing item is an
+    answer (``INFO``), a bad argument or a conflict is a ``WARNING``, an
+    offline device is a status (``INFO``), and a failed device, disk, service
+    or pipeline is an ``ERROR``. A line at ``ERROR`` or above carries the
+    traceback. An unexpected exception (code ``internal``) is always an
+    ``ERROR`` with its traceback.
 
     Parameters
     ----------
@@ -545,16 +534,18 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
     info : `ErrorInfo`
         The error as reported to the caller.
     """
-    if info.code == "not_found":
-        # Asking for something that is not there is an answer, not a
-        # problem: the caller gets the code and decides what to show.
-        logger.info("RPC %s failed (%s): %s", method, info.code, info.message)
-    elif info.code in _EXPECTED_CODES:
-        logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
-    elif info.code == "internal":
+    if info.code == "internal":
         logger.error("RPC %s raised an unexpected error", method, exc_info=exc)
-    else:
-        logger.error("RPC %s failed (%s): %s", method, info.code, info.message, exc_info=exc)
+        return
+    level = info.log_level_number
+    logger.log(
+        level,
+        "RPC %s failed (%s): %s",
+        method,
+        info.code,
+        info.message,
+        exc_info=exc if level >= logging.ERROR else None,
+    )
 
 
 @router.post("/rpc")

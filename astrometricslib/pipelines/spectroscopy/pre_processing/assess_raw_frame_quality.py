@@ -146,7 +146,7 @@ def _refraction_metrics(refraction: DifferentialRefraction) -> tuple[list[StageQ
     )
     altitude = metric(
         "target_altitude_degrees",
-        refraction.altitude_degrees,
+        refraction.altitude_deg,
         "degree",
         limit=resolve(MINIMUM_ALTITUDE_DEGREES).value,
         note=(
@@ -165,8 +165,8 @@ def _refraction_metrics(refraction: DifferentialRefraction) -> tuple[list[StageQ
         ),
         altitude,
         metric(
-            "parallactic_to_dispersion_angle_degrees",
-            refraction.parallactic_to_dispersion_angle_degrees,
+            "parallactic_to_dispersion_angle_deg",
+            refraction.parallactic_to_dispersion_angle_deg,
             "degree",
             note="0 means the red end of the spectrum points at the zenith; report only",
         ),

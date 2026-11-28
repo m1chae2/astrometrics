@@ -110,10 +110,11 @@ def test_exposure_group_weights_are_unknown_when_inputs_are_missing() -> None:
 
 
 def test_the_method_on_processing_pipelines_delegates() -> None:
-    """The method on `ProcessingPipelines` returns the same prediction."""
+    """`processing.stacking.predict_weights` returns the same prediction."""
     pipelines = ProcessingPipelines(AppConfiguration(), MagicMock())
-    prediction = pipelines.predict_stack_weights([5.0] * 6)
-    assert prediction == predict_stack_weights([5.0] * 6)
+    assert pipelines.stacking.predict_weights([5.0] * 6) == predict_stack_weights([5.0] * 6)
+    spectral = pipelines.stacking.predict_weights([5.0] * 6, "wfwhm", kind="spectral")
+    assert spectral == predict_stack_weights([5.0] * 6, "wfwhm", is_spectral=True)
 
 
 def test_the_group_minimum_is_forwarded() -> None:

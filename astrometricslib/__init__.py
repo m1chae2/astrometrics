@@ -19,18 +19,24 @@ settings by itself::
 
 `Astrometrics` has one attribute for each sub-API:
 
-- `targets` (`TargetCatalog`): create, read and save targets, and keep their
-  frame lists current.
+- `targets` (`TargetCatalog`): create, read, change and delete targets; its
+  `frames` (`TargetFrames`) chooses, adds, scans and deletes their frames.
 - `stars` (`StellarCatalog`): the library's star records, catalog queries
   and light-curve (brightness over time) analysis.
 - `processing` (`ProcessingPipelines`): stack a target, remake its preview
-  and run the analysis stages and noise measurements. Its `calibration`
-  child (`CalibrationCatalog`) manages darks, biases and flats.
-- `quality` (`QualityRecords`): stored quality measurements, the metric list
-  and live checks of raw frames and stacks.
+  and run the analysis stages.
+- `calibration` (`CalibrationCatalog`): the darks, biases and flats, which
+  sets fit some light frames, how good each set is, and each camera's noise
+  profile. Its `frames` child adds, rescans and measures the files.
+- `quality` (`QualityRecords`): its `records` read the stored quality
+  measurements and the metric list; `frames`, `stacks`, `detections` and
+  `blocks` measure raw frames, stacks and single images.
 - `visualization` (`Visualization`): draw frames and stacks as pictures and
   plot results.
 - `jobs` (`Jobs`): read the history of running and finished jobs.
+- `observatories` (`Observatories`): the observatory's equipment. Its
+  `configurations` child keeps every set of equipment used together (an
+  `ObservatoryConfiguration`), past and present.
 
 The sub-APIs work on three core records: a `Target` (a place on the sky,
 with its frames and stacks), the `FrameRecord`s that are part of it, and a
@@ -38,16 +44,27 @@ with its frames and stacks), the `FrameRecord`s that are part of it, and a
 
 What to import from where
 -------------------------
-The package root holds 16 names:
+The package root holds 31 names:
 
 - the entry point and setup: `Astrometrics`, `AppConfiguration`,
   `get_configuration`, `configure_logging`, `configure_offline_iers` and
   `warm_earth_orientation_data`;
 - the sub-API classes, which you normally reach as attributes of
-  `Astrometrics` (`TargetCatalog`, `StellarCatalog`, `ProcessingPipelines`,
-  `CalibrationCatalog`, `QualityRecords` and `Visualization`);
+  `Astrometrics` (`TargetCatalog`, with its `TargetFrames`,
+  `StellarCatalog`, `ProcessingPipelines`, with its `StackingPipeline`,
+  `CalibrationCatalog`, `QualityRecords`, `Visualization` and
+  `Observatories`);
 - the core records: `Target`, `FrameRecord`, `StellarObject` and
-  `FilterType`.
+  `FilterType`;
+- the input models: `CaptureSetting`, which says which calibration sets a
+  call means, `EnhancementSettings`, the picture choices of one
+  enhancement run, `PreviewBrightObject`, the object a target's picture
+  protects, `JobSummary`, the recorded job that ``jobs.get_log`` and
+  ``jobs.get_warnings`` take, and `SkyPosition`, a place on the sky in
+  ICRS degrees that is neither a target nor a star;
+- the equipment: `ObservatoryConfiguration` and the models it is built
+  from, `Telescope`, `Camera`, `GuideScope`, `Mount`, `Focuser` and
+  `FilterWheel`.
 
 Five public modules hold the rest:
 
@@ -55,8 +72,8 @@ Five public modules hold the rest:
   that turn an error into a plain record and back;
 - `astrometricslib.reports`: the quality reports and row shapes that checks
   return, plus `CaptureSetting` and `observing_night_id`;
-- `astrometricslib.jobs`: the job history, and the tools that run a function
-  as a tracked background job;
+- `astrometricslib.jobs`: the job context tools that record a function's
+  work as a tracked job, and the switch that stops a running one;
 - `astrometricslib.drivers`: the data store and file tools that other apps
   share.
 - `astrometricslib.parameters`: the tuned-parameter declaration, its
@@ -82,20 +99,37 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
+from astrometricslib._internal.renames import MovedNames
 from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.jobs import register_interrupted_job_cleanup
 from astrometricslib.foundation.logging import configure_logging
+from astrometricslib.models.job_queries import JobSummary
+from astrometricslib.models.observatory_configuration import (
+    Camera,
+    FilterWheel,
+    Focuser,
+    GuideScope,
+    Mount,
+    ObservatoryConfiguration,
+    Telescope,
+)
+from astrometricslib.models.processing_results import EnhancementSettings
+from astrometricslib.models.quality.capture_setting import CaptureSetting
+from astrometricslib.models.sky_position import SkyPosition
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.models.target import FrameRecord, PreviewBrightObject, Target
 from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
 
 if TYPE_CHECKING:
     from astrometricslib._internal.drivers.driver_set import Drivers
+    from astrometricslib.api._processing_stacking import StackingPipeline
+    from astrometricslib.api._target_frames import TargetFrames
     from astrometricslib.api.calibration import CalibrationCatalog
     from astrometricslib.api.jobs import Jobs
+    from astrometricslib.api.observatories import Observatories
     from astrometricslib.api.processing import ProcessingPipelines
     from astrometricslib.api.quality import QualityRecords
     from astrometricslib.api.stars import StellarCatalog
@@ -117,10 +151,13 @@ register_interrupted_job_cleanup(restore_interrupted_stacks)
 
 _DEFERRED_EXPORTS = {
     "CalibrationCatalog": "astrometricslib.api.calibration",
+    "Observatories": "astrometricslib.api.observatories",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityRecords": "astrometricslib.api.quality",
+    "StackingPipeline": "astrometricslib.api._processing_stacking",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
+    "TargetFrames": "astrometricslib.api._target_frames",
     "Visualization": "astrometricslib.api.visualization",
 }
 
@@ -154,12 +191,13 @@ def __getattr__(name: str) -> Any:
     return getattr(importlib.import_module(module_name), name)
 
 
-class Astrometrics:
+class Astrometrics(MovedNames):
     """The main control panel for the library.
 
     This class only builds the sub-APIs and holds them. It has no methods
     of its own: stacking, preview pictures and the analysis stages live on
-    `processing`, the target list on `targets`, the star catalog on
+    `processing`, the calibration frames on `calibration`, the target list
+    on `targets`, the star catalog on
     `stars`, pictures and plots on `visualization`, the job history on
     `jobs`, and quality reads on `quality`. Each sub-API is built once
     here and shared, so they all read and write the same storage.
@@ -178,7 +216,9 @@ class Astrometrics:
     stars : `StellarCatalog`
         Identified stars, catalog queries, and light-curve analysis.
     processing : `ProcessingPipelines`
-        Frame calibration, stacking, and scientific analysis stages.
+        Stacking and the scientific analysis stages.
+    calibration : `CalibrationCatalog`
+        The dark, bias and flat frames and the camera noise profiles.
     visualization : `Visualization`
         Rendering FITS images to PNGs/data URLs and diagnostic plots.
     jobs : `Jobs`
@@ -187,6 +227,8 @@ class Astrometrics:
     quality : `QualityRecords`
         The start of every quality read: stored measurements, the metric
         list, and live checks of raw frames and stacks.
+    observatories : `Observatories`
+        The observatory's equipment and the configurations it was used in.
 
     Notes
     -----
@@ -220,7 +262,9 @@ class Astrometrics:
             The outside programs and services to use. `Drivers()` means the
             built-in ones.
         """
+        from astrometricslib.api.calibration import CalibrationCatalog
         from astrometricslib.api.jobs import Jobs
+        from astrometricslib.api.observatories import Observatories
         from astrometricslib.api.processing import ProcessingPipelines
         from astrometricslib.api.quality import QualityRecords
         from astrometricslib.api.stars import StellarCatalog
@@ -233,39 +277,55 @@ class Astrometrics:
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
-        self.targets = TargetCatalog(
-            self.config, self._catalog_access, drivers=drivers, quality=lambda: self.quality
-        )
+        self.targets = TargetCatalog(self.config, self._catalog_access, drivers=drivers)
         self.stars = StellarCatalog(self.config, self._catalog_access)
+        self.calibration = CalibrationCatalog(self.config, self._catalog_access)
         self.processing = ProcessingPipelines(
-            self.config, self._catalog_access, targets=self.targets, drivers=drivers
+            self.config,
+            self._catalog_access,
+            targets=self.targets,
+            calibration=self.calibration,
+            drivers=drivers,
         )
-        self.visualization = Visualization(
-            self.config, self._catalog_access, targets=self.targets, stars=self.stars
-        )
+        self.visualization = Visualization(self.config, self._catalog_access)
         self.quality = QualityRecords(
             self.config,
             self._catalog_access,
             targets=self.targets,
-            calibration_library=lambda: self.processing.calibration._calibration_library,
+            calibration_library=lambda: self.calibration._calibration_library,
             drivers=drivers,
-            owner=lambda: self,
         )
         self.jobs = Jobs(self.config, self._catalog_access)
+        self.observatories = Observatories(self.config, targets=self.targets)
 
 
 __all__ = [
     "AppConfiguration",
     "Astrometrics",
     "CalibrationCatalog",
+    "Camera",
+    "CaptureSetting",
+    "EnhancementSettings",
     "FilterType",
+    "FilterWheel",
+    "Focuser",
     "FrameRecord",
+    "GuideScope",
+    "JobSummary",
+    "Mount",
+    "Observatories",
+    "ObservatoryConfiguration",
+    "PreviewBrightObject",
     "ProcessingPipelines",
     "QualityRecords",
+    "SkyPosition",
+    "StackingPipeline",
     "StellarCatalog",
     "StellarObject",
     "Target",
     "TargetCatalog",
+    "TargetFrames",
+    "Telescope",
     "Visualization",
     "configure_logging",
     "configure_offline_iers",

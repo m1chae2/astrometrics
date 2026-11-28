@@ -461,7 +461,7 @@ class CalibrationSet:
         The frame file paths.
     temperature_c : `float` or `None`
         The middle of a dark's temperature slot. `None` for a bias.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         A dark's exposure. `None` for a bias.
     """
 
@@ -472,7 +472,7 @@ class CalibrationSet:
     binning: str
     paths: list[str]
     temperature_c: float | None = None
-    exposure_seconds: float | None = None
+    exposure_s: float | None = None
 
     def has_setting_of(self, other: CalibrationSet) -> bool:
         """Tell whether another set has the same camera and settings.
@@ -950,11 +950,11 @@ class CalibrationLibrary(BaseModel):
                         setting = parse_calibration_setting_key(iso)
                         darks.append({
                             "camera": camera,
-                            "iso": setting.gain,
+                            "gain": setting.gain,
                             "offset": setting.offset,
                             "binning": setting.binning,
                             "temperature_c": setting.temperature_c,
-                            "exposure": exposure,
+                            "exposure_s": exposure,
                             "count": len(file_list),
                         })
 
@@ -968,7 +968,7 @@ class CalibrationLibrary(BaseModel):
                     setting = parse_calibration_setting_key(iso)
                     biases.append({
                         "camera": camera,
-                        "iso": setting.gain,
+                        "gain": setting.gain,
                         "offset": setting.offset,
                         "binning": setting.binning,
                         "count": len(file_list),
@@ -991,7 +991,7 @@ class CalibrationLibrary(BaseModel):
                             flats.append({
                                 "camera": camera,
                                 "filter": filt,
-                                "iso": setting.gain,
+                                "gain": setting.gain,
                                 "offset": setting.offset,
                                 "binning": setting.binning,
                                 "count": len(file_list),
@@ -1992,7 +1992,7 @@ class CalibrationLibrary(BaseModel):
                         groups = [(None, below)]
                     else:
                         continue
-                    for exposure_seconds, paths in groups:
+                    for exposure_s, paths in groups:
                         if not isinstance(paths, list):
                             continue
                         kept = [p for p in paths if os.path.exists(p)] if validate_paths else list(paths)
@@ -2007,7 +2007,7 @@ class CalibrationLibrary(BaseModel):
                                 binning=setting.binning,
                                 paths=kept,
                                 temperature_c=setting.temperature_c if kind == "dark" else None,
-                                exposure_seconds=exposure_seconds,
+                                exposure_s=exposure_s,
                             )
                         )
         return sets

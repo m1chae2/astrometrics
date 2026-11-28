@@ -2,8 +2,8 @@
 
 Description: The tools pass a client's JSON arguments to the `Wayfinder`
 methods as they are. These tests check that a coordinate dictionary and an
-ISO time with an offset work, and that the server, not the client, decides
-`register_job`. The library's own tests check the conversions themselves.
+ISO time with an offset work, and that no tool asks the client whether to
+record a job. The library's own tests check the conversions themselves.
 """
 
 import pytest
@@ -14,18 +14,18 @@ pytestmark = pytest.mark.anyio
 
 
 def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry: ToolRegistry) -> None:
-    """Clients are not asked for `register_job`; the server decides it."""
-    schema = registry.tools["planning_get_deep_catalog_status"]["tool_def"].input_schema
+    """Clients are not asked whether to record a job; every run records one."""
+    schema = registry.tools["planning_catalogs_predict_deep_catalog"]["tool_def"].input_schema
     assert "register_job" not in schema["properties"]
-    assert "include" in schema["properties"]
-    advisory = registry.tools["review_get_advisory"]["tool_def"].input_schema
-    assert advisory["required"] == ["kind", "target"]
+    assert "magnitude_max" in schema["properties"]
+    result = registry.tools["review_targets_get_result"]["tool_def"].input_schema
+    assert result["required"] == ["star"]
 
 
 async def test_visibility_accepts_coordinates_and_an_offset_time(registry: ToolRegistry) -> None:
     """Visibility runs with a coordinate dictionary and a local ISO time."""
     result = await registry.execute(
-        "planning_get_visibility",
+        "planning_sky_get_visibility",
         {
             "objects": [{"id": "M 52", "ra_deg": 351.2, "dec_deg": 61.59}],
             "time": "2026-10-02T22:00:00-06:00",

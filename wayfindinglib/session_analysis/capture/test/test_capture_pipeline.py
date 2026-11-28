@@ -78,10 +78,10 @@ def test_a_download_gap_and_a_clipped_star_are_both_reported(
     """Verify problems from different stages appear together."""
     clipped = 50 / SENSOR_PIXELS
     frames = [
-        make_frame(index, is_spectral=True, exposure_seconds=2.0, saturated_pixel_fraction=clipped)
+        make_frame(index, is_spectral=True, exposure_s=2.0, saturated_pixel_fraction=clipped)
         for index in range(20)
     ]
-    captures = [make_capture(index, exposure_seconds=2.0) for index in range(20)]
+    captures = [make_capture(index, exposure_s=2.0) for index in range(20)]
     captures += [make_capture(30 + index) for index in range(5)]
 
     analysis = analyze_capture_session_request(_request(make_envelope, frames, captures))

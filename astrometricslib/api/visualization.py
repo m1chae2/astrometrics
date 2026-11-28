@@ -1,583 +1,483 @@
-"""Main interface for drawing pictures of frames and plots of results.
+"""Main interface for drawing pictures of images and charts of results.
 
 Astronomical data is stored in FITS files, which hold raw measurements that
 an ordinary image viewer cannot show well. `Visualization` turns them into
-pictures: `render_fits` draws one frame, stack or array, stretched so faint
-detail shows, as a PNG, a data URL for the app's viewer, or a Matplotlib
-figure for a script or notebook, optionally with the detected and the named
-stars marked on it; and `plot` draws the charts of a target's or a star's
-results. The work happens in `pipelines/shared/image_conversions.py` and in
-the `visualization/` package.
+pictures: `render` draws one frame, stack or array, stretched so faint detail
+shows, as the bytes of a PNG or JPEG file; `plot_image` draws one as a
+Matplotlib figure, optionally with the detected and the named stars marked
+on it; and the ``plot_<noun>`` methods draw the charts of a target's or a
+star's results. Each method is a thin wrapper of one owner function, named in
+its docstring; the work happens in `pipelines/shared/image_conversions.py`
+and in the `visualization/` package.
 """
 
-from typing import TYPE_CHECKING, Literal
+from collections.abc import Sequence
 
 import numpy as np
 from matplotlib.figure import Figure
 
 from astrometricslib._internal.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib._internal.renames import MovedNames
+from astrometricslib.foundation.arguments import check_limit
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.models.star_catalog import StarOverlay
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.models.target import RenderedImage, Target, ViewableImage
-from astrometricslib.pipelines.shared.api_arguments import (
-    TargetLookup,
-    check_choice,
-    reject_unused_arguments,
-    resolve_target,
-)
-from astrometricslib.visualization.sky_placement import (
-    SkyPicturePlacement,
-    place_picture_on_sky,
-    sky_picture_files,
-)
-
-if TYPE_CHECKING:
-    from astrometricslib.api.stars import StellarCatalog
+from astrometricslib.models.target import FrameRecord, RenderedImage, Target
+from astrometricslib.visualization.sky_placement import SkyPicturePlacement
 
 __all__ = ["Visualization"]
 
-RENDER_KINDS = ("image", "data_url", "figure")
-
-_RENDER_ARGUMENTS = {
-    "image": ("crop", "overlays", "pixels"),
-    "data_url": (),
-    "figure": ("crop", "overlays", "pixels", "figsize"),
-}
-
-DEFAULT_IMAGE_FIGURE_SIZE = (10.0, 8.0)
-"""Size of a ``render_fits(kind="figure")`` figure, in inches."""
-PLOT_KINDS = ("dashboard", "star", "astrometry", "photometry", "spectroscopy", "focus", "asteroids")
-
-_PLOT_ARGUMENTS = {
-    "dashboard": ("target", "selected_star", "limit", "figsize"),
-    "star": ("star", "spectral_star", "figsize"),
-    "astrometry": ("target", "limit", "figsize"),
-    "photometry": ("target", "limit", "figsize"),
-    "spectroscopy": ("target", "limit", "figsize"),
-    "focus": ("target", "figsize"),
-    "asteroids": ("target", "figsize"),
-}
-
-_DEFAULT_FIGURE_SIZES = {
-    "dashboard": (16, 9),
-    "star": (9, 8),
-    "astrometry": (10, 10),
-    "photometry": (16, 9),
-    "spectroscopy": (16, 9),
-    "focus": (14, 9),
-    "asteroids": (10, 10),
-}
+CHART_STAR_LIMIT = 15
+"""Most stars a target chart marks and lists, unless the caller asks."""
 
 
-class Visualization:
-    """Draw FITS frames as pictures, and plot the results of the pipelines.
+class Visualization(MovedNames):
+    """Draw FITS images as pictures, and plot the results of the pipelines.
 
-    To draw the stars of a target on its stacked image, read their pixel
-    positions with `StellarCatalog.query` and ``detail="overlay"``.
-    A target or star id that names nothing in the library raises
-    `NotFoundError`. A file that cannot be drawn raises `ProcessingError`.
+    An image is given as a path, a frame record (from
+    ``targets.frames.query``) or an array of pixels. A file that cannot be
+    drawn raises `ProcessingError`. A chart of a target that lacks what the
+    chart needs (a stack, catalog stars, a focuser temperature) raises
+    `InvalidArgumentError`.
 
     Parameters
     ----------
     config : `AppConfiguration`
         The application settings. They give the frames folder.
     storage : `AbstractCatalogAccess`
-        The database the library reads and writes.
-    targets : `TargetLookup`, optional
-        The target catalog, used to turn a target name into a `Target`.
-    stars : `StellarCatalog`, optional
-        The star catalog, used to find a target's stars and to turn a star
-        id into a `StellarObject`.
+        The database the library reads and writes. It holds the stars the
+        charts and the overlays draw.
     """
 
-    def __init__(
-        self,
-        config: AppConfiguration,
-        storage: AbstractCatalogAccess,
-        *,
-        targets: TargetLookup | None = None,
-        stars: StellarCatalog | None = None,
-    ) -> None:
+    def __init__(self, config: AppConfiguration, storage: AbstractCatalogAccess) -> None:
         self._config = config
         self._storage = storage
-        self._targets = targets
-        self._stars = stars
 
-    def render_fits(
+    def render(
         self,
-        path: str | None = None,
-        target: str | Target | None = None,
-        file_name: str | None = None,
-        kind: Literal["image", "data_url", "figure"] = "image",
-        iso: str | None = None,
-        exposure: str | None = None,
-        index: int = 0,
-        max_dimensions: int | None = None,
+        image: str | FrameRecord | np.ndarray,
+        *,
         stretch: bool = True,
-        center: float | None = None,
-        width: float | None = None,
-        crop_center_x: int | None = None,
-        crop_center_y: int | None = None,
-        crop_size: int | None = None,
-        overlays: list[str] | tuple[str, ...] | str | None = None,
-        pixels: np.ndarray | None = None,
-        figsize: tuple[float, float] | None = None,
-    ) -> ViewableImage | RenderedImage | Figure:
+        brightness: tuple[float, float] | None = None,
+        crop: tuple[float, float, int] | None = None,
+        max_dimensions: int | None = None,
+    ) -> RenderedImage:
         """Draw a frame, a stack or an array as a picture. Nothing is saved.
 
-        The image is named in one of four ways: ``path``; ``target`` and
-        ``file_name``; ``target``, ``iso`` and ``exposure`` (and ``index``);
-        or ``pixels``. Use it to judge a frame by eye: star trailing,
-        clouds, gradients or a bad stack. With ``overlays`` it marks what
-        Image Processing marks: the stars the astrometry run detects and
-        the named stars that have photometry.
+        Use it to judge an image by eye: star trailing, clouds, gradients or
+        a bad stack. A stretched view of a whole stack is the picture the
+        enhancement stage saved beside it (a JPEG), when that picture is
+        current; every other view is drawn from the pixels as a PNG. A
+        Jupyter notebook shows the result as a picture.
 
-        Arguments used by each kind (any other argument is refused):
-
-        - ``"image"``: all except ``figsize``. ``crop_center_x``,
-          ``crop_center_y`` and ``crop_size`` zoom in on one place.
-        - ``"data_url"``: all except the crop arguments, ``overlays``,
-          ``pixels`` and ``figsize``.
-        - ``"figure"``: all except ``max_dimensions``.
-
-        The brightness works the same way for every kind: ``stretch=True``
-        (default) is the app's automatic stretch, ``stretch=False`` is a
-        straight line from the darkest to the brightest pixel, and
-        ``center`` with ``width`` is a straight line over that fixed range
-        of pixel values (it replaces the other two).
+        Owner: astrometricslib.pipelines.shared.image_conversions.render_image
 
         Parameters
         ----------
-        path : `str`, optional
-            Path to the FITS file.
-        target : `str` or `Target`, optional
-            The target whose frame to draw, with ``file_name`` or with
-            ``iso`` and ``exposure``. With ``path`` alone, the target the
-            file belongs to: the ``"stars"`` overlay then names only that
-            target's stars, as Image Processing does.
-        file_name : `str`, optional
-            Which of the target's frames: its file name, or the number at
-            the end of the name, such as ``"013"``. It must match one frame.
-        kind : `str`, optional
-            ``"image"`` (default): a PNG with a description of the
-            brightness range and crop, for a client that shows it as an
-            image. ``"data_url"``: the picture as a data URL with its
-            brightness range and FITS header, as the app's viewer shows it;
-            a stretched stack uses the preview the stacking stage saved.
-            ``"figure"``: a Matplotlib figure at full resolution, for a
-            script or notebook. A notebook shows it in the page; the app's
-            Command Console opens it in a figure window.
-        iso : `str`, optional
-            With ``target`` and ``exposure``: the gain or ISO of the frame.
-        exposure : `str`, optional
-            With ``target`` and ``iso``: the exposure length of the frame.
-        index : `int`, optional
-            With ``iso`` and ``exposure``: which matching frame, by order.
-        max_dimensions : `int`, optional
-            Longest side of the picture in pixels, from 100 to 2000.
-            Defaults to 1200 for ``"image"`` and 2000 for ``"data_url"``.
+        image : `str`, `FrameRecord` or `numpy.ndarray`
+            The FITS file's path, a frame record, or a 2-D or color array.
+            A frame that stacking moved into an ``_excluded`` folder is
+            found there.
         stretch : `bool`, optional
             Brighten faint detail automatically. Defaults to `True`.
-            `False` draws a straight line from the darkest to the brightest
-            pixel. A stack's ``_processed.fits`` file is already stretched,
-            so it is drawn as it is for ``"image"`` and ``"figure"``.
-        center : `float`, optional
-            Middle of a manual brightness range, in pixel values. Needs
-            ``width``.
-        width : `float`, optional
-            Width of a manual brightness range, in pixel values. Needs
-            ``center``.
-        crop_center_x : `int`, optional
-            Column of the centre of a zoomed piece, in full-frame pixels.
-        crop_center_y : `int`, optional
-            Row of the centre of the zoomed piece, in full-frame pixels.
-        crop_size : `int`, optional
-            Side of the zoomed square in pixels. The piece is not shrunk
-            below its own size.
-        overlays : `list` [`str`], `str` or `None`, optional
-            What to mark on a FITS file. None by default. ``"detections"``:
-            the stars the astrometry run's star finder detects (small cyan
-            circles), from the stack's ``<stack>_detections.json`` file
-            when it is still valid. ``"stars"``: the stack's named stars
-            that have photometry (yellow circles with names), from its
-            ``<stack>_identification.json`` file, which `identify_stack`
-            writes. Give one name or a list, such as
-            ``["detections", "stars"]``. The description (``"image"``) or
-            the title (``"figure"``) counts what each overlay drew, or
-            says why it drew nothing.
-        pixels : `numpy.ndarray`, optional
-            A 2-D or color array to draw instead of a file. It has no saved
-            detections or names, so it takes no ``overlays``.
-        figsize : `tuple` [`float`, `float`], optional
-            For ``"figure"``: the figure size in inches. Defaults to 10 by 8.
+            `False` draws a straight line from the darkest to the
+            brightest pixel.
+        brightness : `tuple` [`float`, `float`], optional
+            The pixel values to draw black and white, with a straight line
+            in between. It replaces ``stretch``.
+        crop : `tuple` [`float`, `float`, `int`], optional
+            Zoom in on one place: the column and row of its center, counted
+            from 1, and the side of the square, all in full-image pixels.
+            The piece is enlarged to half of ``max_dimensions``.
+        max_dimensions : `int`, optional
+            Longest side of the picture, from 100 to 2000 pixels. Defaults
+            to 2000.
 
         Returns
         -------
-        picture : `ViewableImage`, `RenderedImage` or `Figure`
-            A `ViewableImage` for ``"image"``, a `RenderedImage` for
-            ``"data_url"``, and a `Figure` for ``"figure"``, with the
-            first row of pixels at the top and axes in full-frame pixels.
+        picture : `RenderedImage`
+            The picture's bytes, its type, the brightness range shown, its
+            size and the crop.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If the kind or an overlay is unknown, an argument the kind does
-            not use is given, only one of ``center`` and ``width`` is
-            given, only some crop values are given, overlays are asked for
-            on ``pixels``, or the image is named in no way or in more than
-            one way.
+        Notes
+        -----
+        Raises `ProcessingError` if the file cannot be drawn. An image of
+        another type, a brightness range whose black value is not below its
+        white value, or a crop that is not three numbers raises
+        `InvalidArgumentError`.
 
         Examples
         --------
         >>> target = astrometrics.targets.get("M 13")  # doctest: +SKIP
-        >>> figure = astrometrics.visualization.render_fits(
-        ...     target.stacking.stacked_image,
-        ...     target=target,
-        ...     kind="figure",
-        ...     overlays=["detections", "stars"],
+        >>> picture = astrometrics.visualization.render(
+        ...     target.stacking.stacked_image
         ... )  # doctest: +SKIP
         """
-        from astrometricslib.pipelines.shared import image_conversions
-        from astrometricslib.visualization import image_display
+        from astrometricslib.pipelines.shared.image_conversions import render_image
 
-        check_choice("kind", kind, RENDER_KINDS)
-        overlay_names = image_display.check_overlays(overlays)
-        crop_values = (crop_center_x, crop_center_y, crop_size)
-        reject_unused_arguments(
-            kind,
-            _RENDER_ARGUMENTS,
-            {
-                "crop": any(value is not None for value in crop_values),
-                "overlays": bool(overlay_names),
-                "pixels": pixels is not None,
-                "figsize": figsize is not None,
-            },
+        return render_image(
+            image, stretch=stretch, brightness=brightness, crop=crop, max_dimensions=max_dimensions
         )
-        if kind == "figure" and max_dimensions is not None:
-            raise InvalidArgumentError(
-                "kind='figure' does not use: max_dimensions. Give figsize instead.",
-                details={"kind": kind, "unused": ["max_dimensions"]},
-            )
-        if (center is None) != (width is None):
-            raise InvalidArgumentError(
-                "Give both center and width for a manual brightness range, or neither."
-            )
-        if any(value is not None for value in crop_values) and any(value is None for value in crop_values):
-            raise InvalidArgumentError(
-                "Give crop_center_x, crop_center_y and crop_size together, or none of them."
-            )
-        crop = (crop_center_x, crop_center_y, crop_size) if crop_size is not None else None
-        if pixels is not None:
-            if path is not None or target is not None or file_name is not None or iso is not None:
-                raise InvalidArgumentError("Give pixels, or a path or a target frame, not both.")
-            if overlay_names:
-                raise InvalidArgumentError(
-                    "An array has no saved detections or names, so it takes no overlays.",
-                    details={"overlays": list(overlay_names)},
-                )
-            resolved, frame_path = None, None
-        else:
-            resolved, frame_path = self._frame_path(path, target, file_name, iso, exposure, index)
-        marks: list[image_display.OverlayMark] = []
-        notes: list[str] = []
-        if overlay_names and frame_path is not None:
-            target_id = resolved.id if resolved is not None else None
-            marks, notes = image_display.collect_overlay_marks(
-                frame_path, overlay_names, self._stars, target_id
-            )
 
-        if kind == "figure":
-            display = image_conversions.scale_for_display(frame_path, pixels, stretch, center, width, crop)
-            size = tuple(figsize) if figsize is not None else DEFAULT_IMAGE_FIGURE_SIZE
-            return image_display.draw_image_figure(
-                display, image_display.figure_name(frame_path), marks, notes, size
-            )
-        default_size = 1200 if kind == "image" else 2000
-        size = max(100, min(int(max_dimensions or default_size), 2000))
-        if kind == "data_url":
-            image_id = resolved.id if resolved is not None else ""
-            return image_conversions.render_data_url(frame_path, image_id, size, stretch, center, width)
-        picture = image_conversions.render_viewable_image(
-            frame_path, size, stretch, center, width, crop, pixels
-        )
-        return image_display.draw_marks_on_picture(picture, marks, notes) if overlay_names else picture
+    def render_newest(
+        self, *, stretch: bool = True, max_dimensions: int | None = None
+    ) -> RenderedImage | None:
+        """Draw the newest FITS file anywhere in the frames folder.
 
-    def _frame_path(
-        self,
-        path: str | None,
-        target: str | Target | None,
-        file_name: str | None,
-        iso: str | None,
-        exposure: str | None,
-        index: int,
-    ) -> tuple[Target | None, str]:
-        """Find the file a `render_fits` call names.
+        The frames folder holds every target's frames and the calibration
+        frames, so this is the frame the camera took last, whatever it was.
 
-        A ``target`` given with ``path`` names the target the file belongs
-        to; it is returned with the path.
-
-        Returns
-        -------
-        target : `Target` or `None`
-            The target, when one was named.
-        path : `str`
-            The FITS file to draw.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If the frame is named in no way or in more than one way.
-        NotFoundError
-            If the target or the frame does not exist.
-        """
-        import os
-
-        from astrometricslib.pipelines.shared import image_conversions
-        from astrometricslib.pipelines.shared.quality.frame_selection import file_in_range
-
-        by_settings = iso is not None or exposure is not None
-        if path is not None:
-            if file_name is not None or by_settings:
-                raise InvalidArgumentError(
-                    "Give a path, or a target with a file_name or iso and exposure, not both."
-                )
-            # A target given with a path only says which target the file
-            # belongs to.
-            return (resolve_target(self._targets, target) if target is not None else None), path
-        if target is None or (file_name is None) == (not by_settings):
-            raise InvalidArgumentError("Give a path, or a target with a file_name or with iso and exposure.")
-        resolved = resolve_target(self._targets, target)
-        if by_settings:
-            if iso is None or exposure is None:
-                raise InvalidArgumentError("Give both iso and exposure.")
-            found = image_conversions.get_frame(resolved, iso, exposure, index)
-            if not os.path.exists(found):
-                raise NotFoundError(f"Frame not found: {found}", details={"path": found})
-            return resolved, found
-        matches = [
-            frame.path
-            for frame in resolved.frames
-            if file_in_range(os.path.basename(frame.path), file_name, file_name)
-        ]
-        if len(matches) != 1:
-            raise NotFoundError(
-                f"{file_name!r} matches {len(matches)} frames of {resolved.id}; give the full file name.",
-                details={"target": resolved.id, "file_name": file_name, "matches": len(matches)},
-            )
-        return resolved, matches[0]
-
-    def get_last_captured_image(self, stretch: bool = True) -> RenderedImage | None:
-        """Find the newest FITS file in the frames folder and draw it.
+        Owner:
+            astrometricslib.pipelines.shared.image_conversions.render_newest_capture
 
         Parameters
         ----------
         stretch : `bool`, optional
             Brighten faint detail automatically. Defaults to `True`.
+        max_dimensions : `int`, optional
+            Longest side of the picture, from 100 to 2000 pixels. Defaults
+            to 2000.
 
         Returns
         -------
-        image : `RenderedImage` or `None`
-            The newest frame as a data URL, or `None` if there is no FITS
-            file or it cannot be drawn.
+        picture : `RenderedImage` or `None`
+            The picture, or `None` if there is no FITS file or it cannot be
+            drawn.
         """
-        from astrometricslib.pipelines.shared import image_conversions
+        from astrometricslib.pipelines.shared.image_conversions import render_newest_capture
 
-        return image_conversions.get_last_captured_image(self._config, stretch)
+        return render_newest_capture(self._config, stretch=stretch, max_dimensions=max_dimensions)
 
-    def stack_sky_picture_files(self, target: str | Target) -> tuple[str, str]:
-        """Name the files that place a target's stack picture on the sky.
+    def plot_image(
+        self,
+        image: str | FrameRecord | np.ndarray,
+        *,
+        overlays: Sequence[str] | str | None = None,
+        crop: tuple[float, float, int] | None = None,
+        stretch: bool = True,
+        brightness: tuple[float, float] | None = None,
+    ) -> Figure:
+        """Draw a frame, a stack or an array as a figure, at full resolution.
 
-        A sky chart lays the picture over the sky. The picture is the color
-        picture when the target has one, else the stack's preview. Where it
-        lies comes from the stretched stack's plate solution. Pass the two
-        paths, once they exist, to `place_stack_picture_on_sky`.
+        The first row of pixels is at the top, as in the app's viewer, and
+        the axes count full-image pixels from 1, even for a crop. A notebook
+        shows the figure in the page; the app's Command Console opens it in
+        a figure window. With ``overlays`` it marks what Image Processing
+        marks.
+
+        Owner: astrometricslib.visualization.image_display.plot_image
 
         Parameters
         ----------
-        target : `str` or `Target`
+        image : `str`, `FrameRecord` or `numpy.ndarray`
+            The FITS file's path, a frame record, or a 2-D or color array.
+        overlays : `Sequence` [`str`], `str` or `None`, optional
+            What to mark on a file. None by default. ``"detections"``: the
+            stars the astrometry run's star finder detects (small cyan
+            circles), from the stack's ``<stack>_detections.json`` file
+            when it is still valid. ``"stars"``: the stack's named stars
+            that have photometry (yellow circles with names), from its
+            ``<stack>_identification.json`` file. The title counts what
+            each overlay drew, or says why it drew nothing. An array has no
+            saved detections or names, so it takes none.
+        crop : `tuple` [`float`, `float`, `int`], optional
+            Zoom in on one place: the column and row of its center, counted
+            from 1, and the side of the square, in full-image pixels.
+        stretch : `bool`, optional
+            Brighten faint detail automatically. Defaults to `True`. A
+            stack's ``_processed.fits`` file is already stretched, so it is
+            drawn as it is.
+        brightness : `tuple` [`float`, `float`], optional
+            The pixel values to draw black and white. It replaces
+            ``stretch``.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The figure.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if an overlay is unknown, overlays are
+        asked for on an array, or the brightness range or the crop is not
+        valid.
+
+        Examples
+        --------
+        >>> figure = astrometrics.visualization.plot_image(
+        ...     target.stacking.stacked_image, overlays=["detections", "stars"]
+        ... )  # doctest: +SKIP
+        """
+        from astrometricslib.visualization.image_display import plot_image
+
+        return plot_image(
+            image, storage=self._storage, overlays=overlays, crop=crop, stretch=stretch, brightness=brightness
+        )
+
+    def plot_target(
+        self, target: Target, *, star: StellarObject | None = None, limit: int = CHART_STAR_LIMIT
+    ) -> Figure:
+        """Draw the combined view of a processed target.
+
+        The stack with its catalog stars beside the light curve and the
+        spectrum of the chosen star. Clicking a star in a figure window
+        shows its panels.
+
+        Owner: astrometricslib.visualization.helpers.plot_target_dashboard
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        star : `StellarObject`, optional
+            The star to show first. Defaults to the brightest.
+        limit : `int`, optional
+            Most catalog stars to mark, at least 1. Defaults to 15.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The chart.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the target has no stack or no catalog
+        stars.
+        """
+        from astrometricslib.visualization.helpers import plot_target_dashboard
+
+        check_limit(limit, 1, None, allow_none=False)
+        return plot_target_dashboard(target, self._storage, limit=limit, selected_star=star)
+
+    def plot_star(self, star: StellarObject) -> Figure:
+        """Draw one star's light curve above its spectrum.
+
+        Owner: astrometricslib.visualization.helpers.plot_stellar_analysis
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The star. Read it with ``stars.get(star_id,
+            include=["light_curves"])`` to draw its light curve.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The chart: one panel when the star has only a light curve or
+            only a spectrum.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the star has neither a light curve nor
+        a spectrum.
+        """
+        from astrometricslib.visualization.helpers import plot_stellar_analysis
+
+        return plot_stellar_analysis(star)
+
+    def plot_astrometry(self, target: Target, *, limit: int = CHART_STAR_LIMIT) -> Figure:
+        """Draw a target's plate-solved star field with its catalog stars.
+
+        Owner: astrometricslib.visualization.helpers.plot_astrometry
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        limit : `int`, optional
+            Most catalog stars to mark, at least 1. Defaults to 15.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The chart.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the target has no stack or no catalog
+        stars.
+        """
+        from astrometricslib.visualization.helpers import plot_astrometry
+
+        check_limit(limit, 1, None, allow_none=False)
+        return plot_astrometry(target, self._storage, limit=limit)
+
+    def plot_photometry(
+        self, target: Target, *, star: StellarObject | None = None, limit: int = CHART_STAR_LIMIT
+    ) -> Figure:
+        """Draw a target's stars beside the light curve of one of them.
+
+        Owner: astrometricslib.visualization.helpers.plot_target_photometry
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        star : `StellarObject`, optional
+            The star whose light curve to show first. Defaults to the
+            brightest.
+        limit : `int`, optional
+            Most catalog stars to mark, at least 1. Defaults to 15.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The chart.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the target has no stack or no catalog
+        stars.
+        """
+        from astrometricslib.visualization.helpers import plot_target_photometry
+
+        check_limit(limit, 1, None, allow_none=False)
+        return plot_target_photometry(target, self._storage, limit=limit, selected_star=star)
+
+    def plot_spectroscopy(
+        self, target: Target, *, star: StellarObject | None = None, limit: int = CHART_STAR_LIMIT
+    ) -> Figure:
+        """Draw a target's spectral stack beside the spectrum of one star.
+
+        Owner: astrometricslib.visualization.helpers.plot_target_spectroscopy
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        star : `StellarObject`, optional
+            The star whose spectrum to show first. Defaults to the first
+            star with an extraction box.
+        limit : `int`, optional
+            Most catalog stars to read, at least 1. Defaults to 15.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The chart.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the target has no spectral stack or no
+        extracted spectrum with an extraction box.
+        """
+        from astrometricslib.visualization.helpers import plot_target_spectroscopy
+
+        check_limit(limit, 1, None, allow_none=False)
+        return plot_target_spectroscopy(target, self._storage, limit=limit, selected_star=star)
+
+    def plot_focus(self, target: Target) -> Figure:
+        """Draw how the focus followed the temperature through the nights.
+
+        The focuser position and the temperature through the night, and the
+        star width against the temperature with its slope in pixels per
+        degree, so a focus drift as the telescope cools is easy to see.
+
+        Owner:
+            astrometricslib.visualization.focus_plots.plot_focus_vs_temperature
+
+        Parameters
+        ----------
+        target : `Target`
+            The target whose frames to read.
+
+        Returns
+        -------
+        figure : `matplotlib.figure.Figure`
+            The chart.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if no frame of the target has a focuser
+        temperature.
+        """
+        from astrometricslib.visualization.focus_plots import plot_focus_vs_temperature
+
+        return plot_focus_vs_temperature(target)
+
+    def plot_asteroids(self, target: Target) -> Figure:
+        """Draw a target's stack with the detected asteroid tracks.
+
+        Owner: astrometricslib.visualization.helpers.plot_asteroid_detection
+
+        Parameters
+        ----------
+        target : `Target`
             The target.
 
         Returns
         -------
-        processed, picture : `tuple` [`str`, `str`]
-            The stretched stack's path and the picture's path, each an empty
-            string when the target has none.
+        figure : `matplotlib.figure.Figure`
+            The chart.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if the target has no stack.
         """
-        return sky_picture_files(resolve_target(self._targets, target).stacking)
+        from astrometricslib.visualization.helpers import plot_asteroid_detection
 
-    def place_stack_picture_on_sky(
-        self, processed_path: str, picture_path: str
-    ) -> SkyPicturePlacement | None:
-        """Work out where a stack picture lies on the sky.
+        return plot_asteroid_detection(target)
 
-        Only the stretched stack's header is read. A grid of points across
-        the picture (17 along each side, edges included) is mapped to the sky
-        with the full plate solution, distortion terms included. A pixel of
-        the picture is the same pixel of the stretched stack, first row at
-        the top.
+    def get_star_overlay(
+        self, target: Target, *, image: str | None = None, limit: int | None = None
+    ) -> StarOverlay:
+        """Place a target's catalog stars on an image, for drawing labels.
+
+        Each star's pixel position comes from the image's plate solution,
+        or from the pixel center saved when the star was detected on the
+        target's only stack. Positions count from 1, as in FITS and DS9.
+
+        Owner:
+            astrometricslib.pipelines.shared.star_overlay.place_target_stars
 
         Parameters
         ----------
-        processed_path : `str`
-            The stretched stack, as `stack_sky_picture_files` names it.
-        picture_path : `str`
-            The picture, given back in the answer.
+        target : `Target`
+            The target whose stars to place.
+        image : `str`, optional
+            The image to place them on, such as the file the app shows. By
+            default, the target's current stack.
+        limit : `int` or `None`, optional
+            Most stars to place, at least 1, the most useful first. `None`
+            (the default) places every star found.
+
+        Returns
+        -------
+        overlay : `StarOverlay`
+            The placed stars, and why there are none when the image has no
+            sky solution.
+        """
+        from astrometricslib.pipelines.shared.star_overlay import place_target_stars
+
+        return place_target_stars(self._storage, target, image_path=image, limit=limit)
+
+    def get_sky_picture(self, target: Target) -> SkyPicturePlacement | None:
+        """Say where a target's stack picture lies on the sky.
+
+        A sky chart lays the picture over the sky. The picture is the color
+        picture when the target has one, else the stack's preview. Where it
+        lies comes from the stretched stack's plate solution, distortion
+        terms included: a grid of points across the picture (17 along each
+        side, edges included) is mapped to the sky. The answer is kept and
+        worked out again only when either file changes.
+
+        Owner: astrometricslib.visualization.sky_placement.get_sky_picture
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
 
         Returns
         -------
         placement : `SkyPicturePlacement` or `None`
             ``picture_path``, ``width``, ``height``, ``grid_size`` and
-            ``grid`` (``[ra, dec]`` pairs in degrees, row by row from the
-            picture's top-left corner). `None` when the header cannot be read
-            or has no real plate solution (only the mount's pointing does not
-            count); that is a status, not an error.
+            ``grid`` (``[ra, dec]`` pairs in degrees, ICRS, row by row from
+            the picture's top-left corner). `None` when the target has no
+            stretched stack, no picture or no real plate solution (only the
+            mount's pointing does not count); that is a status, not an
+            error.
         """
-        return place_picture_on_sky(processed_path, picture_path)
+        from astrometricslib.visualization.sky_placement import get_sky_picture
 
-    def plot(
-        self,
-        kind: Literal["dashboard", "star", "astrometry", "photometry", "spectroscopy", "focus", "asteroids"],
-        target: str | Target | None = None,
-        star: str | StellarObject | None = None,
-        spectral_star: str | StellarObject | None = None,
-        selected_star: str | StellarObject | None = None,
-        limit: int = 15,
-        figsize: tuple[int, int] | None = None,
-    ) -> Figure:
-        """Draw one of the charts of a target's or a star's results.
-
-        Arguments used by each kind (any other argument is refused):
-
-        - ``"dashboard"``: ``target``, ``selected_star``, ``limit``,
-          ``figsize``.
-        - ``"star"``: ``star``, ``spectral_star``, ``figsize``.
-        - ``"astrometry"``, ``"photometry"``, ``"spectroscopy"``:
-          ``target``, ``limit``, ``figsize``.
-        - ``"focus"``, ``"asteroids"``: ``target``, ``figsize``.
-
-        Parameters
-        ----------
-        kind : `str`
-            ``"dashboard"``: the combined view of a processed target.
-            ``"star"``: one star's light curve above its spectrum.
-            ``"astrometry"``: the plate-solved star field.
-            ``"photometry"``: the two-panel brightness view.
-            ``"spectroscopy"``: the two-panel spectrum view.
-            ``"focus"``: the focuser position and temperature through the
-            night, and the star width against the temperature with its
-            slope in pixels per degree, so a focus drift as the telescope
-            cools is easy to see.
-            ``"asteroids"``: the stack with the detected asteroid tracks.
-        target : `str` or `Target`, optional
-            The target to draw.
-        star : `str` or `StellarObject`, optional
-            For ``"star"``: the star (its id or the record).
-        spectral_star : `str` or `StellarObject`, optional
-            For ``"star"``: a separate record that holds the spectrum, if
-            it is not on ``star``.
-        selected_star : `str` or `StellarObject`, optional
-            For ``"dashboard"``: a star to highlight in the light-curve panel.
-        limit : `int`, optional
-            Most stars to plot. Defaults to 15.
-        figsize : `tuple` [`int`, `int`], optional
-            Figure size in inches. Each kind has its own default.
-
-        Returns
-        -------
-        figure : `matplotlib.figure.Figure`
-            The chart.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If the kind is unknown, an argument the kind does not use is
-            given, or a needed target or star is missing. A ``"focus"``
-            plot of a target with no focuser temperature is refused too.
-        """
-        from astrometricslib.visualization import helpers
-
-        check_choice("kind", kind, PLOT_KINDS)
-        reject_unused_arguments(
-            kind,
-            _PLOT_ARGUMENTS,
-            {
-                "target": target is not None,
-                "star": star is not None,
-                "spectral_star": spectral_star is not None,
-                "selected_star": selected_star is not None,
-                "limit": limit != 15,
-                "figsize": figsize is not None,
-            },
-        )
-        size = tuple(figsize) if figsize is not None else _DEFAULT_FIGURE_SIZES[kind]
-        if kind == "star":
-            if star is None:
-                raise InvalidArgumentError("kind='star' needs a star.")
-            return helpers.plot_stellar_analysis(
-                self._resolve_star(star),
-                spectral_star=self._resolve_star(spectral_star) if spectral_star is not None else None,
-                figsize=size,
-            )
-        if target is None:
-            raise InvalidArgumentError(f"kind={kind!r} needs a target.")
-        resolved = resolve_target(self._targets, target)
-        selected = self._resolve_star(selected_star) if selected_star is not None else None
-        try:
-            return self._plot_target(kind, resolved, selected, limit, size)
-        except InvalidArgumentError as error:
-            # The drawing code refuses a target that lacks what the chart
-            # needs, such as a stack or a focuser temperature.
-            error.details.update({"target": resolved.id, "kind": kind})
-            raise
-
-    def _plot_target(
-        self,
-        kind: str,
-        target: Target,
-        selected_star: StellarObject | None,
-        limit: int,
-        figsize: tuple[int, int],
-    ) -> Figure:
-        """Draw one of the charts of a target.
-
-        Returns
-        -------
-        figure : `matplotlib.figure.Figure`
-            The chart.
-        """
-        from astrometricslib.visualization import focus_plots, helpers
-
-        if kind == "dashboard":
-            return helpers.plot_target_dashboard(
-                target, self._stars, limit=limit, figsize=figsize, selected_star=selected_star
-            )
-        if kind == "astrometry":
-            return helpers.plot_astrometry(target, self._stars, limit=limit, figsize=figsize)
-        if kind == "photometry":
-            return helpers.plot_target_photometry(target, self._stars, limit=limit, figsize=figsize)
-        if kind == "spectroscopy":
-            return helpers.plot_target_spectroscopy(target, self._stars, limit=limit, figsize=figsize)
-        if kind == "focus":
-            return focus_plots.plot_focus_vs_temperature(target, figsize=figsize)
-        return helpers.plot_asteroid_detection(target, figsize=figsize)
-
-    def _resolve_star(self, star: str | StellarObject) -> StellarObject:
-        """Turn a star id into the star's record.
-
-        Returns
-        -------
-        star : `StellarObject`
-            The star.
-
-        Raises
-        ------
-        NotFoundError
-            If no star has that id.
-        """
-        if isinstance(star, StellarObject):
-            return star
-        found = self._stars.get(star) if self._stars is not None else None
-        if found is None:
-            raise NotFoundError(f"No star with id {star!r} in the library.", details={"star": star})
-        return found
+        return get_sky_picture(target)

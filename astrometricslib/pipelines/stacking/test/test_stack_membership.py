@@ -39,10 +39,10 @@ def _frames(count: int, exposure: str = "60") -> list[SimpleNamespace]:
     return [
         SimpleNamespace(
             path=f"/frames/{index}.fits",
-            exposure=exposure,
+            exposure_s=exposure,
             timestamp=1.0e9 + index,
             camera="cam",
-            iso="800",
+            gain=800,
             offset="0",
         )
         for index in range(count)
@@ -142,7 +142,7 @@ def _group_entry(frames: list[SimpleNamespace], exposure: float = 60.0) -> dict:
         "paths": [frame.path for frame in frames],
         "weight": len(frames) * exposure**2 / 25.0,
         "frame_count": len(frames),
-        "exposure_seconds": exposure,
+        "exposure_s": exposure,
         "frame_noise_counts": 5.0,
         "gain": 1.0,
         "gain_measured": True,
@@ -409,7 +409,7 @@ def _three_group_diagnostics(frames: list[SimpleNamespace], sizes: list[int], le
             "frame_paths": group_paths,
             "registration_included": flags,
             "frame_count": sum(flags),
-            "exposure_seconds": 30.0,
+            "exposure_s": 30.0,
             "frame_noise_counts": 1.0,
             "stack_weight": None,
         })

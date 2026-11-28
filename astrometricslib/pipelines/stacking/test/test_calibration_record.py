@@ -123,8 +123,8 @@ def test_a_failure_is_logged_and_never_raised() -> None:
 
 def test_a_group_stack_joins_the_calibration_files_of_every_group() -> None:
     """Each group's darks are kept; a file both groups used appears once."""
-    first = SimpleNamespace(exposure_seconds=30.0, frames=[])
-    second = SimpleNamespace(exposure_seconds=60.0, frames=[])
+    first = SimpleNamespace(exposure_s=30.0, frames=[])
+    second = SimpleNamespace(exposure_s=60.0, frames=[])
     merged = _merge_diagnostics([
         (first, "a.fits", {FLAT_FRAME_PATHS_KEY: ["flat"], DARK_FRAME_PATHS_KEY: ["dark30"]}),
         (second, "b.fits", {FLAT_FRAME_PATHS_KEY: ["flat"], DARK_FRAME_PATHS_KEY: ["dark60"]}),

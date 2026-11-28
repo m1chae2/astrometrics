@@ -9,9 +9,11 @@ export interface PlanItem {
     id: string;
     type: string;
     count: number;
-    exposure: number;
+    /** The exposure of one frame, in seconds. */
+    exposure_s: number;
     filter: string;
-    delay: number;
+    /** The wait between frames, in seconds. */
+    delay_s: number;
     coordinates?: {
         ra: number;
         dec: number;
@@ -47,9 +49,9 @@ export const PlanningProvider: React.FC<{ children: ReactNode }> = ({ children }
             id: crypto.randomUUID(),
             type,
             count,
-            exposure,
+            exposure_s: exposure,
             filter,
-            delay,
+            delay_s: delay,
         };
         setPlanItems((prev) => [...prev, newItem]);
     }, []);
@@ -63,7 +65,7 @@ export const PlanningProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     const updateItem = useCallback((id: string, type: string, count: number, exposure: number, filter: string, delay: number) => {
         setPlanItems((prev) => prev.map(item =>
-            item.id === id ? { ...item, type, count, exposure, filter, delay } : item
+            item.id === id ? { ...item, type, count, exposure_s: exposure, filter, delay_s: delay } : item
         ));
     }, []);
 

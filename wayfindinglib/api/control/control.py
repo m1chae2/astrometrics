@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.api.control.context import ControlContext
 from wayfindinglib.api.control.equipment import EquipmentControl
 from wayfindinglib.api.control.guiding import GuidingControl
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
 __all__ = ["ObservatoryControl"]
 
 
-class ObservatoryControl:
+class ObservatoryControl(MovedNames):
     """Operate the observatory through six topic children.
 
     Parameters
@@ -69,7 +70,8 @@ class ObservatoryControl:
         omitted, the simulator is used if ``ASTROMETRICS_TESTING`` is set.
     separate_process : `bool`, optional
         Run the INDI session in a process of its own, so a slow INDI
-        call cannot freeze the caller. `close` stops that process.
+        call cannot freeze the caller. `close` stops that process. An
+        option for programs such as the backend, not for a script.
     open_port_forwards : `bool`, optional
         Allow live SSH port forwards, such as the one to PHD2 on the
         observatory computer. `False` by default: each process would
@@ -139,6 +141,9 @@ class ObservatoryControl:
         event reader, if guiding was used, and the INDI worker process, if
         `separate_process` started one. It starts nothing that was not
         already running, and it is safe to call more than once.
+
+        Owner:
+            wayfindinglib.api.control.context.ControlContext.close
         """
         self._context.close()
 

@@ -645,8 +645,8 @@ class SirilStaging(SirilSession):
             Target identifier used to name the working folder.
         image_files : `Any`
             A list of frame records (dict or FrameRecord-like objects
-            with ``path``/``camera``/``telescope``/``iso``/
-            ``exposure``/``filter`` attributes).
+            with ``path``/``camera``/``telescope``/``gain``/
+            ``exposure_s``/``filter`` attributes).
         camera_filter : `str`, optional
             Camera name to restrict light frames to. If `None`
             (default), it is inferred from the first frame; if it
@@ -890,7 +890,7 @@ class SirilStaging(SirilSession):
             "Pre-fetch: read %d files (%.1f MB) in %.1f s; %d failed, %d missing.",
             summary.file_count,
             summary.byte_count / 1e6,
-            summary.elapsed_seconds,
+            summary.elapsed_s,
             summary.failure_count,
             summary.skipped_missing_count,
         )

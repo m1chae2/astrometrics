@@ -1,7 +1,7 @@
 """Tests of ``images:map_position`` and the position mapping behind it.
 
 The call is declared and wired, and refuses an image outside the library.
-The mapping itself is the library's (`QualityRecords.map_position`, whose
+The mapping itself is the library's (`quality.frames.map_positions`, whose
 matrix steps are tested in the library); these tests run it through the
 image service. Two plate-solved images are linked by the sky. A stack's
 registration record moves a pixel from a frame to the stack (with the crop

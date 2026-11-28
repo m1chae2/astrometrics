@@ -40,7 +40,7 @@ interface StackSummaryPanelProps {
 
 /** One exposure group, as the backend sends it inside `StackSummary.exposure_groups`. */
 export interface ExposureGroupView {
-    exposure_seconds: number;
+    exposure_s: number;
     frames_submitted: number;
     frames_stacked: number;
     saturated?: boolean;
@@ -241,8 +241,8 @@ export const StackSummaryPanel: React.FC<StackSummaryPanelProps> = ({
                         </thead>
                         <tbody>
                             {groups.map((group) => (
-                                <tr key={group.exposure_seconds}>
-                                    <th scope="row">{formatExposureSeconds(group.exposure_seconds)}</th>
+                                <tr key={group.exposure_s}>
+                                    <th scope="row">{formatExposureSeconds(group.exposure_s)}</th>
                                     <td>{group.frames_stacked} of {group.frames_submitted}</td>
                                     <td>{describeGroupNotes(group)}</td>
                                 </tr>

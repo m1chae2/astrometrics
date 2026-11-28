@@ -29,9 +29,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib.reports import CaptureSetting, MeasurementReference, QualityLimit
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import MeasurementReference, QualityLimit
 
 
 class ActionClass(StrEnum):
@@ -98,11 +99,11 @@ class ProposedAction(BaseModel):
 
     Parameters
     ----------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         Exposure time of one frame, in seconds.
     frame_count : `int` or `None`
         How many frames to take.
-    gain_setting : `int` or `None`
+    gain : `int` or `None`
         The camera's gain setting.
     offset : `int` or `None`
         The camera's offset.
@@ -127,9 +128,16 @@ class ProposedAction(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    exposure_seconds: float | None = Field(default=None, gt=0.0, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        gt=0.0,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     frame_count: int | None = Field(default=None, ge=1, alias="frameCount")
-    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    gain: int | None = Field(
+        default=None, alias="gain", validation_alias=AliasChoices("gain", "gainSetting", "gain_setting")
+    )
     offset: int | None = None
     binning: int | None = Field(default=None, ge=1)
     filter_name: str | None = Field(default=None, alias="filterName")
@@ -174,9 +182,9 @@ class ExpectedEffect(BaseModel):
         Expected change in stack noise as a fraction. A fall of 29% is -0.29.
     efficiency_change : `float` or `None`
         Expected change in efficiency (a number from 0 to 1).
-    effective_time_added_seconds : `float` or `None`
+    effective_time_added_s : `float` or `None`
         Effective exposure time the action adds, in seconds.
-    wall_clock_seconds : `float` or `None`
+    wall_clock_s : `float` or `None`
         Time on the clock the action takes, with downloads, dithers and
         autofocus, in seconds.
     description : `str`
@@ -187,8 +195,22 @@ class ExpectedEffect(BaseModel):
 
     noise_change_fraction: float | None = Field(default=None, alias="noiseChangeFraction")
     efficiency_change: float | None = Field(default=None, alias="efficiencyChange")
-    effective_time_added_seconds: float | None = Field(default=None, alias="effectiveTimeAddedSeconds")
-    wall_clock_seconds: float | None = Field(default=None, ge=0.0, alias="wallClockSeconds")
+    effective_time_added_s: float | None = Field(
+        default=None,
+        alias="effectiveTimeAddedS",
+        validation_alias=AliasChoices(
+            "effectiveTimeAddedS",
+            "effective_time_added_s",
+            "effectiveTimeAddedSeconds",
+            "effective_time_added_seconds",
+        ),
+    )
+    wall_clock_s: float | None = Field(
+        default=None,
+        ge=0.0,
+        alias="wallClockS",
+        validation_alias=AliasChoices("wallClockS", "wall_clock_s", "wallClockSeconds", "wall_clock_seconds"),
+    )
     description: str
 
 

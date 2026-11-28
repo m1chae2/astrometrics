@@ -15,7 +15,7 @@ import pytest
 from astropy.time import Time
 from pytest_mock import MockerFixture
 
-from astrometricslib import Target
+from astrometricslib import SkyPosition, Target
 from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
@@ -33,7 +33,6 @@ from wayfindinglib.models.policy.delegation import (
     DelegationState,
     ObservatoryCapability,
 )
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations as ops
 from wayfindinglib.tasks.control_tasks.capture_runs import CaptureRuns
 
@@ -209,11 +208,11 @@ def test_mount_status_reads_the_mount_and_the_ambient_values(mocker: MockerFixtu
 
     status = ops.mount_status(manager)
 
-    assert status.ra.endswith("s") and "h " in status.ra
-    assert status.dec.startswith("+") and status.dec.endswith("″")
-    assert status.model_dump(by_alias=True, exclude={"ra", "dec"}) == {
-        "altitude": "45:00:00",
-        "azimuth": "180:00:00",
+    assert status.ra_deg is not None and 0.0 <= status.ra_deg < 360.0
+    assert status.dec_deg is not None and status.dec_deg > 0.0
+    assert status.model_dump(by_alias=True, exclude={"ra_deg", "dec_deg"}) == {
+        "altitudeDeg": 45.0,
+        "azimuthDeg": 180.0,
         "temperature": "15.0°C",
         "humidity": "40.0%",
         "trackingStatus": "Tracking",
@@ -261,14 +260,12 @@ def test_mount_status_reports_the_mount_position_in_icrs(mocker: MockerFixture) 
 
     status = ops.mount_status(manager)
 
-    from astrometricslib._internal.frames import parse_coordinate_string
-
-    assert parse_coordinate_string(status.ra, is_ra=True) == pytest.approx(catalog_ra_deg, abs=2e-4)
-    assert parse_coordinate_string(status.dec, is_ra=False) == pytest.approx(catalog_dec_deg, abs=2e-4)
+    assert status.ra_deg == pytest.approx(catalog_ra_deg, abs=2e-4)
+    assert status.dec_deg == pytest.approx(catalog_dec_deg, abs=2e-4)
 
 
-def test_mount_position_to_icrs_reads_indi_text_and_passes_unknown_through() -> None:
-    """Verify INDI display text is read and an unknown position is kept."""
+def test_mount_position_to_icrs_reads_indi_text_and_gives_none_when_unknown() -> None:
+    """Verify INDI display text is read and an unknown position is `None`."""
     obstime = Time("2026-10-07T02:15:00", scale="utc")
     current_ra_deg, current_dec_deg = icrs_to_current_epoch(101.28716, -16.71612, obstime)
     ra_hours = current_ra_deg / 15.0
@@ -277,15 +274,15 @@ def test_mount_position_to_icrs_reads_indi_text_and_passes_unknown_through() -> 
     whole_deg, dec_minutes = int(abs(current_dec_deg)), int((abs(current_dec_deg) % 1) * 60)
     dec_seconds = ((abs(current_dec_deg) * 60) % 1) * 60
 
-    ra_text, dec_text = ops.mount_position_to_icrs(
+    ra_deg, dec_deg = ops.mount_position_to_icrs(
         f"{whole_hours}° {minutes}′ {seconds:.4f}″",
         f"-{whole_deg}° {dec_minutes}′ {dec_seconds:.4f}″",
         obstime,
     )
 
-    assert ra_text == "6h 45m 08.92s"
-    assert dec_text == "-16° 42′ 58.0″"
-    assert ops.mount_position_to_icrs("Unknown", "Unknown", obstime) == ("Unknown", "Unknown")
+    assert ra_deg == pytest.approx(101.28716, abs=1e-4)
+    assert dec_deg == pytest.approx(-16.71612, abs=1e-4)
+    assert ops.mount_position_to_icrs("Unknown", "Unknown", obstime) == (None, None)
 
 
 def test_resolve_destination_raises_for_unknown_target(mocker: MockerFixture) -> None:
@@ -334,7 +331,7 @@ def test_slew_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     mount_driver.slew = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is None
     mount_driver.slew.assert_called_once()
     _assert_sent_in_current_epoch(mount_driver.slew, 150.0, 20.0)
 
@@ -360,8 +357,8 @@ def test_park_and_unpark_delegate_to_mount_driver(mocker: MockerFixture) -> None
     mount_driver.unpark = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.park(manager) is True
-    assert ops.unpark(manager) is True
+    assert ops.park(manager) is None
+    assert ops.unpark(manager) is None
 
 
 def test_slew_and_park_stop_the_apps_own_capture_run_first(mocker: MockerFixture) -> None:
@@ -375,9 +372,9 @@ def test_slew_and_park_stop_the_apps_own_capture_run_first(mocker: MockerFixture
     manager = _FakeManager(mount_driver=mount_driver, camera_driver=camera_driver)
     stop_flag = manager.capture_runs.begin()
 
-    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is None
     assert stop_flag.is_set()
-    assert ops.park(manager) is True
+    assert ops.park(manager) is None
 
     assert order == ["abort", "slew", "abort", "park"]
 
@@ -423,7 +420,7 @@ def test_a_failed_abort_does_not_block_the_slew(mocker: MockerFixture) -> None:
     manager = _FakeManager(mount_driver=mount_driver, camera_driver=camera_driver)
     manager.capture_runs.begin()
 
-    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is None
 
 
 def test_stop_capture_stops_the_run_and_is_a_no_op_when_idle(mocker: MockerFixture) -> None:
@@ -432,11 +429,11 @@ def test_stop_capture_stops_the_run_and_is_a_no_op_when_idle(mocker: MockerFixtu
     camera_driver.abort_exposure = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(camera_driver=camera_driver)
 
-    assert ops.stop_capture(manager) is False
+    assert ops.stop_capture(manager) is None
     camera_driver.abort_exposure.assert_not_called()
 
     stop_flag = manager.capture_runs.begin()
-    assert ops.stop_capture(manager) is True
+    assert ops.stop_capture(manager) is None
     assert stop_flag.is_set()
     camera_driver.abort_exposure.assert_called_once_with()
 
@@ -458,48 +455,41 @@ def test_set_tracking_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     mount_driver.set_tracking = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.set_tracking(manager, True) is True
+    assert ops.set_tracking(manager, True) is None
     mount_driver.set_tracking.assert_called_once_with(True)
 
 
-def test_abort_motion_delegates_to_mount_driver(mocker: MockerFixture) -> None:
-    """Verify abort_motion delegates to the mount driver."""
+def test_stop_mount_delegates_to_mount_driver_and_ends_centering(mocker: MockerFixture) -> None:
+    """Verify stop_mount sends the abort and stops a centering loop."""
     mount_driver = mocker.Mock()
     mount_driver.abort_motion = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.abort_motion(manager) is True
+    assert ops.stop_mount(manager) is None
     mount_driver.abort_motion.assert_called_once()
-    assert manager.motion_stop.is_set(), "abort must also stop a centering loop"
+    assert manager.motion_stop.is_set(), "a stop must also end a centering loop"
 
 
-def test_cancel_centering_aborts_only_a_running_run_and_only_with_authority(mocker: MockerFixture) -> None:
-    """A stop needs MOUNT_CONTROL even with no run; with a run it aborts."""
+def test_stop_mount_is_refused_without_authority_and_changes_nothing(mocker: MockerFixture) -> None:
+    """A stop needs MOUNT_CONTROL; refused, it sends and sets nothing."""
     mount_driver = mocker.Mock()
     mount_driver.abort_motion = mocker.AsyncMock(return_value=True)
-    manager = _FakeManager(mount_driver=mount_driver)
-
-    assert ops.cancel_centering(manager, run_is_active=False) is False
-    mount_driver.abort_motion.assert_not_called()
-    assert ops.cancel_centering(manager, run_is_active=True) is True
-    mount_driver.abort_motion.assert_called_once()
-
     delegated = _FakeManager(mount_driver=mount_driver, policy=_authoritative_policy())
-    for run_is_active in (True, False):
-        with pytest.raises(PermissionDeniedError):
-            ops.cancel_centering(delegated, run_is_active=run_is_active)
+
+    with pytest.raises(PermissionDeniedError):
+        ops.stop_mount(delegated)
+    mount_driver.abort_motion.assert_not_called()
     assert not delegated.motion_stop.is_set()
 
 
-def test_stop_guide_loop_sets_the_event_only_with_authority() -> None:
-    """Monitor mode leaves the guide loop's stop event unset."""
-    stop = threading.Event()
-    with pytest.raises(PermissionDeniedError):
-        ops.stop_guide_loop(_FakeManager(policy=_authoritative_policy()), stop)
-    assert not stop.is_set()
+def test_a_refused_device_command_raises_a_hardware_error(mocker: MockerFixture) -> None:
+    """A driver that does not accept a command makes the action raise."""
+    mount_driver = mocker.Mock()
+    mount_driver.park = mocker.AsyncMock(return_value=False)
+    manager = _FakeManager(mount_driver=mount_driver)
 
-    ops.stop_guide_loop(_FakeManager(), stop)
-    assert stop.is_set()
+    with pytest.raises(HardwareError, match="park"):
+        ops.park(manager)
 
 
 def test_pulse_delegates_to_mount_driver(mocker: MockerFixture) -> None:
@@ -544,7 +534,7 @@ def test_sync_mount_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     mount_driver.sync = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.sync_mount(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
+    assert ops.sync_mount(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is None
     mount_driver.sync.assert_called_once()
     _assert_sent_in_current_epoch(mount_driver.sync, 150.0, 20.0)
 
@@ -645,7 +635,7 @@ def test_set_filter_succeeds_with_resolved_name(mocker: MockerFixture) -> None:
     filter_wheel_driver.set_position = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(filter_wheel_driver=filter_wheel_driver)
 
-    assert ops.set_filter(manager, "lum") is True
+    assert ops.set_filter(manager, "lum") is None
     filter_wheel_driver.set_position.assert_called_once_with("Luminance")
 
 
@@ -660,7 +650,7 @@ def test_set_filter_matches_a_luminance_slot_named_l(mocker: MockerFixture, requ
 
     # The wheel driver's own match fails for the long spellings; the
     # control layer finds the slot through the library's filter rule.
-    assert ops.set_filter(manager, requested) is True
+    assert ops.set_filter(manager, requested) is None
     filter_wheel_driver.set_position.assert_called_once_with("L")
 
 
@@ -691,30 +681,30 @@ def test_manual_move_and_slew_rate_delegate_to_mount_driver(mocker: MockerFixtur
     mount_driver.set_slew_rate = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
-    assert ops.manual_move(manager, "north", True) is True
+    assert ops.manual_move(manager, "north", True) is None
     mount_driver.move.assert_called_once_with("north", True)
-    assert ops.set_slew_rate(manager, 3) is True
+    assert ops.set_slew_rate(manager, 3) is None
     mount_driver.set_slew_rate.assert_called_once_with(3)
 
 
-def test_focus_move_delegates_to_focuser_driver(mocker: MockerFixture) -> None:
+def test_move_focuser_delegates_to_focuser_driver(mocker: MockerFixture) -> None:
     """Verify focus_move delegates to the focuser driver."""
     focuser_driver = mocker.Mock()
     focuser_driver.move_relative = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(focuser_driver=focuser_driver)
 
-    assert ops.focus_move(manager, 100) is True
+    assert ops.move_focuser(manager, 100) is None
     focuser_driver.move_relative.assert_called_once_with(100)
 
 
-def test_focus_move_raises_when_autofocus_not_authoritative(mocker: MockerFixture) -> None:
+def test_move_focuser_raises_when_autofocus_not_authoritative(mocker: MockerFixture) -> None:
     """Verify focus_move is refused when AUTOFOCUS isn't authoritative."""
     focuser_driver = mocker.Mock()
     focuser_driver.move_relative = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(focuser_driver=focuser_driver, policy=_authoritative_policy())
 
     with pytest.raises(PermissionDeniedError, match="AUTOFOCUS"):
-        ops.focus_move(manager, 100)
+        ops.move_focuser(manager, 100)
     focuser_driver.move_relative.assert_not_called()
 
 
@@ -757,29 +747,16 @@ def _manager_with_all_drivers(mocker: MockerFixture) -> tuple[_FakeManager, Any]
 
 
 def test_connect_connects_every_configured_driver(mocker: MockerFixture) -> None:
-    """Verify connect() connects each of the six drivers and returns True."""
+    """Verify connect() connects each of the six drivers."""
     manager, guide_camera_driver = _manager_with_all_drivers(mocker)
 
-    assert ops.connect(manager) is True
+    assert ops.connect(manager) is None
     manager.mount_driver.connect.assert_called_once()
     manager.focuser_driver.connect.assert_called_once()
     manager.filter_wheel_driver.connect.assert_called_once()
     manager.camera_driver.connect.assert_called_once()
     guide_camera_driver.connect.assert_called_once()
     manager.enclosure_driver.connect.assert_called_once()
-
-
-def test_disconnect_disconnects_every_configured_driver(mocker: MockerFixture) -> None:
-    """Verify disconnect() disconnects each of the six drivers."""
-    manager, guide_camera_driver = _manager_with_all_drivers(mocker)
-
-    assert ops.disconnect(manager) is True
-    manager.mount_driver.disconnect.assert_called_once()
-    manager.focuser_driver.disconnect.assert_called_once()
-    manager.filter_wheel_driver.disconnect.assert_called_once()
-    manager.camera_driver.disconnect.assert_called_once()
-    guide_camera_driver.disconnect.assert_called_once()
-    manager.enclosure_driver.disconnect.assert_called_once()
 
 
 def test_observer_location_returns_none_when_unreported(mocker: MockerFixture) -> None:
@@ -1028,15 +1005,15 @@ def test_a_bad_position_dictionary_is_an_invalid_argument() -> None:
 
 
 def test_a_slew_target_id_is_read_fresh_from_the_library() -> None:
-    """A target id is looked up after re-reading the catalog."""
+    """A target id is looked up in the library, which reads what changed."""
     calls = []
 
-    def get(target_id: str, refresh: bool = False) -> None:
+    def get(target_id: str) -> None:
         """Record the lookup; no target has the id."""
-        calls.append((target_id, refresh))
+        calls.append(target_id)
 
     context = SimpleNamespace(astrometrics=SimpleNamespace(targets=SimpleNamespace(get=get)))
 
     with pytest.raises(NotFoundError, match="Nope"):
         ops.resolve_destination(context, "Nope")
-    assert calls == [("Nope", True)]
+    assert calls == ["Nope"]

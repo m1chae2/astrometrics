@@ -110,7 +110,7 @@ class DeepStarCatalogDriver(CatalogDriver):
         return "Gaia DR3 (downloaded)"
 
     @property
-    def maximum_query_radius_degrees(self) -> float:
+    def maximum_query_radius_deg(self) -> float:
         """The largest radius, in degrees, this driver accepts (whole sky)."""
         return 180.0
 

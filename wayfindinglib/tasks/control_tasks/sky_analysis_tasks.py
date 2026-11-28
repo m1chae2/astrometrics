@@ -32,7 +32,7 @@ def _has_position(altitude: float | None, azimuth: float | None, pier_side: str 
 
 
 def sky_samples_from_frames(
-    frames: Sequence[CaptureFrame], minimum_exposure_seconds: float | None
+    frames: Sequence[CaptureFrame], minimum_exposure_s: float | None
 ) -> tuple[list[SkySample], int]:
     """Turn the equipment's light frames into star-width and roundness samples.
 
@@ -40,7 +40,7 @@ def sky_samples_from_frames(
     ----------
     frames : `Sequence` [`CaptureFrame`]
         The equipment's light frames.
-    minimum_exposure_seconds : `float` or `None`
+    minimum_exposure_s : `float` or `None`
         Shortest exposure whose star measurements count. `None` when the
         equipment has not guided yet, in which case no frame qualifies.
 
@@ -52,18 +52,18 @@ def sky_samples_from_frames(
     without_position : `int`
         Qualifying frames left out because they have no position.
     """
-    if minimum_exposure_seconds is None:
+    if minimum_exposure_s is None:
         return [], 0
     samples: list[SkySample] = []
     without_position = 0
-    for frame in usable_star_frames(frames, minimum_exposure_seconds):
-        if not _has_position(frame.altitude_degrees, frame.azimuth_degrees, frame.pier_side):
+    for frame in usable_star_frames(frames, minimum_exposure_s):
+        if not _has_position(frame.altitude_deg, frame.azimuth_deg, frame.pier_side):
             without_position += 1
             continue
         common = {
             "night": night_of(frame),
-            "altitude_degrees": frame.altitude_degrees,
-            "azimuth_degrees": frame.azimuth_degrees,
+            "altitude_deg": frame.altitude_deg,
+            "azimuth_deg": frame.azimuth_deg,
             "pier_side": frame.pier_side,
         }
         if frame.star_width_arcsec is not None:
@@ -106,7 +106,7 @@ def sky_samples_from_guiding(
         for run in analysis.performance.runs:
             if run.rms_per_axis_arcsec is None:
                 continue
-            if not _has_position(run.altitude_degrees, run.azimuth_degrees, run.pier_side):
+            if not _has_position(run.altitude_deg, run.azimuth_deg, run.pier_side):
                 without_position += 1
                 continue
             samples.append(
@@ -114,8 +114,8 @@ def sky_samples_from_guiding(
                     night=analysis.session_id,
                     metric="guiding_error",
                     value=run.rms_per_axis_arcsec,
-                    altitude_degrees=run.altitude_degrees,
-                    azimuth_degrees=run.azimuth_degrees,
+                    altitude_deg=run.altitude_deg,
+                    azimuth_deg=run.azimuth_deg,
                     pier_side=run.pier_side,
                 )
             )

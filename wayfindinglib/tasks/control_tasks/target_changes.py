@@ -4,7 +4,7 @@ Description: The Ekos analyze log records the mount's state changes
 (``Slewing``, ``Tracking`` and so on) and, now and then, where the mount
 pointed (altitude, azimuth and declination). The stored
 `EkosSessionContext` keeps both. This module reads them and answers one
-question for `review.query(kind="target_changes")`: when did the
+question for `review.nights.get_target_changes`: when did the
 mount finish a slew and start tracking at a new place in the sky, and
 which library target is that?
 
@@ -127,7 +127,7 @@ def library_target_positions(context: ControlContext) -> list[tuple[str, float, 
         coordinates cannot be read, is left out.
     """
     positions = []
-    for target in context.astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in context.astrometrics.targets.query(include_empty=True).items:
         try:
             ra_deg = target.ra_deg
             dec_deg = target.dec_deg
@@ -231,8 +231,8 @@ def _pointing_at(
     position = min(candidates, key=lambda candidate: abs(candidate.timestamp - tracking_at))
     site = earth_location(location["latitude"], location["longitude"], location.get("elevation", 0.0))
     horizontal = SkyCoord(
-        alt=position.altitude_degrees * u.deg,
-        az=position.azimuth_degrees * u.deg,
+        alt=position.altitude_deg * u.deg,
+        az=position.azimuth_deg * u.deg,
         frame=AltAz(obstime=Time(position.timestamp, format="unix"), location=site),
     )
     sky = horizontal.icrs
@@ -266,9 +266,7 @@ def slew_end_positions(context: ControlContext) -> list[tuple[float, float]]:
     return positions
 
 
-def find_target_changes(
-    context: ControlContext, session_id: str | None = None, limit: int = 10
-) -> list[TargetChange]:
+def find_target_changes(context: ControlContext, session_id: str | None = None) -> list[TargetChange]:
     """List the slews that moved the mount to a new place in the sky.
 
     Parameters
@@ -279,8 +277,6 @@ def find_target_changes(
     session_id : `str`, optional
         Keep only this observing night, such as ``"2026-09-24"``. Every
         recorded night when omitted.
-    limit : `int`, optional
-        How many of the newest changes to return.
 
     Returns
     -------
@@ -323,4 +319,4 @@ def find_target_changes(
                 note=note,
             )
         )
-    return changes[-limit:]
+    return changes

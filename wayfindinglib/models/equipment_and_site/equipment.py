@@ -1,181 +1,18 @@
 """Purpose: Equipment Domain Models.
 
-Description: Telescope and camera specifications, held in a catalog of
-which more than one may be configured with exactly one of each active.
-Per `Wayfinding_Library_Architecture.md` Section 3.2: optics, cameras and
-mounts are configured once each and joined by the setups, one of which is
-active. A `Telescope` is the view the planning and control code uses: one
-optic joined with the safe pointing envelope of the mount that carries it
-in its setup.
-
-`meridian_flip_delay_min` is derived from `flip_hour_angle_deg` rather
-than independently stored, per `Wayfinding_Library_Architecture.md`
-Section 5.5: both describe the same physical threshold, and Phase 4 executing
-flips rather than merely reporting them means the two can no longer be
-allowed to disagree.
-
-`EquipmentConfiguration` is the one model of an active telescope and
-camera pairing. It derives the plate scale and field of view from the
-two (`Wayfinding_Library_Architecture.md` Section 3.2, Equation (1)).
+Description: The catalog of configured telescopes, cameras and guide
+scopes, with exactly one of each active, and the cooling policy of a camera.
+The equipment models themselves (`Telescope`, `Camera`, `GuideScope`) and the
+active pairing with its plate scale and field of view
+(`ObservatoryConfiguration`) belong to the core library and are imported
+from `astrometricslib`. Per `Wayfinding_Library_Architecture.md` Section 3.2:
+optics, cameras and mounts are configured once each and joined by the
+setups, one of which is active.
 """
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-PLATE_SCALE_CONSTANT = 206.265
-"""Numerator in the standard plate-scale formula (radians x arcsec/rad / 1000).
-
-plate_scale (arcsec/px) = 206.265 x pixel_size_um / focal_length_mm
-"""
-
-SIDEREAL_DEGREES_PER_HOUR = 15.0
-"""Earth's sidereal rotation rate, in degrees of hour angle per hour."""
-
-
-class Telescope(BaseModel):
-    """A physical imaging rig's optics and safe pointing envelope.
-
-    More than one may be configured in an `EquipmentCatalog`; exactly
-    one is active. `flip_hour_angle_deg` is the single stored
-    meridian-flip threshold; `meridian_flip_delay_min` is derived from
-    it (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    id: str
-    name: str
-    focal_length_mm: float = Field(..., gt=0.0, description="Effective focal length in millimetres.")
-    focal_ratio: float = Field(default=0.0, ge=0.0, description="Focal ratio (f/number).")
-    altitude_limits_enabled: bool = Field(default=True)
-    min_altitude_deg: float = Field(default=0.0, ge=-90.0, le=90.0)
-    max_altitude_deg: float = Field(default=90.0, ge=-90.0, le=90.0)
-    hour_angle_limits_enabled: bool = Field(default=False)
-    max_hour_angle_hours: float = Field(default=2.0, gt=0.0, le=12.0)
-    flip_hour_angle_deg: float = Field(
-        default=1.0,
-        gt=0.0,
-        description="Hour angle past transit at which a meridian flip is triggered, in degrees.",
-    )
-    mount_protocol: str = Field(
-        default="indi",
-        description="Hardware-control protocol driving this telescope's mount.",
-    )
-    focuser_protocol: str = Field(
-        default="indi",
-        description=(
-            "Hardware-control protocol driving this telescope's focuser. Lives here rather "
-            "than on a standalone catalog entry because the focuser has no `EquipmentCatalog` "
-            "entry of its own -- it is discovered heuristically off the same connection as "
-            "the mount."
-        ),
-    )
-    filter_wheel_protocol: str = Field(
-        default="indi",
-        description=(
-            "Hardware-control protocol driving this telescope's filter wheel. Lives here "
-            "rather than on a standalone catalog entry for the same reason as "
-            "`focuser_protocol`."
-        ),
-    )
-    guiding_protocol: str = Field(
-        default="phd2",
-        description=(
-            "Which guider guides this telescope: 'phd2' (PHD2), 'internal' (KStars/Ekos "
-            "sends the mount its own guide pulses) or 'simulator' (a stand-in guide loop)."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _check_altitude_envelope_ordering(self) -> Telescope:
-        """Verify the configured altitude envelope is non-empty.
-
-        Returns
-        -------
-        telescope : `Telescope`
-            This telescope, unchanged, once validated.
-
-        Raises
-        ------
-        ValueError
-            Raised if `min_altitude_deg` exceeds `max_altitude_deg`.
-        """
-        if self.min_altitude_deg > self.max_altitude_deg:
-            raise ValueError(
-                f"min_altitude_deg ({self.min_altitude_deg}) exceeds "
-                f"max_altitude_deg ({self.max_altitude_deg})"
-            )
-        return self
-
-    @property
-    def meridian_flip_delay_min(self) -> float:
-        """Meridian-flip trigger, in minutes past transit.
-
-        Derived from `flip_hour_angle_deg` at the sidereal rate
-        (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)):
-        minutes = (degrees / 15) x 60.
-        """
-        return (self.flip_hour_angle_deg / SIDEREAL_DEGREES_PER_HOUR) * 60.0
-
-    @property
-    def aperture_mm(self) -> float | None:
-        """Aperture diameter, in millimeters.
-
-        Derived from the focal length and the focal ratio: aperture =
-        focal length / focal ratio. A focal ratio of 0 means "not set", so
-        the aperture is then unknown.
-
-        Returns
-        -------
-        aperture_mm : `float` or `None`
-            The aperture, or `None` when the focal length or the focal ratio
-            is missing or not above 0.
-        """
-        if not (self.focal_length_mm and self.focal_ratio) or self.focal_ratio < 0.0:
-            return None
-        return self.focal_length_mm / self.focal_ratio
-
-
-class Camera(BaseModel):
-    """A physical sensor's imaging geometry and thermal envelope.
-
-    More than one may be configured in an `EquipmentCatalog`; exactly
-    one is active.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    id: str
-    name: str
-    pixel_size_um: float = Field(..., gt=0.0, description="Pixel pitch in micrometres.")
-    sensor_width_px: int = Field(..., gt=0, description="Sensor width in pixels.")
-    sensor_height_px: int = Field(..., gt=0, description="Sensor height in pixels.")
-    min_cooling_temp_c: float = Field(default=-30.0, description="Coldest temperature the sensor supports.")
-    max_cooling_ramp_c_per_min: float = Field(
-        default=2.0, gt=0.0, description="Maximum safe cooling/warming rate."
-    )
-    protocol: str = Field(
-        default="indi",
-        description="Hardware-control protocol driving this camera.",
-    )
-
-
-class GuideScope(BaseModel):
-    """A separate optical tube used only for guiding, its own focal length.
-
-    Relevant to `compute_guider_calibration`'s `arcsec_per_pixel` input:
-    `EquipmentConfiguration.plate_scale_arcsec_per_px` assumes the
-    *main* telescope's focal length, which is wrong when guiding
-    through a separate scope rather than an off-axis guider sharing
-    the main OTA's aperture. More than one may be configured in an
-    `EquipmentCatalog`; at most one is active.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    id: str
-    name: str
-    focal_length_mm: float = Field(..., gt=0.0, description="Effective focal length in millimetres.")
-    aperture_mm: float | None = Field(default=None, gt=0.0, description="Clear aperture in millimetres.")
+from astrometricslib import Camera, GuideScope, Telescope
 
 
 class CoolingPolicy(BaseModel):
@@ -186,7 +23,9 @@ class CoolingPolicy(BaseModel):
     target_temp_c: float = Field(default=-10.0)
     ramp_c_per_min: float = Field(default=2.0, gt=0.0)
     settle_tolerance_c: float = Field(default=0.5, gt=0.0)
-    settle_timeout_sec: int = Field(default=900, gt=0)
+    settle_timeout_s: int = Field(
+        default=900, gt=0, validation_alias=AliasChoices("settle_timeout_s", "settle_timeout_sec")
+    )
 
 
 class EquipmentCatalog(BaseModel):
@@ -302,56 +141,3 @@ class EquipmentCatalog(BaseModel):
         if self.active_guide_camera_id is None:
             return None
         return next((c for c in self.cameras if c.id == self.active_guide_camera_id), None)
-
-
-class EquipmentConfiguration(BaseModel):
-    """A resolved active telescope/camera pairing with derived geometry.
-
-    Constructed from an `EquipmentCatalog`'s active entries rather than
-    recorded independently, so there is exactly one place activeness is
-    recorded (`Wayfinding_Library_Architecture.md` Section 3.2).
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    telescope: Telescope
-    camera: Camera
-
-    @property
-    def plate_scale_arcsec_per_px(self) -> float:
-        """Plate scale in arcseconds per pixel.
-
-        Derived via: 206.265 x pixel_size_um / focal_length_mm.
-        """
-        return PLATE_SCALE_CONSTANT * self.camera.pixel_size_um / self.telescope.focal_length_mm
-
-    def guider_plate_scale_arcsec_per_px(
-        self, guide_scope: GuideScope | None = None, guide_camera: Camera | None = None
-    ) -> float:
-        """Plate scale to use for guider-calibration math.
-
-        Uses `guide_scope`'s focal length in place of the main
-        telescope's when guiding through a separate optical tube, and
-        `guide_camera`'s pixel size in place of the main camera's when
-        a separate guide camera is used. Each falls back to the main
-        telescope or main camera when it is `None` (guiding through the
-        main OTA with the main camera, the common case).
-
-        Returns
-        -------
-        plate_scale : `float`
-            Arcseconds per pixel for guider-calibration math.
-        """
-        focal_length_mm = guide_scope.focal_length_mm if guide_scope else self.telescope.focal_length_mm
-        pixel_size_um = guide_camera.pixel_size_um if guide_camera else self.camera.pixel_size_um
-        return PLATE_SCALE_CONSTANT * pixel_size_um / focal_length_mm
-
-    @property
-    def fov_width_deg(self) -> float:
-        """Sensor field-of-view width in degrees."""
-        return self.plate_scale_arcsec_per_px * self.camera.sensor_width_px / 3600.0
-
-    @property
-    def fov_height_deg(self) -> float:
-        """Sensor field-of-view height in degrees."""
-        return self.plate_scale_arcsec_per_px * self.camera.sensor_height_px / 3600.0

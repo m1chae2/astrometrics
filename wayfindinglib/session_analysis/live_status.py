@@ -332,7 +332,7 @@ def _total_error(sample: EkosGuideStat) -> float:
 
 
 def summarize_guiding_window(
-    guide_stats: Sequence[EkosGuideStat], end_time: float, window_seconds: float
+    guide_stats: Sequence[EkosGuideStat], end_time: float, window_s: float
 ) -> GuidingWindowSummary:
     """Summarize guiding accuracy over the stretch ending at `end_time`.
 
@@ -342,7 +342,7 @@ def summarize_guiding_window(
         All guiding measurements, in time order.
     end_time : `float`
         End of the window, in seconds since the Unix epoch.
-    window_seconds : `float`
+    window_s : `float`
         Length of the window.
 
     Returns
@@ -350,9 +350,9 @@ def summarize_guiding_window(
     summary : `GuidingWindowSummary`
         Root-mean-square errors over the window.
     """
-    inside = [s for s in guide_stats if end_time - window_seconds < s.timestamp <= end_time]
+    inside = [s for s in guide_stats if end_time - window_s < s.timestamp <= end_time]
     return GuidingWindowSummary(
-        window_seconds=window_seconds,
+        window_s=window_s,
         sample_count=len(inside),
         ra_rms_arcsec=_rms([s.ra_error_arcsec for s in inside]),
         dec_rms_arcsec=_rms([s.dec_error_arcsec for s in inside]),
@@ -468,7 +468,7 @@ def _median_drift_rate(
     return statistics.median(slopes) if slopes else None
 
 
-def matches_stopped_mount(fits: Sequence[tuple[float, float]], declination_degrees: float) -> bool | None:
+def matches_stopped_mount(fits: Sequence[tuple[float, float]], declination_deg: float) -> bool | None:
     """Say whether a drift is statistically the drift of a stopped RA axis.
 
     A mount that stopped tracking lets the sky turn past at the sidereal
@@ -484,7 +484,7 @@ def matches_stopped_mount(fits: Sequence[tuple[float, float]], declination_degre
     ----------
     fits : `Sequence` [`tuple` [`float`, `float`]]
         The slope and its standard error of each piece of the excursion.
-    declination_degrees : `float`
+    declination_deg : `float`
         The mount's declination.
 
     Returns
@@ -504,7 +504,7 @@ def matches_stopped_mount(fits: Sequence[tuple[float, float]], declination_degre
         low, high = ranked[middle - 1], ranked[middle]
         rate = (abs(low[0]) + abs(high[0])) / 2.0
         standard_error = math.hypot(low[1], high[1]) / 2.0
-    stopped_rate = SIDEREAL_RATE_ARCSEC_PER_SECOND * math.cos(math.radians(declination_degrees))
+    stopped_rate = SIDEREAL_RATE_ARCSEC_PER_SECOND * math.cos(math.radians(declination_deg))
     sigmas = float(resolve_parameter(EXCURSION_DRIFT_SIGNIFICANCE_SIGMAS).value)
     return abs(rate - stopped_rate) <= sigmas * standard_error + 1e-9 * stopped_rate
 
@@ -512,7 +512,7 @@ def matches_stopped_mount(fits: Sequence[tuple[float, float]], declination_degre
 def find_guiding_excursions(
     guide_stats: Sequence[EkosGuideStat],
     reacquire_times: Sequence[float],
-    declination_degrees: float | None,
+    declination_deg: float | None,
 ) -> list[GuidingExcursion]:
     """Find the stretches where the guide error ran far above normal.
 
@@ -522,7 +522,7 @@ def find_guiding_excursions(
         All guiding measurements, in time order.
     reacquire_times : `Sequence` [`float`]
         When the guider re-locked on its star.
-    declination_degrees : `float` or `None`
+    declination_deg : `float` or `None`
         The mount's declination, used to say whether an RA drift matches a
         stopped mount.
 
@@ -558,9 +558,9 @@ def find_guiding_excursions(
         axis = "RA" if ra_peak >= dec_peak else "Dec"
         rate = _median_drift_rate(run, axis, reacquire_times)
         matches_stopped = None
-        if axis == "RA" and rate is not None and declination_degrees is not None:
+        if axis == "RA" and rate is not None and declination_deg is not None:
             fits = _piece_fits(_drift_pieces(run, reacquire_times), "RA")
-            matches_stopped = matches_stopped_mount(fits, declination_degrees)
+            matches_stopped = matches_stopped_mount(fits, declination_deg)
         started_at, ended_at = run[0].timestamp, run[-1].timestamp
         peak_error = max(_total_error(s) for s in run)
         kind = (
@@ -575,7 +575,7 @@ def find_guiding_excursions(
                 peak_error_arcsec=peak_error,
                 axis=axis,
                 kind=kind,
-                drift_rate_arcsec_per_second=rate,
+                drift_rate_arcsec_per_s=rate,
                 matches_stopped_ra_axis=matches_stopped,
                 reacquire_count=sum(1 for t in reacquire_times if started_at - 10.0 <= t <= ended_at + 10.0),
             )
@@ -627,7 +627,7 @@ def _baseline_key(capture: EkosCapture) -> tuple[str, str, float]:
     return (
         _target_name_from_path(capture.file_path),
         capture.filter_name.strip().lower(),
-        round(capture.exposure_seconds, 3),
+        round(capture.exposure_s, 3),
     )
 
 
@@ -726,7 +726,7 @@ def dither_settle_seconds(
     return settles
 
 
-def dither_follow_seconds(exposure_seconds: float | None, settle_seconds: float | None) -> float:
+def dither_follow_seconds(exposure_s: float | None, settle_s: float | None) -> float:
     """Give how long before an exposure's start a dither still led into it.
 
     The exposure that follows a dither starts when the settle ends, and the
@@ -736,9 +736,9 @@ def dither_follow_seconds(exposure_seconds: float | None, settle_seconds: float 
 
     Parameters
     ----------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The capture's own exposure length.
-    settle_seconds : `float` or `None`
+    settle_s : `float` or `None`
         The dither's settle time, or the session's when it has none.
 
     Returns
@@ -747,9 +747,9 @@ def dither_follow_seconds(exposure_seconds: float | None, settle_seconds: float 
         Exposure plus settle, or the fallback `DITHER_FOLLOW_SECONDS` when
         either is unknown.
     """
-    if exposure_seconds is None or settle_seconds is None or exposure_seconds <= 0.0:
+    if exposure_s is None or settle_s is None or exposure_s <= 0.0:
         return float(resolve_parameter(DITHER_FOLLOW_SECONDS).value)
-    return exposure_seconds + settle_seconds
+    return exposure_s + settle_s
 
 
 def summarize_exposures(
@@ -788,7 +788,7 @@ def summarize_exposures(
     summaries = []
     for index in range(max(0, len(captures) - count), len(captures)):
         capture = captures[index]
-        started_at = capture.completed_at - capture.exposure_seconds
+        started_at = capture.completed_at - capture.exposure_s
         inside = [s for s in guide_stats if started_at <= s.timestamp <= capture.completed_at]
         early = [
             _total_error(s)
@@ -828,14 +828,14 @@ def summarize_exposures(
             ExposureSummary(
                 frame_name=capture.file_path.rsplit("/", 1)[-1],
                 completed_at=capture.completed_at,
-                exposure_seconds=capture.exposure_seconds,
+                exposure_s=capture.exposure_s,
                 star_count=capture.star_count,
                 half_flux_radius_px=capture.half_flux_radius_px,
                 eccentricity=capture.eccentricity,
                 guide_rms_first_seconds_arcsec=_rms(early),
                 guide_rms_rest_arcsec=_rms(rest),
                 follows_dither=any(
-                    0.0 <= started_at - d.timestamp <= dither_follow_seconds(capture.exposure_seconds, settle)
+                    0.0 <= started_at - d.timestamp <= dither_follow_seconds(capture.exposure_s, settle)
                     for d, settle in zip(dithers, settles, strict=True)
                 ),
                 flags=flags,
@@ -915,7 +915,7 @@ def summarize_live_session(
     dithers: Sequence[DitherEvent],
     analyze_file: str,
     kstars_log_file: str | None = None,
-    window_seconds: float | None = None,
+    window_s: float | None = None,
     wall_clock_now: float | None = None,
 ) -> LiveSessionStatus:
     """Build the status of the current session from its Ekos records.
@@ -930,7 +930,7 @@ def summarize_live_session(
         Dithers read from the KStars log; empty if no log was available.
     analyze_file, kstars_log_file : `str`
         The files the records came from, for the report.
-    window_seconds : `float`, optional
+    window_s : `float`, optional
         Length of the recent-guiding window. `None` uses
         `LIVE_STATUS_WINDOW_SECONDS` (ten minutes).
     wall_clock_now : `float`, optional
@@ -942,15 +942,15 @@ def summarize_live_session(
     status : `LiveSessionStatus`
         The session's current state and any problems found.
     """
-    if window_seconds is None:
-        window_seconds = resolve_parameter(LIVE_STATUS_WINDOW_SECONDS).value
+    if window_s is None:
+        window_s = resolve_parameter(LIVE_STATUS_WINDOW_SECONDS).value
     timestamps = [context.ended_at]
     if guide_stats:
         timestamps.append(guide_stats[-1].timestamp)
     as_of = max(timestamps)
     now = time.time() if wall_clock_now is None else wall_clock_now
 
-    declination = context.mount_positions[-1].declination_degrees if context.mount_positions else None
+    declination = context.mount_positions[-1].declination_deg if context.mount_positions else None
     reacquire_times = [e.timestamp for e in context.guide_state_events if e.state == "Reacquiring"]
     excursions = find_guiding_excursions(guide_stats, reacquire_times, declination)
     exposures = summarize_exposures(
@@ -975,7 +975,7 @@ def summarize_live_session(
         )
         if excursion.kind == "drift" and excursion.matches_stopped_ra_axis:
             text += (
-                f" The {excursion.drift_rate_arcsec_per_second:.1f} arcsec/s drift matches an RA axis that"
+                f" The {excursion.drift_rate_arcsec_per_s:.1f} arcsec/s drift matches an RA axis that"
                 " stopped tracking."
             )
         flags.append(text)
@@ -1009,17 +1009,17 @@ def summarize_live_session(
         analyze_file=analyze_file,
         kstars_log_file=kstars_log_file,
         as_of=as_of,
-        seconds_since_last_record=silence,
+        time_since_last_record_s=silence,
         guider_state=last_guide_state.state if last_guide_state else None,
         guider_state_since=last_guide_state.timestamp if last_guide_state else None,
-        declination_degrees=declination,
+        declination_deg=declination,
         temperature_c=context.temperatures[-1].temperature_c if context.temperatures else None,
         pier_side=context.mount_positions[-1].pier_side if context.mount_positions else None,
         captures_completed=len(context.captures),
         captures_aborted=len(context.aborted_captures),
         dither_settings=summarize_dither_settings(dithers, len(context.captures)),
         unavailable=[GUIDE_SETTINGS_UNAVAILABLE, MOUNT_POSITION_UNAVAILABLE],
-        recent_guiding=summarize_guiding_window(guide_stats, as_of, window_seconds),
+        recent_guiding=summarize_guiding_window(guide_stats, as_of, window_s),
         exposures=exposures,
         excursions=excursions,
         dithers=list(dithers),

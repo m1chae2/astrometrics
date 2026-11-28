@@ -33,7 +33,7 @@ from astrometricslib import Astrometrics
 from astrometricslib._internal.drivers.fits_access import read_data
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.pipelines.shared.frame_grouping import (
-    frame_exposure_seconds,
+    frame_exposure_s,
     frame_is_spectral,
     group_frames_by_configuration,
 )
@@ -108,9 +108,7 @@ def mixed_exposure_counts(frames: list[Any]) -> dict[float, int]:
         lengths each have `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames (only
         those sessions are stacked as several groups).
     """
-    counts = Counter(
-        round(exposure, 3) for exposure in map(frame_exposure_seconds, frames) if exposure is not None
-    )
+    counts = Counter(round(exposure, 3) for exposure in map(frame_exposure_s, frames) if exposure is not None)
     large = {
         exposure: count
         for exposure, count in counts.items()
@@ -153,7 +151,7 @@ def find_candidates(astrometrics: Astrometrics, names: list[str] | None) -> list
     """
     frames_path = astrometrics.config.get_frames_path()
     candidates = []
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in astrometrics.targets.query(include_empty=True).items:
         name = target.id
         if names and name not in names:
             continue
@@ -234,7 +232,7 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
                     measured_at=datetime.now(UTC),
                     quality_recording=quality_recording,
                 )
-    astrometrics.targets.save()
+    astrometrics.targets._save()
 
 
 def main(arguments: list[str] | None = None) -> int:

@@ -103,9 +103,9 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
         id: String(index),
         type: labelFromFrameType(request.frameType),
         count: request.count,
-        exposure: request.exposureSec,
+        exposure_s: request.exposureS,
         filter: request.filter ?? FilterType.NONE,
-        delay: request.delaySec ?? 0,
+        delay_s: request.delayS ?? 0,
         name: undefined,
     }));
     const editingItem = editingIndex !== null ? listItems[editingIndex] ?? null : null;
@@ -116,9 +116,9 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
         const request: ExposureRequest = {
             frameType: frameTypeFromLabel(type),
             filter: filter as FilterType,
-            exposureSec: exposure,
+            exposureS: exposure,
             count,
-            delaySec: delay,
+            delayS: delay,
         };
         if (editingIndex !== null) {
             onUpdateExposure(editingIndex, request);
@@ -138,7 +138,7 @@ export const PackageEditor: React.FC<PackageEditorProps> = ({
         emitToast(`Capturing test frame: ${exposure}s ${filter || ''} ${type}`.replace(/\s+/g, ' '), 'info');
         const jobId = await captureTestFrame({
             targetId: editedPackage.target_id,
-            exposureSeconds: exposure,
+            exposureS: exposure,
             imageType: type,
             filterName: filter || undefined,
         });

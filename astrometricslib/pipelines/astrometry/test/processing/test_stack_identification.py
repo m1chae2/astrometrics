@@ -19,6 +19,7 @@ from astropy.table import Table
 from astropy.wcs import WCS
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.quality.detections import DetectionsMeasurement, StarDetection
 from astrometricslib.pipelines.astrometry.processing import stack_identification as module
 from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import FieldGaiaStars
@@ -256,7 +257,7 @@ def test_a_stop_request_stops_the_work(tmp_path: Path, monkeypatch: pytest.Monke
     path = _stack(tmp_path)
     _setup(monkeypatch, path)
 
-    with pytest.raises(module.StackIdentificationStoppedError):
+    with pytest.raises(RunAbandonedError):
         module.identify_stack_stars(path, config=None, should_stop=lambda: True)
     assert module.read_stack_identification(path) is None
 

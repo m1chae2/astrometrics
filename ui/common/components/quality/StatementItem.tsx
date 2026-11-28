@@ -34,10 +34,10 @@ export interface StatementItemProps {
 function describeCaptureSetting(setting: CaptureSetting): string {
     const parts: string[] = [setting.camera];
     if (setting.filterName) parts.push(setting.filterName);
-    if (setting.exposureSeconds !== null && setting.exposureSeconds !== undefined) {
-        parts.push(`${formatValue(setting.exposureSeconds)} s`);
+    if (setting.exposureS !== null && setting.exposureS !== undefined) {
+        parts.push(`${formatValue(setting.exposureS)} s`);
     }
-    if (setting.gainSetting !== null && setting.gainSetting !== undefined) parts.push(`gain ${setting.gainSetting}`);
+    if (setting.gain !== null && setting.gain !== undefined) parts.push(`gain ${setting.gain}`);
     return parts.join(', ');
 }
 

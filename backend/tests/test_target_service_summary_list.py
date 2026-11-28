@@ -30,7 +30,7 @@ def _service_with(*targets: Target) -> TargetService:
     """
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
-    service.astrometrics.targets.query.return_value.objects = list(targets)
+    service.astrometrics.targets.query.return_value = list(targets)
     service.astrometrics.targets.get.side_effect = lambda target_id: next(
         (target for target in targets if target.id == target_id), None
     )
@@ -51,7 +51,7 @@ def _target(target_id: str) -> Target:
         dec="+30 39 37",
         frames=[FrameRecord(path="/a.fits"), FrameRecord(path="/b.fits")],
     )
-    target.exposure_sec = 120.0
+    target.exposure_s = 120.0
     target.stacking.stacked_image = f"/stacks/{target_id}.fits"
     return target
 
@@ -73,7 +73,7 @@ def test_the_summary_list_has_no_frames_and_the_same_everything_else() -> None:
     assert [target.id for target in summary] == ["M 33", "M 31"]
     assert summary[0].frames == []
     assert summary[0].ra == original.ra
-    assert summary[0].exposure_sec == pytest.approx(120.0)
+    assert summary[0].exposure_s == pytest.approx(120.0)
     assert summary[0].stacking.stacked_image == "/stacks/M 33.fits"
     dumped = summary[0].model_dump(mode="json", by_alias=True)
     expected = original.model_dump(mode="json", by_alias=True)

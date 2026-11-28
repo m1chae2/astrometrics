@@ -1,12 +1,13 @@
-"""Purpose: Keep the replies of the quality reads short enough to send.
+"""Purpose: Keep the replies of the MCP tools short enough to send.
 
 Description: The MCP tools cut a reply longer than 40,000 characters, and a
-cut reply is no longer valid JSON. The target report, tonight's ranking and
-the night review can all grow with the library. The library itself returns
-them in full, to every caller (the desktop app shows full reports). The MCP
-layer calls `fit_reply_to_budget` on a tool's reply before it sends it. This
-module, which belongs to the MCP servers and not to the library, holds what
-that needs, in one place:
+cut reply is no longer valid JSON. Many replies grow with the library: a
+target's frames, a star's light curve and spectrum, a night's guiding
+samples, the target report, tonight's ranking and the night review. The
+library itself returns them in full, to every caller (the desktop app shows
+full reports). The MCP layer calls `shape_reply` on a tool's reply before it
+sends it. This module, which belongs to the MCP servers and not to the
+library, holds what that needs, in one place:
 
 * the limit, and the budget a reply must meet (the limit less 10 percent
   headroom);
@@ -15,8 +16,13 @@ that needs, in one place:
   reply that fits here is not cut there;
 * ``fit_reply``, which applies a reply's own shrinking steps until it fits;
 * the way to cut the evidence lists of statements;
-* ``fit_reply_to_budget``, the one public entry point, which picks the
-  shrinking steps for each kind of reply.
+* ``fit_reply_to_budget``, which picks the shrinking steps for the three
+  quality reports;
+* `HEAVY_LISTS`, the one table of heavy lists (a model's field and how many
+  items it keeps), and ``shape_reply``, the entry point the tool registry
+  calls: it fits the quality reports, then cuts the heavy lists until the
+  reply fits, and gives back a note for each list it cut that says what was
+  left out and how to ask for it.
 
 When cutting evidence is not enough, the last step of a target report or a
 night review empties the plain message of every statement. The technical
@@ -29,14 +35,15 @@ reference furthest beyond the statement's limit; see
 ``evidence_order.py``), so cutting a list from the end keeps the references
 that matter most. Cutting never removes a statement, and a statement that
 lost references says how many (``evidence_omitted_count``), so the loss is
-visible. The rows stay readable with ``QualityRecords.query``.
+visible. The rows stay readable with ``quality.records.query``.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from typing import cast
+from dataclasses import dataclass
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -79,16 +86,46 @@ def reply_budget(limit: int = MAXIMUM_REPLY_CHARACTERS) -> int:
     return int(limit * (1.0 - REPLY_HEADROOM_FRACTION))
 
 
-def reply_characters(model: BaseModel) -> int:
-    """Count the characters of a model's compact JSON.
+def serialize_reply(value: Any) -> Any:
+    """Turn models and records into plain JSON-ready values, recursively.
 
-    The text is made the way the MCP tool registry makes it: ``model_dump()``
-    (field names, Python values) and compact ``json.dumps`` with
-    ``default=str``.
+    The MCP tool registry sends what this gives.
 
     Parameters
     ----------
-    model : `BaseModel`
+    value : `Any`
+        Value to convert.
+
+    Returns
+    -------
+    serialized : `Any`
+        The value as plain dicts, lists and scalars: a value with a
+        ``serialize`` method gives its result, then ``model_dump()`` (field
+        names, Python values), then ``to_dict()``.
+    """
+    if callable(getattr(value, "serialize", None)):
+        return value.serialize()
+    if callable(getattr(value, "model_dump", None)):
+        return value.model_dump()
+    if callable(getattr(value, "to_dict", None)):
+        return value.to_dict()
+    if isinstance(value, list | tuple):
+        return [serialize_reply(item) for item in value]
+    if isinstance(value, dict):
+        return {key: serialize_reply(item) for key, item in value.items()}
+    return value
+
+
+def reply_characters(model: Any) -> int:
+    """Count the characters of a reply's compact JSON.
+
+    The text is made the way the MCP tool registry makes it:
+    `serialize_reply` (for a model, ``model_dump()``: field names, Python
+    values) and compact ``json.dumps`` with ``default=str``.
+
+    Parameters
+    ----------
+    model : `Any`
         The reply.
 
     Returns
@@ -96,7 +133,7 @@ def reply_characters(model: BaseModel) -> int:
     characters : `int`
         The length of the text an MCP tool would send.
     """
-    return len(json.dumps(model.model_dump(), separators=(",", ":"), default=str))
+    return len(json.dumps(serialize_reply(model), separators=(",", ":"), default=str))
 
 
 def fit_reply[ReplyT: BaseModel](
@@ -231,7 +268,7 @@ def _fit_target_report(report: BaseModel, limit: int) -> BaseModel:
                     "context_omitted_reason": (
                         "The context readings were left out so the report fits the reply budget of "
                         f"{limit:,} characters. The statements still cite the rows they used; read "
-                        "any metric with QualityRecords.query."
+                        "any metric with quality.records.query."
                     ),
                 }
             )
@@ -323,7 +360,7 @@ def _fit_night_quality(quality: BaseModel, limit: int) -> BaseModel:
     """
     note = (
         f"The evidence lists of the statements were cut to fit the reply budget of {limit:,} characters. "
-        "Read the rows with QualityRecords.query."
+        "Read the rows with quality.records.query."
     )
 
     def shrink(current: BaseModel, round_number: int) -> BaseModel | None:
@@ -408,3 +445,236 @@ def fit_reply_to_budget[ReplyT](reply: ReplyT, budget: int | None = None) -> Rep
     if TONIGHT_RANKING_FIELDS <= field_names:
         return cast(ReplyT, _fit_tonight_ranking(reply, limit))
     return reply
+
+
+@dataclass(frozen=True)
+class HeavyList:
+    """One list in a reply that can grow large, and how to cut it.
+
+    Attributes
+    ----------
+    model : `str`
+        The class name of the model that holds the list, such as
+        ``"Target"``. The classes are private, so they are named, not
+        imported. A generic model is named without its parameter (``"Page"``).
+    fields : `tuple` [`str`, ...]
+        The list fields, cut together to the same length. Several fields
+        are parallel lists of one series (a light curve's times and fluxes).
+    keep : `int`
+        How many items the first cut keeps. Each later cut halves it. 0
+        drops the list at once: a part of a spectrum or light curve would
+        mislead.
+    what : `str`
+        What the items are, for the note, such as ``"frames"``.
+    how_to_ask : `str`
+        How a client asks for what was left out, for the note.
+    """
+
+    model: str
+    fields: tuple[str, ...]
+    keep: int
+    what: str
+    how_to_ask: str
+
+
+_LIGHT_CURVE_FIELDS = (
+    "timestamps",
+    "fluxes",
+    "fluxes_normalized",
+    "fluxes_detrended",
+    "airmasses",
+    "magnitudes",
+    "is_saturated",
+    "flux_errors",
+    "fluxes_normalized_errors",
+    "fluxes_detrended_errors",
+    "time_bjd_tdb",
+)
+_SPECTRUM_FIELDS = (
+    "wavelengths_angstrom",
+    "intensities",
+    "intensity_errors",
+    "quantum_efficiency_corrected_intensities",
+    "response_corrected_intensities",
+    "response_corrected_intensity_errors",
+)
+_NIGHT_SAMPLES_NOTE = "Ask about one night with the review tools, which summarize the samples."
+_PAGE_NOTE = "Ask for the rest with offset= (and a smaller limit=), or narrow the query's filters."
+
+HEAVY_LISTS: tuple[HeavyList, ...] = (
+    HeavyList(
+        "Target",
+        ("frames",),
+        20,
+        "frames",
+        "List a target's frames with target_frames_query (night=, filter_name=, since=, until=, limit=).",
+    ),
+    HeavyList("Page", ("items",), 50, "items", _PAGE_NOTE),
+    HeavyList(
+        "PhotometryResult", _LIGHT_CURVE_FIELDS, 0, "light curve points", "Read one star with star_get."
+    ),
+    HeavyList(
+        "SpectroscopyResult", _SPECTRUM_FIELDS, 0, "spectrum points", "Read it with star_get_spectrum."
+    ),
+    HeavyList("ObservationSession", ("guiding_samples",), 0, "guiding samples", _NIGHT_SAMPLES_NOTE),
+    HeavyList("ObservationSession", ("weather_samples",), 0, "weather samples", _NIGHT_SAMPLES_NOTE),
+    HeavyList("LiveGuidingStatus", ("history",), 50, "guiding samples", "The newest samples are first."),
+    HeavyList("FrameStatusReport", ("frames",), 50, "frames", "Ask about fewer frames."),
+)
+"""The heavy lists of the replies, by model. ``test_reply_shaper.py`` checks
+that each model is one a public method returns and each field is a list."""
+
+_HEAVY_BY_MODEL: dict[str, tuple[HeavyList, ...]] = {
+    name: tuple(entry for entry in HEAVY_LISTS if entry.model == name)
+    for name in {e.model for e in HEAVY_LISTS}
+}
+
+
+@dataclass(frozen=True)
+class ShapedReply:
+    """A reply cut to fit, and the notes that say what was cut.
+
+    Attributes
+    ----------
+    reply : `Any`
+        The reply, or a smaller copy.
+    notes : `tuple` [`str`, ...]
+        One note per heavy list that was cut. Empty when nothing was cut.
+    """
+
+    reply: Any
+    notes: tuple[str, ...] = ()
+
+
+def _model_name(model: BaseModel) -> str:
+    """Name a model's class, without the parameter of a generic one.
+
+    Parameters
+    ----------
+    model : `BaseModel`
+        The model.
+
+    Returns
+    -------
+    name : `str`
+        For example ``"Page"`` for a ``Page[FrameRecord]``.
+    """
+    origin = type(model).__pydantic_generic_metadata__.get("origin")
+    return (origin or type(model)).__name__
+
+
+def _cut_heavy_lists(value: Any, halvings: int, cut: dict[HeavyList, list[int]]) -> Any:
+    """Copy a reply with each heavy list cut, recursively.
+
+    Parameters
+    ----------
+    value : `Any`
+        The reply, or a part of it.
+    halvings : `int`
+        How many times each list's ``keep`` is halved.
+    cut : `dict` [`HeavyList`, `list` [`int`]]
+        Filled with, per table entry, the items left out and the items
+        there were, summed over every model cut.
+
+    Returns
+    -------
+    value : `Any`
+        The same value when nothing in it was cut, else a copy.
+    """
+    if isinstance(value, BaseModel):
+        heavy = {
+            field_name: entry
+            for entry in _HEAVY_BY_MODEL.get(_model_name(value), ())
+            for field_name in entry.fields
+        }
+        updates: dict[str, Any] = {}
+        counted: set[HeavyList] = set()
+        for field_name in type(value).model_fields:
+            item = getattr(value, field_name)
+            entry = heavy.get(field_name)
+            if entry is not None and isinstance(item, list | tuple):
+                keep = entry.keep >> halvings
+                if len(item) > keep:
+                    if entry not in counted:
+                        totals = cut.setdefault(entry, [0, 0])
+                        totals[0] += len(item) - keep
+                        totals[1] += len(item)
+                        counted.add(entry)
+                    item = item[:keep]
+                    updates[field_name] = item
+            smaller = _cut_heavy_lists(item, halvings, cut)
+            if smaller is not item:
+                updates[field_name] = smaller
+        return value.model_copy(update=updates) if updates else value
+    if isinstance(value, list | tuple):
+        items = [_cut_heavy_lists(item, halvings, cut) for item in value]
+        if all(new is old for new, old in zip(items, value, strict=True)):
+            return value
+        return type(value)(items) if isinstance(value, tuple) else items
+    if isinstance(value, dict):
+        changed = {key: _cut_heavy_lists(item, halvings, cut) for key, item in value.items()}
+        return value if all(changed[key] is value[key] for key in value) else changed
+    return value
+
+
+def _cut_notes(cut: dict[HeavyList, list[int]], limit: int) -> tuple[str, ...]:
+    """Write one note for each heavy list that was cut.
+
+    Parameters
+    ----------
+    cut : `dict` [`HeavyList`, `list` [`int`]]
+        Per table entry, the items left out and the items there were.
+    limit : `int`
+        The budget, for the note.
+
+    Returns
+    -------
+    notes : `tuple` [`str`, ...]
+        The notes, in table order.
+    """
+    return tuple(
+        f"Left out {cut[entry][0]:,} of {cut[entry][1]:,} {entry.what} ({entry.model}.{entry.fields[0]}) "
+        f"to fit the reply budget of {limit:,} characters. {entry.how_to_ask}"
+        for entry in HEAVY_LISTS
+        if entry in cut
+    )
+
+
+def shape_reply(reply: Any, budget: int | None = None) -> ShapedReply:
+    """Shrink any tool reply to fit the MCP reply budget.
+
+    The three quality reports are fitted first (`fit_reply_to_budget`).
+    When the reply is still too long, every heavy list in it
+    (`HEAVY_LISTS`, at any depth) is cut to its ``keep``, then to half of
+    that, and so on, until the reply fits or every list is empty.
+
+    Parameters
+    ----------
+    reply : `Any`
+        What a tool returned.
+    budget : `int`, optional
+        The most characters the reply's JSON may have. `reply_budget` when
+        omitted.
+
+    Returns
+    -------
+    shaped : `ShapedReply`
+        The reply (the same object when it fits) and a note per heavy list
+        that was cut.
+    """
+    limit = reply_budget() if budget is None else budget
+    fitted = fit_reply_to_budget(reply, limit)
+    if reply_characters(fitted) <= limit:
+        return ShapedReply(fitted)
+    largest_keep = max(entry.keep for entry in HEAVY_LISTS)
+    halvings = 0
+    while True:
+        cut: dict[HeavyList, list[int]] = {}
+        smaller = _cut_heavy_lists(fitted, halvings, cut)
+        notes = _cut_notes(cut, limit)
+        fits = reply_characters(smaller) + sum(len(note) for note in notes) <= limit
+        if cut and (fits or largest_keep >> halvings == 0):
+            return ShapedReply(smaller, notes)
+        if largest_keep >> halvings == 0:
+            return ShapedReply(fitted)
+        halvings += 1

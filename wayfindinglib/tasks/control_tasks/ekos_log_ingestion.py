@@ -34,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -42,7 +43,6 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import observing_night_id
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_guide_log_file
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
@@ -168,17 +168,17 @@ def _summarize_run(
         ended_at=section.ended_at,
         pixel_scale_arcsec_per_px=section.pixel_scale_arcsec_per_px,
         focal_length_mm=section.focal_length_mm,
-        ra_rate_arcsec_per_second=section.ra_rate_arcsec_per_second,
-        dec_rate_arcsec_per_second=section.dec_rate_arcsec_per_second,
+        ra_rate_arcsec_per_s=section.ra_rate_arcsec_per_s,
+        dec_rate_arcsec_per_s=section.dec_rate_arcsec_per_s,
         frames_total=section.frames_total,
         frames_lost=section.frames_with_error_code,
         frames_without_pixel_scale=section.frames_without_pixel_scale,
         samples_stored=len(section.samples),
-        declination_degrees=section.declination_degrees,
-        altitude_degrees=section.altitude_degrees,
-        azimuth_degrees=section.azimuth_degrees,
+        declination_deg=section.declination_deg,
+        altitude_deg=section.altitude_deg,
+        azimuth_deg=section.azimuth_deg,
         pier_side=section.pier_side,
-        guide_exposure_seconds=controller.exposure_seconds,
+        guide_exposure_s=controller.exposure_s,
         ra_algorithm=ra_axis.algorithm if ra_axis else None,
         dec_algorithm=dec_axis.algorithm if dec_axis else None,
         ra_aggressiveness=ra_axis.aggressiveness if ra_axis else None,
@@ -286,7 +286,7 @@ def build_frame_lookup(astrometrics: Any) -> FrameLookup:
     """
     frames = sorted(
         (frame.timestamp, frame.telescope, frame.camera)
-        for target in astrometrics.targets.query(detail="objects", limit=None).objects
+        for target in astrometrics.targets.query(include_empty=True).items
         for frame in target.frames
         if frame.timestamp is not None and str(frame.role).upper().endswith("LIGHT")
     )

@@ -341,7 +341,7 @@ class ExposureDriver:
         PHD2 writes its own).
     stats_path : `pathlib.Path`
         Where to write the statistics.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Length of each exposure.
     target : `str`
         The target's folder name under the picture folder.
@@ -372,7 +372,7 @@ class ExposureDriver:
         standin: Path,
         guide_log: Path | None,
         stats_path: Path,
-        exposure_seconds: float,
+        exposure_s: float,
         target: str,
         ra_hours: float,
         dec_degrees: float,
@@ -395,7 +395,7 @@ class ExposureDriver:
         self.standin = standin
         self.guide_log = guide_log
         self.stats_path = stats_path
-        self.exposure_seconds = exposure_seconds
+        self.exposure_s = exposure_s
         self.target = target
         self.ra_hours = ra_hours
         self.dec_degrees = dec_degrees
@@ -544,7 +544,7 @@ class ExposureDriver:
             stats = {
                 "started_at": self.started_at,
                 "target": self.target,
-                "exposure_seconds": self.exposure_seconds,
+                "exposure_s": self.exposure_s,
                 "frames": list(self.frames),
                 "guide_log_lines_written": self.guide_log_lines,
                 "cooling_seconds": self.cooling_seconds,
@@ -879,7 +879,7 @@ class ExposureDriver:
         try:
             return float(fits.getheader(path, memmap=False)["EXPTIME"])
         except OSError, KeyError, ValueError, TypeError:
-            return self.exposure_seconds
+            return self.exposure_s
 
     def take_exposures(self) -> None:
         """Take exposures one after another until stopped (``driver`` mode).
@@ -891,8 +891,8 @@ class ExposureDriver:
             self.follow_mount()
             before = self._fits_files()
             started = time.time()
-            self._set(f"{CAMERA}.CCD_EXPOSURE.CCD_EXPOSURE_VALUE={self.exposure_seconds}")
-            deadline = started + self.exposure_seconds + FRAME_GRACE_SECONDS
+            self._set(f"{CAMERA}.CCD_EXPOSURE.CCD_EXPOSURE_VALUE={self.exposure_s}")
+            deadline = started + self.exposure_s + FRAME_GRACE_SECONDS
             new_name = None
             while time.time() < deadline and not self.stop_event.is_set():
                 added = self._fits_files() - before

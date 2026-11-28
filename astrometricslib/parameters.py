@@ -8,29 +8,31 @@ which equipment it depends on and which register entry holds its evidence.
 `collect_parameters` gathers a library's declarations into a
 `ParameterRegistry`, and `resolve_parameter` finds the value to use, from the
 equipment, a tuning run, the configuration or the default. A run sets a
-`ParameterContext` (`setup_parameter_context`, `frames_parameter_context`)
-naming the setup whose equipment and tuned values it reads. The two spectrum
+`ParameterContext` (`frames_parameter_context`) naming the setup whose
+equipment and tuned values it reads. The two spectrum
 match limits are public so that wayfindinglib judges spectra with the same
 limits the pipeline uses, and the stretched-star warning level so that its
-trailed-stars rule warns where the frame status flags. A `Tuner`
-derives one family of tuned values, and `run_tuning` stores them with their
-provenance in the config. `tune` is the one entry point that picks a
-library's tuners and a setup and runs them; both libraries'
-``measure_tuned_parameters`` call it. A script and
+trailed-stars rule warns where the frame status flags, and the dark
+temperature tolerance so that a reader of calibration counts quotes the
+tolerance the library matched darks with. A `Tuner`
+derives one family of tuned values. `tune` is the one entry point: it runs
+the tuners of every registered library on one setup and stores the values
+with their provenance in the config. `wayfindinglib` adds its tuners with
+`register_tuner_package` when it is imported. A script and
 `wayfindinglib` import these names from here. Each is imported from the module
 where its code lives today.
 """
 
+from typing import NoReturn
+
+from astrometricslib._internal.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+from astrometricslib._internal.renames import moved_module_name
 from astrometricslib.foundation.parameter_context import (
     ParameterContext,
     SetupEquipmentValues,
-    current_parameter_context,
     equipment_values_to_write,
     frames_parameter_context,
-    parameter_context,
-    record_basis,
     run_basis_value,
-    setup_parameter_context,
 )
 from astrometricslib.foundation.parameters import (
     ConfigurationValues,
@@ -55,9 +57,7 @@ from astrometricslib.foundation.tuning import (
     TuningReport,
     TuningResult,
     TuningSkippedError,
-    collect_tuners,
-    read_tuned_record,
-    run_tuning,
+    register_tuner_package,
     tune,
 )
 from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS
@@ -77,6 +77,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
 
 __all__ = [
     "AMBIGUOUS_RMS_GAP",
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
     "LOW_STAR_FRACTION",
     "MOUNT_PERIODIC_ERROR_PERIOD_SECONDS",
     "NO_GOOD_MATCH_RMS",
@@ -105,17 +106,27 @@ __all__ = [
     "TuningSkippedError",
     "WhenMissing",
     "collect_parameters",
-    "collect_tuners",
-    "current_parameter_context",
     "equipment_values_to_write",
     "factor_for",
     "frames_parameter_context",
-    "parameter_context",
-    "read_tuned_record",
-    "record_basis",
+    "register_tuner_package",
     "resolve_parameter",
     "run_basis_value",
-    "run_tuning",
-    "setup_parameter_context",
     "tune",
 ]
+
+
+def __getattr__(name: str) -> NoReturn:
+    """Refuse a name this module no longer offers, saying where it went.
+
+    Parameters
+    ----------
+    name : `str`
+        The name that was read.
+
+    Notes
+    -----
+    Always raises: an `ImportError` that says where the name went for a
+    name in the rename table, and an `AttributeError` for any other name.
+    """
+    moved_module_name(__name__, name)

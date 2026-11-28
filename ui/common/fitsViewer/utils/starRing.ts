@@ -23,7 +23,7 @@ export const ROUND_WITHIN_NOISE = 'Round within the noise';
 /** The pieces of a measurement that the ring plot needs. */
 export type RingSource = Pick<
   StarProfileMeasurement,
-  'ring_bin_angle_degrees' | 'ring_bin_counts' | 'ring_harmonics' | 'ring_constant' | 'ring_scale_value'
+  'ring_bin_angle_deg' | 'ring_bin_counts' | 'ring_harmonics' | 'ring_constant' | 'ring_scale_value'
 >;
 
 /** A smooth curve of brightness against direction. */
@@ -67,15 +67,15 @@ export function formatPercent(fraction: number): string {
  * by a quarter turn, the directions turn with it. So with no turn, 0 degrees points down or up, and
  * 90 degrees points right.
  *
- * @param angleDegrees One of 0, 90, 180 or 270 (any other angle is rounded to the nearest of them).
+ * @param angleDeg One of 0, 90, 180 or 270 (any other angle is rounded to the nearest of them).
  * @param firstRowAtTop True when the picture shows the file's first row at the top.
  * @param turn How far the picture is shown turned, clockwise in degrees (default 0).
  * @returns "Up", "Right", "Down" or "Left".
  */
 export function screenDirection(
-  angleDegrees: number, firstRowAtTop: boolean, turn: number = 0,
+  angleDeg: number, firstRowAtTop: boolean, turn: number = 0,
 ): 'Up' | 'Right' | 'Down' | 'Left' {
-  const quarter = (((Math.round(angleDegrees / 90) % 4) + 4) % 4);
+  const quarter = (((Math.round(angleDeg / 90) % 4) + 4) % 4);
   // The direction as a step in the file's own x and y, then in the base picture, then in the turned one.
   const fileStepX = quarter === 1 ? 1 : quarter === 3 ? -1 : 0;
   const fileStepY = quarter === 0 ? 1 : quarter === 2 ? -1 : 0;
@@ -106,7 +106,7 @@ export function describeRing(harmonics: RingHarmonic[], firstRowAtTop: boolean, 
     .map((term, index) => {
       const name = index === 0 ? orderName(term.order) : orderName(term.order).toLowerCase();
       const size = `${name} ${formatPercent(term.amplitude_debiased)} ± ${formatPercent(term.amplitude_error)}`;
-      return term.order === 1 ? `${size} toward ${screenDirection(term.direction_degrees, firstRowAtTop, turn)}` : size;
+      return term.order === 1 ? `${size} toward ${screenDirection(term.direction_deg, firstRowAtTop, turn)}` : size;
     })
     .join('; ');
 }
@@ -131,7 +131,7 @@ export function harmonicCurve(source: RingSource, stepDegrees = 2): RingCurve | 
   for (let angle = 0; angle <= 360; angle += stepDegrees) {
     let relative = 1;
     for (const term of terms) {
-      relative += term.amplitude * Math.cos((term.order * (angle - term.direction_degrees) * Math.PI) / 180);
+      relative += term.amplitude * Math.cos((term.order * (angle - term.direction_deg) * Math.PI) / 180);
     }
     angles.push(angle);
     values.push(scale * constant * relative);

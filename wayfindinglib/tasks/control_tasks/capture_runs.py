@@ -1,6 +1,6 @@
 """Purpose: Remember the capture runs the app started, so they can stop.
 
-Description: `control.imaging.capture_image` takes a run of exposures.
+Description: `control.imaging.capture` takes a run of exposures.
 `CaptureRuns` is the list of runs going right now. A run adds itself when
 it starts and removes itself when it ends. A stop request sets a flag on
 every listed run. The run looks at its flag between frames and during the

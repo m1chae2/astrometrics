@@ -1,6 +1,3 @@
-import { FileItem } from '../types/backendTypes';
-
-
 /**
  * searchLogic.ts
  *
@@ -12,7 +9,16 @@ import { FileItem } from '../types/backendTypes';
  * A file the search can look at. `status` is the File Browser's Status text for the frame, such as
  * "set-aside cloud" or "flagged", so a search can say `status:set-aside`.
  */
-export type SearchableFile = FileItem & { status?: string };
+export interface SearchableFile {
+    name?: string;
+    camera?: string;
+    filter?: string;
+    /** The gain setting (or ISO), or null when it is not known. */
+    gain?: number | null;
+    /** The exposure in seconds, or null when it is not known. */
+    exposureS?: number | null;
+    status?: string;
+}
 
 // Token types
 type TokenType = 'AND' | 'OR' | 'LPAREN' | 'RPAREN' | 'CONDITION';
@@ -185,8 +191,8 @@ class Parser {
 
             // Map short property names to FileItem properties
             let fileValueString: string;
-            if (propertyKey.startsWith('exp')) fileValueString = String(this.file.exposure || '');
-            else if (propertyKey === 'iso') fileValueString = String(this.file.iso || '');
+            if (propertyKey.startsWith('exp')) fileValueString = String(this.file.exposureS ?? '');
+            else if (propertyKey === 'iso' || propertyKey === 'gain') fileValueString = String(this.file.gain ?? '');
             else if (propertyKey.startsWith('cam')) fileValueString = String(this.file.camera || '');
             else if (propertyKey === 'name' || propertyKey === 'file') fileValueString = String(this.file.name || '');
             else if (propertyKey.startsWith('filt')) fileValueString = String(this.file.filter || '');
@@ -225,7 +231,7 @@ class Parser {
             // Fallback to Global search check against common properties
             const name = String(this.file.name || '').toLowerCase();
             const camera = String(this.file.camera || '').toLowerCase();
-            const exposure = String(this.file.exposure || '').toLowerCase();
+            const exposure = String(this.file.exposureS ?? '').toLowerCase();
             const filter = String(this.file.filter || '').toLowerCase();
             return (
                 name.includes(lowerCondition) ||

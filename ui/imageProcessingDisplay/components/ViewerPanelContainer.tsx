@@ -105,9 +105,9 @@ export const ViewerPanelContainer: React.FC<ViewerPanelContainerProps> = ({
   /** Finds the FITS file on screen: the file picked in the browser, else the light frame being shown. */
   const resolveMeasurePath = useCallback(async (): Promise<string | null> => {
     if (shownFile ?? selectedFile) return shownFile ?? selectedFile;
-    if (imageFrameInfo && imageFrameInfo.iso !== 'Unknown' && imageFrameInfo.objectId) {
+    if (imageFrameInfo && imageFrameInfo.exposureS !== null && imageFrameInfo.objectId) {
       return resolveTargetFramePath(
-        imageFrameInfo.objectId, imageFrameInfo.iso, imageFrameInfo.exposure, imageFrameInfo.index ?? 0
+        imageFrameInfo.objectId, imageFrameInfo.gain, imageFrameInfo.exposureS, imageFrameInfo.index ?? 0
       );
     }
     return null;

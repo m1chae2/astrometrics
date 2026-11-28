@@ -1,0 +1,11 @@
+# Known departures from the public API design rules, one per line, written
+# `<qualified method>: <rule>` (documentation/library_design/Public_API_Design_Guide.md,
+# Section 11). test_public_surface.py fails on a departure that is not listed
+# here, and on a line here that no longer occurs.
+#
+# The steps of issue #206 empty this file. A change that fixes a departure
+# deletes its line in the same commit; no change adds a line.
+#
+# Rules: verb, banned-argument(<name>), no-default(<name>), no-return-annotation,
+# return-union, bool-return, unit-suffix(<name>), depth, fold, owner.
+

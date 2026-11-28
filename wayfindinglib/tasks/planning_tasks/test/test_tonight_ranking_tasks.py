@@ -14,11 +14,12 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import FrameRecord, Target
+from astrometricslib import CaptureSetting, FrameRecord, Target
 from astrometricslib._internal.frames import frame_is_spectral, frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject, StoredCaptureSetting
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import ConfigurationError
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -40,21 +41,21 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import CandidateStatus, RankedCandidate, RankedUse
 from wayfindinglib.tasks.planning_tasks import tonight_ranking_tasks as tr
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 SITE = SiteProfile(id="site", name="Home", latitude_deg=45.76, longitude_deg=-110.74, elevation_m=1400.0)
 SETTING = CaptureSetting(
     camera="CamA",
     telescope="Scope",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=10,
     binning=1,
 )
 SPECTRAL_SETTING = SETTING.model_copy(update={"filter_name": "Star Analyzer 200"})
 """The same camera behind the grating: a spectroscopy setting (id 2)."""
-SHORT_SETTING = SETTING.model_copy(update={"exposure_seconds": 30.0})
+SHORT_SETTING = SETTING.model_copy(update={"exposure_s": 30.0})
 """The same camera with 30 s frames: the short exposure group (id 3)."""
 TONIGHT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 FIRST_NIGHT = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)
@@ -100,7 +101,7 @@ def _target(spec: tuple[str, str, str], frame_count: int, nights: int = 1, **ext
                 FrameRecord(
                     path=f"/lib/lights/{target_id}/Scope/CamA/n{night}_{index:03d}.fits",
                     timestamp=moment.timestamp(),
-                    exposure="60",
+                    exposure_s=60,
                 )
             )
     return Target(id=target_id, ra=ra, dec=dec, frames=frames, **extra)
@@ -213,36 +214,41 @@ class FakeLibrary:
             Every stored measurement.
         """
         self.rows = rows
-        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=targets))
-        self.processing = no_camera_profiles_processing()
+        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=tuple(targets)))
+        self.calibration = no_camera_profiles_calibration()
+        self.config = NO_CAMERAS
+        settings = {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING}
         self.quality = SimpleNamespace(
-            query=self._query,
-            capture_settings=lambda ids=None: {1: SETTING, 2: SPECTRAL_SETTING, 3: SHORT_SETTING},
+            records=SimpleNamespace(
+                query=self._query,
+                get_calibration_identities=lambda target=None, **_k: [],
+                get_capture_settings=lambda ids=None: [
+                    StoredCaptureSetting(id=key, setting=value) for key, value in settings.items()
+                ],
+            )
         )
 
     def _query(
         self,
         metric: str | None = None,
         level: str | None = None,
-        target_id: str | None = None,
+        target: Target | None = None,
         **_: Any,
-    ) -> QualityQueryResult:
-        """Answer ``quality.query`` from the stored rows.
+    ) -> Page:
+        """Answer ``quality.records.query`` from the stored rows.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows that match the metric, level and target.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self.rows
-                if (metric is None or row.metric == metric)
-                and (level is None or row.subject.level.value == level)
-                and (target_id is None or row.subject.target_id == target_id)
-            ]
-        )
+        return Page.of([
+            row
+            for row in self.rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (target is None or row.subject.target_id == target.id)
+        ])
 
 
 def _rank(library: FakeLibrary, **extra: Any) -> Any:
@@ -316,7 +322,7 @@ def test_an_hour_is_counted_in_clock_time_with_overheads() -> None:
     candidate = ranking.lists[0].candidates[0]
     # (3600 - 120 s autofocus) / (60 s + 5 s download + 20 s / 3 dither) = 48.
     assert candidate.frames_in_hour == 48
-    assert candidate.exposure_seconds == pytest.approx(60.0)
+    assert candidate.exposure_s == pytest.approx(60.0)
     assert candidate.overhead_fraction is not None and candidate.overhead_fraction > 0.2
 
 
@@ -336,7 +342,7 @@ def test_the_sky_comes_from_the_history_without_a_model_and_says_so() -> None:
 def test_a_fitted_sky_model_is_used_for_tonight() -> None:
     """With enough nights the sky model sets the sky rate of the new frames."""
     library = _library()
-    deep = next(t for t in library.targets.query(detail="objects", limit=None).objects if t.id == "M 81")
+    deep = next(t for t in library.targets.query(include_empty=True).items if t.id == "M 81")
 
     ranking = _rank(library)
     candidate = {c.target_id: c for c in ranking.lists[0].candidates}["M 81"]
@@ -549,7 +555,7 @@ def _group_stack_library(measured: float, expected: float) -> FakeLibrary:
             FrameRecord(
                 path=f"/lib/lights/M 81/Scope/CamA/g_{index:03d}.fits",
                 timestamp=moment.timestamp(),
-                exposure="30" if short else "60",
+                exposure_s="30" if short else "60",
             )
         )
     target = Target(id="M 81", ra=M81[1], dec=M81[2], frames=frames)
@@ -590,7 +596,7 @@ def _group_stack_library(measured: float, expected: float) -> FakeLibrary:
         model_groups.append(
             StackFrame(
                 frame_id=subject_id,
-                exposure_seconds=exposure,
+                exposure_s=exposure,
                 sky_rate_e_per_s_per_px=sky,
                 read_noise_e=3.0,
                 star_width=width,

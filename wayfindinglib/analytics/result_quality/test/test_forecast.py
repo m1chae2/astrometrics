@@ -20,16 +20,16 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from astrometricslib import Astrometrics
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib import Astrometrics, CaptureSetting
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number, fold_exposure_lengths
+from astrometricslib.arguments import Page
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
 )
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
-    CaptureSetting,
     MeasurementStatus,
     QualityMeasurement,
     SubjectLevel,
@@ -57,7 +57,7 @@ from wayfindinglib.models.planning.target_report import (
     RecommendedAdditionalFramesStatus,
 )
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
 START = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 APERTURES = 1000
 APERTURE_SET = "v3-156104df543d"
@@ -102,7 +102,7 @@ def _observation(
     return FrameObservation(
         frame_id=frame_id,
         capture_setting=SETTING,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         star_width_effective_arcsec=width,
         sky_rate_e_per_s_per_px=sky,
         read_noise_e=read_noise,
@@ -126,7 +126,7 @@ def _frames(observations: list[FrameObservation]) -> list[StackFrame]:
     return [
         StackFrame(
             frame_id=o.frame_id,
-            exposure_seconds=o.exposure_seconds or 0.0,
+            exposure_s=o.exposure_s or 0.0,
             sky_rate_e_per_s_per_px=o.sky_rate_e_per_s_per_px or 0.0,
             read_noise_e=o.read_noise_e or 0.0,
             star_width=o.star_width_effective_arcsec,
@@ -630,7 +630,7 @@ def test_stop_signal_says_so_with_no_noise_at_all() -> None:
 
 def test_pinned_versions_match_the_registry() -> None:
     """The registry has not moved past a version this module reads."""
-    registry = {spec.name: spec for spec in Astrometrics().quality.metrics(detail="full")}
+    registry = {spec.name: spec for spec in Astrometrics().quality.records.get_metrics()}
     for metric, version in fc.PINNED_STACK_METRICS.items():
         assert registry[metric].definition_version == version, metric
 
@@ -1110,9 +1110,7 @@ def _library_of_targets(multipliers: list[float], setting_id: int = 1) -> list[Q
     return rows
 
 
-_SETTING = CaptureSetting(
-    camera="ZWO ASI533MM Pro", telescope="Scope", gain_setting=100, offset=10, binning=1
-)
+_SETTING = CaptureSetting(camera="ZWO ASI533MM Pro", telescope="Scope", gain=100, offset=10, binning=1)
 
 
 def test_the_model_error_is_measured_only_from_five_targets_of_a_setting_group() -> None:
@@ -1133,8 +1131,8 @@ def test_the_model_error_is_measured_only_from_five_targets_of_a_setting_group()
 
 def test_the_setting_group_ignores_filter_and_exposure_but_not_gain() -> None:
     """Camera, optic, gain, offset and binning make the group."""
-    other_filter = _SETTING.model_copy(update={"filter_name": "Ha", "exposure_seconds": 300.0})
-    other_gain = _SETTING.model_copy(update={"gain_setting": 200})
+    other_filter = _SETTING.model_copy(update={"filter_name": "Ha", "exposure_s": 300.0})
+    other_gain = _SETTING.model_copy(update={"gain": 200})
 
     assert fc.noise_model_setting_key(other_filter) == fc.noise_model_setting_key(_SETTING)
     assert fc.noise_model_setting_key(other_gain) != fc.noise_model_setting_key(_SETTING)
@@ -1389,7 +1387,7 @@ def _group_run_rows(
         The stack, group and frame rows.
     """
     when = START + timedelta(days=day)
-    placed = fold_exposure_lengths([o.exposure_seconds for o in observations])
+    placed = fold_exposure_lengths([o.exposure_s for o in observations])
     lengths = sorted({float(length) for length in placed if length is not None})
     groups = []
     for length in lengths:
@@ -1474,11 +1472,11 @@ def _group_pair(
             """
             return [
                 StackGroup(
-                    frames=tuple(_frames([o for o in frames if o.exposure_seconds == length])),
+                    frames=tuple(_frames([o for o in frames if o.exposure_s == length])),
                     frame_noise_adu=noise_of[length],
                     gain=(gains or {}).get(length, 1.0),
                 )
-                for length in sorted({o.exposure_seconds for o in frames if o.exposure_seconds})
+                for length in sorted({o.exposure_s for o in frames if o.exposure_s})
             ]
 
         before = forecast_group_noise(groups_of(old, noises))
@@ -1499,8 +1497,8 @@ def test_group_rows_are_read_into_the_run() -> None:
     runs, _ = _group_pair(_group_frames("b60_", 10, 60.0))
 
     assert [run.run_id for run in runs] == ["run1", "run2"]
-    assert [(g.exposure_seconds, g.frames_stacked) for g in runs[0].groups] == [(30.0, 12), (60.0, 20)]
-    assert [(g.exposure_seconds, g.frames_stacked) for g in runs[1].groups] == [(30.0, 12), (60.0, 30)]
+    assert [(g.exposure_s, g.frames_stacked) for g in runs[0].groups] == [(30.0, 12), (60.0, 20)]
+    assert [(g.exposure_s, g.frames_stacked) for g in runs[1].groups] == [(30.0, 12), (60.0, 30)]
 
 
 def test_group_frame_noise_is_recovered_from_the_stored_rows() -> None:
@@ -1593,7 +1591,7 @@ def test_a_group_stack_after_a_single_group_stack_is_not_checkable() -> None:
 def test_a_group_with_no_stored_row_is_not_checkable() -> None:
     """A run with no group rows says which group it lacks."""
     runs, observations = _group_pair(_group_frames("b60_", 10, 60.0))
-    runs[1] = runs[1].model_copy(update={"groups": [g for g in runs[1].groups if g.exposure_seconds < 45.0]})
+    runs[1] = runs[1].model_copy(update={"groups": [g for g in runs[1].groups if g.exposure_s < 45.0]})
 
     (check,) = fc.forecast_check(runs, observations)
 
@@ -1660,7 +1658,7 @@ def _folded_pair(
             forecast : `NoiseForecast`
                 The group forecast.
             """
-            placed = fold_exposure_lengths([o.exposure_seconds for o in frames])
+            placed = fold_exposure_lengths([o.exposure_s for o in frames])
             groups = []
             for length in sorted({float(value) for value in placed if value is not None}):
                 members = _frames([o for o, key in zip(frames, placed, strict=True) if key == length])
@@ -1692,7 +1690,7 @@ def test_the_reference_exposure_row_is_read_into_the_group() -> None:
     runs, _ = _folded_pair({30.0: 30.0, 60.0: 100.0})
 
     assert [g.reference_exposure_seconds for g in runs[1].groups] == [30.0, 100.0]
-    assert runs[1].groups[1].exposure_seconds == pytest.approx((20 * 60.0 + 3 * 100.0) / 23)
+    assert runs[1].groups[1].exposure_s == pytest.approx((20 * 60.0 + 3 * 100.0) / 23)
 
 
 def test_a_folded_group_is_forecast_and_checked_with_its_reference_exposure() -> None:
@@ -1721,13 +1719,13 @@ def test_a_folded_group_that_lost_frames_is_matched_by_its_reference_exposure() 
     by_id = {observation.frame_id: observation for observation in observations}
     frames, _problems = fc.stack_frames_from_observations(run.member_frame_ids, by_id)
     folded = run.groups[1]
-    members_mean = math.fsum(f.exposure_seconds for f in frames if f.exposure_seconds > 45.0) / sum(
-        1 for f in frames if f.exposure_seconds > 45.0
+    members_mean = math.fsum(f.exposure_s for f in frames if f.exposure_s > 45.0) / sum(
+        1 for f in frames if f.exposure_s > 45.0
     )
     stored_mean = members_mean * (1.0 - 0.0091)
     assert abs(stored_mean - members_mean) > 0.005 * members_mean
     lost = run.model_copy(
-        update={"groups": [run.groups[0], folded.model_copy(update={"exposure_seconds": stored_mean})]}
+        update={"groups": [run.groups[0], folded.model_copy(update={"exposure_s": stored_mean})]}
     )
 
     result = fc.stack_groups_of_run(lost, frames)
@@ -2230,6 +2228,7 @@ class _StoreStandIn:
         """
         self._rows = rows
         self._identities = identities
+        self.records = self
 
     def query(
         self,
@@ -2238,26 +2237,24 @@ class _StoreStandIn:
         variant: str | None = None,
         library_only: bool = False,
         **_: object,
-    ) -> QualityQueryResult:
-        """Answer ``quality.query`` the way the library does for these filters.
+    ) -> Page:
+        """Answer ``quality.records.query`` the way the library does here.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows that match.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self._rows
-                if (metric is None or row.metric == metric)
-                and (level is None or row.subject.level.value == level)
-                and (variant is None or row.subject.variant == variant)
-                and not (library_only and row.subject.variant is not None)
-            ]
-        )
+        return Page.of([
+            row
+            for row in self._rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (variant is None or row.subject.variant == variant)
+            and not (library_only and row.subject.variant is not None)
+        ])
 
-    def calibration_identities(self, **_: object) -> list[CalibrationIdentities]:
+    def get_calibration_identities(self, target: object = None, **_: object) -> list[CalibrationIdentities]:
         """Give the stored calibration records.
 
         Returns
@@ -2296,7 +2293,7 @@ def test_rows_as_the_library_writes_a_subset_give_an_provisional_status() -> Non
     runs = fc.stack_runs_from_measurements([*library_rows, *subset_rows], include_earlier_nights=True)
     subset = next(run for run in runs if run.is_earlier_nights_subset)
     frames_status = recommended_additional_frames_status_of_target(
-        astrometrics, "T", store.query(library_only=True).rows, everyone
+        astrometrics, "T", list(store.query(library_only=True)), everyone
     )
 
     assert subset.stack_subject_id == subset_subject

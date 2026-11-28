@@ -15,7 +15,7 @@ import math
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class GuidingSampleSource(StrEnum):
@@ -140,7 +140,11 @@ class AlignmentTrackPoint(BaseModel):
     """One plate solve in a target's run, timed from the run's first solve."""
 
     model_config = ConfigDict(populate_by_name=True)
-    elapsed_seconds: float = Field(..., alias="elapsedSeconds")
+    elapsed_s: float = Field(
+        ...,
+        alias="elapsedS",
+        validation_alias=AliasChoices("elapsedS", "elapsed_s", "elapsedSeconds", "elapsed_seconds"),
+    )
     delta_ra_arcsec: float = Field(..., alias="deltaRaArcsec")
     delta_dec_arcsec: float = Field(..., alias="deltaDecArcsec")
     total_error_arcsec: float = Field(..., alias="totalErrorArcsec")
@@ -159,7 +163,7 @@ class AlignmentTargetSession(BaseModel):
     as tracking error. Drift is the slope of a straight-line fit of the
     offsets against time.
 
-    `ObservationReview.query_alignment_sessions` builds these from a list of
+    `review.alignment.query` builds these from a list of
     `AlignmentAttempt` records.
     """
 
@@ -183,15 +187,18 @@ class AlignmentTargetSession(BaseModel):
     drift_dec_arcsec_per_min: float = Field(..., alias="driftDecArcsecPerMin")
     start_time: float | None = Field(default=None, alias="startTime")
     end_time: float | None = Field(default=None, alias="endTime")
-    elapsed_seconds: float = Field(
-        ..., alias="elapsedSeconds", description="Time spent tracking, summed over runs (gaps excluded)."
+    elapsed_s: float = Field(
+        ...,
+        alias="elapsedS",
+        description="Time spent tracking, summed over runs (gaps excluded).",
+        validation_alias=AliasChoices("elapsedS", "elapsed_s", "elapsedSeconds", "elapsed_seconds"),
     )
     time_series: list[AlignmentTrackPoint] = Field(default_factory=list, alias="timeSeries")
     attempts: list[AlignmentAttempt] = Field(default_factory=list, alias="attempts")
 
 
 class ExternalAlignmentPoll(BaseModel):
-    """What `control.mount.poll_external_alignment` stored.
+    """What `review.alignment.record_external` stored.
 
     Attributes
     ----------
@@ -208,7 +215,7 @@ class ExternalAlignmentPoll(BaseModel):
 class AlignmentSessionsResult(BaseModel):
     """The alignment attempts, and the same attempts grouped by target.
 
-    Returned by `ObservationReview.query_alignment_sessions`.
+    Built by `analytics.alignment_sessions.group_alignment_attempts`.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -238,7 +245,7 @@ class LiveGuidingStatus(BaseModel):
     is_guiding: bool = Field(default=False, alias="is_guiding")
     stats: GuidingStats = Field(default_factory=GuidingStats, alias="stats")
     history: list[GuidingSample] = Field(default_factory=list, alias="history")
-    exposure: float = Field(default=1.0, alias="exposure")
+    exposure_s: float = Field(default=1.0, alias="exposure_s")
     gain: float = Field(default=0.0, alias="gain")
 
 
@@ -249,7 +256,13 @@ class MountPointingModel(BaseModel):
     sample_count: int = Field(..., alias="sampleCount")
     raw_rms_arcsec: float = Field(..., alias="rawRmsArcsec")
     residual_rms_arcsec: float = Field(..., alias="residualRmsArcsec")
-    improvement_percent: float = Field(default=0.0, alias="improvementPercent")
+    improvement_pct: float = Field(
+        default=0.0,
+        alias="improvementPct",
+        validation_alias=AliasChoices(
+            "improvementPct", "improvement_pct", "improvementPercent", "improvement_percent"
+        ),
+    )
     ih_arcsec: float = Field(default=0.0, alias="ihArcsec")
     id_arcsec: float = Field(default=0.0, alias="idArcsec")
     me_arcsec: float = Field(default=0.0, alias="meArcsec")
@@ -265,7 +278,11 @@ class GuidingSpectrumPeak(BaseModel):
     """A dominant harmonic frequency identified in guiding telemetry."""
 
     model_config = ConfigDict(populate_by_name=True)
-    period_seconds: float = Field(..., alias="periodSeconds")
+    period_s: float = Field(
+        ...,
+        alias="periodS",
+        validation_alias=AliasChoices("periodS", "period_s", "periodSeconds", "period_seconds"),
+    )
     amplitude_arcsec: float = Field(..., alias="amplitudeArcsec")
     power: float = Field(..., alias="power")
     probable_source: str = Field(default="Unknown", alias="probableSource")
@@ -291,9 +308,19 @@ class GuidingSpectrumAnalysis(BaseModel):
     telescope_id: str = Field(default="", alias="telescopeId")
     schema_version: int = Field(default=1, alias="schemaVersion")
     sample_count: int = Field(..., alias="sampleCount")
-    duration_seconds: float = Field(..., alias="durationSeconds")
+    duration_s: float = Field(
+        ...,
+        alias="durationS",
+        validation_alias=AliasChoices("durationS", "duration_s", "durationSeconds", "duration_seconds"),
+    )
     periodic_error_peak_to_peak_arcsec: float = Field(default=0.0, alias="periodicErrorPeakToPeakArcsec")
-    dominant_period_seconds: float | None = Field(default=None, alias="dominantPeriodSeconds")
+    dominant_period_s: float | None = Field(
+        default=None,
+        alias="dominantPeriodS",
+        validation_alias=AliasChoices(
+            "dominantPeriodS", "dominant_period_s", "dominantPeriodSeconds", "dominant_period_seconds"
+        ),
+    )
     dec_backlash_estimate_ms: float | None = Field(default=None, alias="decBacklashEstimateMs")
     peaks: list[GuidingSpectrumPeak] = Field(default_factory=list, alias="peaks")
     psd_curve: list[dict[str, float]] = Field(default_factory=list, alias="psdCurve")

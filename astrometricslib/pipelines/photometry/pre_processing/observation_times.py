@@ -78,7 +78,7 @@ def time_basis_for(site: ObservatorySite | None) -> str:
 
 
 def mid_exposure_times(
-    starts: Sequence[datetime], exposure_seconds: Sequence[float], site: ObservatorySite | None = None
+    starts: Sequence[datetime], exposure_s: Sequence[float], site: ObservatorySite | None = None
 ) -> Time:
     """Find the middle of each exposure.
 
@@ -87,7 +87,7 @@ def mid_exposure_times(
     starts : `Sequence` [`datetime.datetime`]
         The exposure start times, in UTC, with no time zone attached (as
         read from ``DATE-OBS``).
-    exposure_seconds : `Sequence` [`float`]
+    exposure_s : `Sequence` [`float`]
         The exposure time of each frame, in seconds.
     site : `ObservatorySite`, optional
         The observatory. It is attached to the result so the UTC to TDB
@@ -110,13 +110,13 @@ def mid_exposure_times(
         # of Earth-fixed coordinates is Earth's center.
         location = EarthLocation.from_geocentric(0.0, 0.0, 0.0, astropy_units.m)
     start_times = Time(list(starts), scale="utc", location=location)
-    half_exposures = TimeDelta(np.asarray(exposure_seconds, dtype=float) / 2.0, format="sec")
+    half_exposures = TimeDelta(np.asarray(exposure_s, dtype=float) / 2.0, format="sec")
     return start_times + half_exposures
 
 
 def barycentric_julian_dates(
     starts: Sequence[datetime],
-    exposure_seconds: Sequence[float],
+    exposure_s: Sequence[float],
     right_ascension_deg: float,
     declination_deg: float,
     site: ObservatorySite | None = None,
@@ -127,7 +127,7 @@ def barycentric_julian_dates(
     ----------
     starts : `Sequence` [`datetime.datetime`]
         The exposure start times, in UTC, with no time zone attached.
-    exposure_seconds : `Sequence` [`float`]
+    exposure_s : `Sequence` [`float`]
         The exposure time of each frame, in seconds. Must match `starts`
         in length.
     right_ascension_deg, declination_deg : `float`
@@ -143,7 +143,7 @@ def barycentric_julian_dates(
         One value per frame: the Julian Date of the middle of the exposure
         in BJD_TDB, in days.
     """
-    middles = mid_exposure_times(starts, exposure_seconds, site)
+    middles = mid_exposure_times(starts, exposure_s, site)
     target = SkyCoord(ra=right_ascension_deg * astropy_units.deg, dec=declination_deg * astropy_units.deg)
     delay = middles.light_travel_time(target, kind="barycentric", ephemeris=_EPHEMERIS)
     return np.asarray((middles.tdb + delay).jd, dtype=float)

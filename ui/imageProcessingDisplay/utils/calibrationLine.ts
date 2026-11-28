@@ -53,10 +53,10 @@ const isNoFilter = (filter: string | null | undefined): boolean =>
     !filter || filter === 'None' || filter === 'None (No Filter)';
 
 /** Writes a numeric setting without a useless ".0" ("10.0" becomes "10"); other text is kept. */
-const plainNumber = (value: string | null | undefined): string => {
+const plainNumber = (value: string | number | null | undefined): string => {
     if (value === null || value === undefined || value === '') return '';
     const number = Number(value);
-    return Number.isNaN(number) ? value : String(number);
+    return Number.isNaN(number) ? String(value) : String(number);
 };
 
 /**
@@ -85,14 +85,13 @@ const readPart = (match: CalibrationGroupMatch | null | undefined, noun: string)
 export const buildCalibrationReport = (groups: GroupedFrameStat[]): CalibrationReport | null => {
     if (groups.length === 0) return null;
     const sorted = [...groups].sort((a, b) =>
-        a.filter.localeCompare(b.filter) || parseFloat(a.exposure) - parseFloat(b.exposure));
+        a.filter.localeCompare(b.filter) || a.exposureS - b.exposureS);
     const reports = sorted.map((group): CalibrationGroupReport => {
-        const seconds = parseFloat(group.exposure);
-        const exposure = Number.isNaN(seconds) ? group.exposure : formatExposureSeconds(seconds);
+        const exposure = formatExposureSeconds(group.exposureS);
         const label = isNoFilter(group.filter) ? exposure : `${group.filter} ${exposure}`;
         const settings = [
-            group.iso ? `gain ${plainNumber(group.iso)}` : '',
-            group.offset ? `offset ${plainNumber(group.offset)}` : '',
+            group.gain !== null && group.gain !== undefined ? `gain ${plainNumber(group.gain)}` : '',
+            group.offset !== null && group.offset !== undefined ? `offset ${plainNumber(group.offset)}` : '',
             group.binning ? group.binning.replace('x', '×') : '',
         ].filter(Boolean).join(', ');
         return {

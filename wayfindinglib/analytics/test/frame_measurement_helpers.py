@@ -2,8 +2,9 @@
 
 Description: The capture history and the performance envelope read each
 frame's star width, shape and saturation from the stored quality
-measurements (`astrometrics.quality.query`). These helpers stand in for that
-read with made-up rows, so tests state only which values a frame has.
+measurements (`astrometrics.quality.records.query`). These helpers stand in
+for that read with made-up rows, so tests state only which values a frame
+has.
 """
 
 from datetime import UTC, datetime
@@ -11,10 +12,14 @@ from types import SimpleNamespace
 from typing import Any
 
 from astrometricslib._internal.frames import frame_subject_id
-from astrometricslib._internal.quality import QualityQueryResult
+from astrometricslib.arguments import Page
 from astrometricslib.models.quality.measurement import MeasurementOrigin, QualitySubject, SubjectLevel
 from astrometricslib.reports import MeasurementStatus, QualityMeasurement
-from wayfindinglib.test.camera_profile_support import camera_profile_processing, no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import (
+    NO_CAMERAS,
+    camera_profile_calibration,
+    no_camera_profiles_calibration,
+)
 
 
 def stored_measurement(
@@ -82,20 +87,21 @@ class FakeAstrometrics:
             frames=frames,
             frame_subject_id=lambda frame: frame_subject_id(frame.path, target_id),
         )
-        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[target]))
-        self.quality = SimpleNamespace(query=self._query)
-        self.processing = (
-            camera_profile_processing(camera_config)
+        self.targets = SimpleNamespace(query=lambda **_k: SimpleNamespace(items=(target,)))
+        self.quality = SimpleNamespace(records=SimpleNamespace(query=self._query))
+        self.calibration = (
+            camera_profile_calibration(camera_config)
             if camera_config is not None
-            else no_camera_profiles_processing()
+            else no_camera_profiles_calibration()
         )
+        self.config = camera_config if camera_config is not None else NO_CAMERAS
 
-    def _query(self, metric: str | None = None, level: str | None = None, **_: Any) -> QualityQueryResult:
-        """Answer `astrometrics.quality.query` from the made-up rows.
+    def _query(self, metric: str | None = None, level: str | None = None, **_: Any) -> Page:
+        """Answer `astrometrics.quality.records.query` from the made-up rows.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows of the asked metric (all rows when none is asked).
         """
-        return QualityQueryResult(rows=[row for row in self.rows if metric is None or row.metric == metric])
+        return Page.of([row for row in self.rows if metric is None or row.metric == metric])

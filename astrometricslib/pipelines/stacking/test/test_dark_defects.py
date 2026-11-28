@@ -304,12 +304,12 @@ def test_a_dark_left_out_is_not_chosen_and_the_flags_say_why(library_with_darks:
         path="light.fits",
         role="LIGHT",
         filter="Luminance",
-        exposure="30.0",
+        exposure_s=30.0,
         timestamp=1000.0,
         camera=CAMERA,
         telescope="T",
-        iso="0",
-        offset="10",
+        gain=0,
+        offset=10,
         sensor_temperature_c=-10.0,
     )
     chosen = choose_batch_calibration(library, [light], [])
@@ -344,15 +344,15 @@ def test_the_warning_reaches_the_stack_prediction(library_with_darks: tuple) -> 
         path="light.fits",
         role="LIGHT",
         filter="Luminance",
-        exposure="30.0",
+        exposure_s=30.0,
         timestamp=1000.0,
         camera=CAMERA,
         telescope="T",
-        iso="0",
-        offset="10",
+        gain=0,
+        offset=10,
         sensor_temperature_c=-10.0,
     )
-    group = SimpleNamespace(frames=[light], exposure_seconds=30.0, night="2026-11-22")
+    group = SimpleNamespace(frames=[light], exposure_s=30.0, night="2026-11-22")
     predicted = stack_prediction._predicted_group(group, library)
     warnings = " ".join(predicted.warnings)
     assert "dark: Dark frame Dark_21.fits was left out of the master" in warnings

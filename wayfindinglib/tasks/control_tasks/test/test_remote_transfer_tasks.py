@@ -93,9 +93,9 @@ def _patched_config(**overrides: str) -> _FakeConfig:
 def test_download_remote_frames_indexes_through_science_astrometrics_on_success() -> None:
     """Verify a successful download reindexes the target through Astrometrics.
 
-    `TargetCatalog.reindex_frames` is the science library's public way to
-    find new files on disk; it also recalculates the total exposure and
-    saves the target.
+    `TargetFrames.scan` is the science library's public way to find new
+    files on disk; it also recalculates the total exposure and saves the
+    target.
     """
     target = _FakeTarget("M 81", frame_paths=[])
     driver = Mock()
@@ -111,7 +111,7 @@ def test_download_remote_frames_indexes_through_science_astrometrics_on_success(
         success = remote_operations.download_remote_frames(observatory, target)
 
     assert success is True
-    observatory.astrometrics.targets.reindex_frames.assert_called_once_with(target)
+    observatory.astrometrics.targets.frames.scan.assert_called_once_with(target)
 
 
 def test_download_remote_frames_returns_false_without_indexing_on_failure() -> None:
@@ -130,7 +130,7 @@ def test_download_remote_frames_returns_false_without_indexing_on_failure() -> N
         success = remote_operations.download_remote_frames(observatory, target)
 
     assert success is False
-    observatory.astrometrics.targets.reindex_frames.assert_not_called()
+    observatory.astrometrics.targets.frames.scan.assert_not_called()
 
 
 @dataclass
@@ -155,21 +155,29 @@ class _FakeAstrometrics:
         self.saved = False
         self.prune_flags = []
         self.targets = self
-        self.add_frames_calls: list[tuple[list[str], str, str]] = []
+        self.frames = self
+        self.add_frames_calls: list[tuple[list[str], str]] = []
         self.added_paths: list[str] = []
 
-    def add_frames(self, paths: list[str], target: _FakeTargetRecord, *, telescope: str) -> list[str]:
-        """Record the call and give back the new paths a test set up.
+    def add(self, target: _FakeTargetRecord, paths: list[str]) -> list[FrameRecord]:
+        """Record the call, save, and give back the frames a test set up.
 
         Returns
         -------
-        added_paths : `list` [`str`]
-            The paths in `added_paths`.
+        frames : `list` [`FrameRecord`]
+            One record per path in `added_paths`.
         """
-        self.add_frames_calls.append((list(paths), target.id, telescope))
-        return list(self.added_paths)
+        self.add_frames_calls.append((list(paths), target.id))
+        self.saved = True
+        return [FrameRecord(path=path) for path in self.added_paths]
 
-    def get(self, target_id: str, refresh: bool = False) -> _FakeTargetRecord | None:
+    def scan(self, target: _FakeTargetRecord, prune_missing: bool = False) -> None:
+        """Record a rescan of the target and save it."""
+        target.reindexed = True
+        self.prune_flags.append(prune_missing)
+        self.saved = True
+
+    def get(self, target_id: str) -> _FakeTargetRecord | None:
         return self._existing.get(target_id)
 
     def create(self, target_id: str) -> _FakeTargetRecord:
@@ -178,14 +186,7 @@ class _FakeAstrometrics:
         self.created.append(target_id)
         return target
 
-    def reindex_frames(self, target: _FakeTargetRecord, prune_missing: bool = True) -> None:
-        target.reindexed = True
-        self.prune_flags.append(prune_missing)
-
-    def save(self) -> None:
-        self.saved = True
-
-    def read_frame_header(self, path: str) -> None:
+    def get_header(self, path: str) -> None:
         """Refuse to read a frame, as the library does for a missing file.
 
         Raises
@@ -228,7 +229,7 @@ def _download_with_one_new_frame(
     Parameters
     ----------
     measure : `Mock`
-        Stands in for ``astrometrics.quality.record_frame_measurements``.
+        Stands in for ``astrometrics.quality.frames.record``.
     measurement_summaries : `list`, optional
         Collects the measurement summary, as the caller of a sync would.
 
@@ -240,7 +241,7 @@ def _download_with_one_new_frame(
         The stand-in science library, to check what was called.
     """
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
 
@@ -287,7 +288,7 @@ def test_a_sync_that_adds_frames_measures_only_those_frames_after_saving_the_tar
     assert [frame.path for frame in measure.call_args.kwargs["frames"]] == [
         "/library/lights/M 81/frame_001.fits"
     ]
-    assert measure.call_args.kwargs["register_job"] is True
+    assert "register_job" not in measure.call_args.kwargs
     # The run's own summary is handed back for the one announcement.
     assert summaries == [measure.return_value]
 
@@ -330,7 +331,7 @@ def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
     """With nothing new, the measurement is not started."""
     measure = Mock()
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
 
@@ -342,65 +343,24 @@ def test_a_sync_that_adds_no_frames_measures_nothing() -> None:
     measure.assert_not_called()
 
 
-def test_on_copied_runs_after_the_reindex_and_before_the_measuring() -> None:
-    """The copy listener hears the count once, before any measuring."""
+def test_the_job_hears_of_the_new_frames_before_the_measuring() -> None:
+    """The running job is told the new frame count, before any measuring."""
     order: list[str] = []
     measure = Mock(side_effect=lambda *args, **kwargs: order.append("measure") or _summary())
     fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
+    fake_astrometrics.quality = SimpleNamespace(frames=SimpleNamespace(record=measure))
     fake_astrometrics.added_paths = ["/library/lights/M 81/a.fits", "/library/lights/M 81/b.fits"]
     observatory = _FakeObservatory(Mock())
     observatory.astrometrics = fake_astrometrics
-    copied: list[int] = []
+    job = SimpleNamespace(info=lambda message: order.append(message))
 
-    def on_copied(count: int) -> None:
-        """Record the count and whether the target was saved already."""
-        order.append(f"copied-after-save={fake_astrometrics.saved}")
-        copied.append(count)
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        patch.object(remote_operations, "get_current_job", return_value=job),
+    ):
+        remote_operations.download_remote_targets(observatory, "M 81", local_path="/local/lights/M81")
 
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        remote_operations.download_remote_targets(
-            observatory, "M 81", local_path="/local/lights/M81", on_copied=on_copied
-        )
-
-    assert copied == [2]
-    assert order == ["copied-after-save=True", "measure"]
-
-
-def test_on_copied_is_not_called_when_no_frame_was_added() -> None:
-    """With nothing new, the copy listener stays silent."""
-    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    observatory = _FakeObservatory(Mock())
-    observatory.astrometrics = fake_astrometrics
-    on_copied = Mock()
-
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        remote_operations.download_remote_targets(
-            observatory, "M 81", local_path="/local/lights/M81", on_copied=on_copied
-        )
-
-    on_copied.assert_not_called()
-
-
-def test_a_failing_copy_listener_never_fails_the_sync() -> None:
-    """A copy listener error is logged; the frames are still measured."""
-    measure = Mock(return_value=_summary())
-    fake_astrometrics = _FakeAstrometrics(existing=[_FakeTargetRecord("M 81")])
-    fake_astrometrics.quality = SimpleNamespace(record_frame_measurements=measure)
-    fake_astrometrics.added_paths = ["/library/lights/M 81/a.fits"]
-    observatory = _FakeObservatory(Mock())
-    observatory.astrometrics = fake_astrometrics
-
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        success = remote_operations.download_remote_targets(
-            observatory,
-            "M 81",
-            local_path="/local/lights/M81",
-            on_copied=Mock(side_effect=RuntimeError("socket gone")),
-        )
-
-    assert success is True
-    measure.assert_called_once()
+    assert order == ["Added 2 new frame(s) of M 81 to the library.", "measure"]
 
 
 def test_download_remote_targets_local_path_skips_download() -> None:
@@ -422,7 +382,7 @@ def test_download_remote_targets_local_path_skips_download() -> None:
 
     assert success is True
     driver.download_target_folder.assert_not_called()
-    assert fake_astrometrics.add_frames_calls == [(["/local/lights/M81"], "M 81", "Apertura 75Q")]
+    assert fake_astrometrics.add_frames_calls == [(["/local/lights/M81"], "M 81")]
     assert fake_astrometrics.saved is True
 
 
@@ -431,7 +391,7 @@ def test_discover_unassociated_remote_targets_fuzzy_matches() -> None:
     driver = Mock()
     driver.list_remote_targets.return_value = ["M_81", "NGC 7000", "Unassociated Target"]
     context = _FakeObservatory(driver)
-    context.astrometrics.targets.query.return_value.objects = [
+    context.astrometrics.targets.query.return_value.items = [
         _FakeTarget("M 81", []),
         _FakeTarget("NGC-7000", []),
     ]
@@ -633,9 +593,9 @@ class _EmptyTargetCatalog:
         Returns
         -------
         answer : `SimpleNamespace`
-            An answer whose ``objects`` list is empty.
+            An answer whose ``items`` are empty.
         """
-        return SimpleNamespace(objects=[])
+        return SimpleNamespace(items=())
 
 
 class _EmptyAstrometrics:
@@ -701,7 +661,7 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     handlers_before = len(_our_log_handlers("wayfindinglib"))
 
     result = remote_operations.sync_all_remote_folders(
-        context=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=True
+        context=SimpleNamespace(astrometrics=_EmptyAstrometrics())
     )
 
     assert result["succeeded"] == []
@@ -720,10 +680,10 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     assert _our_log_handlers(f"job_{result['job_id']}") == []
 
 
-def test_sync_all_remote_folders_without_job_registration_records_nothing(
+def test_sync_all_remote_folders_inside_a_job_records_no_second_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify the opt-out skips the job row and attaches no handlers."""
+    """Inside a caller's job the copy joins it: no new row, no handlers."""
     import astrometricslib
     from astrometricslib import AppConfiguration
 
@@ -737,9 +697,14 @@ def test_sync_all_remote_folders_without_job_registration_records_nothing(
 
     handlers_before = len(_our_log_handlers("wayfindinglib"))
 
-    result = remote_operations.sync_all_remote_folders(
-        context=SimpleNamespace(astrometrics=_EmptyAstrometrics()), register_job=False
-    )
+    from unittest.mock import MagicMock
+
+    from astrometricslib.jobs import running_as_job
+
+    with running_as_job("caller-job", MagicMock(), job_type="remote_sync", target_id="all"):
+        result = remote_operations.sync_all_remote_folders(
+            context=SimpleNamespace(astrometrics=_EmptyAstrometrics())
+        )
 
     assert result["job_id"] is None
     assert len(_our_log_handlers("wayfindinglib")) == handlers_before
@@ -765,23 +730,20 @@ def test_sync_calibration_folder_summarises_what_was_added(
         def get_frames_path(self) -> Path:
             return frames_path
 
-    class _Catalog:
-        def add_frames(self, paths: list[str], *, telescope: str) -> list[str]:
+    class _Frames:
+        def add(self, paths: list[str], *, telescope: str | None = None) -> list[SimpleNamespace]:
             added_paths = []
             for name in ("Dark_002.fits", "Dark_003.fits"):
                 (held_folder / name).write_bytes(b"y" * 10)
                 added_paths.append(str(held_folder / name))
-            return added_paths
-
-        def reindex_frames(self, kind: str) -> None:
-            pass
-
-        def save(self) -> None:
-            pass
+            return [
+                SimpleNamespace(kind="dark", added_paths=added_paths),
+                SimpleNamespace(kind="bias", added_paths=[]),
+            ]
 
     class _Astrometrics:
         def __init__(self, config: object) -> None:
-            self.processing = type("Processing", (), {"calibration": _Catalog()})()
+            self.calibration = SimpleNamespace(frames=_Frames())
 
     class _Api:
         astrometrics = _Astrometrics(None)

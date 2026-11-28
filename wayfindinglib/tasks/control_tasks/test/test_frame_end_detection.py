@@ -4,7 +4,7 @@ Description: Feeds status sequences (the texts the telescope poll reports for
 the camera) to `FrameEndDetector` and checks when it says a frame has ended.
 """
 
-from wayfindinglib import FrameEndDetector
+from wayfindinglib.logs import FrameEndDetector
 
 
 def _ends(statuses: list[str | None]) -> list[bool]:

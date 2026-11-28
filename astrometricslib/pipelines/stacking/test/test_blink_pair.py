@@ -177,7 +177,7 @@ def make_record(path: str, timestamp: float, exposure: str = "60.0") -> FrameRec
     return FrameRecord.model_validate({
         "path": path,
         "timestamp": timestamp,
-        "exposure": exposure,
+        "exposure_s": exposure,
         "camera": "Cam",
     })
 
@@ -258,7 +258,7 @@ def test_a_set_aside_frame_takes_the_setup_of_a_frame_in_the_stack() -> None:
     record = frame_record_for_set_aside(lights, "/x/_excluded/b.fits", "Cam", "", 60.0, "2026-10-03 08:15:30")
 
     assert record is not None
-    assert record.exposure == "60" and record.path == "/x/_excluded/b.fits"
+    assert record.exposure_s == pytest.approx(60.0) and record.path == "/x/_excluded/b.fits"
     assert record.timestamp == pytest.approx(datetime(2026, 10, 3, 8, 15, 30, tzinfo=UTC).timestamp())
     assert frame_record_for_set_aside(lights, "/x/c.fits", "Cam", "", 30.0, "2026-10-03 08:15:30") is None
     assert frame_record_for_set_aside(lights, "/x/c.fits", "Cam", "", 60.0, "not a date") is None

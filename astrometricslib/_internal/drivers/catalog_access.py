@@ -5,6 +5,7 @@ following a standard pattern so different parts of the code don't have to
 worry about where the data actually lives.
 """
 
+import functools
 import json
 import logging
 import math
@@ -27,6 +28,7 @@ from astrometricslib.foundation.storage.data_versions import STARS_KIND, TARGETS
 # documents every imported name too, which is what produced the
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
+    "LIGHT_CURVE_RECORD_KEYS",
     "POSITION_ONLY_STAR_ID_PREFIX",
     "STAR_RECORD_COLUMNS",
     "UNRESOLVED_DETECTION_ID",
@@ -75,10 +77,10 @@ class FrameSelector(BaseModel):
         Telescope optics identifier. Default `None`.
     filter : `FilterType`, optional
         Filter type enum. Default `None`.
-    exposure : `float`, optional
+    exposure_s : `float`, optional
         Exposure duration in seconds. Default `None`.
-    iso : `str`, optional
-        ISO or gain setting. Default `None`.
+    gain : `int`, optional
+        Gain setting, or the ISO of a DSLR. Default `None`.
     sequence_id : `int`, optional
         Frame sequence index. Default `None`.
     path : `str`, optional
@@ -90,8 +92,8 @@ class FrameSelector(BaseModel):
     camera: str | None = Field(default=None, description="Camera sensor identifier")
     telescope: str | None = Field(default=None, description="Telescope optics identifier")
     filter: FilterType | None = Field(default=None, description="Filter type enum")
-    exposure: float | None = Field(default=None, description="Exposure duration in seconds")
-    iso: str | None = Field(default=None, description="ISO or Gain setting")
+    exposure_s: float | None = Field(default=None, description="Exposure duration in seconds")
+    gain: int | None = Field(default=None, description="Gain setting, or the ISO of a DSLR")
     sequence_id: int | None = Field(default=None, description="Frame sequence index")
     path: str | None = Field(default=None, description="Optional physical path override")
 
@@ -563,6 +565,32 @@ class AbstractCatalogAccess(ABC):
     # `get` and so are slow on a real library; `CatalogAccess` replaces every
     # one of them with a query that touches only the rows it needs.
 
+    def get_stars_without_light_curves(self, ids: list[str]) -> list[Any]:
+        """Load some stars without the points of their light curves.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        stars : `list` [`StellarObject`]
+            The stars found, in no particular order. Each has the lists
+            named in `LIGHT_CURVE_RECORD_KEYS` emptied and remembers their
+            stored lengths, so `StellarObject.has_photometry` still answers
+            for the stored star (`StellarObject.light_curves_included` is
+            `False`).
+        """
+        stars = []
+        for star in self.get_by_ids("stellar_catalog", ids):
+            lengths = {
+                key: len(getattr(star.photometry, field_name, None) or [])
+                for key, field_name in _LIGHT_CURVE_KEY_FIELDS
+            }
+            stars.append(_left_out_light_curve(star, lengths))
+        return stars
+
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only the records with the given ids.
 
@@ -712,6 +740,71 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
 # can give back exactly, and reading the row puts it back from the column.
 _STAR_FIELDS_HELD_IN_COLUMNS = (("name", "name"), ("ra", "ra"), ("dec", "dec"), ("magnitude", "magnitude"))
 
+LIGHT_CURVE_RECORD_KEYS = (
+    "timestamps",
+    "fluxes",
+    "fluxesNormalized",
+    "fluxesDetrended",
+    "airmasses",
+    "magnitudes",
+    "isSaturated",
+    "fluxErrors",
+    "fluxesNormalizedErrors",
+    "fluxesDetrendedErrors",
+    "timeBjdTdb",
+)
+"""The keys of a star's stored ``photometry`` that hold one value per
+light-curve point. `get_stars_without_light_curves` leaves them out."""
+
+_LIGHT_CURVE_KEY_FIELDS = (("timestamps", "timestamps"), ("magnitudes", "magnitudes"), ("fluxes", "fluxes"))
+"""The light-curve keys whose stored lengths a star keeps when its points
+are left out, with the `PhotometryResult` field of each."""
+
+
+@functools.cache
+def _light_curve_field_names() -> tuple[str, ...]:
+    """Name the `PhotometryResult` fields of `LIGHT_CURVE_RECORD_KEYS`.
+
+    Returns
+    -------
+    field_names : `tuple` [`str`, ...]
+        The field names, worked out once.
+    """
+    from astrometricslib.models.stellar_source import PhotometryResult
+
+    return tuple(
+        field_name
+        for field_name, field_info in PhotometryResult.model_fields.items()
+        if field_info.alias in LIGHT_CURVE_RECORD_KEYS
+    )
+
+
+def _left_out_light_curve(star: Any, lengths: dict[str, int]) -> Any:
+    """Empty a star's light-curve lists and remember their stored lengths.
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        The star as read. It is changed in place.
+    lengths : `dict` [`str`, `int`]
+        The stored length of ``timestamps``, ``magnitudes`` and ``fluxes``.
+
+    Returns
+    -------
+    star : `StellarObject`
+        The same star, now with `StellarObject.light_curves_included`
+        `False`.
+    """
+    photometry = star.photometry
+    field_names = _light_curve_field_names()
+    # A record read with its lists already taken out (see
+    # `CatalogAccess.get_stars_without_light_curves`) needs no copy.
+    if photometry is not None and any(getattr(photometry, name) for name in field_names):
+        star.photometry = photometry.model_copy(update={name: [] for name in field_names})
+    star._left_out_light_curve_lengths = dict(lengths)
+    return star
+
+
 STAR_RECORD_COLUMNS = ("id", "name", "ra", "dec", "magnitude", "target_id")
 """The columns of the star table that `stellar_object_from_row` reads
 together with the stored record."""
@@ -765,7 +858,20 @@ def stellar_storage_payload(stellar_object: Any) -> dict[str, Any]:
     -------
     payload : `dict`
         The record, keyed by the field aliases.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the star was read without its light curve
+        (`StellarObject.light_curves_included` is `False`): saving it would
+        erase the stored points.
     """
+    if not getattr(stellar_object, "light_curves_included", True):
+        raise InvalidArgumentError(
+            f"Star {stellar_object.id!r} was read without its light curve, so saving it would erase the "
+            "light curve. Read it with include=['light_curves'] first.",
+            details={"star_id": stellar_object.id},
+        )
     payload = stellar_object.model_dump(
         mode="python", by_alias=True, exclude_defaults=True, exclude_computed_fields=True
     )
@@ -1190,6 +1296,35 @@ class CatalogAccess(AbstractCatalogAccess):
 
         self._generic.delete_by_ids(dataset_type, ids)
 
+    def get_stars_without_light_curves(self, ids: list[str]) -> list[Any]:
+        """Load some stars without the points of their light curves.
+
+        The database takes the light-curve lists out of each stored record
+        before it is parsed, so a star whose record is mostly its light
+        curve reads quickly.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        stars : `list` [`StellarObject`]
+            The stars found, in no particular order, as the base class
+            describes.
+        """
+        paths = tuple(f"photometry.{key}" for key in LIGHT_CURVE_RECORD_KEYS)
+        counted = {f"photometry.{key}": key for key, _ in _LIGHT_CURVE_KEY_FIELDS}
+        stars = []
+        for star, lengths in self._generic.get_by_ids_leaving_out(
+            "stellar_catalog", ids, paths, tuple(counted)
+        ):
+            stars.append(
+                _left_out_light_curve(star, {counted[path]: length for path, length in lengths.items()})
+            )
+        return stars
+
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only specific records from the database instead of everything.
 
@@ -1235,6 +1370,35 @@ class CatalogAccess(AbstractCatalogAccess):
         """
         values = self._generic.read_record_field("stellar_catalog", ids, "radiusPx")
         return {star_id: (float(value) if value is not None else None) for star_id, value in values.items()}
+
+    def read_star_known_variability(self, ids: list[str]) -> dict[str, Any]:
+        """Say what the catalogs record about some stars being variable.
+
+        Only the three catalog fields (SIMBAD object types, the Gaia DR3
+        variable flag and the VSX type) are read out of each stored record,
+        so no record is parsed.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        answers : `dict` [`str`, `KnownVariability`]
+            The answer of `combine_known_variability` for each star found.
+        """
+        from astrometricslib.models.known_variability import combine_known_variability
+
+        simbad = self._generic.read_record_field("stellar_catalog", ids, "simbadObjectTypes")
+        gaia = self._generic.read_record_field("stellar_catalog", ids, "gaiaVariableFlag")
+        vsx = self._generic.read_record_field("stellar_catalog", ids, "vsxVariabilityType")
+        return {
+            star_id: combine_known_variability(
+                simbad.get(star_id) or "", gaia.get(star_id) or "", vsx.get(star_id) or ""
+            )
+            for star_id in simbad
+        }
 
     def existing_star_ids(self, ids: list[str]) -> set[str]:
         """Say which of the given star ids are in the catalog.

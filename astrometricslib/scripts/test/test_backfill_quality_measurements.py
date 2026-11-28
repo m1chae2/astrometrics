@@ -76,7 +76,7 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
     """
     groups = [
         ExposureGroupSummary(
-            exposureSeconds=10.0,
+            exposureS=10.0,
             framesSubmitted=20,
             framesStacked=18,
             darkApplied=True,
@@ -86,7 +86,7 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
             gainBrightEndRatio=0.97,
             gainDisagreement=0.03,
         ),
-        ExposureGroupSummary(exposureSeconds=30.0, framesSubmitted=5, framesStacked=0, darkApplied=False),
+        ExposureGroupSummary(exposureS=30.0, framesSubmitted=5, framesStacked=0, darkApplied=False),
     ]
     summary = StackQualitySummary(
         targetId=TARGET,
@@ -101,11 +101,11 @@ def stack_summary(*, with_groups: bool = True) -> dict[str, Any]:
             flatSmoothingSigmaPx=1.5,
             saturatedPixelFraction=0.0001,
             zeroPixelFraction=0.01,
-            negativePixelMaxPercent=12,
+            negativePixelMaxPct=12,
             stackedFwhmPx=3.1,
             medianInputFwhmPx=3.0,
             expectedStackFwhmPx=3.0,
-            stackingDurationSeconds=61.5,
+            stackingDurationS=61.5,
             registrationReferenceStarCount=210,
             exposureGroups=groups if with_groups else [],
             framesAccepted=21,
@@ -224,8 +224,8 @@ def spectroscopy_summary(*, identification_counts: tuple[int, int, int] = (7, 3,
             ],
             gaiaXpSummary=GaiaXpRunSummary(
                 comparedStarCount=5,
-                medianSlopePercentPer1000Angstrom=-3.0,
-                medianAbsoluteSlopePercentPer1000Angstrom=4.0,
+                medianSlopePctPer1000Angstrom=-3.0,
+                medianAbsoluteSlopePctPer1000Angstrom=4.0,
                 bands=[
                     GaiaXpBandSummary(
                         startAngstrom=4200, endAngstrom=5000, medianRatio=1.1, scatter=0.05, starCount=5
@@ -445,7 +445,7 @@ def test_the_group_subject_equals_the_one_the_stacking_record_step_uses() -> Non
         kind, TARGET, document["stacking"]["qualitySummary"], datetime.now(UTC), "", "r", STACK_NAME
     )
     groups = document["stacking"]["qualitySummary"]["stackingMetrics"]["exposureGroups"]
-    extra_group = {"exposureSeconds": 7.5, "stackPath": f"/x/{STACK_NAME}"}
+    extra_group = {"exposureS": 7.5, "stackPath": f"/x/{STACK_NAME}"}
     for index, raw in enumerate([*groups, extra_group]):
         model = ExposureGroupSummary.model_validate(
             raw | {"framesSubmitted": 1, "framesStacked": 1, "darkApplied": True}

@@ -15,7 +15,7 @@ import pytest
 
 from astrometricslib import AppConfiguration
 from astrometricslib._internal.frames import frame_is_spectral
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib.analytics.capture_history import (
     BACKGROUND_METRIC,
     PINNED_FRAME_METRICS,
@@ -77,7 +77,7 @@ def make_frame() -> Any:
             "path": f"/frames/Target_Light_{index:03d}.fits",
             "target_id": "Target",
             "timestamp": _NIGHT_ONE + 60.0 * index,
-            "exposure_seconds": 30.0,
+            "exposure_s": 30.0,
             "filter_name": "Luminance",
             "is_spectral": False,
             "star_width_arcsec": 5.5,
@@ -101,13 +101,13 @@ def _library_frame(**overrides: Any) -> SimpleNamespace:
         "path": "/lib/lights/Target/Apertura/ASI/Target_Light_001.fits",
         "role": "LIGHT",
         "timestamp": _NIGHT_ONE,
-        "exposure": "60.0",
+        "exposure_s": "60.0",
         "filter": "Luminance",
         "camera": "ZWO ASI 533MM Pro",
         "telescope": "Apertura 75Q",
         "sensor_temperature_c": -10.0,
-        "altitude_degrees": 45.0,
-        "azimuth_degrees": 120.0,
+        "altitude_deg": 45.0,
+        "azimuth_deg": 120.0,
         "pier_side": "East",
         "pixel_scale_arcsec": 2.0,
         "binning": 1,
@@ -138,7 +138,8 @@ def _astrometrics(
     Returns
     -------
     astrometrics : `FakeAstrometrics`
-        Offers ``targets.query(detail="objects")`` and ``quality.query``.
+        Offers ``targets.query(include_empty=True)`` and
+        ``quality.records.query``.
     """
     values = _STORED if stored is None else stored
     return FakeAstrometrics(frames, {frame.path: values for frame in frames}, camera_config=camera_config)
@@ -154,7 +155,7 @@ def test_star_width_and_roundness_come_from_the_stored_measurements(camera_profi
 
     assert frame.star_width_arcsec == pytest.approx(5.0)
     assert frame.roundness == pytest.approx(0.8)
-    assert frame.exposure_seconds == pytest.approx(60.0)
+    assert frame.exposure_s == pytest.approx(60.0)
     assert frame.target_id == "Target"
     assert not frame.is_spectral
     assert set(frame.measurement_rows) == set(_STORED)
@@ -275,7 +276,7 @@ def test_post_processing_output_recorded_as_a_light_frame_is_left_out(camera_pro
         _astrometrics(frames, camera_config=camera_profile_config), "Apertura 75Q", "ZWO ASI 533MM Pro"
     )
 
-    assert [frame.exposure_seconds for frame in result] == [60.0]
+    assert [frame.exposure_s for frame in result] == [60.0]
 
 
 def test_frames_come_back_oldest_first(camera_profile_config: Any) -> None:
@@ -308,7 +309,7 @@ def test_usable_star_frames_drop_short_spectral_and_unmeasured_frames(make_frame
     """Verify only long imaging frames with a star width qualify."""
     frames = [
         make_frame(0),
-        make_frame(1, exposure_seconds=2.0),
+        make_frame(1, exposure_s=2.0),
         make_frame(2, is_spectral=True),
         make_frame(3, star_width_arcsec=None),
     ]
@@ -327,13 +328,13 @@ def test_ekos_captures_are_classified_by_their_saved_folder() -> None:
     }
 
     for path, expected in paths.items():
-        capture = EkosCapture(completed_at=1.0, exposure_seconds=1.0, filter_name="", file_path=path)
+        capture = EkosCapture(completed_at=1.0, exposure_s=1.0, filter_name="", file_path=path)
         assert capture_kind(capture) == expected
 
 
 def test_a_nights_captures_and_aborts_are_summed_across_sessions() -> None:
     """Verify two Ekos sessions on one night are combined."""
-    capture = EkosCapture(completed_at=1.0, exposure_seconds=1.0, filter_name="")
+    capture = EkosCapture(completed_at=1.0, exposure_s=1.0, filter_name="")
     from wayfindinglib.models.session.ekos_session import EkosAbortedCapture
 
     first = EkosSessionContext(
@@ -342,7 +343,7 @@ def test_a_nights_captures_and_aborts_are_summed_across_sessions() -> None:
         started_at=0.0,
         ended_at=1.0,
         captures=[capture],
-        aborted_captures=[EkosAbortedCapture(timestamp=1.0, exposure_seconds=30.0)],
+        aborted_captures=[EkosAbortedCapture(timestamp=1.0, exposure_s=30.0)],
     )
     second = EkosSessionContext(
         id="b", session_id="2026-09-23", started_at=2.0, ended_at=3.0, captures=[capture, capture]
@@ -384,11 +385,11 @@ def _context(day: int, captures: int, aborted: int) -> EkosSessionContext:
         started_at=start,
         ended_at=start + 7200.0,
         captures=[
-            EkosCapture(completed_at=start + index, exposure_seconds=1.0, filter_name="")
+            EkosCapture(completed_at=start + index, exposure_s=1.0, filter_name="")
             for index in range(captures)
         ],
         aborted_captures=[
-            EkosAbortedCapture(timestamp=start + index, exposure_seconds=30.0) for index in range(aborted)
+            EkosAbortedCapture(timestamp=start + index, exposure_s=30.0) for index in range(aborted)
         ],
     )
 

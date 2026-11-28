@@ -259,7 +259,28 @@ def add_frame(
     return record
 
 
-def frame_exposure_seconds(frame: Any) -> float | None:
+def _dictionary_value(frame: dict[str, Any], *keys: str) -> Any:
+    """Read the first of several keys a frame dictionary holds.
+
+    Parameters
+    ----------
+    frame : `dict` [`str`, `Any`]
+        A frame record as a dictionary.
+    *keys : `str`
+        The keys to try, the current name first and older names after.
+
+    Returns
+    -------
+    value : `Any`
+        The value of the first key present, or `None` when none is.
+    """
+    for key in keys:
+        if key in frame:
+            return frame[key]
+    return None
+
+
+def frame_exposure_s(frame: Any) -> float | None:
     """Read a frame's exposure length in seconds.
 
     This is the one reader of a frame record's exposure. Stacking, the frame
@@ -269,16 +290,21 @@ def frame_exposure_seconds(frame: Any) -> float | None:
     Parameters
     ----------
     frame : `Any`
-        A frame record, or a dictionary of one, with an ``exposure`` (a
-        number or a string such as ``"0.5"``).
+        A frame record, or a dictionary of one, with an ``exposure_s`` (a
+        number, or a string such as ``"0.5"``; a dictionary of an older
+        record may name it ``exposureS`` or ``exposure``).
 
     Returns
     -------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure length, or `None` when it is missing, not a number, not
         finite, or not positive.
     """
-    raw = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
+    raw = (
+        _dictionary_value(frame, "exposure_s", "exposureS", "exposure")
+        if isinstance(frame, dict)
+        else getattr(frame, "exposure_s", None)
+    )
     try:
         value = float(raw)
     except TypeError, ValueError:
@@ -288,7 +314,7 @@ def frame_exposure_seconds(frame: Any) -> float | None:
     return value
 
 
-def frame_iso_value(frame: Any) -> float | None:
+def frame_gain_value(frame: Any) -> float | None:
     """Read a frame's ISO (or gain setting) as a number.
 
     Frames that differ in ISO cannot be compared in counts per second, so
@@ -298,8 +324,9 @@ def frame_iso_value(frame: Any) -> float | None:
     Parameters
     ----------
     frame : `Any`
-        A frame record, or a dictionary of one, with an ``iso`` (a number or
-        text such as ``"800"`` or ``"800.0"``).
+        A frame record, or a dictionary of one, with a ``gain`` (a number,
+        or text such as ``"800"`` or ``"800.0"``; a dictionary of an older
+        record may name it ``iso``).
 
     Returns
     -------
@@ -307,7 +334,7 @@ def frame_iso_value(frame: Any) -> float | None:
         The ISO, or `None` when it is missing, not a number, not finite, or
         not positive (for example ``"Auto"``).
     """
-    raw = frame.get("iso") if isinstance(frame, dict) else getattr(frame, "iso", None)
+    raw = _dictionary_value(frame, "gain", "iso") if isinstance(frame, dict) else getattr(frame, "gain", None)
     try:
         value = float(str(raw).strip())
     except TypeError, ValueError:

@@ -1,27 +1,27 @@
 """Purpose: Start main-camera captures as background jobs.
 
 Description: The capture itself (filter change, exposures, dithering)
-is `control.imaging.capture_image` in the wayfinding library. This
-service only runs it on a background thread inside a ``capture`` job,
-so the app gets a job id right away and can watch the progress. The
-library moves the job's progress bar once per frame. `stop_capture`
-asks the library to end the run it started.
+is `control.imaging.capture` in the wayfinding library. This service
+first asks the library to check the capture (`control.imaging.check_capture`:
+the arguments, and whether monitor mode refuses it), so a refusal reaches
+the caller as an error before any thread starts. It then runs the capture
+on a background thread inside a ``capture`` job, so the app gets a job id
+right away and can watch the progress. The library moves the job's
+progress bar once per frame. `stop_capture` asks the library to end the
+run it started.
 """
 
 import logging
 import threading
 from typing import Any
 
+from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.jobs import registered_job
+from backend.services.error_logging import log_failure
 from backend.services.processing.job_service import JobService
 from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)
-
-EARLY_FAILURE_WAIT_SECONDS = 0.5
-"""How long a new capture is watched for an immediate failure, such as a
-bad argument, so the caller gets that error directly instead of a job
-that failed at once."""
 
 
 class ImagingService:
@@ -43,7 +43,7 @@ class ImagingService:
     def capture_sequence(
         self,
         target_id: str,
-        exposure_seconds: float,
+        exposure_s: float,
         count: int,
         image_type: str = "LIGHT",
         filter_name: str | None = None,
@@ -56,7 +56,7 @@ class ImagingService:
         ----------
         target_id : `str`
             Target the frames are recorded against.
-        exposure_seconds : `float`
+        exposure_s : `float`
             Exposure time per frame.
         count : `int`
             Number of frames to take.
@@ -78,28 +78,33 @@ class ImagingService:
 
         Notes
         -----
-        A capture that fails at once, for example because an argument is
-        out of range, raises its error here instead of returning a job id.
+        A capture the library refuses (an argument out of range, or monitor
+        mode) raises its error here, before any thread starts, instead of
+        returning a job id.
         """
+        self._observatory.imaging.check_capture(
+            exposure_s, count=count, filter_name=filter_name, dither=dither, delay_s=delay_seconds
+        )
         started = threading.Event()
         state: dict[str, Any] = {}
 
         def run() -> None:
             """Run the capture as a ``capture`` job on this thread."""
             try:
-                with registered_job(enabled=True, job_type="capture", target_id=target_id) as job:
+                with registered_job(job_type="capture", target_id=target_id) as job:
                     state["job_id"] = job.job_id
                     started.set()
-                    job.info(f"Capturing {count} x {exposure_seconds} s {image_type} frames")
-                    self._observatory.imaging.capture_image(
-                        exposure_seconds,
+                    job.info(f"Capturing {count} x {exposure_s} s {image_type} frames")
+                    self._observatory.imaging.capture(
+                        exposure_s,
                         count=count,
                         filter_name=filter_name,
                         dither=dither,
-                        delay_seconds=delay_seconds,
+                        delay_s=delay_seconds,
                     )
-            except Exception as error:  # the top of a background job: record it, never lose it
-                state["error"] = error
+            except AstrometricsError as error:
+                log_failure(logger, error, "Capture for %s failed", target_id)
+            except Exception:  # the top of a background job: record it, never lose it
                 logger.exception("Capture for %s failed", target_id)
             finally:
                 started.set()
@@ -107,9 +112,6 @@ class ImagingService:
         thread = threading.Thread(target=run, name=f"capture-{target_id}", daemon=True)
         thread.start()
         started.wait()
-        thread.join(timeout=EARLY_FAILURE_WAIT_SECONDS)
-        if "error" in state and not thread.is_alive():
-            raise state["error"]
         return state.get("job_id") or ""
 
     def stop_capture(self) -> bool:
@@ -123,5 +125,12 @@ class ImagingService:
         stopped : `bool`
             `True` if a run was stopped, `False` if none was going. Not an
             error: stopping nothing does nothing.
+
+        Notes
+        -----
+        In monitor mode the library raises `PermissionDeniedError`, even
+        when no run is going; this service lets the error through.
         """
-        return self._observatory.imaging.stop_capture()
+        running = bool(self._observatory.imaging.get_status(include=["capture"]).capture_running)
+        self._observatory.imaging.stop()
+        return running

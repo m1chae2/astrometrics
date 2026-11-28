@@ -16,7 +16,8 @@ intermediate setpoint is a thin orchestration step layered on top, not
 part of this module.
 """
 
-from wayfindinglib.models.equipment_and_site.equipment import Camera, CoolingPolicy
+from astrometricslib import Camera
+from wayfindinglib.models.equipment_and_site.equipment import CoolingPolicy
 
 
 def effective_ramp_rate_c_per_min(policy: CoolingPolicy, camera: Camera | None) -> float:
@@ -68,12 +69,12 @@ def is_settled(current_temp_c: float, target_temp_c: float, settle_tolerance_c: 
     return abs(current_temp_c - target_temp_c) <= settle_tolerance_c
 
 
-def has_settle_timed_out(elapsed_sec: float, settle_timeout_sec: int) -> bool:
+def has_settle_timed_out(elapsed_sec: float, settle_timeout_s: int) -> bool:
     """Return whether the settle wait has exceeded its configured bound.
 
     Returns
     -------
     timed_out : `bool`
-        `True` if `elapsed_sec` exceeds `settle_timeout_sec`.
+        `True` if `elapsed_sec` exceeds `settle_timeout_s`.
     """
-    return elapsed_sec > settle_timeout_sec
+    return elapsed_sec > settle_timeout_s

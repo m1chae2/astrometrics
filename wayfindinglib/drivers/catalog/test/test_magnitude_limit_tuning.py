@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.parameters import TuningInputs, TuningSkippedError, collect_tuners
+from astrometricslib._internal.parameters import collect_tuners
+from astrometricslib.parameters import TuningInputs, TuningSkippedError
 from wayfindinglib.drivers.catalog.deep_star_catalog_builder import DEFAULT_MAGNITUDE_LIMIT
 from wayfindinglib.drivers.catalog.magnitude_limit_tuning import (
     MAGNITUDE_LIMIT_TUNER,
@@ -51,17 +52,24 @@ def _inputs(rows: list[dict] | Exception) -> TuningInputs:
         Inputs with a ``"wayfinder"`` service.
     """
 
-    def query(**_kwargs: object) -> SimpleNamespace:
-        """Answer like `StellarCatalog.query`.
+    def query(**_kwargs: object) -> list[SimpleNamespace]:
+        """Answer like `StellarCatalog.query`, one star record per row.
 
         Returns
         -------
-        answer : `types.SimpleNamespace`
-            An answer with ``stars``.
+        stars : `list` [`types.SimpleNamespace`]
+            Stand-ins with ``id``, ``magnitude`` and ``has_catalog_magnitude``.
         """
         if isinstance(rows, Exception):
             raise rows
-        return SimpleNamespace(stars=rows)
+        return [
+            SimpleNamespace(
+                id=row["id"],
+                magnitude=row.get("magnitude"),
+                has_catalog_magnitude=row.get("hasCatalogMagnitude"),
+            )
+            for row in rows
+        ]
 
     wayfinder = SimpleNamespace(astrometrics=SimpleNamespace(stars=SimpleNamespace(query=query)))
     return TuningInputs(SimpleNamespace(camera_name="cam"), None, None, {"wayfinder": wayfinder})  # type: ignore[arg-type]

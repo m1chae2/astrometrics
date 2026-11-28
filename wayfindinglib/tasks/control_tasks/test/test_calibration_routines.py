@@ -65,8 +65,8 @@ def test_run_guider_calibration_sequences_ra_then_dec_pulses() -> None:
     assert call_order == ["pulse_ra", "pulse_dec"]
     assert isinstance(calibration, GuiderCalibration)
     assert calibration.id == "cal-1"
-    assert calibration.ra_rate_arcsec_per_sec == pytest.approx((10.0 * 2.0) / 3.0)
-    assert calibration.dec_rate_arcsec_per_sec == pytest.approx((8.0 * 2.0) / 3.0)
+    assert calibration.ra_rate_arcsec_per_s == pytest.approx((10.0 * 2.0) / 3.0)
+    assert calibration.dec_rate_arcsec_per_s == pytest.approx((8.0 * 2.0) / 3.0)
 
 
 def test_calibration_pulse_moves_the_star_the_declared_distance() -> None:

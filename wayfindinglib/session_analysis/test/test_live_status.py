@@ -81,7 +81,7 @@ def _capture(complete_offset: float, stars: int = 240, name: str = "frame") -> E
     """
     return EkosCapture(
         completed_at=_START + complete_offset,
-        exposure_seconds=120.0,
+        exposure_s=120.0,
         filter_name="Luminance",
         half_flux_radius_px=1.6,
         star_count=stars,
@@ -109,9 +109,9 @@ def _context(captures: list[EkosCapture], guider_state: str = "Guiding") -> Ekos
         mount_positions=[
             EkosMountPosition(
                 timestamp=_START,
-                declination_degrees=_DECLINATION,
-                azimuth_degrees=34.0,
-                altitude_degrees=67.0,
+                declination_deg=_DECLINATION,
+                azimuth_deg=34.0,
+                altitude_deg=67.0,
             )
         ],
         guide_state_events=[
@@ -155,7 +155,7 @@ def test_a_drift_at_the_rate_of_a_stopped_mount_is_recognised() -> None:
     """7 arcsec/s at +61.7 degrees matches an RA axis that stopped tracking."""
     drift = live_status.find_guiding_excursions(_guide_stats(), [_START + 620.0], _DECLINATION)[1]
 
-    assert drift.drift_rate_arcsec_per_second == pytest.approx(7.0, rel=0.05)
+    assert drift.drift_rate_arcsec_per_s == pytest.approx(7.0, rel=0.05)
     assert drift.matches_stopped_ra_axis is True
     assert drift.reacquire_count == 1
 
@@ -171,7 +171,7 @@ def test_a_re_lock_does_not_hide_the_drift_rate() -> None:
     """Fitting each piece between re-locks keeps the rate near 7."""
     drift = live_status.find_guiding_excursions(_guide_stats(), [_START + 620.0], _DECLINATION)[1]
 
-    assert drift.drift_rate_arcsec_per_second > 6.0
+    assert drift.drift_rate_arcsec_per_s > 6.0
 
 
 def test_a_ruined_frame_is_flagged_for_few_stars_and_for_the_excursion() -> None:
@@ -238,12 +238,12 @@ def test_the_recent_guiding_window_defaults_to_the_declared_length() -> None:
     }
 
     default_status = live_status.summarize_live_session(**arguments)
-    short_status = live_status.summarize_live_session(**arguments, window_seconds=120.0)
+    short_status = live_status.summarize_live_session(**arguments, window_s=120.0)
 
     declared = live_status.LIVE_STATUS_WINDOW_SECONDS.default
-    assert default_status.recent_guiding.window_seconds == pytest.approx(declared)
-    assert default_status.recent_guiding.window_seconds == pytest.approx(600.0)
-    assert short_status.recent_guiding.window_seconds == pytest.approx(120.0)
+    assert default_status.recent_guiding.window_s == pytest.approx(declared)
+    assert default_status.recent_guiding.window_s == pytest.approx(600.0)
+    assert short_status.recent_guiding.window_s == pytest.approx(120.0)
 
 
 def test_status_reports_a_stale_file_and_a_guider_that_is_not_guiding() -> None:
@@ -312,7 +312,7 @@ def _frame(
     """
     return EkosCapture(
         completed_at=_START + 130.0 + 120.0 * index,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         filter_name=filter_name,
         star_count=stars,
         file_path=f"/home/stellarmate/Pictures/{target}/Light/{filter_name}/frame_{index:03d}.fits",

@@ -1,4 +1,4 @@
-"""Tests for `CalibrationCatalog.assess` and `measure_frames`.
+"""Tests for `CalibrationCatalog.assess` and `frames.record`.
 
 A small library of synthetic darks and biases is written under a temporary
 folder and measured by the job. The camera is the shipped ASI 533 profile, so
@@ -12,10 +12,12 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib import CaptureSetting
 from astrometricslib.api.calibration import CalibrationCatalog
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.pipelines.stacking import calibration_catalog
 
 CAMERA_HEADER_NAME = "ZWO CCD ASI533MM Pro"
 BIAS_LEVEL_ADU = 395.0
@@ -127,8 +129,8 @@ def catalog(tmp_path: Path) -> CalibrationCatalog:
             CCD_TEMP=-10.0,
         )
     catalog = CalibrationCatalog(_StubConfiguration(tmp_path), None)
-    catalog.reindex_frames("bias")
-    catalog.reindex_frames("dark")
+    catalog.frames.scan("bias")
+    catalog.frames.scan("dark")
     return catalog
 
 
@@ -145,7 +147,7 @@ def _statuses(health: object) -> dict[str, GateStatus]:
 
 def test_before_measuring_every_check_but_the_count_is_not_checked(catalog: CalibrationCatalog) -> None:
     """Numbers that are not stored yet are not judged, and the set says so."""
-    (health,) = catalog.assess("bias", register_job=False)
+    (health,) = catalog.assess("bias")
     assert health.status == "good"
     statuses = _statuses(health)
     assert statuses["calibration_frame_count"] is GateStatus.PASSED
@@ -156,9 +158,9 @@ def test_before_measuring_every_check_but_the_count_is_not_checked(catalog: Cali
 
 def test_a_measured_bias_set_is_good(catalog: CalibrationCatalog) -> None:
     """Twelve clean biases at the profile level and noise pass."""
-    report = catalog.measure_frames(register_job=False)
+    report = catalog.frames.record()
     assert report.measured_count == 2 * FRAMES_PER_SET
-    (health,) = catalog.assess("bias", register_job=False)
+    (health,) = catalog.assess("bias")
     assert health.status == "good"
     assert health.measured_frame_count == FRAMES_PER_SET
     assert set(_statuses(health).values()) == {GateStatus.PASSED}
@@ -167,8 +169,8 @@ def test_a_measured_bias_set_is_good(catalog: CalibrationCatalog) -> None:
 
 def test_the_light_struck_dark_is_found_and_the_set_warns(catalog: CalibrationCatalog) -> None:
     """The dark with the bright band fails the light leak check."""
-    catalog.measure_frames(register_job=False)
-    (health,) = catalog.assess("dark", register_job=False)
+    catalog.frames.record()
+    (health,) = catalog.assess("dark")
     statuses = _statuses(health)
     assert statuses["dark_light_leak"] is GateStatus.FAILED
     assert statuses["dark_zero_pixel_fraction"] is GateStatus.PASSED
@@ -176,44 +178,42 @@ def test_the_light_struck_dark_is_found_and_the_set_warns(catalog: CalibrationCa
     assert [Path(concern.path).name for concern in health.frames_of_concern] == [
         f"Dark_{FRAMES_PER_SET - 1}.fits"
     ]
-    assert health.exposure_seconds == pytest.approx(30.0)
+    assert health.exposure_s == pytest.approx(30.0)
 
 
 def test_the_row_key_matches_the_counts_row(catalog: CalibrationCatalog) -> None:
     """The display can join the health to the counts row by the same key."""
-    counts = catalog.query(kind="dark")
-    (health,) = catalog.assess("dark", register_job=False)
-    assert [row["row_key"] for row in counts.darks] == [health.row_key]
+    counts = catalog.query("dark")
+    (health,) = catalog.assess("dark")
+    assert [row.row_key for row in counts] == [health.row_key]
 
 
 def test_a_second_measuring_run_reads_nothing(catalog: CalibrationCatalog) -> None:
     """Unchanged files are skipped by their stamps."""
-    catalog.measure_frames(register_job=False)
-    again = catalog.measure_frames(register_job=False)
+    catalog.frames.record()
+    again = catalog.frames.record()
     assert again.measured_count == 0
     assert again.unchanged_count == 2 * FRAMES_PER_SET
 
 
-def test_assess_narrows_by_setting_and_refuses_an_argument_of_another_kind(
+def test_assess_narrows_by_setting(
     catalog: CalibrationCatalog,
 ) -> None:
-    """A matching exposure finds the set; a wrong argument is refused."""
-    assert len(catalog.assess("dark", exposure_seconds=30.0, register_job=False)) == 1
-    assert catalog.assess("dark", exposure_seconds=60.0, register_job=False) == []
-    assert catalog.assess("bias", offset=20, register_job=False) == []
-    with pytest.raises(InvalidArgumentError, match="telescope"):
-        catalog.assess("bias", telescope="Scope", register_job=False)
-    with pytest.raises(InvalidArgumentError, match="exposure_seconds"):
-        catalog.assess("bias", exposure_seconds=30.0, register_job=False)
+    """A matching exposure finds the set; other kinds' fields are ignored."""
+    assert len(catalog.assess("dark", CaptureSetting(camera=CAMERA_HEADER_NAME, exposure_s=30.0))) == 1
+    assert catalog.assess("dark", CaptureSetting(camera=CAMERA_HEADER_NAME, exposure_s=60.0)) == []
+    assert catalog.assess("bias", CaptureSetting(camera=CAMERA_HEADER_NAME, offset=20)) == []
+    assert catalog.assess("bias", CaptureSetting(camera="Other Camera")) == []
+    assert len(catalog.assess("bias", CaptureSetting(camera=CAMERA_HEADER_NAME, exposure_s=30.0))) == 1
     with pytest.raises(InvalidArgumentError, match="kind"):
-        catalog.assess("lamp", register_job=False)  # ty: ignore[invalid-argument-type]
+        catalog.assess("lamp")  # ty: ignore[invalid-argument-type]
 
 
 def test_a_rescan_reports_the_health_of_new_dark_and_bias_sets(
     catalog: CalibrationCatalog, tmp_path: Path
 ) -> None:
     """New frames give a health record that says they are not measured yet."""
-    catalog.measure_frames(register_job=False)
+    catalog.frames.record()
     _write(tmp_path / "frames" / "biases" / "Bias_new.fits", 500, BIAS_LEVEL_ADU, EXPTIME=0.0)
     _write(
         tmp_path / "frames" / "darks" / "Dark_new.fits",
@@ -223,8 +223,8 @@ def test_a_rescan_reports_the_health_of_new_dark_and_bias_sets(
         CCD_TEMP=-10.0,
     )
 
-    bias_report = catalog.reindex_frames("bias")
-    dark_report = catalog.reindex_frames("dark")
+    bias_report = catalog.frames.scan("bias")[0]
+    dark_report = catalog.frames.scan("dark")[0]
 
     for report, kind in ((bias_report, "bias"), (dark_report, "dark")):
         assert report.added_count == 1
@@ -238,7 +238,7 @@ def test_a_rescan_reports_the_health_of_new_dark_and_bias_sets(
 
 def test_a_rescan_with_nothing_new_reports_no_assessments(catalog: CalibrationCatalog) -> None:
     """A second rescan of an unchanged folder judges nothing."""
-    assert catalog.reindex_frames("bias").assessments == []
+    assert catalog.frames.scan("bias")[0].assessments == []
 
 
 def _count_judgements(catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPatch) -> list[int]:
@@ -250,7 +250,7 @@ def _count_judgements(catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPat
         One entry is added per real judgement.
     """
     calls: list[int] = []
-    judge = catalog._judge_dark_or_bias_sets
+    judge = calibration_catalog._judge_dark_or_bias_sets
 
     def counted(*arguments: object) -> object:
         """Count the call and judge.
@@ -263,7 +263,7 @@ def _count_judgements(catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPat
         calls.append(1)
         return judge(*arguments)
 
-    monkeypatch.setattr(catalog, "_judge_dark_or_bias_sets", counted)
+    monkeypatch.setattr(calibration_catalog, "_judge_dark_or_bias_sets", counted)
     return calls
 
 
@@ -271,10 +271,10 @@ def test_an_unchanged_library_is_judged_once(
     catalog: CalibrationCatalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unchanged library is answered from memory the second time."""
-    catalog.measure_frames(register_job=False)
+    catalog.frames.record()
     calls = _count_judgements(catalog, monkeypatch)
-    first = catalog.assess("dark", register_job=False)
-    second = catalog.assess("dark", register_job=False)
+    first = catalog.assess("dark")
+    second = catalog.assess("dark")
     assert len(calls) == 1
     assert first == second
     assert first is not second
@@ -285,16 +285,16 @@ def test_new_numbers_or_a_new_file_judge_again(
 ) -> None:
     """A measuring run and a new calibration file each judge again."""
     calls = _count_judgements(catalog, monkeypatch)
-    (before,) = catalog.assess("bias", register_job=False)
+    (before,) = catalog.assess("bias")
     assert before.measured_frame_count == 0
-    catalog.measure_frames(register_job=False)
-    (measured,) = catalog.assess("bias", register_job=False)
+    catalog.frames.record()
+    (measured,) = catalog.assess("bias")
     assert len(calls) == 2
     assert measured.measured_frame_count == FRAMES_PER_SET
 
     _write(tmp_path / "frames" / "biases" / "Bias_new.fits", 999, BIAS_LEVEL_ADU, EXPTIME=0.0)
-    catalog.reindex_frames("bias")
+    catalog.frames.scan("bias")[0]
     judged_before = len(calls)
-    (grown,) = catalog.assess("bias", register_job=False)
+    (grown,) = catalog.assess("bias")
     assert len(calls) == judged_before + 1
     assert grown.frame_count == FRAMES_PER_SET + 1

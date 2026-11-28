@@ -14,7 +14,7 @@ planning models.
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 
@@ -41,7 +41,7 @@ class DepthGoalState(StrEnum):
     ``not_stacked`` means the target has no library stack.
     ``depth_not_measured`` means the stack has no usable depth. ``reached``
     means the depth meets the chosen
-    level. ``below_goal`` means it does not, and ``seconds_to_goal`` may say
+    level. ``below_goal`` means it does not, and ``time_to_goal_s`` may say
     how long it would take. ``will_not_help`` means more frames will not
     reach the level.
     """
@@ -120,12 +120,12 @@ class DepthGoalStatus(BaseModel):
         none.
     reached_level_label : `str` or `None`
         That level in words.
-    seconds_to_goal : `float` or `None`
+    time_to_goal_s : `float` or `None`
         Clock time to reach the chosen level, with downloads, when below it
         and a forecast could be made.
     frames_to_goal : `int` or `None`
         The frames behind that time.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure of each of those frames.
     forecast_status : `RecommendedAdditionalFramesStatus`
         Whether the forecast behind the time was checked. ``not_checked``
@@ -151,9 +151,17 @@ class DepthGoalStatus(BaseModel):
     goal_depth: float | None = Field(default=None, alias="goalDepth")
     reached_level: DepthLevel | None = Field(default=None, alias="reachedLevel")
     reached_level_label: str | None = Field(default=None, alias="reachedLevelLabel")
-    seconds_to_goal: float | None = Field(default=None, alias="secondsToGoal")
+    time_to_goal_s: float | None = Field(
+        default=None,
+        alias="timeToGoalS",
+        validation_alias=AliasChoices("timeToGoalS", "time_to_goal_s", "secondsToGoal", "seconds_to_goal"),
+    )
     frames_to_goal: int | None = Field(default=None, alias="framesToGoal")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     forecast_status: RecommendedAdditionalFramesStatus = Field(
         default=RecommendedAdditionalFramesStatus.NOT_CHECKED, alias="forecastStatus"
     )

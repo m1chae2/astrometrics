@@ -199,13 +199,13 @@ class CalibrationFrame:
     ----------
     pixels : `numpy.ndarray`
         The pixel values in ADU, as a 2-D float array.
-    gain_setting : `str`
+    gain : `str`
         The camera gain setting (or ISO), in standard form.
     offset : `str`
         The camera offset, in standard form.
     binning : `str`
         The binning, such as ``"1x1"``.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure time, or `None` when the header gives none.
     temperature_c : `float` or `None`
         The sensor temperature, or `None` when the header gives none.
@@ -219,10 +219,10 @@ class CalibrationFrame:
     """
 
     pixels: np.ndarray
-    gain_setting: str
+    gain: str
     offset: str
     binning: str
-    exposure_seconds: float | None = None
+    exposure_s: float | None = None
     temperature_c: float | None = None
     path: str = ""
     observed_at: float | None = None
@@ -236,7 +236,7 @@ class CalibrationFrame:
         setting : `tuple` [`str`, `str`, `str`]
             Gain setting, offset and binning.
         """
-        return (self.gain_setting, self.offset, self.binning)
+        return (self.gain, self.offset, self.binning)
 
 
 def _parse_observation_time(value: object) -> float | None:
@@ -294,15 +294,15 @@ def load_calibration_frame(path: str) -> CalibrationFrame | None:
     offset = header.get("OFFSET", header.get("BLKLEVEL"))
     exposure = header.get("EXPTIME", header.get("EXPOSURE"))
     try:
-        exposure_seconds = None if exposure is None else float(exposure)
+        exposure_s = None if exposure is None else float(exposure)
     except TypeError, ValueError:
-        exposure_seconds = None
+        exposure_s = None
     return CalibrationFrame(
         pixels=pixels,
-        gain_setting=canonical_gain_setting(gain),
+        gain=canonical_gain_setting(gain),
         offset=canonical_offset_setting(offset),
         binning=canonical_binning_setting(header_binning(header)),
-        exposure_seconds=exposure_seconds,
+        exposure_s=exposure_s,
         temperature_c=header_temperature_c(header),
         path=path,
         observed_at=_parse_observation_time(header.get("DATE-OBS")),
@@ -421,7 +421,7 @@ def make_unmeasured_result(
         status=MeasurementStatus.NOT_MEASURED,
         reason=reason,
         camera_id=camera_id,
-        gain_setting=setting[0],
+        gain=setting[0],
         offset=setting[1],
         binning=setting[2],
         flat_frame_count=flat_frame_count,
@@ -448,7 +448,7 @@ def _find_condition_problem(
         return f"the frames were taken at more than one camera setting ({listed})"
     if len({frame.pixels.shape for frame in every_frame}) > 1:
         return "the frames do not all have the same size"
-    exposures = [frame.exposure_seconds for frame in flat_frames if frame.exposure_seconds is not None]
+    exposures = [frame.exposure_s for frame in flat_frames if frame.exposure_s is not None]
     if exposures and any(
         not math.isclose(value, exposures[0], rel_tol=exposure_relative_tolerance) for value in exposures
     ):
@@ -610,12 +610,12 @@ def measure_sensor_noise(
     signal = float(np.median(pair_signals))
     temperatures = [f.temperature_c for f in [*flat_frames, *bias_frames] if f.temperature_c is not None]
     temperature_c = float(np.mean(temperatures)) if temperatures else None
-    exposures = [f.exposure_seconds for f in flat_frames if f.exposure_seconds is not None]
-    exposure_seconds = float(np.mean(exposures)) if exposures else None
+    exposures = [f.exposure_s for f in flat_frames if f.exposure_s is not None]
+    exposure_s = float(np.mean(exposures)) if exposures else None
     date_text = measured_on.isoformat()
     conditions = []
-    if exposure_seconds is not None:
-        conditions.append(f"{exposure_seconds:g} s")
+    if exposure_s is not None:
+        conditions.append(f"{exposure_s:g} s")
     if temperature_c is not None:
         conditions.append(f"{temperature_c:.0f} C")
     conditions_text = f" ({', '.join(conditions)})" if conditions else ""
@@ -630,11 +630,11 @@ def measure_sensor_noise(
     return SensorNoiseMeasurement(
         status=MeasurementStatus.MEASURED,
         camera_id=camera_id,
-        gain_setting=setting[0],
+        gain=setting[0],
         offset=setting[1],
         binning=setting[2],
         temperature_c=temperature_c,
-        exposure_seconds=exposure_seconds,
+        exposure_s=exposure_s,
         gain_e_per_adu=gain,
         gain_spread_e_per_adu=spread,
         read_noise_adu=read_noise_adu,

@@ -15,7 +15,7 @@ fields are deliberately not kept; altitude, azimuth, declination and pier
 side are consistent and are enough to place a sample on the sky.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 EKOS_SESSION_CONTEXT_SCHEMA_VERSION = 1
 """Bumped whenever the shape of `EkosSessionContext` changes meaningfully."""
@@ -28,11 +28,11 @@ class EkosMountPosition(BaseModel):
     ----------
     timestamp : `float`
         Seconds since the Unix epoch.
-    declination_degrees : `float`
+    declination_deg : `float`
         Declination, in degrees.
-    altitude_degrees : `float`
+    altitude_deg : `float`
         Altitude above the horizon, in degrees.
-    azimuth_degrees : `float`
+    azimuth_deg : `float`
         Azimuth, in degrees from north through east.
     pier_side : `str` or `None`
         ``"West"`` or ``"East"`` (the side of the pier the telescope is
@@ -42,9 +42,20 @@ class EkosMountPosition(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     timestamp: float
-    declination_degrees: float = Field(alias="declinationDegrees")
-    altitude_degrees: float = Field(alias="altitudeDegrees")
-    azimuth_degrees: float = Field(alias="azimuthDegrees")
+    declination_deg: float = Field(
+        alias="declinationDeg",
+        validation_alias=AliasChoices(
+            "declinationDeg", "declination_deg", "declinationDegrees", "declination_degrees"
+        ),
+    )
+    altitude_deg: float = Field(
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float = Field(
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     pier_side: str | None = Field(default=None, alias="pierSide")
 
 
@@ -74,7 +85,7 @@ class EkosCapture(BaseModel):
     ----------
     completed_at : `float`
         When the exposure finished, in seconds since the Unix epoch.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length, in seconds.
     filter_name : `str`
         Filter or filter-wheel slot name.
@@ -95,7 +106,10 @@ class EkosCapture(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     completed_at: float = Field(alias="completedAt")
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     filter_name: str = Field(alias="filterName")
     half_flux_radius_px: float | None = Field(default=None, alias="halfFluxRadiusPx")
     star_count: int = Field(default=0, alias="starCount")
@@ -111,14 +125,17 @@ class EkosAbortedCapture(BaseModel):
     ----------
     timestamp : `float`
         When it was aborted, in seconds since the Unix epoch.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length that was requested, in seconds.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
     timestamp: float
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
 
 
 class EkosFocusSample(BaseModel):
@@ -332,3 +349,71 @@ class EkosGuideStat(BaseModel):
     snr: float
     sky_background: float = Field(alias="skyBackground")
     star_count: int = Field(alias="starCount")
+
+
+class EkosSessionSummary(BaseModel):
+    """One recorded Ekos session in a few fields, without its detail.
+
+    Attributes
+    ----------
+    id : `str`
+        The session's id, the analyze file's time stamp.
+    night : `str`
+        The observing night the session belongs to.
+    started_at, ended_at : `float`
+        Seconds since the Unix epoch.
+    equipment_fingerprint : `str` or `None`
+        The equipment the session used, when it is known.
+    captures, aborted_captures, autofocus_runs : `int`
+        How many exposures, aborted exposures and autofocus runs it holds.
+    align_events, guide_state_events, mount_state_events : `int`
+        How many plate-solve, guider and mount state changes it holds.
+    temperatures, mount_positions : `int`
+        How many temperature readings and mount positions it holds.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    id: str
+    night: str
+    started_at: float = Field(alias="startedAt")
+    ended_at: float = Field(alias="endedAt")
+    equipment_fingerprint: str | None = Field(default=None, alias="equipmentFingerprint")
+    captures: int = 0
+    aborted_captures: int = Field(default=0, alias="abortedCaptures")
+    autofocus_runs: int = Field(default=0, alias="autofocusRuns")
+    align_events: int = Field(default=0, alias="alignEvents")
+    guide_state_events: int = Field(default=0, alias="guideStateEvents")
+    mount_state_events: int = Field(default=0, alias="mountStateEvents")
+    temperatures: int = 0
+    mount_positions: int = Field(default=0, alias="mountPositions")
+
+    @classmethod
+    def of(cls, record: EkosSessionContext) -> EkosSessionSummary:
+        """Summarize one stored session record.
+
+        Parameters
+        ----------
+        record : `EkosSessionContext`
+            The stored session.
+
+        Returns
+        -------
+        summary : `EkosSessionSummary`
+            Its id, night, times, equipment and section counts.
+        """
+        return cls(
+            id=record.id,
+            night=record.session_id,
+            started_at=record.started_at,
+            ended_at=record.ended_at,
+            equipment_fingerprint=record.equipment.equipment_fingerprint if record.equipment else None,
+            captures=len(record.captures),
+            aborted_captures=len(record.aborted_captures),
+            autofocus_runs=len(record.autofocus_runs),
+            align_events=len(record.align_events),
+            guide_state_events=len(record.guide_state_events),
+            mount_state_events=len(record.mount_state_events),
+            temperatures=len(record.temperatures),
+            mount_positions=len(record.mount_positions),
+        )

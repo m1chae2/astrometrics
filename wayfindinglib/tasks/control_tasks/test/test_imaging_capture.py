@@ -66,14 +66,22 @@ def _context(plate_scale_arcsec_per_px: float | None = 2.0) -> SimpleNamespace:
     Returns
     -------
     context : `types.SimpleNamespace`
-        The active telescope and camera lookups.
+        The active telescope and camera lookups, and a policy that lets
+        every capability act.
     """
+    policy = SimpleNamespace(is_authoritative=lambda capability: True)
     if plate_scale_arcsec_per_px is None:
         return SimpleNamespace(
-            active_telescope=lambda: None, active_camera=lambda: None, capture_runs=CaptureRuns()
+            active_telescope=lambda: None,
+            active_camera=lambda: None,
+            capture_runs=CaptureRuns(),
+            delegation_policy=lambda: policy,
         )
     return SimpleNamespace(
-        active_telescope=lambda: "telescope", active_camera=lambda: "camera", capture_runs=CaptureRuns()
+        active_telescope=lambda: "telescope",
+        active_camera=lambda: "camera",
+        capture_runs=CaptureRuns(),
+        delegation_policy=lambda: policy,
     )
 
 
@@ -82,13 +90,14 @@ def plate_scale(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every equipment pairing report 2 arcseconds per pixel."""
 
     class _Equipment:
-        """Stands in for `EquipmentConfiguration`."""
+        """Stands in for `ObservatoryConfiguration`."""
 
         def __init__(self, telescope: Any, camera: Any) -> None:
             """Ignore the equipment."""
 
+        @property
         def plate_scale_arcsec_per_px(self) -> float:
-            """Return a fixed plate scale.
+            """A fixed plate scale.
 
             Returns
             -------
@@ -97,9 +106,7 @@ def plate_scale(monkeypatch: pytest.MonkeyPatch) -> None:
             """
             return 2.0
 
-    monkeypatch.setattr(
-        "wayfindinglib.models.equipment_and_site.equipment.EquipmentConfiguration", _Equipment
-    )
+    monkeypatch.setattr("astrometricslib.ObservatoryConfiguration", _Equipment)
 
 
 def test_the_filter_is_set_once_before_the_frames(commands: list) -> None:
@@ -140,9 +147,9 @@ def test_dithering_needs_active_equipment(commands: list) -> None:
 @pytest.mark.parametrize(
     "arguments",
     [
-        {"exposure_seconds": 0.0},
-        {"exposure_seconds": 1.0, "count": 0},
-        {"exposure_seconds": 1.0, "delay_seconds": -1},
+        {"exposure_s": 0.0},
+        {"exposure_s": 1.0, "count": 0},
+        {"exposure_s": 1.0, "delay_s": -1},
     ],
 )
 def test_bad_arguments_are_refused(commands: list, arguments: dict) -> None:
@@ -267,3 +274,17 @@ def test_a_real_stop_ends_a_long_wait_at_once(monkeypatch: pytest.MonkeyPatch) -
     assert results[0].stopped is True
     assert results[0].frames_captured == 0
     assert aborted == [True]
+
+
+def test_check_capture_refuses_monitor_mode_before_any_command(commands: list) -> None:
+    """In monitor mode the check refuses, and no device is touched."""
+    from astrometricslib.exceptions import PermissionDeniedError
+
+    context = _context()
+    context.delegation_policy = lambda: SimpleNamespace(is_authoritative=lambda capability: False)
+    with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
+        imaging_capture.check_capture(context, 1.0, count=2)
+    with pytest.raises(PermissionDeniedError):
+        imaging_capture.capture_frames(context, 1.0, count=2, filter_name="L")
+    assert commands == []
+    assert not context.capture_runs.is_running()

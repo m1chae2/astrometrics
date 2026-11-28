@@ -83,7 +83,7 @@ def test_a_spectrum_equal_to_its_xp_spectrum_agrees_with_it() -> None:
 
     assert comparison.status == "compared"
     assert comparison.residual_rms_fraction < 0.02
-    assert comparison.slope_percent_per_1000_angstrom == pytest.approx(0.0, abs=0.3)
+    assert comparison.slope_pct_per_1000_angstrom == pytest.approx(0.0, abs=0.3)
     assert abs(comparison.wavelength_shift_angstrom) < 3.0
     assert [band.median_ratio for band in comparison.bands] == pytest.approx([1.0] * 4, abs=0.01)
 
@@ -93,7 +93,7 @@ def test_a_tilt_of_five_percent_per_1000_angstrom_is_recovered(spectral_type: st
     """A known tilt of 5 percent per 1000 A comes back within 0.5."""
     comparison = compare(spectral_type, tilt_percent_per_1000_angstrom=5.0, noise_fraction=0.01)
 
-    assert comparison.slope_percent_per_1000_angstrom == pytest.approx(5.0, abs=0.5)
+    assert comparison.slope_pct_per_1000_angstrom == pytest.approx(5.0, abs=0.5)
     # The ratio is 1 at 5500 A, so the bands rise from below 1 to above 1.
     ratios = [band.median_ratio for band in comparison.bands]
     assert ratios == sorted(ratios)
@@ -137,9 +137,7 @@ def test_the_telluric_bands_and_the_edges_are_left_out() -> None:
     dipped[(wavelength > 7500.0) & (wavelength < 7700.0)] *= 0.3
     with_dip = compare_spectrum_to_xp(wavelength, dipped, make_xp_spectrum("G2V"))
 
-    assert with_dip.slope_percent_per_1000_angstrom == pytest.approx(
-        clean.slope_percent_per_1000_angstrom, abs=0.2
-    )
+    assert with_dip.slope_pct_per_1000_angstrom == pytest.approx(clean.slope_pct_per_1000_angstrom, abs=0.2)
     assert with_dip.sample_count == clean.sample_count
     assert clean.sample_count < np.isfinite(intensity).sum()
 
@@ -154,7 +152,7 @@ def test_the_spectrums_own_errors_are_used_when_given() -> None:
     )
 
     assert comparison.used_observed_errors
-    assert comparison.slope_percent_per_1000_angstrom == pytest.approx(2.0, abs=0.3)
+    assert comparison.slope_pct_per_1000_angstrom == pytest.approx(2.0, abs=0.3)
     assert not compare("G2V").used_observed_errors
 
 
@@ -229,7 +227,7 @@ def test_compare_to_gaia_xp_runs_the_comparison_with_the_drivers_spectrum() -> N
 
     assert comparison.status == "compared"
     assert comparison.gaia_source_id == SOURCE_ID
-    assert comparison.slope_percent_per_1000_angstrom == pytest.approx(4.0, abs=0.5)
+    assert comparison.slope_pct_per_1000_angstrom == pytest.approx(4.0, abs=0.5)
 
 
 def test_the_gaia_source_id_comes_from_the_stored_id_or_a_gaia_name() -> None:
@@ -346,7 +344,7 @@ def make_row(
     """
     comparison = GaiaXpComparison(
         status="compared",
-        slope_percent_per_1000_angstrom=slope,
+        slope_pct_per_1000_angstrom=slope,
         bands=[
             {"start_angstrom": low, "end_angstrom": high, "median_ratio": ratio, "sample_count": 50}
             for (low, high), ratio in zip(COMPARISON_BANDS_ANGSTROM, ratios, strict=True)
@@ -370,8 +368,8 @@ def test_the_run_summary_gives_the_median_ratio_and_scatter_in_each_band() -> No
     # 1.4826 * MAD of (0.90, 0.92, 0.94) is 1.4826 * 0.02.
     assert summary.bands[0].scatter == pytest.approx(1.4826 * 0.02)
     assert [band.star_count for band in summary.bands] == [3, 3, 3, 3]
-    assert summary.median_slope_percent_per_1000_angstrom == pytest.approx(5.0)
-    assert summary.median_absolute_slope_percent_per_1000_angstrom == pytest.approx(5.0)
+    assert summary.median_slope_pct_per_1000_angstrom == pytest.approx(5.0)
+    assert summary.median_absolute_slope_pct_per_1000_angstrom == pytest.approx(5.0)
 
 
 def test_a_star_with_several_spectra_counts_once() -> None:
@@ -386,8 +384,8 @@ def test_a_star_with_several_spectra_counts_once() -> None:
     summary = summarize_gaia_xp(rows)
 
     assert summary.compared_star_count == 2
-    assert summary.median_slope_percent_per_1000_angstrom == pytest.approx(0.5)
-    assert summary.median_absolute_slope_percent_per_1000_angstrom == pytest.approx(2.5)
+    assert summary.median_slope_pct_per_1000_angstrom == pytest.approx(0.5)
+    assert summary.median_absolute_slope_pct_per_1000_angstrom == pytest.approx(2.5)
     assert summarize_gaia_xp([]) is None
 
 
@@ -397,8 +395,8 @@ def test_the_run_summary_uses_the_median_absolute_slope_not_the_signed_one() -> 
 
     summary = summarize_gaia_xp(rows)
 
-    assert summary.median_slope_percent_per_1000_angstrom == pytest.approx(4.0)
-    assert summary.median_absolute_slope_percent_per_1000_angstrom == pytest.approx(4.0)
+    assert summary.median_slope_pct_per_1000_angstrom == pytest.approx(4.0)
+    assert summary.median_absolute_slope_pct_per_1000_angstrom == pytest.approx(4.0)
 
 
 def test_gaia_xp_rows_keeps_only_compared_spectra_with_the_star_id() -> None:

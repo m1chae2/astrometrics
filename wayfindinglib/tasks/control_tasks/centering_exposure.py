@@ -18,7 +18,7 @@ The steps are:
 4. Take the shortest exposure whose count reaches the target. If the longest
    one still falls short, use it and say so.
 
-If any input is missing, the fixed ``alignment_exposure_seconds`` setting is
+If any input is missing, the fixed ``alignment_exposure_s`` setting is
 used, and the result says which input was missing. Nothing here writes or
 moves anything.
 
@@ -38,6 +38,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib import CaptureSetting, SkyPosition
 from astrometricslib.exceptions import AstrometricsError, ConfigurationError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -46,15 +47,16 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, QualityMeasurement
+from astrometricslib.reports import QualityMeasurement
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import equipment_spellings, normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, baseline_key
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.models.session.centering_exposure import CenteringExposure, CenteringExposureTrial
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import sky_rate_tasks
 
 if TYPE_CHECKING:
+    from astrometricslib.arguments import TimeInput
     from wayfindinglib.api.control.context import ControlContext
 
 __all__ = [
@@ -210,14 +212,14 @@ class SensorAndSky:
         return 4.0 * math.pi * sigma * sigma
 
 
-def star_electrons(magnitude: float, exposure_seconds: float, sensor: SensorAndSky) -> float:
+def star_electrons(magnitude: float, exposure_s: float, sensor: SensorAndSky) -> float:
     """Give the electrons a star of a magnitude collects in an exposure.
 
     Parameters
     ----------
     magnitude : `float`
         Gaia G magnitude.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure, in seconds.
     sensor : `SensorAndSky`
         The zero point and the gain.
@@ -227,10 +229,10 @@ def star_electrons(magnitude: float, exposure_seconds: float, sensor: SensorAndS
     electrons : `float`
         ``gain * 10**(0.4 (zero_point - m)) * t``.
     """
-    return sensor.gain_e_per_adu * 10.0 ** (0.4 * (sensor.zero_point_mag - magnitude)) * exposure_seconds
+    return sensor.gain_e_per_adu * 10.0 ** (0.4 * (sensor.zero_point_mag - magnitude)) * exposure_s
 
 
-def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sensor: SensorAndSky) -> float:
+def point_source_signal_to_noise(magnitude: float, exposure_s: float, sensor: SensorAndSky) -> float:
     """Give the signal-to-noise ratio of a star in one exposure.
 
     ``S / sqrt(S + n (B t + R**2))``: the star's electrons ``S``, its own shot
@@ -242,7 +244,7 @@ def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sens
     ----------
     magnitude : `float`
         Gaia G magnitude.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure, in seconds.
     sensor : `SensorAndSky`
         The camera, sky and star-width numbers.
@@ -252,13 +254,13 @@ def point_source_signal_to_noise(magnitude: float, exposure_seconds: float, sens
     ratio : `float`
         The signal-to-noise ratio. It rises with exposure time.
     """
-    signal = star_electrons(magnitude, exposure_seconds, sensor)
-    background = sensor.sky_rate_e_per_s_per_px * exposure_seconds + sensor.read_noise_e**2
+    signal = star_electrons(magnitude, exposure_s, sensor)
+    background = sensor.sky_rate_e_per_s_per_px * exposure_s + sensor.read_noise_e**2
     return signal / math.sqrt(signal + sensor.noise_pixels * background)
 
 
 def limiting_magnitude(
-    exposure_seconds: float, sensor: SensorAndSky, signal_to_noise: float | None = None
+    exposure_s: float, sensor: SensorAndSky, signal_to_noise: float | None = None
 ) -> float:
     """Give the faintest magnitude that reaches a signal-to-noise ratio.
 
@@ -268,7 +270,7 @@ def limiting_magnitude(
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure, in seconds.
     sensor : `SensorAndSky`
         The camera, sky and star-width numbers.
@@ -282,10 +284,10 @@ def limiting_magnitude(
     """
     if signal_to_noise is None:
         signal_to_noise = resolve_parameter(DETECTION_SIGNAL_TO_NOISE).value
-    background = sensor.sky_rate_e_per_s_per_px * exposure_seconds + sensor.read_noise_e**2
+    background = sensor.sky_rate_e_per_s_per_px * exposure_s + sensor.read_noise_e**2
     square = signal_to_noise**2
     electrons = (square + math.sqrt(square * square + 4.0 * square * sensor.noise_pixels * background)) / 2.0
-    adu_per_second = electrons / sensor.gain_e_per_adu / exposure_seconds
+    adu_per_second = electrons / sensor.gain_e_per_adu / exposure_s
     return sensor.zero_point_mag - 2.5 * math.log10(adu_per_second)
 
 
@@ -317,7 +319,7 @@ def choose_exposure(
 
     Returns
     -------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The shortest ladder step that reaches the target, else the longest.
     trials : `list` [`CenteringExposureTrial`]
         Every ladder step up to the chosen one, with its limit and count.
@@ -338,9 +340,7 @@ def choose_exposure(
         limit = limiting_magnitude(exposure, sensor)
         count = sum(1 for magnitude in ordered if magnitude <= limit)
         trials.append(
-            CenteringExposureTrial(
-                exposure_seconds=exposure, limiting_magnitude=limit, expected_star_count=count
-            )
+            CenteringExposureTrial(exposure_s=exposure, limiting_magnitude=limit, expected_star_count=count)
         )
         lower_bound = not catalog_complete or (
             catalog_limit_magnitude is not None and limit > catalog_limit_magnitude
@@ -467,25 +467,25 @@ def _library_rows(
 
     astrometrics = context.astrometrics
     since = datetime.fromtimestamp(now - resolve_parameter(ZERO_POINT_LOOKBACK_DAYS).value * 86400.0, UTC)
-    settings = astrometrics.quality.capture_settings()
+    settings = {stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings()}
     camera_names = equipment_spellings(astrometrics, equipment.camera_name)
     telescope_name = normalize_name(equipment.telescope_name)
     by_key: dict[str, list[QualityMeasurement]] = {}
     chosen: dict[str, CaptureSetting] = {}
-    zero_points = astrometrics.quality.query(
+    zero_points = astrometrics.quality.records.query(
         metric=ZERO_POINT_METRIC, level="frame", since=since, library_only=True
     )
-    widths = astrometrics.quality.query(
+    widths = astrometrics.quality.records.query(
         metric=STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, level="frame", since=since, library_only=True
     )
     # The photometry rows carry no capture setting; the frame measurements of
     # the same frame do, so a zero point takes its frame's setting from them.
     setting_by_frame = {
         row.subject.subject_id: row.subject.capture_setting_id
-        for row in widths.rows
+        for row in widths
         if row.subject.capture_setting_id
     }
-    for row in zero_points.rows:
+    for row in zero_points:
         setting_id = row.subject.capture_setting_id or setting_by_frame.get(row.subject.subject_id)
         setting = settings.get(setting_id) if setting_id else None
         if setting is None or normalize_name(setting.camera) not in camera_names:
@@ -505,7 +505,7 @@ def _library_rows(
     key = max(by_key, key=lambda name: len(by_key[name]))
     width_rows = [
         row
-        for row in widths.rows
+        for row in widths
         if (found := settings.get(row.subject.capture_setting_id) if row.subject.capture_setting_id else None)
         is not None
         and baseline_key(found) == key
@@ -563,12 +563,10 @@ def _sensor_numbers(
     pixel_scale = (
         ARCSEC_PER_RADIAN * equipment.pixel_size_um * 1e-6 * binning / (equipment.focal_length_mm * 1e-3)
     )
-    profile = context.astrometrics.processing.calibration.camera_profile(setting.camera)
+    profile = profile_for_name(context.astrometrics, setting.camera)
     if profile.is_generic_fallback:
         raise _MissingInputError("the camera has no profile, so its gain and read noise are unknown")
-    entry = profile.sensor_noise_for(
-        setting.gain_setting, setting.offset or 0, binning, clipped_at_zero=False
-    )
+    entry = profile.sensor_noise_for(setting.gain, setting.offset or 0, binning, clipped_at_zero=False)
     if entry is None or entry.gain_e_per_adu is None or entry.read_noise_e is None:
         raise _MissingInputError("the camera profile has no gain and read noise for the capture setting")
     prediction = sky_rate_tasks.get_sky_rate_prediction(
@@ -601,7 +599,7 @@ def _fallback(context: ControlContext, reason: str) -> CenteringExposure:
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the ``alignment_exposure_seconds`` setting.
+        Supplies the ``alignment_exposure_s`` setting.
     reason : `str`
         Which input was missing.
 
@@ -610,11 +608,11 @@ def _fallback(context: ControlContext, reason: str) -> CenteringExposure:
     result : `CenteringExposure`
         The fixed exposure, marked as the fallback.
     """
-    exposure = context.correction_config.alignment_exposure_seconds
+    exposure = context.correction_config.alignment_exposure_s
     return CenteringExposure(
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         source="fallback",
-        reason=f"Used the fixed {exposure:g} s setting (alignment_exposure_seconds) because {reason}.",
+        reason=f"Used the fixed {exposure:g} s setting (alignment_exposure_s) because {reason}.",
         target_star_count=resolve_parameter(TARGET_STAR_COUNT).value,
     )
 
@@ -740,9 +738,7 @@ def predict_star_counts(
         limit = limiting_magnitude(exposure, sensor)
         count = sum(1 for magnitude in magnitudes if magnitude <= limit)
         trials.append(
-            CenteringExposureTrial(
-                exposure_seconds=exposure, limiting_magnitude=limit, expected_star_count=count
-            )
+            CenteringExposureTrial(exposure_s=exposure, limiting_magnitude=limit, expected_star_count=count)
         )
     return trials, facts, None
 
@@ -820,7 +816,7 @@ def choose_centering_exposure(
             "at least that."
         )
     return CenteringExposure(
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         source="computed",
         reason=reason,
         target_star_count=target_star_count,
@@ -840,3 +836,39 @@ def choose_centering_exposure(
         setting_key=facts["setting_key"],
         trials=trials,
     )
+
+
+def get_centering_exposure(
+    context: ControlContext,
+    destination: Any,
+    time: TimeInput | None = None,
+    filter_name: str | None = None,
+) -> CenteringExposure:
+    """Choose the centering exposure for a slew destination.
+
+    The work behind ``control.mount.get_centering_exposure``: it turns the
+    destination into a sky position and the time into seconds, then calls
+    `choose_centering_exposure`.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the equipment, the science library and the catalog.
+    destination : `Target`, `StellarObject` or `SkyPosition`
+        Where the telescope will point.
+    time : `TimeInput`, optional
+        When the frame will be taken. Now when omitted.
+    filter_name : `str`, optional
+        Use this filter's measurements.
+
+    Returns
+    -------
+    result : `CenteringExposure`
+        See `choose_centering_exposure`.
+    """
+    from astrometricslib.arguments import to_epoch_seconds
+    from wayfindinglib.tasks.control_tasks import hardware_operations
+
+    position = hardware_operations.resolve_destination(context, destination)
+    epoch_seconds = None if time is None else to_epoch_seconds(time)
+    return choose_centering_exposure(context, position, epoch_seconds=epoch_seconds, filter_name=filter_name)

@@ -14,6 +14,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.arguments import SettingNumber
+
 
 class NoiseEvidenceStatus(StrEnum):
     """How well a gain or read noise is backed, in the register's words."""
@@ -52,18 +54,21 @@ class CameraNoiseSetting(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     camera_name: str = Field(..., alias="cameraName", description="The camera's name in the configuration.")
-    gain_setting: str = Field(
+    gain: SettingNumber = Field(
         ...,
-        alias="gainSetting",
-        description="The camera's gain setting (an index, not electrons per ADU) or a DSLR's ISO.",
+        description=(
+            "The camera's gain setting (an index, not electrons per ADU) or a DSLR's ISO, or None when it "
+            "is not a number."
+        ),
     )
-    offset: str = Field(..., description="The camera offset.")
+    offset: SettingNumber = Field(..., description="The camera offset, or None when it is not a number.")
     binning: str = Field(..., description='The binning, such as "1x1".')
     temperature_c: float | None = Field(
         default=None, alias="temperatureC", description="Sensor temperature of the measurement, in degrees C."
     )
-    gain: CameraNoiseValue | None = Field(
+    gain_e_per_adu: CameraNoiseValue | None = Field(
         default=None,
+        alias="gainEPerAdu",
         description="The conversion gain in electrons per ADU, or None when only read noise is recorded.",
     )
     read_noise: CameraNoiseValue | None = Field(

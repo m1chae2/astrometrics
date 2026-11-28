@@ -12,8 +12,9 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import QualitySubject
-from astrometricslib.reports import CaptureSetting, LimitTier, QualityLimit, QualityMeasurement
+from astrometricslib.reports import LimitTier, QualityLimit, QualityMeasurement
 from wayfindinglib.analytics.result_quality.judge_results import (
     PLAIN_RULE_NAMES,
     judge_results,
@@ -34,9 +35,7 @@ from wayfindinglib.models.quality.statements import (
 from wayfindinglib.test.plain_wording_support import assert_plain_message_is_sound
 
 _NOW = datetime(2026, 10, 20, 22, 0, tzinfo=UTC)
-_SETTING = CaptureSetting(
-    camera="ASI533MM Pro", exposure_seconds=60.0, gain_setting=100, offset=50, binning=1
-)
+_SETTING = CaptureSetting(camera="ASI533MM Pro", exposure_s=60.0, gain=100, offset=50, binning=1)
 
 _next_row_id = 0
 
@@ -127,7 +126,7 @@ def test_overexposed_fires_at_the_ceiling_and_proposes_a_shorter_exposure() -> N
     assert statement.kind == StatementKind.WARNING
     assert statement.severity == Severity.WARNING
     assert statement.action_class == ActionClass.CAPTURE_SETTINGS
-    assert statement.proposed_action.exposure_seconds == pytest.approx(24.0)
+    assert statement.proposed_action.exposure_s == pytest.approx(24.0)
     assert [reference.row_id for reference in statement.evidence] == [row.row_id]
     assert "60 s" in statement.message
 
@@ -160,7 +159,7 @@ def test_underexposed_proposes_a_longer_exposure() -> None:
     ]
     statement = _of_rule(_judge(rows), "underexposed_setting")[0]
     assert statement.kind == StatementKind.RECOMMENDATION
-    assert statement.proposed_action.exposure_seconds == pytest.approx(60.0 * 36.0)
+    assert statement.proposed_action.exposure_s == pytest.approx(60.0 * 36.0)
     assert "profile value" in statement.reason
 
 

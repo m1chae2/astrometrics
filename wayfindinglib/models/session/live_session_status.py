@@ -10,7 +10,7 @@ Times are seconds since the Unix epoch. Errors are arcseconds on the sky.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class DitherEvent(BaseModel):
@@ -26,10 +26,10 @@ class DitherEvent(BaseModel):
         `True` if the guide star reached its new position, `False` if the
         guider gave up after its allowed tries, `None` if the log ends
         before the dither does.
-    settle_seconds : `float` or `None`
+    settle_s : `float` or `None`
         The wait the guider applied after the move, before the next
         exposure could start.
-    duration_seconds : `float` or `None`
+    duration_s : `float` or `None`
         Time from the start of the dither to its completion message.
     """
 
@@ -38,8 +38,10 @@ class DitherEvent(BaseModel):
     timestamp: float
     amplitude_px: float
     succeeded: bool | None = None
-    settle_seconds: float | None = None
-    duration_seconds: float | None = None
+    settle_s: float | None = Field(default=None, validation_alias=AliasChoices("settle_s", "settle_seconds"))
+    duration_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("duration_s", "duration_seconds")
+    )
 
 
 class GuidingWindowSummary(BaseModel):
@@ -47,7 +49,7 @@ class GuidingWindowSummary(BaseModel):
 
     Attributes
     ----------
-    window_seconds : `float`
+    window_s : `float`
         The length of the stretch, ending at the latest record.
     sample_count : `int`
         Guiding measurements inside it.
@@ -58,7 +60,7 @@ class GuidingWindowSummary(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    window_seconds: float
+    window_s: float = Field(validation_alias=AliasChoices("window_s", "window_seconds"))
     sample_count: int
     ra_rms_arcsec: float | None = None
     dec_rms_arcsec: float | None = None
@@ -79,7 +81,7 @@ class GuidingExcursion(BaseModel):
     kind : `str`
         ``"jump"`` if the error arrived at full size in one step (the
         field moved suddenly), ``"drift"`` if it built up over time.
-    drift_rate_arcsec_per_second : `float` or `None`
+    drift_rate_arcsec_per_s : `float` or `None`
         How fast the error grew along that axis, from a straight-line fit.
         `None` with fewer than three measurements.
     matches_stopped_ra_axis : `bool` or `None`
@@ -98,7 +100,9 @@ class GuidingExcursion(BaseModel):
     peak_error_arcsec: float
     axis: str
     kind: str = "drift"
-    drift_rate_arcsec_per_second: float | None = None
+    drift_rate_arcsec_per_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("drift_rate_arcsec_per_s", "drift_rate_arcsec_per_second")
+    )
     matches_stopped_ra_axis: bool | None = None
     reacquire_count: int = 0
 
@@ -112,7 +116,7 @@ class ExposureSummary(BaseModel):
         The saved file's name.
     completed_at : `float`
         When the exposure finished.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Its length.
     star_count : `int`
         Stars Ekos found in the frame.
@@ -138,7 +142,7 @@ class ExposureSummary(BaseModel):
 
     frame_name: str
     completed_at: float
-    exposure_seconds: float
+    exposure_s: float = Field(validation_alias=AliasChoices("exposure_s", "exposure_seconds"))
     star_count: int
     half_flux_radius_px: float | None = None
     eccentricity: float | None = None
@@ -181,14 +185,14 @@ class LiveSessionStatus(BaseModel):
         The files the status was read from.
     as_of : `float`
         Time of the latest record in the analyze file.
-    seconds_since_last_record : `float` or `None`
+    time_since_last_record_s : `float` or `None`
         How long ago that was by the wall clock. A large value means Ekos
         has stopped writing (or the file was not refreshed).
     guider_state : `str` or `None`
         The guider's latest state, such as ``"Guiding"``.
     guider_state_since : `float` or `None`
         When it entered that state.
-    declination_degrees : `float` or `None`
+    declination_deg : `float` or `None`
         The mount's latest declination.
     temperature_c : `float` or `None`
         The latest camera sensor temperature Ekos logged, in degrees C.
@@ -234,10 +238,14 @@ class LiveSessionStatus(BaseModel):
     analyze_file: str
     kstars_log_file: str | None = None
     as_of: float
-    seconds_since_last_record: float | None = None
+    time_since_last_record_s: float | None = Field(
+        default=None, validation_alias=AliasChoices("time_since_last_record_s", "seconds_since_last_record")
+    )
     guider_state: str | None = None
     guider_state_since: float | None = None
-    declination_degrees: float | None = None
+    declination_deg: float | None = Field(
+        default=None, validation_alias=AliasChoices("declination_deg", "declination_degrees")
+    )
     temperature_c: float | None = None
     pier_side: str | None = None
     captures_completed: int = 0

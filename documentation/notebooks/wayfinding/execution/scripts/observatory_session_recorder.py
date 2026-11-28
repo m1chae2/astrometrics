@@ -37,12 +37,14 @@ def _ensure_session(wayfinder: Wayfinder, session_id: str) -> ObservationSession
     Notes
     -----
     The library raises `InvalidArgumentError` if no session has this id and
-    `session_id` is not a date.
+    `session_id` is not a date. A night that already has a session gives
+    that session back.
     """
-    existing = wayfinder.planning.get_plan(session_id)
+    sessions = wayfinder.planning.sessions
+    existing = next((session for session in sessions.query() if session.id == session_id), None)
     if existing is not None:
         return existing
-    return wayfinder.planning.create_session(session_id)
+    return sessions.create(session_id)
 
 
 def run_observation_session_recorder() -> None:
@@ -98,7 +100,7 @@ def run_observation_session_recorder() -> None:
         recorder = wayfinder.execution.create_recorder(
             phd2_host=args.phd2_host,
             phd2_port=args.phd2_port,
-            snapshot_interval_seconds=args.snapshot_interval_seconds,
+            snapshot_interval_s=args.snapshot_interval_seconds,
         )
 
         if args.dry_run:

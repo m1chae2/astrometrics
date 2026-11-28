@@ -126,12 +126,12 @@ import { postHandoff, resetHandoffsForTests } from '../../common/utils/displayHa
  */
 function renderPlanetarium() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const { unmount } = render(
     <QueryClientProvider client={client}>
       <PlanetariumDisplay />
     </QueryClientProvider>,
   );
-  return { user: userEvent.setup() };
+  return { user: userEvent.setup(), unmount };
 }
 
 /**
@@ -180,6 +180,33 @@ describe('Planetarium drill-in column', () => {
     await user.click(back);
     expect(drillParts().track.dataset.level).toBe('list');
     expect(levelOneRadio('M 81').checked).toBe(true);
+  });
+
+  /** Leaving the Planetarium mid-slide cancels the waiting map move, so no timer outlives the page. */
+  it('cancels the slide timers when the column goes away', async () => {
+    const started: number[] = [];
+    const cleared = new Set<number>();
+    const realSetTimeout = window.setTimeout.bind(window);
+    const realClearTimeout = window.clearTimeout.bind(window);
+    const setSpy = vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, delay?: number) => {
+      const id = realSetTimeout(handler, delay);
+      if (delay === 400) started.push(Number(id));
+      return id;
+    }) as typeof window.setTimeout);
+    const clearSpy = vi.spyOn(window, 'clearTimeout').mockImplementation(((id?: number) => {
+      cleared.add(Number(id));
+      realClearTimeout(id);
+    }) as typeof window.clearTimeout);
+    try {
+      const { unmount } = renderPlanetarium();
+      fireEvent.click(levelOneRadio('M 81'));
+      unmount();
+      expect(started.length).toBeGreaterThan(0);
+      expect(started.filter((id) => !cleared.has(id))).toEqual([]);
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
   });
 
   /** Escape on the star list goes back to the target list. */

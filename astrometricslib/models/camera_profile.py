@@ -16,7 +16,7 @@ loads the profiles is in
 
 import enum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrometricslib.utilities.camera_setting_text import (
     canonical_binning_setting,
@@ -142,7 +142,7 @@ class SensorSettingNoise(BaseModel):
 
     Attributes
     ----------
-    gain_setting : `str`
+    gain : `str`
         The camera's gain setting (the header's ``GAIN`` card, a unitless
         index, not electrons per ADU) or, for a DSLR, its ISO.
     offset : `str`
@@ -177,7 +177,7 @@ class SensorSettingNoise(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    gain_setting: str = Field(min_length=1)
+    gain: str = Field(min_length=1, validation_alias=AliasChoices("gain", "gain_setting"))
     offset: str = "0"
     binning: str = "1x1"
     gain_e_per_adu: ProvenancedValue | None = None
@@ -188,14 +188,14 @@ class SensorSettingNoise(BaseModel):
     read_noise_adu_robust: float | None = None
     pair_read_noises_adu: tuple[float, ...] = ()
 
-    @field_validator("gain_setting", mode="before")
+    @field_validator("gain", mode="before")
     @classmethod
     def write_gain_setting_in_standard_form(cls, value: object) -> str:
         """Write the gain setting the way frames are compared.
 
         Returns
         -------
-        gain_setting : `str`
+        gain : `str`
             The setting in its standard form.
         """
         return canonical_gain_setting(value)
@@ -251,7 +251,7 @@ class SensorSettingNoise(BaseModel):
         key : `tuple` [`str`, `str`, `str`]
             The gain setting, offset and binning, each in standard form.
         """
-        return (self.gain_setting, self.offset, self.binning)
+        return (self.gain, self.offset, self.binning)
 
 
 class SettingBiasLevel(BaseModel):
@@ -267,7 +267,7 @@ class SettingBiasLevel(BaseModel):
 
     Attributes
     ----------
-    gain_setting : `str`
+    gain : `str`
         The camera's gain setting (or the ISO of a DSLR).
     offset : `str`
         The camera's offset.
@@ -281,20 +281,20 @@ class SettingBiasLevel(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    gain_setting: str = Field(min_length=1)
+    gain: str = Field(min_length=1, validation_alias=AliasChoices("gain", "gain_setting"))
     offset: str = "0"
     binning: str = "1x1"
     bias_level_adu: ProvenancedValue
     temperature_c: float | None = None
 
-    @field_validator("gain_setting", mode="before")
+    @field_validator("gain", mode="before")
     @classmethod
     def write_gain_setting_in_standard_form(cls, value: object) -> str:
         """Write the gain setting the way frames are compared.
 
         Returns
         -------
-        gain_setting : `str`
+        gain : `str`
             The setting in its standard form.
         """
         return canonical_gain_setting(value)
@@ -332,7 +332,7 @@ class SettingBiasLevel(BaseModel):
         key : `tuple` [`str`, `str`, `str`]
             The gain setting, offset and binning, each in standard form.
         """
-        return (self.gain_setting, self.offset, self.binning)
+        return (self.gain, self.offset, self.binning)
 
 
 # The reason given for a frame when the profile still holds the single,
@@ -480,7 +480,7 @@ class CameraProfile(BaseModel):
         for entry in self.sensor_noise:
             if entry.setting_key in seen:
                 raise ValueError(
-                    f"two sensor_noise entries share gain {entry.gain_setting}, offset {entry.offset}, "
+                    f"two sensor_noise entries share gain {entry.gain}, offset {entry.offset}, "
                     f"binning {entry.binning}"
                 )
             seen.add(entry.setting_key)
@@ -488,20 +488,18 @@ class CameraProfile(BaseModel):
         for level in self.bias_levels:
             if level.setting_key in seen_levels:
                 raise ValueError(
-                    f"two bias_levels entries share gain {level.gain_setting}, offset {level.offset}, "
+                    f"two bias_levels entries share gain {level.gain}, offset {level.offset}, "
                     f"binning {level.binning}"
                 )
             seen_levels.add(level.setting_key)
         return self
 
-    def bias_level_for(
-        self, gain_setting: object, offset: object, binning: object
-    ) -> SettingBiasLevel | None:
+    def bias_level_for(self, gain: object, offset: object, binning: object) -> SettingBiasLevel | None:
         """Find the bias level stored for a camera setting.
 
         Parameters
         ----------
-        gain_setting : `Any`
+        gain : `Any`
             The gain (or ISO), as text or a number.
         offset : `Any`
             The offset. A missing offset counts as 0.
@@ -515,7 +513,7 @@ class CameraProfile(BaseModel):
             fallback to another offset: the level changes with the offset.
         """
         wanted = (
-            canonical_gain_setting(gain_setting),
+            canonical_gain_setting(gain),
             canonical_offset_setting(offset),
             canonical_binning_setting(binning),
         )
@@ -523,7 +521,7 @@ class CameraProfile(BaseModel):
 
     def sensor_noise_for(
         self,
-        gain_setting: object,
+        gain: object,
         offset: object,
         binning: object,
         *,
@@ -548,7 +546,7 @@ class CameraProfile(BaseModel):
 
         Parameters
         ----------
-        gain_setting : `Any`
+        gain : `Any`
             The frame's gain (or ISO), as text or a number.
         offset : `Any`
             The frame's offset. A missing offset counts as 0.
@@ -570,7 +568,7 @@ class CameraProfile(BaseModel):
             `None`.
         """
         wanted = (
-            canonical_gain_setting(gain_setting),
+            canonical_gain_setting(gain),
             canonical_offset_setting(offset),
             canonical_binning_setting(binning),
         )
@@ -580,14 +578,12 @@ class CameraProfile(BaseModel):
         other = self._nearest_other_offset_entry(*wanted)
         return None if other is None else _entry_used_at_offset(other, wanted[1])
 
-    def _nearest_other_offset_entry(
-        self, gain_setting: str, offset: str, binning: str
-    ) -> SensorSettingNoise | None:
+    def _nearest_other_offset_entry(self, gain: str, offset: str, binning: str) -> SensorSettingNoise | None:
         """Pick the same-gain, same-binning entry at the nearest other offset.
 
         Parameters
         ----------
-        gain_setting, offset, binning : `str`
+        gain, offset, binning : `str`
             The frame's setting, in standard form.
 
         Returns
@@ -602,7 +598,7 @@ class CameraProfile(BaseModel):
             candidates = [
                 (abs(float(entry.offset) - wanted_offset), -float(entry.offset), entry)
                 for entry in self.sensor_noise
-                if entry.gain_setting == gain_setting and entry.binning == binning and entry.offset != offset
+                if entry.gain == gain and entry.binning == binning and entry.offset != offset
             ]
         except ValueError:
             return None
@@ -611,13 +607,13 @@ class CameraProfile(BaseModel):
         return min(candidates, key=lambda candidate: candidate[:2])[2]
 
     def sensor_noise_gap_reason(
-        self, gain_setting: object, offset: object, binning: object, *, clipped_at_zero: bool | None = None
+        self, gain: object, offset: object, binning: object, *, clipped_at_zero: bool | None = None
     ) -> str | None:
         """Say why a frame's setting has no gain and read noise.
 
         Parameters
         ----------
-        gain_setting : `Any`
+        gain : `Any`
             The frame's gain (or ISO), or `None` when it does not state one.
         offset : `Any`
             The frame's offset.
@@ -636,14 +632,14 @@ class CameraProfile(BaseModel):
             used because the frame is clipped at zero or not known to be
             unclipped, or the profile has no entry for this setting.
         """
-        if gain_setting is None:
+        if gain is None:
             return "the frame does not state its gain setting, so no gain and read noise entry can match"
-        if self.sensor_noise_for(gain_setting, offset, binning, clipped_at_zero=clipped_at_zero) is not None:
+        if self.sensor_noise_for(gain, offset, binning, clipped_at_zero=clipped_at_zero) is not None:
             return None
         if self.has_unkeyed_noise_values and not self.sensor_noise:
             return UNMIGRATED_NOISE_REASON
         wanted = (
-            canonical_gain_setting(gain_setting),
+            canonical_gain_setting(gain),
             canonical_offset_setting(offset),
             canonical_binning_setting(binning),
         )

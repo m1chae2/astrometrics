@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.processing_scripts import restore_excluded_frames
+from astrometricslib.api._target_frames import TargetFrames
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.api.quality import QualityRecords
 from astrometricslib.foundation.enums import FilterType
@@ -35,6 +36,22 @@ def pipelines(tmp_path: Path) -> ProcessingPipelines:
     """
     configuration = SimpleNamespace(get_frames_path=lambda: tmp_path / "frames")
     return ProcessingPipelines(configuration, None, targets=MagicMock())
+
+
+@pytest.fixture
+def scans(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stand in for the frame scan that follows a restore.
+
+    Returns
+    -------
+    scan : `MagicMock`
+        Records each call of `target_frames.scan_frames`.
+    """
+    from astrometricslib.pipelines.shared import target_frames
+
+    scan = MagicMock()
+    monkeypatch.setattr(target_frames, "scan_frames", scan)
+    return scan
 
 
 @pytest.fixture
@@ -82,7 +99,7 @@ def make_target(folder: Path, count: int, role: str = "LIGHT") -> Target:
                 path=str(path),
                 filter=FilterType.L,
                 camera="ZWO ASI 533MM Pro",
-                exposure="120.0",
+                exposure_s=120.0,
                 timestamp=float(index) * 120.0,
                 role=role,
             )
@@ -223,7 +240,7 @@ def test_restore_without_apply_only_lists(pipelines: ProcessingPipelines, tmp_pa
 
 
 def test_restore_with_apply_moves_frames_back_and_rescans(
-    pipelines: ProcessingPipelines, tmp_path: Path
+    pipelines: ProcessingPipelines, tmp_path: Path, scans: MagicMock
 ) -> None:
     """With ``apply`` the frame returns and the target is rescanned."""
     folder = camera_folder(tmp_path)
@@ -236,11 +253,11 @@ def test_restore_with_apply_moves_frames_back_and_rescans(
     assert report.restored_count == 1
     assert (folder / "frame_003.fits").exists()
     assert not quarantine.exists()
-    pipelines._targets.reindex_frames.assert_called_once_with(target)
+    scans.assert_called_once_with(pipelines._targets, target)
 
 
 def test_restore_with_apply_does_not_rescan_when_nothing_moved(
-    pipelines: ProcessingPipelines, tmp_path: Path
+    pipelines: ProcessingPipelines, tmp_path: Path, scans: MagicMock
 ) -> None:
     """A target with nothing set aside is left alone."""
     camera_folder(tmp_path)
@@ -248,16 +265,16 @@ def test_restore_with_apply_does_not_rescan_when_nothing_moved(
     report = restore_excluded_frames(pipelines, Target(id="M 1"), apply=True)
 
     assert report.restored_count == 0
-    pipelines._targets.reindex_frames.assert_not_called()
+    scans.assert_not_called()
 
 
 def test_frame_quality_has_no_set_aside_preview(quality: QualityRecords, tmp_path: Path) -> None:
-    """The preview kind is gone: `predict_stack` is the one preview."""
+    """The frame check has no preview part; the stack prediction is the one."""
     folder = camera_folder(tmp_path)
     target = make_target(folder, 12)
 
-    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
-        quality.measure_frames(target, kind="quarantine_preview", register_job=False)
+    with pytest.raises(InvalidArgumentError, match="Unknown include section"):
+        quality.frames.measure(target.frames, include=["quarantine_preview"])
 
 
 def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:
@@ -265,7 +282,9 @@ def test_target_folder_names_cover_the_spellings_a_folder_may_have() -> None:
     assert frame_quarantine.target_folder_names("M 52") == ["M 52", "M_52", "M52"]
 
 
-def test_put_back_moves_only_the_chosen_frame_and_rescans(quality: QualityRecords, tmp_path: Path) -> None:
+def test_restore_moves_only_the_chosen_frame_and_rescans(
+    quality: QualityRecords, tmp_path: Path, scans: MagicMock
+) -> None:
     """Only the chosen frame returns, and the target is rescanned."""
     folder = camera_folder(tmp_path)
     quarantine = write_manifest(
@@ -273,25 +292,28 @@ def test_put_back_moves_only_the_chosen_frame_and_rescans(quality: QualityRecord
     )
     target = Target(id="M 1")
 
-    restored = quality.put_back_set_aside_frames(target, [str(quarantine / "frame_003.fits")])
+    catalog = SimpleNamespace(_config=quality._config)
+    restored = TargetFrames(catalog).restore(target, [str(quarantine / "frame_003.fits")])
 
-    assert restored == [str(folder / "frame_003.fits")]
+    assert len(restored) == 0
     assert (folder / "frame_003.fits").exists()
     assert (quarantine / "frame_004.fits").exists()
     assert [
         entry["file"]
         for entry in frame_quarantine.read_quarantine_manifest(str(quarantine / MANIFEST_FILE_NAME))
     ] == ["frame_004.fits"]
-    quality._targets.reindex_frames.assert_called_once_with(target)
+    scans.assert_called_once_with(catalog, target)
 
 
-def test_put_back_refuses_a_path_outside_the_excluded_folders(
-    quality: QualityRecords, tmp_path: Path
+def test_restore_refuses_a_path_outside_the_excluded_folders(
+    quality: QualityRecords, tmp_path: Path, scans: MagicMock
 ) -> None:
     """A frame that is not set aside cannot be moved by this call."""
     folder = camera_folder(tmp_path)
     (folder / "frame_001.fits").write_bytes(b"x")
 
     with pytest.raises(InvalidArgumentError):
-        quality.put_back_set_aside_frames(Target(id="M 1"), [str(folder / "frame_001.fits")])
-    quality._targets.reindex_frames.assert_not_called()
+        TargetFrames(SimpleNamespace(_config=quality._config)).restore(
+            Target(id="M 1"), [str(folder / "frame_001.fits")]
+        )
+    scans.assert_not_called()

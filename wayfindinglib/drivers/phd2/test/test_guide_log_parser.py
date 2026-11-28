@@ -150,9 +150,9 @@ def test_section_context_records_the_equipment_and_sky_position(tmp_path: Path) 
     assert section.focal_length_mm == pytest.approx(121.05)
     assert section.binning == 1
     assert section.pier_side == "West"
-    assert section.altitude_degrees == pytest.approx(32.6)
-    assert section.azimuth_degrees == pytest.approx(20.5)
-    assert section.declination_degrees == pytest.approx(69.5)
+    assert section.altitude_deg == pytest.approx(32.6)
+    assert section.azimuth_deg == pytest.approx(20.5)
+    assert section.declination_deg == pytest.approx(69.5)
     assert section.hour_angle_hours is None  # the log says N/A
 
 
@@ -161,11 +161,11 @@ def test_measured_guide_speeds_are_kept(tmp_path: Path) -> None:
     parsed_log = parse_guide_log_file(_write(tmp_path, "guide_log.txt", _EKOS_LOG))
 
     (calibration,) = parsed_log.calibrations
-    assert calibration.ra_rate_arcsec_per_second == pytest.approx(5.1)
-    assert calibration.dec_rate_arcsec_per_second == pytest.approx(7.5)
+    assert calibration.ra_rate_arcsec_per_s == pytest.approx(5.1)
+    assert calibration.dec_rate_arcsec_per_s == pytest.approx(7.5)
     (section,) = parsed_log.sections
-    assert section.ra_rate_arcsec_per_second == pytest.approx(5.061)
-    assert section.dec_rate_arcsec_per_second == pytest.approx(7.530)
+    assert section.ra_rate_arcsec_per_s == pytest.approx(5.061)
+    assert section.dec_rate_arcsec_per_s == pytest.approx(7.530)
 
 
 def test_lost_star_rows_are_counted_but_not_sampled(tmp_path: Path) -> None:
@@ -249,11 +249,11 @@ def test_ekos_calibration_speeds_and_section_rates_are_unchanged(tmp_path: Path)
     parsed_log = parse_guide_log_file(_write(tmp_path, "guide_log.txt", _EKOS_LOG))
 
     (calibration,) = parsed_log.calibrations
-    assert calibration.ra_rate_arcsec_per_second == pytest.approx(5.1)
-    assert calibration.dec_rate_arcsec_per_second == pytest.approx(7.5)
+    assert calibration.ra_rate_arcsec_per_s == pytest.approx(5.1)
+    assert calibration.dec_rate_arcsec_per_s == pytest.approx(7.5)
     (section,) = parsed_log.sections
-    assert section.ra_rate_arcsec_per_second == pytest.approx(5.061)
-    assert section.dec_rate_arcsec_per_second == pytest.approx(7.530)
+    assert section.ra_rate_arcsec_per_s == pytest.approx(5.061)
+    assert section.dec_rate_arcsec_per_s == pytest.approx(7.530)
 
 
 def test_phd2_written_log_gives_calibration_speeds_and_angle() -> None:
@@ -263,8 +263,8 @@ def test_phd2_written_log_gives_calibration_speeds_and_angle() -> None:
     assert parsed_log.written_by_ekos is False
     (calibration,) = parsed_log.calibrations
     # "RA Guide Speed = 7.5 a-s/s, Dec Guide Speed = 7.5 a-s/s"
-    assert calibration.ra_rate_arcsec_per_second == pytest.approx(7.5)
-    assert calibration.dec_rate_arcsec_per_second == pytest.approx(7.5)
+    assert calibration.ra_rate_arcsec_per_s == pytest.approx(7.5)
+    assert calibration.dec_rate_arcsec_per_s == pytest.approx(7.5)
     # "West calibration complete. Angle = -178.1 deg"
     assert calibration.camera_angle_deg == pytest.approx(-178.1)
 
@@ -275,8 +275,8 @@ def test_phd2_written_log_section_rates_are_converted_from_pixels_per_second() -
 
     section = parsed_log.sections[0]
     assert section.pixel_scale_arcsec_per_px == pytest.approx(1.24)
-    assert section.ra_rate_arcsec_per_second == pytest.approx(4.239 * 1.24)
-    assert section.dec_rate_arcsec_per_second == pytest.approx(5.850 * 1.24)
+    assert section.ra_rate_arcsec_per_s == pytest.approx(4.239 * 1.24)
+    assert section.dec_rate_arcsec_per_s == pytest.approx(5.850 * 1.24)
 
 
 def test_phd2_written_log_without_pixel_scale_leaves_section_rates_empty(tmp_path: Path) -> None:
@@ -285,8 +285,8 @@ def test_phd2_written_log_without_pixel_scale_leaves_section_rates_empty(tmp_pat
     scaleless = "\n".join(line for line in text.splitlines() if not line.startswith("Pixel scale = "))
     section = parse_guide_log_file(_write(tmp_path, "PHD2_GuideLog.txt", scaleless)).sections[0]
 
-    assert section.ra_rate_arcsec_per_second is None
-    assert section.dec_rate_arcsec_per_second is None
+    assert section.ra_rate_arcsec_per_s is None
+    assert section.dec_rate_arcsec_per_s is None
 
 
 def test_section_rate_matches_the_guide_speed_times_cosine_of_calibration_declination() -> None:
@@ -307,12 +307,10 @@ def test_section_rate_matches_the_guide_speed_times_cosine_of_calibration_declin
     section = parsed.sections[0]
 
     assert section.pixel_scale_arcsec_per_px is not None
-    assert section.ra_rate_arcsec_per_second == pytest.approx(
-        calibration.ra_rate_arcsec_per_second * math.cos(math.radians(calibration_declination)), rel=0.10
+    assert section.ra_rate_arcsec_per_s == pytest.approx(
+        calibration.ra_rate_arcsec_per_s * math.cos(math.radians(calibration_declination)), rel=0.10
     )
-    assert section.dec_rate_arcsec_per_second == pytest.approx(
-        calibration.dec_rate_arcsec_per_second, rel=0.10
-    )
+    assert section.dec_rate_arcsec_per_s == pytest.approx(calibration.dec_rate_arcsec_per_s, rel=0.10)
 
 
 _PHD2_HEADER_LOG = """\
@@ -338,7 +336,7 @@ def test_phd2_header_gives_the_guide_controller_settings(tmp_path: Path) -> None
     """The exposure, algorithms, gains and pulse limits are read."""
     parsed = parse_guide_log_file(_write(tmp_path, "phd2.txt", _PHD2_HEADER_LOG))
     controller = parsed.sections[0].controller
-    assert controller.exposure_seconds == pytest.approx(2.5)
+    assert controller.exposure_s == pytest.approx(2.5)
     assert controller.ra_axis is not None
     assert controller.ra_axis.algorithm == "Hysteresis"
     assert controller.ra_axis.hysteresis == pytest.approx(0.1)
@@ -363,13 +361,13 @@ def test_header_lines_do_not_disturb_the_samples_or_rates(tmp_path: Path) -> Non
     section = parse_guide_log_file(_write(tmp_path, "phd2.txt", _PHD2_HEADER_LOG)).sections[0]
     assert len(section.samples) == 1
     assert section.pixel_scale_arcsec_per_px == pytest.approx(3.74)
-    assert section.ra_rate_arcsec_per_second == pytest.approx(2.0 * 3.74)
+    assert section.ra_rate_arcsec_per_s == pytest.approx(2.0 * 3.74)
 
 
 def test_a_log_without_controller_lines_leaves_the_settings_empty(tmp_path: Path) -> None:
     """The Ekos guider writes no controller lines; each setting is `None`."""
     section = parse_guide_log_file(_write(tmp_path, "ekos.txt", _EKOS_LOG)).sections[0]
-    assert section.controller.exposure_seconds is None
+    assert section.controller.exposure_s is None
     assert section.controller.ra_axis is None
     assert section.controller.dec_axis is None
 
@@ -380,7 +378,7 @@ def test_the_run_summary_carries_the_controller_settings(tmp_path: Path) -> None
 
     section = parse_guide_log_file(_write(tmp_path, "phd2.txt", _PHD2_HEADER_LOG)).sections[0]
     run = _summarize_run(section, 1, "phd2.txt", False)
-    assert run.guide_exposure_seconds == pytest.approx(2.5)
+    assert run.guide_exposure_s == pytest.approx(2.5)
     assert run.ra_algorithm == "Hysteresis"
     assert run.dec_algorithm == "Resist Switch"
     assert run.ra_aggressiveness == pytest.approx(0.7)
@@ -406,7 +404,7 @@ def test_the_real_phd2_log_header_gives_the_controller_settings() -> None:
     parsed = parse_guide_log_file(str(fixture))
     section = next(section for section in parsed.sections if section.samples)
     controller = section.controller
-    assert controller.exposure_seconds == pytest.approx(1.0)
+    assert controller.exposure_s == pytest.approx(1.0)
     assert controller.ra_axis is not None
     assert (
         controller.ra_axis.algorithm,
@@ -425,5 +423,5 @@ def test_the_real_phd2_log_header_gives_the_controller_settings() -> None:
     assert controller.maximum_ra_duration_ms == pytest.approx(2500.0)
     assert controller.maximum_dec_duration_ms == pytest.approx(2500.0)
     # The speed PHD2 measured in its calibration (the simulator moves at 7.5).
-    assert section.dec_rate_arcsec_per_second == pytest.approx(7.25, abs=0.02)
+    assert section.dec_rate_arcsec_per_s == pytest.approx(7.25, abs=0.02)
     assert len(section.samples) >= 20

@@ -7,14 +7,14 @@ frames back:
 
 - `SetAsideFrame` describes one frame, moved or about to be moved.
 - `RestoreReport` says what a restore listed or moved back.
-- `SetAsideFrameRecord` is one line of `QualityRecords.set_aside_frames`: a
+- `SetAsideFrameRecord` is one line of `TargetFrames.get_set_aside`: a
   frame lying in an `_excluded` folder, with the reason and where the reason
   came from.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class SetAsideFrame(BaseModel):
@@ -99,7 +99,11 @@ class SetAsideFrameRecord(BaseModel):
     action_taken: str | None = Field(default=None, alias="actionTaken")
     # Exposure of one frame in seconds: from the stored capture setting, else
     # from the file header. `None` if neither could be read.
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     # The capture setting row of the frame's stored rows, when there is one.
     capture_setting_id: int | None = Field(default=None, alias="captureSettingId")
     # When the frame was moved (UTC, ISO 8601), from the manifest; else the

@@ -300,7 +300,7 @@ describe('frame status timeline bars', () => {
             { path: '/lib/c.fits', timestamp: start + 600, elongation: 1 },
         ];
         const exposures = new Map([['/lib/a.fits', 60], ['/lib/b.fits', 60], ['/lib/c.fits', 60]]);
-        const bars = buildStarShapeChart(series, new Set(), null, null, new Map(), { exposureSeconds: exposures })
+        const bars = buildStarShapeChart(series, new Set(), null, null, new Map(), { exposureS: exposures })
             .traces[0] as unknown as { base: number[]; x: number[] };
         expect(bars.base[0] + bars.x[0]).toBeCloseTo(bars.base[1], 9);
         expect(bars.base[1] + bars.x[1]).toBeLessThan(bars.base[2]);

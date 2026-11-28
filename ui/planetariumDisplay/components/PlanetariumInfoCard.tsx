@@ -139,8 +139,8 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
   let flipMessage = '--';
   if (source.flipRequired) {
     flipMessage = 'Flip Required!';
-  } else if (source.timeToFlipSeconds !== undefined) {
-    const minutesUntilFlip = source.timeToFlipSeconds / 60.0;
+  } else if (source.timeToFlipS !== undefined) {
+    const minutesUntilFlip = source.timeToFlipS / 60.0;
     if (minutesUntilFlip < 0) {
       // Past meridian but within flip delay window
       flipMessage = `Post-meridian (Flip in ${Math.abs(minutesUntilFlip).toFixed(1)}m)`;

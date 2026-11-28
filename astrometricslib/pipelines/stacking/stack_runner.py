@@ -570,7 +570,7 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
                 "The %g s frames of '%s' are clipped at zero (%.0f%% of pixels), and the stack has no "
                 "other exposure group to take its faint pixels from (a pixel less than %g frame noises "
                 "above zero reads too high). Longer exposures or a higher camera offset avoid this.",
-                entry["exposure_seconds"],
+                entry["exposure_s"],
                 stacked_path,
                 100 * entry["frame_zero_fraction"],
                 clipping_floor_sigmas,
@@ -607,7 +607,7 @@ class GroupResult:
         What the engine reported for the group's run.
     summary_index : `int`
         The group's place in the ``"exposure_group_summaries"`` list.
-    exposure : `float`
+    exposure_s : `float`
         The exposure length of one frame, in seconds.
     count : `int`
         How many frames the group's stack holds.
@@ -642,7 +642,7 @@ class GroupResult:
     path: str
     diagnostics: dict[str, Any]
     summary_index: int
-    exposure: float
+    exposure_s: float
     count: int
     artifacts: dict[str, Any] = field(default_factory=dict)
     image: Any = None
@@ -821,19 +821,17 @@ def _stack_each_group(
         "Stacking '%s' as %d exposure groups (%s s) and combining them.",
         target_id,
         len(groups),
-        ", ".join(
-            f"{group.exposure_seconds:g}" + (f" ({group.night})" if group.night else "") for group in groups
-        ),
+        ", ".join(f"{group.exposure_s:g}" + (f" ({group.night})" if group.night else "") for group in groups),
     )
     results: list[GroupResult] = []
     failed_groups = []
     # Groups at one exposure length but different ISOs would share a file
     # name, so the ISO joins the name whenever the groups' ISOs differ.
-    mixed_isos = len({group.iso for group in groups}) > 1
+    mixed_isos = len({group.gain for group in groups}) > 1
     for group in groups:
-        tag = f"exp{group.exposure_seconds:g}s".replace(".", "p")
-        if mixed_isos and group.iso is not None:
-            tag += f"_iso{group.iso:g}".replace(".", "p")
+        tag = f"exp{group.exposure_s:g}s".replace(".", "p")
+        if mixed_isos and group.gain is not None:
+            tag += f"_iso{group.gain:g}".replace(".", "p")
         if group.night is not None:
             tag += f"_{group.night}"
         path, diagnostics = _stack_one_batch(
@@ -849,7 +847,7 @@ def _stack_each_group(
         if path is None:
             logger.warning(
                 "The %g s exposure group (%d frames) of '%s' could not be stacked; leaving it out.",
-                group.exposure_seconds,
+                group.exposure_s,
                 len(group.frames),
                 target_id,
             )
@@ -861,7 +859,7 @@ def _stack_each_group(
                 path=path,
                 diagnostics=diagnostics,
                 summary_index=len(results),
-                exposure=group.exposure_seconds,
+                exposure_s=group.exposure_s,
                 count=int(diagnostics.get("images_stacked") or len(group.frames)),
             )
         )
@@ -952,7 +950,7 @@ def _measure_group_stacks(
                 logger.warning(
                     "The %g s exposure group of '%s' had no trustworthy trail tilt to line up; "
                     "it is combined without derotation.",
-                    group.exposure_seconds,
+                    group.exposure_s,
                     target_id,
                 )
 
@@ -984,7 +982,7 @@ def _measure_group_stacks(
         result.frame_noise = frame_noise
         result.frame_zero_fraction = frame_zero_fraction
     measured_zero_fractions, clipped_groups = describe_group_clipping(
-        [result.exposure for result in results], frame_zero_fractions
+        [result.exposure_s for result in results], frame_zero_fractions
     )
     if not zero_fractions_measured:
         # The zeros above are stand-ins, not measurements: the raw-clipping
@@ -994,7 +992,7 @@ def _measure_group_stacks(
         logger.warning(
             "The %g s frames of '%s' are clipped at zero (%.0f%% of pixels): where a pixel is less than "
             "%g frame noises above zero it is taken from the other exposure groups.",
-            entry["exposure_seconds"],
+            entry["exposure_s"],
             target_id,
             100 * entry["frame_zero_fraction"],
             clipping_floor_sigmas,
@@ -1085,7 +1083,7 @@ def _align_and_screen_groups(
     # `group_alignment.refine_alignment_with_stars`); spectral stacks keep
     # the plain shift.
     for result in results:
-        result.weight = group_weight(result.count, result.exposure, result.frame_noise)
+        result.weight = group_weight(result.count, result.exposure_s, result.frame_noise)
     reference_index = int(np.argmax([result.weight for result in results]))
     reference = results[reference_index]
     crop_fraction = resolve(SPECTRAL_ALIGNMENT_CENTER_CROP_FRACTION).value if is_spectral else None
@@ -1109,7 +1107,7 @@ def _align_and_screen_groups(
                 "The %g s exposure group of '%s' was lined up with %d stars: shift (%.2f, %.2f) px, "
                 "rotation %.4f degrees, scale %.5f, stars left %.2f px from their partners "
                 "(%s model%s).",
-                result.exposure,
+                result.exposure_s,
                 target_id,
                 alignment.star_pairs,
                 alignment.shift_rows_pixels,
@@ -1124,10 +1122,10 @@ def _align_and_screen_groups(
             )
     for result in results:
         if result.aligned_image is None:
-            reason = alignment_left_out_reason(reference.exposure, result.alignment)
+            reason = alignment_left_out_reason(reference.exposure_s, result.alignment)
             result.left_out_reason = reason
             logger.warning(
-                "The %g s exposure group of '%s' %s; leaving it out.", result.exposure, target_id, reason
+                "The %g s exposure group of '%s' %s; leaving it out.", result.exposure_s, target_id, reason
             )
     used = used_groups(results)
     if len(used) > 1:
@@ -1141,7 +1139,7 @@ def _align_and_screen_groups(
         # reference's (see `SKY_RATIO_LIMIT`).
         reference_in_used, gain_measurements = measure_exposure_group_gains(
             [result.aligned_image for result in used],
-            [result.exposure for result in used],
+            [result.exposure_s for result in used],
             [result.count for result in used],
             frame_noises=[result.frame_noise for result in used],
             frame_zero_fractions=[result.frame_zero_fraction for result in used],
@@ -1166,7 +1164,7 @@ def _align_and_screen_groups(
                 or gain_measurement.gain_rejected
             ):
                 continue
-            reference_exposure = used[reference_in_used].exposure
+            reference_exposure = used[reference_in_used].exposure_s
             if gain_measurement.nonlinear:
                 reason = describe_nonlinear_group(
                     gain_measurement,
@@ -1178,7 +1176,7 @@ def _align_and_screen_groups(
             else:
                 reason = describe_bright_sky_group(gain_measurement, reference_exposure)
             result.left_out_reason = reason
-            logger.warning("The %g s exposure group of '%s' %s.", result.exposure, target_id, reason)
+            logger.warning("The %g s exposure group of '%s' %s.", result.exposure_s, target_id, reason)
 
 
 def _write_combined_stack(
@@ -1223,7 +1221,7 @@ def _write_combined_stack(
     used = used_groups(results)
     combination = combine_exposure_group_images(
         [result.aligned_image for result in used],
-        [result.exposure for result in used],
+        [result.exposure_s for result in used],
         [result.count for result in used],
         frame_noises=[result.frame_noise for result in used],
         frame_zero_fractions=[result.frame_zero_fraction for result in used],
@@ -1245,10 +1243,10 @@ def _write_combined_stack(
     # lined up with and whose frame is the registration reference.
     heaviest = used[combination.reference_index]
     header = read_header(heaviest.path)
-    header["EXPTIME"] = float(sum(result.count * result.exposure for result in used))
+    header["EXPTIME"] = float(sum(result.count * result.exposure_s for result in used))
     header["STACKCNT"] = int(sum(result.count for result in used))
     header["HISTORY"] = "Combined from exposure groups: " + ", ".join(
-        f"{result.count} x {result.exposure:g} s" for result in used
+        f"{result.count} x {result.exposure_s:g} s" for result in used
     )
     write_image(final_path, combined, header)
 
@@ -1328,7 +1326,7 @@ def _describe_groups(
         alignment = result.alignment
         summaries.append(
             build_group_summary(
-                result.exposure,
+                result.exposure_s,
                 result.group.frames,
                 result.diagnostics,
                 saturation,
@@ -1362,7 +1360,7 @@ def _describe_groups(
     for group, diagnostics in failed_groups:
         summaries.append(
             build_group_summary(
-                group.exposure_seconds,
+                group.exposure_s,
                 group.frames,
                 diagnostics,
                 [],
@@ -1421,7 +1419,7 @@ def _join_group_diagnostics(
         [result.artifacts for result in used],
         [result.weight for result in used],
         [result.count for result in used],
-        [result.exposure for result in used],
+        [result.exposure_s for result in used],
         [result.frame_noise if measurements.frame_noises_read else None for result in used],
         combination,
         stack_weight,
@@ -1539,7 +1537,7 @@ def _exposure_group_weight_entries(
         summaries), ``paths`` (every frame of the group),
         ``frame_paths``, ``registration_frames`` and ``registration_included``
         (Siril's lists for the group, in the engine's order), ``weight``
-        (``W_g``), ``frame_count`` (``N_g``), ``exposure_seconds`` (``t_g``),
+        (``W_g``), ``frame_count`` (``N_g``), ``exposure_s`` (``t_g``),
         ``frame_noise_counts`` (``s_g`` or `None`), ``gain`` (the applied
         ``G_g``), ``gain_measured``, ``sky_level_per_second``,
         ``stack_weight`` and ``holds_folded_frames``.
@@ -1562,7 +1560,7 @@ def _exposure_group_weight_entries(
             "registration_included": list(artifacts[position].get("registration_included") or []),
             "weight": float(weights[position]),
             "frame_count": int(counts[position]),
-            "exposure_seconds": float(exposures[position]),
+            "exposure_s": float(exposures[position]),
             "frame_noise_counts": None if frame_noises[position] is None else float(frame_noises[position]),
             "gain": float(combination.gains[position]),
             "gain_measured": bool(combination.gains_measured[position]),
@@ -1647,9 +1645,9 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
         joined = [item for _, _, diagnostics in results for item in diagnostics.get(key, [])]
         if joined:
             merged[key] = list(dict.fromkeys(joined))
-    durations = [diagnostics.get("stacking_duration_seconds") for _, _, diagnostics in results]
+    durations = [diagnostics.get("stacking_duration_s") for _, _, diagnostics in results]
     if any(duration is not None for duration in durations):
-        merged["stacking_duration_seconds"] = float(sum(duration or 0.0 for duration in durations))
+        merged["stacking_duration_s"] = float(sum(duration or 0.0 for duration in durations))
     # Every count below describes a whole session, so add up all the groups
     # (the copy of the first group would report only its own frames).
     for key in ("images_stacked", "num_lights", "registered_frames", "registration_failed_frames"):
@@ -1657,9 +1655,9 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
             merged[key] = sum(int(diagnostics.get(key) or 0) for _, _, diagnostics in results)
     # Siril's negative-pixel warnings: the worst share over all groups, and how
     # many frames were warned about in total.
-    warned = [d for _, _, d in results if d.get("negative_pixel_max_percent") is not None]
+    warned = [d for _, _, d in results if d.get("negative_pixel_max_pct") is not None]
     if warned:
-        merged["negative_pixel_max_percent"] = max(d["negative_pixel_max_percent"] for d in warned)
+        merged["negative_pixel_max_pct"] = max(d["negative_pixel_max_pct"] for d in warned)
         merged["negative_pixel_frames"] = sum(int(d.get("negative_pixel_frames") or 0) for d in warned)
     merged["registered_fraction"] = _registered_fraction(merged)
     # The frames that really went into the combined stack, so the quality
@@ -1672,7 +1670,7 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
     ]
     merged["exposure_groups"] = [
         {
-            "exposure_seconds": group.exposure_seconds,
+            "exposure_s": group.exposure_s,
             "frames": len(group.frames),
             "images_stacked": diagnostics.get("images_stacked"),
             "registered_fraction": diagnostics.get("registered_fraction"),

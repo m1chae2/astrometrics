@@ -57,7 +57,7 @@ def _session(elongations: list[float], start: float = 100.0) -> list[FrameRecord
         One frame per elongation, at ``/f<i>.fits``.
     """
     return [
-        FrameRecord(path=f"/f{index}.fits", timestamp=start + 60.0 * index, camera="ASI533MM", exposure="120")
+        FrameRecord(path=f"/f{index}.fits", timestamp=start + 60.0 * index, camera="ASI533MM", exposure_s=120)
         for index in range(len(elongations))
     ]
 
@@ -76,7 +76,7 @@ def _set_aside(file_name: str, kind: str | None = "clouded") -> SetAsideFrameRec
         kind=kind,
         reason="203 stars against a typical 3348",
         reason_source="stored_row",
-        exposure_seconds=120.0,
+        exposure_s=120.0,
         original_path=f"/frames/lights/M 1/{file_name}",
         restorable=True,
         camera="ASI533MM",
@@ -224,7 +224,7 @@ def test_set_aside_frames_are_listed_with_their_reason_kind_and_date() -> None:
     assert status.reason == "203 stars against a typical 3348"
     assert status.date == "2026-10-03 08:15:30"
     assert (status.camera, status.filter) == ("ASI533MM", "Luminance")
-    assert status.exposure == "120"
+    assert status.exposure_s == pytest.approx(120.0)
     assert status.restorable is True
 
 

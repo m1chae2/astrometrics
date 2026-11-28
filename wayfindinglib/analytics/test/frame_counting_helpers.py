@@ -1,9 +1,9 @@
 """Purpose: Stand-ins for the frame counting tests.
 
 Description: Builds frame records, frame-level quality rows and a small fake
-science library (`targets.get` and `quality.query`) so the counting, progress
-and suggestion tests run with no real data. The fake keeps its frames in
-memory and never touches a file or a database.
+science library (`targets.get` and `quality.records.query`) so the counting,
+progress and suggestion tests run with no real data. The fake keeps its
+frames in memory and never touches a file or a database.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -12,7 +12,8 @@ from typing import Any
 
 from astrometricslib import FilterType, FrameRecord, Target
 from astrometricslib._internal.frames import frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import NotFoundError
 from astrometricslib.reports import (
     LimitTier,
@@ -22,7 +23,7 @@ from astrometricslib.reports import (
     SubjectLevel,
 )
 from wayfindinglib.analytics.frame_counting import EquipmentNames
-from wayfindinglib.test.camera_profile_support import no_camera_profiles_processing
+from wayfindinglib.test.camera_profile_support import NO_CAMERAS, no_camera_profiles_calibration
 
 NIGHT_START = datetime(2026, 10, 24, 22, 0, tzinfo=UTC)
 """A time during the night of 2026-10-24, used as frame time zero."""
@@ -36,9 +37,9 @@ def make_frame(
     *,
     target_id: str = "M 81",
     filter_value: FilterType | str = FilterType.L,
-    exposure: float = 60.0,
-    iso: str = "120",
-    offset: str = "10",
+    exposure_s: float = 60.0,
+    gain: int = 120,
+    offset: int = 10,
     binning: int | None = 1,
     camera: str = "Test Camera",
     telescope: str = "Test Scope",
@@ -57,12 +58,12 @@ def make_frame(
         The target folder name.
     filter_value : `FilterType` or `str`, optional
         The frame's filter.
-    exposure : `float`, optional
+    exposure_s : `float`, optional
         The exposure in seconds.
-    iso : `str`, optional
-        The gain, as the record keeps it.
-    offset : `str`, optional
-        The offset, as the record keeps it.
+    gain : `int`, optional
+        The gain setting.
+    offset : `int`, optional
+        The offset.
     binning : `int` or `None`, optional
         The binning factor.
     camera, telescope : `str`, optional
@@ -93,9 +94,9 @@ def make_frame(
         path="/".join(parts),
         filter=filter_value,
         role=role,
-        iso=iso,
+        gain=gain,
         offset=offset,
-        exposure=str(exposure),
+        exposure_s=exposure_s,
         timestamp=when.timestamp(),
         camera=camera,
         telescope=telescope,
@@ -153,7 +154,7 @@ class FakeLibrary:
     frames_by_target : `dict` [`str`, `list` [`FrameRecord`]]
         The frames of each target.
     rows : `list` [`QualityMeasurement`], optional
-        Every stored row. `quality.query` filters them.
+        Every stored row. `quality.records.query` filters them.
     object_types : `dict` [`str`, `str`], optional
         The stored SIMBAD object type of each target. A target left out has
         none.
@@ -170,13 +171,18 @@ class FakeLibrary:
         self.object_types = object_types or {}
         self.read_failures: set[str] = set()
         self.targets = SimpleNamespace(
-            get=self._get_target, query=lambda **_k: SimpleNamespace(objects=self._list_targets())
+            get=self._get_target,
+            query=lambda **_k: SimpleNamespace(items=tuple(self._list_targets())),
+            frames=SimpleNamespace(get_set_aside=lambda _target: ()),
         )
-        self.processing = no_camera_profiles_processing()
+        self.calibration = no_camera_profiles_calibration()
+        self.config = NO_CAMERAS
         self.quality = SimpleNamespace(
-            query=self._query,
-            set_aside_frames=lambda _target: [],
-            capture_settings=lambda ids=None: {},
+            records=SimpleNamespace(
+                query=self._query,
+                get_calibration_identities=lambda target=None, **_k: [],
+                get_capture_settings=lambda ids=None: [],
+            )
         )
 
     def _get_target(
@@ -229,26 +235,24 @@ class FakeLibrary:
         """
         return [Target(id=target_id) for target_id in self.frames_by_target]
 
-    def _query(self, **arguments: Any) -> QualityQueryResult:
-        """Filter the stored rows the way `quality.query` does.
+    def _query(self, **arguments: Any) -> Page:
+        """Filter the stored rows the way `quality.records.query` does.
 
         Parameters
         ----------
         **arguments : `Any`
-            The `quality.query` arguments. Only `metric`, `level` and
-            `target_id` are used.
+            The `quality.records.query` arguments. Only `metric`, `level` and
+            `target` are used.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The matching rows.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self.rows
-                if (arguments.get("metric") is None or row.metric == arguments["metric"])
-                and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
-                and (arguments.get("target_id") is None or row.subject.target_id == arguments["target_id"])
-            ]
-        )
+        return Page.of([
+            row
+            for row in self.rows
+            if (arguments.get("metric") is None or row.metric == arguments["metric"])
+            and (arguments.get("level") is None or row.subject.level.value == arguments["level"])
+            and (arguments.get("target") is None or row.subject.target_id == arguments["target"].id)
+        ])

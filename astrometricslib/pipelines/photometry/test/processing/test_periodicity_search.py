@@ -207,7 +207,7 @@ def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search() -> Non
     started_at = time_module.monotonic()
     lomb_scargle_search(times, flux)
     box_search(times, flux)
-    elapsed_seconds = time_module.monotonic() - started_at
+    elapsed_s = time_module.monotonic() - started_at
 
     # Measured 2026-10-10 on a 12-core machine: 36 s (150 shuffles at 0.08 s
     # for Lomb-Scargle and 0.16 s for the box search). The incident needed
@@ -215,7 +215,7 @@ def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search() -> Non
     # roughly 17 hours. 120 s keeps the test about 500 times below the
     # incident and leaves a 3x margin for slower machines; the earlier 30 s
     # limit sat just under the real cost and failed on this machine.
-    assert elapsed_seconds < 120.0
+    assert elapsed_s < 120.0
 
 
 LONG_BASELINE_PERIOD_DAYS = 0.21

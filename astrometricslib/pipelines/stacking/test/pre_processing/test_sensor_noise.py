@@ -38,9 +38,9 @@ MEASURED_ON = date(2026, 10, 22)
 def make_frame(
     generator: np.random.Generator,
     signal_electrons: float = 0.0,
-    gain_setting: str = "0",
+    gain: str = "0",
     temperature_c: float | None = -10.0,
-    exposure_seconds: float | None = 0.5,
+    exposure_s: float | None = 0.5,
 ) -> CalibrationFrame:
     """Make one synthetic frame of known gain and read noise.
 
@@ -50,11 +50,11 @@ def make_frame(
         The seeded source of noise.
     signal_electrons : `float`, optional
         Mean signal in electrons. Zero makes a bias frame.
-    gain_setting : `str`, optional
+    gain : `str`, optional
         The gain setting written on the frame.
     temperature_c : `float`, optional
         The sensor temperature written on the frame.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         The exposure written on the frame.
 
     Returns
@@ -71,10 +71,10 @@ def make_frame(
     pixels = pixels + generator.normal(0.0, TRUE_READ_NOISE_ADU, FRAME_SHAPE)
     return CalibrationFrame(
         pixels=pixels,
-        gain_setting=gain_setting,
+        gain=gain,
         offset="10",
         binning="1x1",
-        exposure_seconds=exposure_seconds,
+        exposure_s=exposure_s,
         temperature_c=temperature_c,
     )
 
@@ -116,7 +116,7 @@ def test_known_gain_and_read_noise_come_back() -> None:
     assert 0.0 < result.gain_spread_e_per_adu < TOLERANCE * TRUE_GAIN_E_PER_ADU
     assert result.signal_level_adu == pytest.approx(FLAT_SIGNAL_ELECTRONS / TRUE_GAIN_E_PER_ADU, rel=0.1)
     assert result.region_shape_pixels == list(FRAME_SHAPE)
-    assert (result.gain_setting, result.offset, result.binning) == ("0", "10", "1x1")
+    assert (result.gain, result.offset, result.binning) == (0, 10, "1x1")
     assert result.temperature_c == pytest.approx(-10.0)
     assert "Photon transfer on 8 flat pairs" in result.provenance
     assert result.provenance.endswith("Measured 2026-10-22 by measure_sensor_noise.")
@@ -130,10 +130,10 @@ def test_a_drifting_lamp_does_not_read_as_noise() -> None:
             first,
             CalibrationFrame(
                 pixels=BIAS_LEVEL_ADU + (second.pixels - BIAS_LEVEL_ADU) * 1.03,
-                gain_setting=second.gain_setting,
+                gain=second.gain,
                 offset=second.offset,
                 binning=second.binning,
-                exposure_seconds=second.exposure_seconds,
+                exposure_s=second.exposure_s,
                 temperature_c=second.temperature_c,
             ),
         )
@@ -191,7 +191,7 @@ def test_the_minimum_pair_counts_are_accepted() -> None:
 def test_mixed_settings_are_refused() -> None:
     """A bias frame at another gain setting stops the measurement."""
     flat_pairs, bias_pairs = make_pairs(seed=7)
-    other_gain_frame = make_frame(np.random.default_rng(70), 0.0, gain_setting="100")
+    other_gain_frame = make_frame(np.random.default_rng(70), 0.0, gain="100")
     bias_pairs[-1] = (bias_pairs[-1][0], other_gain_frame)
 
     result = measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON)
@@ -203,7 +203,7 @@ def test_mixed_settings_are_refused() -> None:
 def test_mixed_flat_exposures_are_refused() -> None:
     """Flats of two exposures stop the measurement."""
     flat_pairs, bias_pairs = make_pairs(seed=8)
-    odd_frame = make_frame(np.random.default_rng(80), FLAT_SIGNAL_ELECTRONS, exposure_seconds=1.0)
+    odd_frame = make_frame(np.random.default_rng(80), FLAT_SIGNAL_ELECTRONS, exposure_s=1.0)
     flat_pairs[0] = (flat_pairs[0][0], odd_frame)
 
     result = measure_sensor_noise(flat_pairs, bias_pairs, measured_on=MEASURED_ON)
@@ -231,10 +231,10 @@ def test_pairs_quieter_than_the_read_noise_give_no_gain() -> None:
     quiet_flats = [
         CalibrationFrame(
             pixels=3000.0 + generator.normal(0.0, 0.5 * TRUE_READ_NOISE_ADU, FRAME_SHAPE),
-            gain_setting="0",
+            gain="0",
             offset="10",
             binning="1x1",
-            exposure_seconds=0.5,
+            exposure_s=0.5,
             temperature_c=-10.0,
         )
         for _ in range(16)

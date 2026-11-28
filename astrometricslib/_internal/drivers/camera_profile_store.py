@@ -44,6 +44,7 @@ from astrometricslib.models.camera_profile import (
     SettingBiasLevel,
     ValueProvenance,
 )
+from astrometricslib.utilities.iso_text import setting_number
 
 __all__ = [
     "BIAS_LEVELS_KEY",
@@ -116,6 +117,48 @@ def _build_quantum_efficiency(field: Mapping[str, Any]) -> QuantumEfficiencyReco
     )
 
 
+def _setting_field(field: Mapping[str, Any], name: str, old_name: str) -> Any:
+    """Read a setting from a profile entry, under its name or its old name.
+
+    Parameters
+    ----------
+    field : `Mapping` [`str`, `Any`]
+        One ``sensor_noise`` or ``bias_levels`` entry.
+    name : `str`
+        The key the entry is written with now, such as ``"gain"``.
+    old_name : `str`
+        The key an entry written before the rename has, such as
+        ``"gain_setting"``.
+
+    Returns
+    -------
+    value : `Any`
+        The setting.
+
+    Notes
+    -----
+    Raises `KeyError` when the entry has neither key.
+    """
+    return field[name] if name in field else field[old_name]
+
+
+def _setting_value(text: str) -> int | str:
+    """Write a gain or offset setting as a number when it is a whole number.
+
+    Parameters
+    ----------
+    text : `str`
+        The setting in its standard text, such as ``"100"``.
+
+    Returns
+    -------
+    value : `int` or `str`
+        The whole number, or the text when it holds none.
+    """
+    number = setting_number(text)
+    return text if number is None or str(number) != text else number
+
+
 def _build_sensor_setting_noise(field: Mapping[str, Any]) -> SensorSettingNoise:
     """Build a `SensorSettingNoise` from one ``sensor_noise`` entry.
 
@@ -125,7 +168,7 @@ def _build_sensor_setting_noise(field: Mapping[str, Any]) -> SensorSettingNoise:
         The gain and read noise recorded for one camera setting.
     """
     kwargs = {
-        "gain_setting": str(field["gain_setting"]),
+        "gain": str(_setting_field(field, "gain", "gain_setting")),
         "offset": str(field.get("offset", "0")),
         "binning": str(field.get("binning", "1x1")),
     }
@@ -152,7 +195,7 @@ def _build_setting_bias_level(field: Mapping[str, Any]) -> SettingBiasLevel:
         The bias level recorded for one camera setting.
     """
     kwargs: dict[str, Any] = {
-        "gain_setting": str(field["gain_setting"]),
+        "gain": str(_setting_field(field, "gain", "gain_setting")),
         "offset": str(field.get("offset", "0")),
         "binning": str(field.get("binning", "1x1")),
         "bias_level_adu": build_provenanced_value(field["bias_level_adu"]),
@@ -517,8 +560,8 @@ def sensor_noise_to_toml_array(
     array.multiline(True)
     for entry in entries:
         table = tomlkit.inline_table()
-        table["gain_setting"] = entry.gain_setting
-        table["offset"] = entry.offset
+        table["gain"] = _setting_value(entry.gain)
+        table["offset"] = _setting_value(entry.offset)
         table["binning"] = entry.binning
         if entry.temperature_c is not None:
             table["temperature_c"] = entry.temperature_c

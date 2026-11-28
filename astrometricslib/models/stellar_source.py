@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.known_variability import (
@@ -44,6 +44,7 @@ from astrometricslib.models.tuned_parameter import (
     TunedParameter,
 )
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointRecord
+from astrometricslib.utilities.iso_text import SettingNumber
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -812,20 +813,47 @@ class DifferentialRefractionRecord(BaseModel):
     # The time of mid-exposure, UTC, as an ISO string.
     mid_exposure_utc: str | None = Field(default=None, alias="midExposureUtc")
     # The target's altitude above the horizon, in degrees.
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
     # The position angle of the zenith as seen from the target, in degrees
     # from north through east.
-    parallactic_angle_degrees: float | None = Field(default=None, alias="parallacticAngleDegrees")
+    parallactic_angle_deg: float | None = Field(
+        default=None,
+        alias="parallacticAngleDeg",
+        validation_alias=AliasChoices(
+            "parallacticAngleDeg",
+            "parallactic_angle_deg",
+            "parallacticAngleDegrees",
+            "parallactic_angle_degrees",
+        ),
+    )
     # The position angle of the direction of increasing wavelength along
     # the trail, in degrees from north through east.
-    dispersion_position_angle_degrees: float | None = Field(
-        default=None, alias="dispersionPositionAngleDegrees"
+    dispersion_position_angle_deg: float | None = Field(
+        default=None,
+        alias="dispersionPositionAngleDeg",
+        validation_alias=AliasChoices(
+            "dispersionPositionAngleDeg",
+            "dispersion_position_angle_deg",
+            "dispersionPositionAngleDegrees",
+            "dispersion_position_angle_degrees",
+        ),
     )
     # The dispersion position angle minus the parallactic angle, wrapped to
     # -180 to 180 degrees. 0 means the red end of the spectrum points at the
     # zenith.
-    parallactic_to_dispersion_angle_degrees: float | None = Field(
-        default=None, alias="parallacticToDispersionAngleDegrees"
+    parallactic_to_dispersion_angle_deg: float | None = Field(
+        default=None,
+        alias="parallacticToDispersionAngleDeg",
+        validation_alias=AliasChoices(
+            "parallacticToDispersionAngleDeg",
+            "parallactic_to_dispersion_angle_deg",
+            "parallacticToDispersionAngleDegrees",
+            "parallactic_to_dispersion_angle_degrees",
+        ),
     )
     # The sky angle of one pixel along the dispersion, in arcseconds.
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
@@ -836,7 +864,16 @@ class DifferentialRefractionRecord(BaseModel):
     # standard atmosphere scaled to the site's elevation).
     pressure_hpa: float | None = Field(default=None, alias="pressureHpa")
     temperature_c: float | None = Field(default=None, alias="temperatureC")
-    relative_humidity_percent: float | None = Field(default=None, alias="relativeHumidityPercent")
+    relative_humidity_pct: float | None = Field(
+        default=None,
+        alias="relativeHumidityPct",
+        validation_alias=AliasChoices(
+            "relativeHumidityPct",
+            "relative_humidity_pct",
+            "relativeHumidityPercent",
+            "relative_humidity_percent",
+        ),
+    )
     atmosphere_source: str | None = Field(default=None, alias="atmosphereSource")
     # The displacement of the light along the dispersion, relative to the
     # zero order, in arcseconds. Positive is toward longer wavelengths.
@@ -1316,6 +1353,45 @@ class StellarObject(BaseModel):
     # see CatalogMatchQuality. `None` for a star that was never matched
     # (a FIELD_J... position-only id).
     catalog_match_quality: CatalogMatchQuality | None = Field(default=None, alias="catalogMatchQuality")
+    # The stored lengths of the light-curve lists ("timestamps",
+    # "magnitudes", "fluxes") when the star was read without its light
+    # curve (`light_curves_included` is then False). `None` when the lists
+    # are on the record itself. Kept out of the saved record.
+    _left_out_light_curve_lengths: dict[str, int] | None = PrivateAttr(default=None)
+
+    def _light_curve_length(self, list_name: str) -> int:
+        """Count the points of one light-curve list, even when it was left out.
+
+        Parameters
+        ----------
+        list_name : `str`
+            ``"timestamps"``, ``"magnitudes"`` or ``"fluxes"``.
+
+        Returns
+        -------
+        length : `int`
+            The stored length when the light curve was left out of this
+            copy, else the length of the list on the record.
+        """
+        if self._left_out_light_curve_lengths is not None:
+            return self._left_out_light_curve_lengths.get(list_name, 0)
+        values = getattr(self.photometry, list_name, None) if self.photometry else None
+        return len(values) if values else 0
+
+    @property
+    def light_curves_included(self) -> bool:
+        """Say whether this copy of the star holds its light-curve points.
+
+        A star read with `StellarCatalog.get` or `query` without
+        ``include=["light_curves"]`` has empty point lists in `photometry`,
+        though its period results and summaries are there.
+
+        Returns
+        -------
+        included : `bool`
+            `False` when the light-curve points were left out of this copy.
+        """
+        return self._left_out_light_curve_lengths is None
 
     @property
     def known_variability(self) -> KnownVariability:
@@ -1398,8 +1474,7 @@ class StellarObject(BaseModel):
         `True` with at least `MINIMUM_POINTS_FOR_PERIOD_SEARCH` (5)
         measurements.
         """
-        points = len(self.photometry.timestamps) if self.photometry else 0
-        return points >= resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
+        return self._light_curve_length("timestamps") >= resolve(MINIMUM_POINTS_FOR_PERIOD_SEARCH).value
 
     @computed_field(alias="canRunTransitSearch")
     @property
@@ -1409,21 +1484,13 @@ class StellarObject(BaseModel):
         `True` with at least `MINIMUM_POINTS_FOR_TRANSIT_SEARCH` (8)
         measurements.
         """
-        points = len(self.photometry.timestamps) if self.photometry else 0
-        return points >= resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
+        return self._light_curve_length("timestamps") >= resolve(MINIMUM_POINTS_FOR_TRANSIT_SEARCH).value
 
     @computed_field(alias="hasPhotometry")
     @property
     def has_photometry(self) -> bool:
         """Check if this star's brightness has been tracked over time."""
-        return bool(
-            self.photometry
-            and (
-                (self.photometry.timestamps and len(self.photometry.timestamps) > 0)
-                or (self.photometry.magnitudes and len(self.photometry.magnitudes) > 0)
-                or (self.photometry.fluxes and len(self.photometry.fluxes) > 0)
-            )
-        )
+        return any(self._light_curve_length(name) > 0 for name in ("timestamps", "magnitudes", "fluxes"))
 
     @computed_field(alias="plotData")
     @property
@@ -1551,8 +1618,9 @@ class FileItem(BaseModel):
     path: str = Field(alias="path")
     name: str = Field(alias="name")
     camera: str = Field(default="Unknown", alias="camera")
-    iso: str = Field(default="800", alias="iso")
-    exposure: str = Field(default="1.0", alias="exposure")
+    # The gain setting (or ISO), or None when it is not known.
+    gain: SettingNumber = Field(default=800, alias="gain")
+    exposure_s: float = Field(default=1.0, alias="exposureS")
     filter: str = Field(default="None", alias="filter")
     date: str = Field(default="Unknown", alias="date")
     # The focal length of the optic (lens or telescope) in millimeters, or
@@ -1587,8 +1655,9 @@ class GroupedFrameStat(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     filter: str = Field(alias="filter")
-    iso: str = Field(alias="iso")
-    exposure: str = Field(alias="exposure")
+    # The gain setting (or ISO), or None when it is not known.
+    gain: SettingNumber = Field(alias="gain")
+    exposure_s: float = Field(alias="exposureS")
     count: int = Field(..., gt=0, alias="count")
     # Whether matching "dark" calibration frames are available -- these
     # are pictures taken with the lens capped, used to subtract out the
@@ -1598,7 +1667,7 @@ class GroupedFrameStat(BaseModel):
     # The optic of the group: its focal length in whole millimeters.
     focal_length_mm: int | None = Field(default=None, alias="focalLengthMm")
     # The camera offset and binning of the group, as the stacker matches them.
-    offset: str | None = Field(default=None, alias="offset")
+    offset: SettingNumber = Field(default=None, alias="offset")
     binning: str | None = Field(default=None, alias="binning")
     # What the stacker would use for this group, per calibration kind.
     dark_match: CalibrationGroupMatch | None = Field(default=None, alias="darkMatch")

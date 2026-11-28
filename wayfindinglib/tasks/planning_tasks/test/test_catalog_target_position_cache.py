@@ -46,7 +46,7 @@ def _astrometrics(library: Path, targets: list[SimpleNamespace]) -> tuple[Simple
     handle = SimpleNamespace(
         config=SimpleNamespace(get_library_path=lambda: library),
         targets=SimpleNamespace(
-            query=lambda **_k: SimpleNamespace(objects=list_targets()),
+            query=lambda **_k: SimpleNamespace(items=tuple(list_targets())),
             get=lambda target_id: by_id.get(target_id),
         ),
     )

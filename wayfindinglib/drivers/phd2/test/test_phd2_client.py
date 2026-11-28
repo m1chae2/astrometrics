@@ -307,7 +307,7 @@ def test_a_session_waits_for_an_event_that_arrives_after_a_command() -> None:
     try:
         with PHD2Client(host="localhost", port=port).open_session() as session:
             mark = session.event_count
-            session.guide(settle_pixels=2.0, settle_seconds=5, settle_timeout_seconds=90, recalibrate=True)
+            session.guide(settle_pixels=2.0, settle_s=5, settle_timeout_s=90, recalibrate=True)
             assert session.wait_for_event("SettleDone", mark, 5, Status=0) == settled
             assert session.wait_for_event("SettleDone", session.event_count, 0.2) is None
         assert requests[0]["params"] == [{"pixels": 2.0, "time": 5, "timeout": 90}, True]

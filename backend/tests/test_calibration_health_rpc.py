@@ -1,7 +1,8 @@
 """Purpose: Test the calibration health RPC methods.
 
-Description: ``calibration:assess`` hands the kind and the filters to the
-library's calibration catalog and returns one health record for each set.
+Description: ``calibration:assess`` turns the kind and the filters into a
+`CaptureSetting` for the library's calibration catalog and returns one
+health record for each set.
 ``calibration:measure_frames`` starts the measuring job through the image
 processing service and answers with the job's id. The tests replace the
 catalog's methods with recording stand-ins, call the methods through the RPC
@@ -14,6 +15,7 @@ import json
 
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib.exceptions import InvalidArgumentError
 from backend.container import container
 from backend.public_interface import RPC_METHODS
@@ -32,10 +34,10 @@ def test_both_methods_are_declared_and_served() -> None:
 
 
 def test_assess_passes_its_arguments_and_returns_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The kind and camera reach the library, and the reply is plain JSON."""
-    asked: dict[str, object] = {}
+    """The kind and camera reach the library as a setting, as JSON."""
+    asked: list[tuple[object, ...]] = []
 
-    def fake_assess(**arguments: object) -> list[dict[str, object]]:
+    def fake_assess(*arguments: object) -> list[dict[str, object]]:
         """Record the arguments and give one made-up health record.
 
         Returns
@@ -43,18 +45,24 @@ def test_assess_passes_its_arguments_and_returns_json(monkeypatch: pytest.Monkey
         records : `list` [`dict`]
             One record, shaped like `CalibrationSetHealth`.
         """
-        asked.update(arguments)
+        asked.append(arguments)
         return [{"rowKey": "dark|cam", "status": "good", "summary": "No problem found."}]
 
-    monkeypatch.setattr(container.astrometrics.processing.calibration, "assess", fake_assess)
+    monkeypatch.setattr(container.astrometrics.calibration, "assess", fake_assess)
 
     result = serialize_rpc_result(
-        asyncio.run(rpc_registry.execute(ASSESS, {"kind": "dark", "camera_id": "Cam"}))
+        asyncio.run(rpc_registry.execute(ASSESS, {"kind": "dark", "camera_id": "Cam", "gain": "100"}))
     )
 
-    assert asked == {"kind": "dark", "camera_id": "Cam"}
+    assert asked == [("dark", CaptureSetting(camera="Cam", gain=100))]
     assert result[0]["rowKey"] == "dark|cam"
     json.dumps(result)
+
+
+def test_assess_refuses_an_argument_of_another_kind() -> None:
+    """A bias is not filed by telescope, so the argument is refused."""
+    with pytest.raises(InvalidArgumentError, match="telescope"):
+        asyncio.run(rpc_registry.execute(ASSESS, {"kind": "bias", "camera_id": "Cam", "telescope": "Scope"}))
 
 
 def test_assess_needs_a_kind() -> None:
@@ -78,10 +86,10 @@ def test_measure_frames_starts_the_job_and_answers_with_its_id(monkeypatch: pyte
         asked.update(arguments)
         return {"frameCount": 3, "measuredCount": 0, "unchangedCount": 3}
 
-    monkeypatch.setattr(container.astrometrics.processing.calibration, "measure_frames", fake_measure)
+    monkeypatch.setattr(container.astrometrics.calibration.frames, "record", fake_measure)
 
     result = serialize_rpc_result(asyncio.run(rpc_registry.execute(MEASURE, {"kind": "bias", "force": True})))
 
-    assert asked == {"kind": "bias", "camera_id": None, "force": True, "register_job": True}
+    assert asked == {"kind": "bias", "setting": None, "force": True}
     assert result["result"]["frameCount"] == 3
     json.dumps(result)

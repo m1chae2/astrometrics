@@ -17,8 +17,6 @@ import requests
 from astropy.table import Table
 
 from astrometricslib._internal.catalog import FieldCenter, ImagedFieldCenters
-from wayfindinglib.api.planning import ObservationPlanning
-from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.catalog import deep_star_catalog_builder
 from wayfindinglib.scripts import build_deep_star_catalog as script
 
@@ -95,13 +93,9 @@ def fake_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _FakeGa
     monkeypatch.setitem(sys.modules, "astroquery.gaia", fake_module)
 
     config = _LibraryConfig(tmp_path)
-    # A real ObservationPlanning bound to the sandboxed config -- the deep-
-    # catalog methods only ever touch self._butler.config, never the lazily
-    # built Sky engine, so this exercises the real wiring end to end.
-    fake_wayfinder = types.SimpleNamespace(
-        config=config, planning=ObservationPlanning(butler=DiskButler(app_config=config))
-    )
-    monkeypatch.setattr(script, "Wayfinder", lambda: fake_wayfinder)
+    # The script reads the settings and calls the catalog owner functions
+    # directly, so the sandboxed settings exercise the real wiring end to end.
+    monkeypatch.setattr(script, "get_configuration", lambda: config)
     monkeypatch.setattr(deep_star_catalog_builder.time, "sleep", lambda _seconds: None)
     return gaia
 
@@ -214,23 +208,12 @@ def test_ctrl_c_stops_cleanly_and_says_how_to_resume(
     def _interrupt(*_arguments: Any, **_keyword_arguments: Any) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(fake_environment_planning(), "build_deep_star_catalog", _interrupt)
+    monkeypatch.setattr(script, "build_deep_star_catalog", _interrupt)
 
     exit_code = script.run_catalog_build(["--healpix-level", "0"])
 
     assert exit_code == 130
     assert "run the same command again to resume" in capsys.readouterr().out
-
-
-def fake_environment_planning() -> ObservationPlanning:
-    """Fetch the `ObservationPlanning` the `fake_environment` fixture built.
-
-    Returns
-    -------
-    planning : `ObservationPlanning`
-        The planning instance `script.Wayfinder()` will hand back.
-    """
-    return script.Wayfinder().planning
 
 
 def imaged_fields(monkeypatch: pytest.MonkeyPatch, fields: list[dict]) -> None:
@@ -246,9 +229,7 @@ def imaged_fields(monkeypatch: pytest.MonkeyPatch, fields: list[dict]) -> None:
     """
     centers = [FieldCenter(frames_examined=1, **field) for field in fields]
     library = types.SimpleNamespace(
-        targets=types.SimpleNamespace(
-            imaged_field_centers=lambda register_job: ImagedFieldCenters(centers=centers)
-        )
+        targets=types.SimpleNamespace(measure_field_centers=lambda: ImagedFieldCenters(centers=centers))
     )
     monkeypatch.setattr(script, "Astrometrics", lambda config: library)
 

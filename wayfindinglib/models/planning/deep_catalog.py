@@ -8,7 +8,7 @@ stars in a sample of chunks. `DeepCatalogBuildReport` is what a download
 run returns.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class DeepCatalogEstimate(BaseModel):
@@ -56,7 +56,11 @@ class DeepCatalogBuildReport(BaseModel):
     pixels_downloaded: int = Field(..., description="Chunks downloaded in this run.")
     pixels_failed: list[int] = Field(default_factory=list, description="The numbers of chunks that failed.")
     stars_added: int = Field(..., description="Stars saved by this run.")
-    elapsed_seconds: float = Field(..., description="How long the run took, in seconds.")
+    elapsed_s: float = Field(
+        ...,
+        description="How long the run took, in seconds.",
+        validation_alias=AliasChoices("elapsed_s", "elapsed_seconds"),
+    )
     stopped_early: bool = Field(
         ..., description="True when the archive seemed to be down or the chunk limit was reached."
     )

@@ -92,7 +92,7 @@ def test_a_catalog_name_creates_a_target_with_its_position(monkeypatch: pytest.M
     assert target.id == "M 57"
     assert target.ra != "0h 0m 0s"
     assert target.dec != "0° 0′ 0′′"
-    assert catalog.get("M 57") is target
+    assert catalog._targets == [target]
 
 
 def test_an_existing_target_is_reused_without_a_lookup(monkeypatch: pytest.MonkeyPatch) -> None:

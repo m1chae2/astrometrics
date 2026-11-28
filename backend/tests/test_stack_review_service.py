@@ -1,11 +1,12 @@
 """Purpose: Test the stack review RPC methods and the service behind them.
 
-Description: ``processing:remake_preview`` starts the library's preview remake
-as a background job, and ``quality:set_aside_frames`` reads the set-aside
-listing. The tests check that both are declared and routed, that a quick job
-gives back its result, that a slow job gives back a job id, that a quick
-failure reaches the caller as an error, and that the service never asks the
-library to skip keeping the old pictures. The science library is a stand-in.
+Description: ``processing:remake_preview`` starts the library's enhancement
+run (``processing.enhancement.run``, always forced) as a background job, and
+``quality:set_aside_frames`` reads the set-aside listing. The tests check
+that both are declared and routed, that a quick job gives back its result,
+that a slow job gives back a job id, that a quick failure reaches the caller
+as an error, and that the service never asks the library to skip keeping the
+old pictures. The science library is a stand-in.
 """
 
 import asyncio
@@ -15,7 +16,9 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import EnhancementSettings, Target
 from astrometricslib._internal.results import PreviewRemakeResult
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.reports import SetAsideFrameRecord
 from backend.container import container
@@ -38,6 +41,43 @@ def _result() -> PreviewRemakeResult:
     )
 
 
+def _library(run: Any, **processing: Any) -> SimpleNamespace:
+    """Build a stand-in library whose enhancement run is ``run``.
+
+    The target M 81 has a main stack and a spectral stack.
+
+    Parameters
+    ----------
+    run : `Any`
+        The stand-in for ``processing.enhancement.run``.
+    **processing : `Any`
+        More stand-ins for the processing pipelines, such as ``stacking``.
+
+    Returns
+    -------
+    library : `SimpleNamespace`
+        The stand-in library.
+    """
+
+    def get(target_id: str) -> Target:
+        """Give a target with both stacks.
+
+        Returns
+        -------
+        target : `Target`
+            The target.
+        """
+        target = Target(id=target_id)
+        target.stacking.stacked_image = "/s/M_81_Stacked.fits"
+        target.spectral_stacking.stacked_image = "/s/M_81_SPEC_Stacked.fits"
+        return target
+
+    return SimpleNamespace(
+        processing=SimpleNamespace(enhancement=SimpleNamespace(run=run), **processing),
+        targets=SimpleNamespace(get=get),
+    )
+
+
 def test_the_methods_are_declared_and_routed() -> None:
     """Both methods are public and go to the right place."""
     assert "processing:remake_preview" in RPC_METHODS
@@ -46,14 +86,14 @@ def test_the_methods_are_declared_and_routed() -> None:
         "stack_review_service",
         "start_preview_remake",
     )
-    assert rpc_registry._handlers["quality:set_aside_frames"] == ("astrometrics.quality", "set_aside_frames")
+    assert rpc_registry._handlers["quality:set_aside_frames"] == ("target_service", "get_set_aside_frames")
 
 
 def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
-    """The settings reach the library, and nothing turns off keep_previous."""
+    """The settings reach the library, forced, and keep_previous stays on."""
     calls: list[dict[str, Any]] = []
 
-    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+    def run(target: Target, settings: Any = None, stack: Any = None, **options: Any) -> PreviewRemakeResult:
         """Record the call and give a result.
 
         Returns
@@ -61,10 +101,10 @@ def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
         result : `PreviewRemakeResult`
             A small result.
         """
-        calls.append({"target": target, **options})
+        calls.append({"target": target.id, "settings": settings, "stack": stack, **options})
         return _result()
 
-    service = StackReviewService(SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)))
+    service = StackReviewService(_library(run))
 
     reply = service.start_preview_remake("M 81", "spectral", denoise=True, denoise_strength=0.4)
 
@@ -74,15 +114,9 @@ def test_a_quick_remake_gives_its_result_and_keeps_the_old_pictures() -> None:
     assert calls == [
         {
             "target": "M 81",
-            "kind": "spectral",
-            "denoise": True,
-            "denoise_strength": 0.4,
-            "star_toning": None,
-            "starnet": False,
-            "star_strength": None,
-            "star_stretch": None,
-            "register_job": True,
-            "stack_path": None,
+            "settings": EnhancementSettings(denoise=True, denoise_strength=0.4),
+            "stack": "/s/M_81_SPEC_Stacked.fits",
+            "force": True,
         }
     ]
     assert "keep_previous" not in calls[0]
@@ -92,7 +126,7 @@ def test_a_remake_of_one_configuration_names_its_stack() -> None:
     """The stack of a chosen camera and optic reaches the library."""
     calls: list[dict[str, Any]] = []
 
-    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+    def run(target: Target, settings: Any = None, stack: Any = None, **options: Any) -> PreviewRemakeResult:
         """Record the call and give a result.
 
         Returns
@@ -100,23 +134,24 @@ def test_a_remake_of_one_configuration_names_its_stack() -> None:
         result : `PreviewRemakeResult`
             A small result.
         """
-        calls.append({"target": target, **options})
+        calls.append({"target": target.id, "stack": stack, **options})
         return _result()
 
-    service = StackReviewService(SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)))
+    service = StackReviewService(_library(run))
 
     reply = service.start_preview_remake("M 81", stack_path="/s/M_81_Nikon_300mm.fits")
 
     assert reply.status == "completed"
-    assert calls[0]["stack_path"] == "/s/M_81_Nikon_300mm.fits"
-    assert calls[0]["kind"] == "imaging"
+    assert calls[0]["stack"] == "/s/M_81_Nikon_300mm.fits"
 
 
-def test_a_remake_by_camera_and_optic_asks_the_library_for_the_stack() -> None:
-    """A camera and optic are turned into the stack by the library."""
+def test_a_remake_by_camera_and_optic_asks_the_library_for_the_stack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A camera and optic become the stack the library holds for them."""
+    from backend.services.processing import stack_review_service
+
     calls: list[dict[str, Any]] = []
 
-    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+    def run(target: Target, settings: Any = None, stack: Any = None, **options: Any) -> PreviewRemakeResult:
         """Record the call and give a result.
 
         Returns
@@ -124,13 +159,13 @@ def test_a_remake_by_camera_and_optic_asks_the_library_for_the_stack() -> None:
         result : `PreviewRemakeResult`
             A small result.
         """
-        calls.append({"target": target, **options})
+        calls.append({"target": target.id, "stack": stack, **options})
         return _result()
 
     record = SimpleNamespace(stacked_image="/s/M_81_Nikon_300mm.fits", configuration_key="Nikon@300mm")
     found: list[tuple] = []
 
-    def find_stack_configuration(*arguments: Any) -> SimpleNamespace:
+    def stack_for_equipment(library: Any, target: Target, camera_id: Any, focal_length_mm: Any) -> Any:
         """Record the lookup and give the Nikon stack's record.
 
         Returns
@@ -138,18 +173,16 @@ def test_a_remake_by_camera_and_optic_asks_the_library_for_the_stack() -> None:
         record : `SimpleNamespace`
             The stand-in record.
         """
-        found.append(arguments)
+        found.append((target.id, camera_id, focal_length_mm))
         return record
 
-    processing = SimpleNamespace(
-        remake_preview=remake_preview, find_stack_configuration=find_stack_configuration
-    )
-    service = StackReviewService(SimpleNamespace(processing=processing))
+    monkeypatch.setattr(stack_review_service, "stack_for_equipment", stack_for_equipment)
+    service = StackReviewService(_library(run))
 
     reply = service.start_preview_remake("M 81", camera_id="D5300", focal_length_mm=300.0)
 
     assert found == [("M 81", "D5300", 300.0)]
-    assert calls[0]["stack_path"] == "/s/M_81_Nikon_300mm.fits"
+    assert calls[0]["stack"] is record
     assert reply.configuration == "Nikon@300mm"
     with pytest.raises(InvalidArgumentError, match="spectral"):
         service.start_preview_remake("M 81", kind="spectral", camera_id="D5300")
@@ -160,7 +193,7 @@ def test_a_slow_remake_gives_back_to_the_caller_while_it_runs() -> None:
     release = threading.Event()
     finished = threading.Event()
 
-    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+    def run(target: Target, *arguments: Any, **options: Any) -> PreviewRemakeResult:
         """Wait until the test lets go.
 
         Returns
@@ -172,9 +205,7 @@ def test_a_slow_remake_gives_back_to_the_caller_while_it_runs() -> None:
         finished.set()
         return _result()
 
-    service = StackReviewService(
-        SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)), wait_seconds=0.05
-    )
+    service = StackReviewService(_library(run), wait_seconds=0.05)
 
     reply = service.start_preview_remake("M 81")
 
@@ -187,7 +218,7 @@ def test_a_slow_remake_gives_back_to_the_caller_while_it_runs() -> None:
 def test_a_quick_failure_reaches_the_caller() -> None:
     """A refused value is raised, not hidden in a job."""
 
-    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+    def run(target: Target, *arguments: Any, **options: Any) -> PreviewRemakeResult:
         """Refuse the strength.
 
         Raises
@@ -197,7 +228,7 @@ def test_a_quick_failure_reaches_the_caller() -> None:
         """
         raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
 
-    service = StackReviewService(SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)))
+    service = StackReviewService(_library(run))
 
     with pytest.raises(InvalidArgumentError, match="between 0 and 1"):
         service.start_preview_remake("M 81", denoise_strength=3.0)
@@ -219,18 +250,19 @@ def test_the_set_aside_reply_keeps_the_stored_kind_and_the_missing_reason(
     ]
     calls: list[str] = []
 
-    def set_aside_frames(target: str) -> list[SetAsideFrameRecord]:
+    def get_set_aside(target: Target) -> Page[SetAsideFrameRecord]:
         """Record the call and give the frames.
 
         Returns
         -------
-        frames : `list` [`SetAsideFrameRecord`]
+        frames : `Page` [`SetAsideFrameRecord`]
             The two frames.
         """
-        calls.append(target)
-        return frames
+        calls.append(target.id)
+        return Page.of(frames)
 
-    monkeypatch.setattr(container.astrometrics.quality, "set_aside_frames", set_aside_frames)
+    monkeypatch.setattr(container.astrometrics.targets, "get", lambda target_id: Target(id=target_id))
+    monkeypatch.setattr(container.astrometrics.targets.frames, "get_set_aside", get_set_aside)
 
     reply = asyncio.run(rpc_registry.execute("quality:set_aside_frames", {"target": "M 81"}))
 
@@ -253,7 +285,7 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     )
     calls: list[dict[str, Any]] = []
 
-    def measure_stack(target: str, **options: Any) -> StackQualityReport:
+    def measure_stack(target: Any, **options: Any) -> StackQualityReport:
         """Record the call and give an empty report.
 
         Returns
@@ -261,13 +293,22 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
         report : `StackQualityReport`
             A report with a note and no comparison.
         """
-        calls.append({"target": target, **options})
+        calls.append({"target": target.id, **options})
         return StackQualityReport(
             stack_path="/s/M_81_Stacked.fits",
             notes=["No previous stack is kept, so there is nothing to compare with."],
         )
 
-    service = StackReviewService(SimpleNamespace(quality=SimpleNamespace(measure_stack=measure_stack)))
+    from astrometricslib import Target
+
+    target = Target(id="M 81")
+    target.spectral_stacking.stacked_image = "/s/M_81_SPEC_Stacked.fits"
+    service = StackReviewService(
+        SimpleNamespace(
+            quality=SimpleNamespace(stacks=SimpleNamespace(measure=measure_stack)),
+            targets=SimpleNamespace(get=lambda target_id, *args, **kwargs: target),
+        )
+    )
 
     reply = service.start_stack_comparison("M 81", "spectral")
 
@@ -276,7 +317,7 @@ def test_the_comparison_asks_for_the_previous_stack_only() -> None:
     assert reply.result["comparison"] is None
     assert "No previous stack" in reply.result["notes"][0]
     assert calls == [
-        {"target": "M 81", "kind": "spectral", "include": [], "compare_to": "previous", "register_job": True}
+        {"target": "M 81", "stack": "/s/M_81_SPEC_Stacked.fits", "include": [], "compare_to": "previous"}
     ]
 
 
@@ -302,7 +343,7 @@ def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_
     working = threading.Event()
     seen: dict[str, Any] = {}
 
-    def remake_preview(target: str, **options: Any) -> PreviewRemakeResult:
+    def run(target: Target, *arguments: Any, **options: Any) -> PreviewRemakeResult:
         """Replace the picture, then wait for a cancel, as the library does.
 
         Returns
@@ -310,7 +351,7 @@ def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_
         result : `PreviewRemakeResult`
             Never returns: the cancel stops it.
         """
-        with registered_job(enabled=True, job_type="preview", target_id=target) as job:
+        with registered_job(job_type="preview", target_id=target.id) as job:
             seen["job_id"] = job.job_id
             picture.write_text("half-made picture")
             working.set()
@@ -323,9 +364,7 @@ def test_cancelling_a_running_remake_ends_it_cancelled_and_puts_the_old_picture_
                 raise
         return _result()
 
-    service = StackReviewService(
-        SimpleNamespace(processing=SimpleNamespace(remake_preview=remake_preview)), wait_seconds=0.05
-    )
+    service = StackReviewService(_library(run), wait_seconds=0.05)
 
     reply = service.start_preview_remake("M 81")
     assert reply.status == "running"

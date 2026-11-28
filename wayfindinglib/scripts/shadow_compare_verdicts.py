@@ -17,7 +17,7 @@ reasons, because its warnings are the rows. The old side covers stacking,
 spectral stacking, astrometry, photometry, spectroscopy and asteroid detection,
 plus a star's match distance and gaps, read against their limits. The new side
 is the statements of
-`review.get_advisory`, kind ``"quality"`` for a target and ``"result"`` for a
+`review.targets.get_report` for a target and `review.targets.get_result` for a
 star. A rule is tied to a gate when the rule reads the gate's metric
 (``<pipeline>.gate_<name>``). A gate that no rule reads is listed as having no
 rule. Detection labels (period, transit, spectral feature verdicts) stay in
@@ -898,14 +898,14 @@ def run_comparison(
 
     index = build_rule_index(ALL_RULES)
     astrometrics = wayfinder.astrometrics
-    registered = [spec.name for spec in astrometrics.quality.metrics() if ".gate_" in spec.name]
+    registered = [spec.name for spec in astrometrics.quality.records.get_metrics() if ".gate_" in spec.name]
     unruled = gates_without_rule(registered, index)
     differences: list[Difference] = []
     gate_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     targets_checked = 0
     stars_checked = 0
     warning_counts = WarningCheckCounts()
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in astrometrics.targets.query(include_empty=True).items:
         if only_targets and target.id not in only_targets:
             continue
         targets_checked += 1
@@ -914,7 +914,7 @@ def run_comparison(
             for gate_name, (status, _detail) in state.gates.items():
                 gate_counts[f"{PIPELINE_METRIC_PREFIX[pipeline]}.gate_{gate_name}"][status] += 1
         try:
-            rows = astrometrics.quality.query(target_id=target.id, latest_only=True).rows
+            rows = astrometrics.quality.records.query(target=target, latest_only=True)
             reason_differences, counts = compare_flag_reasons_to_warnings(
                 target.id, old_states, warning_rows_from_measurements(rows), new_rows_since
             )
@@ -928,7 +928,7 @@ def run_comparison(
                 Difference(target.id, UNATTRIBUTED, COULD_NOT_JUDGE, repr(error)[:120], "warning rows")
             )
         try:
-            report = wayfinder.review.get_advisory(kind="quality", target=target)
+            report = wayfinder.review.targets.get_report(target)
             differences += compare_target_pipelines(target.id, old_states, report.statements, index)
         except Exception as error:  # ruff: ignore[blind-except] - one bad target must not stop the run
             differences.append(
@@ -958,15 +958,14 @@ def _compare_target_stars(wayfinder: Any, target: Any, differences: list[Differe
     count : `int`
         How many stars with a spectrum were compared.
     """
-    answer = wayfinder.astrometrics.stars.query(target_id=target.id, detail="objects", limit=None)
     count = 0
-    for star in answer.objects or []:
+    for star in wayfinder.astrometrics.stars.query(target=target, include=["light_curves"]):
         spectroscopy = star.spectroscopy
         if spectroscopy is None or not spectroscopy.intensities:
             continue
         count += 1
         try:
-            statements = wayfinder.review.get_advisory(kind="result", target=target, object_id=star.id)
+            statements = wayfinder.review.targets.get_result(star, target=target)
             differences += compare_star(target.id, star.id, spectroscopy, statements)
         except Exception as error:  # ruff: ignore[blind-except] - one bad star must not stop the run
             differences.append(

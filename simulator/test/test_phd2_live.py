@@ -69,7 +69,7 @@ CONTROLLER_SETTINGS = {
     "aggressiveness": 0.45,
     "minimum_move": 0.4,
     "hysteresis": 0.25,
-    "exposure_seconds": 1.0,
+    "exposure_s": 1.0,
 }
 
 
@@ -321,7 +321,7 @@ def test_real_phd2_guides_and_writes_a_genuine_guide_log(world: dict) -> None:
     # The controller settings written into the profile are in the log header.
     controller = next(section.controller for section in parsed.sections if section.samples)
     print(f"controller read from the real log header: {controller}")
-    assert controller.exposure_seconds == pytest.approx(1.0)
+    assert controller.exposure_s == pytest.approx(1.0)
     assert controller.ra_axis is not None
     assert controller.ra_axis.aggressiveness == pytest.approx(CONTROLLER_SETTINGS["aggressiveness"])
     assert controller.ra_axis.hysteresis == pytest.approx(CONTROLLER_SETTINGS["hysteresis"])

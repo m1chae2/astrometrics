@@ -40,7 +40,7 @@ class MigrationSetting:
 
     Attributes
     ----------
-    gain_setting : `str`
+    gain : `str`
         The gain setting (or ISO) of the frames the values came from.
     offset : `str`
         The offset of those frames.
@@ -50,7 +50,7 @@ class MigrationSetting:
         The sensor temperature of those frames, in degrees C, if known.
     """
 
-    gain_setting: str
+    gain: str
     offset: str
     binning: str = "1x1"
     temperature_c: float | None = None
@@ -187,7 +187,7 @@ def migrate_camera_profiles(
             changes.append(MigrationChange(section_name, False, description))
             continue
         kwargs = {
-            "gain_setting": setting.gain_setting,
+            "gain": setting.gain,
             "offset": setting.offset,
             "binning": setting.binning,
             "temperature_c": setting.temperature_c,
@@ -202,7 +202,7 @@ def migrate_camera_profiles(
             MigrationChange(
                 section_name,
                 True,
-                f"moves {held} into {SENSOR_NOISE_KEY} for gain {entry.gain_setting}, offset {entry.offset}, "
+                f"moves {held} into {SENSOR_NOISE_KEY} for gain {entry.gain}, offset {entry.offset}, "
                 f"binning {entry.binning}",
             )
         )

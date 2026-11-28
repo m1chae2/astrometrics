@@ -1,14 +1,18 @@
 """Purpose: Equipment Selection.
 
-Description: Changes which configured telescope or camera is active,
-per `Wayfinding_Library_Architecture.md` Sections 3.2 and 6.1: reading the
-equipment catalog is a Foundation concern both Control and Planning
-need, but *changing* which entry is active is a Control operation, so
-it lives here rather than in `data_access/equipment_catalog_reader.py`.
+Description: Reads and changes which observatory configuration (the core
+library's record of one set of equipment used together) is active, and saves
+the active telescope's safety limits, per `Wayfinding_Library_Architecture.md`
+Sections 3.2 and 6.1: reading the equipment catalog is a Foundation concern
+both Control and Planning need, but *changing* which entry is active is a
+Control operation, so it lives here rather than in
+`data_access/equipment_catalog_reader.py`.
 
-Selection validates before it records. An unrecognized id is rejected
-instead of being saved, so a typo cannot leave the active selection
-pointing at nothing.
+One configuration is active at a time. Making one active changes the
+settings so its telescope and camera are the catalog's active ones (with
+setups, the setup that pairs them becomes active). Selection checks before it
+records: equipment the settings do not list is refused instead of saved, so a
+typo cannot leave the active selection pointing at nothing.
 
 `list_camera_profiles` and `get_equipment_configuration` read the same
 equipment catalog and report it in the camelCase dictionary shapes the
@@ -17,14 +21,19 @@ frontend's `observatory:list_cameras` and
 """
 
 import logging
+from datetime import date
 from typing import Any
 
-from astrometricslib import AppConfiguration
-from astrometricslib.exceptions import ConfigurationError
+from astrometricslib import AppConfiguration, Camera, FilterWheel, Mount, ObservatoryConfiguration
+from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
+    ACTIVE_GUIDE_CAMERA_KEY,
+    ACTIVE_GUIDE_SCOPE_KEY,
     ACTIVE_TELESCOPE_KEY,
     CAMERA_SECTION,
+    GUIDE_SCOPE_SECTION,
     TELESCOPE_SECTION,
     camera_id_for,
     camera_key,
@@ -38,157 +47,215 @@ from wayfindinglib.models.equipment_and_site.camera_noise import (
     CameraNoiseValue,
     NoiseEvidenceStatus,
 )
-from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration
 
 logger = logging.getLogger(__name__)
 
 
 SETUPS_SECTION = "Observatory.Setups"
 ACTIVE_SETUP_KEY = "active"
+CONFIGURATION_SECTION = "Observatory.Configuration"
+"""The settings section that names the active observatory configuration."""
+ACTIVE_CONFIGURATION_KEY = "active"
+"""The key in `CONFIGURATION_SECTION` that holds the active one's id."""
 
 
-def _choose_setup(setups: Any, *, chosen_optic: str | None = None, chosen_camera: str | None = None) -> Any:
-    """Choose the setup to make active for a new telescope or camera choice.
-
-    Exactly one of ``chosen_optic`` and ``chosen_camera`` is given. The setup
-    that pairs the chosen item with the other item of the active setup wins;
-    otherwise the first setup that uses the chosen item.
+def live_configuration(config: AppConfiguration) -> ObservatoryConfiguration | None:
+    """Describe the equipment the settings make active, as a configuration.
 
     Parameters
     ----------
-    setups : `ObservatorySetups`
-        The configured setups.
-    chosen_optic : `str`, optional
-        The optic chosen as the active telescope.
-    chosen_camera : `str`, optional
-        The camera chosen as the active camera.
+    config : `AppConfiguration`
+        The application configuration.
 
     Returns
     -------
-    setup : `SetupConfig` or `None`
-        The setup, or `None` when no setup uses the chosen item.
+    configuration : `ObservatoryConfiguration` or `None`
+        The active telescope, camera, guide scope and guide camera of the
+        equipment catalog, with the active setup's mount and filters, or
+        `None` when no telescope or no camera is active.
     """
-    if chosen_optic is not None:
-        using = [setup for setup in setups.setups if setup.optic_name == chosen_optic]
-    else:
-        key = camera_key(chosen_camera or "")
-        using = [setup for setup in setups.setups if camera_key(setup.camera_name) == key]
-    active = setups.active_setup()
-    if active is not None:
-        active_camera = camera_key(active.camera_name)
-        keep = [
-            setup
-            for setup in using
-            if (chosen_optic is not None and camera_key(setup.camera_name) == active_camera)
-            or (chosen_camera is not None and setup.optic_name == active.optic_name)
-        ]
-        if keep:
-            return keep[0]
-    return using[0] if using else None
+    catalog = get_equipment_catalog(config)
+    telescope = catalog.active_telescope()
+    camera = catalog.active_camera()
+    if telescope is None or camera is None:
+        return None
+    setups = config.get_observatory_setups()
+    setup = setups.setup_for(camera.name, telescope.name, camera_key) if setups.setups else None
+    return ObservatoryConfiguration(
+        name=setup.name if setup is not None else "",
+        telescope=telescope,
+        camera=camera,
+        guide_scope=catalog.active_guide_scope(),
+        guide_camera=catalog.active_guide_camera(),
+        mount=Mount(name=setup.mount_name) if setup is not None and setup.mount_name else None,
+        filter_wheel=(
+            FilterWheel(name=setup.name, filter_names=setup.filter_names)
+            if setup is not None and setup.filter_names
+            else None
+        ),
+    )
 
 
-def set_active_telescope(
-    config: AppConfiguration, telescope_id: str, limits: dict[str, float | bool] | None = None
-) -> bool:
-    """Record the active telescope, and optionally its safety limits.
+def _same_equipment(stored: ObservatoryConfiguration, live: ObservatoryConfiguration) -> bool:
+    """Say whether a stored configuration has the live camera and telescope.
 
-    When the config has setups, the active setup changes instead: the one
-    that pairs this optic with the camera in use, or else the first setup
-    with this optic (which may bring another camera). Limits go to that
-    setup's mount section.
+    Parameters
+    ----------
+    stored : `ObservatoryConfiguration`
+        A stored configuration.
+    live : `ObservatoryConfiguration`
+        The equipment the settings make active.
+
+    Returns
+    -------
+    same : `bool`
+        `True` when the main camera (any spelling) and the telescope's name
+        and focal length (to the millimeter) agree.
+    """
+    camera_names = {camera_key(name) for name in (stored.camera.name, *stored.camera.aliases)}
+    return (
+        camera_key(live.camera.name) in camera_names
+        and stored.telescope.name == live.telescope.name
+        and round(stored.telescope.focal_length_mm) == round(live.telescope.focal_length_mm)
+    )
+
+
+def get_active_configuration(config: AppConfiguration, astrometrics: Any) -> ObservatoryConfiguration | None:
+    """Return the stored observatory configuration that is active now.
+
+    The settings say which camera and telescope are active. The stored
+    configuration named by ``[Observatory.Configuration] active`` is returned
+    while it still has that equipment; otherwise the stored configuration
+    with that equipment that is in use today (the newest when several are).
+    When none is stored, one is created from the settings, so the equipment
+    in use always has a record.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application configuration.
+    astrometrics : `Astrometrics`
+        The science library, which keeps the configurations.
+
+    Returns
+    -------
+    configuration : `ObservatoryConfiguration` or `None`
+        The active configuration, or `None` when the settings make no
+        telescope or no camera active.
+    """
+    live = live_configuration(config)
+    if live is None:
+        return None
+    configurations = astrometrics.observatories.configurations
+    active_id = config.get_value(CONFIGURATION_SECTION, ACTIVE_CONFIGURATION_KEY)
+    if active_id:
+        stored = configurations.get(active_id)
+        if stored is not None and _same_equipment(stored, live):
+            return stored
+    candidates = [
+        stored for stored in configurations.query(time=date.today()) if _same_equipment(stored, live)
+    ]
+    if candidates:
+        return max(candidates, key=lambda stored: (stored.valid_from or date.min, stored.id))
+    return configurations.create(live)
+
+
+def set_active_configuration(config: AppConfiguration, configuration: ObservatoryConfiguration) -> None:
+    """Make an observatory configuration the active one, and save the choice.
+
+    The settings are changed so the configuration's telescope, camera, guide
+    scope and guide camera are the active ones. When the settings list
+    setups, the setup that pairs the camera with the telescope becomes the
+    active setup. The configuration's id is saved too.
 
     Parameters
     ----------
     config : `AppConfiguration`
         The application configuration to update.
-    telescope_id : `str`
-        Must match the `id` of a `Telescope` returned by `list_telescopes`.
-    limits : `dict`, optional
-        New safety limits for this telescope: any of
-        ``altitude_limits_enabled``, ``min_altitude_deg``,
+    configuration : `ObservatoryConfiguration`
+        A stored configuration.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the configuration is not stored, or the settings do not list its
+        telescope or camera (or, with setups, no setup pairs them). Nothing
+        is saved then.
+    """
+    if not configuration.id:
+        raise InvalidArgumentError("Store the observatory configuration before making it active.")
+    telescope = configuration.telescope
+    camera_id = camera_id_for(config, configuration.camera.name)
+    if telescope.id not in {known.id for known in list_telescopes(config)}:
+        raise InvalidArgumentError(
+            f"The settings list no telescope {telescope.id!r}, so it cannot be made active.",
+            details={"telescope_id": telescope.id},
+        )
+    if camera_id not in {known.id for known in list_cameras(config)}:
+        raise InvalidArgumentError(
+            f"The settings list no camera {configuration.camera.name!r}, so it cannot be made active.",
+            details={"camera": configuration.camera.name},
+        )
+    update: dict[str, dict[str, str]] = {
+        CAMERA_SECTION: {
+            ACTIVE_CAMERA_KEY: camera_id,
+            ACTIVE_GUIDE_CAMERA_KEY: (
+                camera_id_for(config, configuration.guide_camera.name) if configuration.guide_camera else ""
+            ),
+        },
+        GUIDE_SCOPE_SECTION: {
+            ACTIVE_GUIDE_SCOPE_KEY: configuration.guide_scope.id if configuration.guide_scope else ""
+        },
+        CONFIGURATION_SECTION: {ACTIVE_CONFIGURATION_KEY: configuration.id},
+    }
+    setups = config.get_observatory_setups()
+    if setups.setups:
+        setup = setups.setup_for(configuration.camera.name, telescope.name, camera_key)
+        if setup is None:
+            raise InvalidArgumentError(
+                f"No setup in the settings pairs {configuration.camera.name!r} with {telescope.name!r}.",
+                details={"camera": configuration.camera.name, "telescope_id": telescope.id},
+            )
+        update[SETUPS_SECTION] = {ACTIVE_SETUP_KEY: setup.name}
+    else:
+        update[TELESCOPE_SECTION] = {ACTIVE_TELESCOPE_KEY: telescope.id}
+    config.update_config(update)
+    logger.info("Active observatory configuration set to %r (%s)", configuration.name, configuration.id)
+
+
+def set_pointing_limits(config: AppConfiguration, limits: dict[str, float | bool]) -> None:
+    """Save new safety limits for the active telescope.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application configuration to update.
+    limits : `dict` [`str`, `float` or `bool`]
+        Any of ``altitude_limits_enabled``, ``min_altitude_deg``,
         ``max_altitude_deg``, ``hour_angle_limits_enabled``,
         ``max_hour_angle_hours`` and ``flip_hour_angle_deg``. They are
-        written only to the config section that already holds this
-        telescope's settings, and a section is never created. A
-        per-telescope minimum or maximum altitude overrides the global
-        ``[Observatory.Constraints]`` values. The limits and the active
-        choice are saved together.
+        written only to the settings section that already holds the
+        telescope's settings (the mount section of its setup, else its own
+        section); a section is never created. A per-telescope minimum or
+        maximum altitude overrides the global ``[Observatory.Constraints]``
+        values.
 
-    Returns
-    -------
-    activated : `bool`
-        `True` if `telescope_id` was recognized and saved, `False`
-        otherwise -- the config is left unchanged in that case.
-
-    Notes
-    -----
-    Invalid `limits` (not a limit key, minimum above maximum, a value out
-    of range), or a telescope with no config section to write to, raise
-    `ValueError` and save nothing.
+    Raises
+    ------
+    InvalidArgumentError
+        If no telescope is active, a key is not a limit, the values fail the
+        `Telescope` checks (such as a minimum above the maximum), or the
+        telescope has no settings section. Nothing is saved then.
     """
-    known_ids = {telescope.id for telescope in list_telescopes(config)}
-    if telescope_id not in known_ids:
-        logger.warning("set_active_telescope: '%s' is not a known telescope", telescope_id)
-        return False
-    update: dict[str, dict[str, str]] = {}
-    if limits:
-        update = build_telescope_limits_update(config, telescope_id, limits)
-    setups = config.get_observatory_setups()
-    if setups.setups:
-        setup = _choose_setup(setups, chosen_optic=telescope_id)
-        if setup is None:
-            logger.warning("set_active_telescope: no setup uses the optic '%s'", telescope_id)
-            return False
-        update.setdefault(SETUPS_SECTION, {})[ACTIVE_SETUP_KEY] = setup.name
-        # The setup may bring another camera; astrometricslib reads the
-        # primary camera from its own key.
-        update.setdefault(CAMERA_SECTION, {})[ACTIVE_CAMERA_KEY] = camera_id_for(config, setup.camera_name)
-    else:
-        update.setdefault(TELESCOPE_SECTION, {})[ACTIVE_TELESCOPE_KEY] = telescope_id
+    telescope = get_equipment_catalog(config).active_telescope()
+    if telescope is None:
+        raise InvalidArgumentError("No telescope is active, so there are no limits to set.")
+    try:
+        update = build_telescope_limits_update(config, telescope.id, limits)
+    except ValueError as problem:
+        raise InvalidArgumentError(str(problem), details={"telescope_id": telescope.id}) from None
     config.update_config(update)
-    logger.info("Active telescope set to '%s'", telescope_id)
-    return True
-
-
-def set_active_camera(config: AppConfiguration, camera_id: str) -> bool:
-    """Record a new active camera selection.
-
-    When the config has setups, the active setup changes instead: the one
-    that pairs this camera with the optic in use, or else the first setup
-    with this camera.
-
-    Parameters
-    ----------
-    config : `AppConfiguration`
-        The application configuration to update.
-    camera_id : `str`
-        Must match the `id` of a `Camera` returned by `list_cameras`.
-
-    Returns
-    -------
-    activated : `bool`
-        `True` if `camera_id` was recognized and saved, `False`
-        otherwise -- the config is left unchanged in that case.
-    """
-    known_ids = {camera.id for camera in list_cameras(config)}
-    if camera_id not in known_ids:
-        logger.warning("set_active_camera: '%s' is not a known camera", camera_id)
-        return False
-    setups = config.get_observatory_setups()
-    if setups.setups:
-        setup = _choose_setup(setups, chosen_camera=camera_id)
-        if setup is None:
-            logger.warning("set_active_camera: no setup uses the camera '%s'", camera_id)
-            return False
-        # astrometricslib still reads the primary camera from its own key.
-        config.update_config({
-            SETUPS_SECTION: {ACTIVE_SETUP_KEY: setup.name},
-            CAMERA_SECTION: {ACTIVE_CAMERA_KEY: camera_id},
-        })
-    else:
-        config.update_config({CAMERA_SECTION: {ACTIVE_CAMERA_KEY: camera_id}})
-    logger.info("Active camera set to '%s'", camera_id)
-    return True
+    logger.info("Safety limits of '%s' saved", telescope.id)
 
 
 def _camera_profile(camera: Camera) -> dict[str, Any]:
@@ -269,7 +336,7 @@ def list_camera_noise(astrometrics: Any, camera_name: str) -> list[CameraNoiseSe
         has no profile or no entries ("not measured").
     """
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except ConfigurationError:
         logger.warning("Camera profiles could not be read for '%s'", camera_name, exc_info=True)
         return []
@@ -277,18 +344,18 @@ def list_camera_noise(astrometrics: Any, camera_name: str) -> list[CameraNoiseSe
         return []
     settings = []
     for entry in profile.sensor_noise:
-        gain = _noise_value(entry.gain_e_per_adu)
+        gain_e_per_adu = _noise_value(entry.gain_e_per_adu)
         read_noise = _noise_value(entry.read_noise_e)
         settings.append(
             CameraNoiseSetting(
                 camera_name=camera_name,
-                gain_setting=entry.gain_setting,
+                gain=entry.gain,
                 offset=entry.offset,
                 binning=entry.binning,
                 temperature_c=entry.temperature_c,
-                gain=gain,
+                gain_e_per_adu=gain_e_per_adu,
                 read_noise=read_noise,
-                status=_noise_status([value for value in (gain, read_noise) if value is not None]),
+                status=_noise_status([value for value in (gain_e_per_adu, read_noise) if value is not None]),
             )
         )
     return settings
@@ -346,7 +413,7 @@ def get_equipment_configuration(config: Any) -> dict[str, Any] | None:
     camera = catalog.active_camera()
     if telescope is None or camera is None:
         return None
-    configuration = EquipmentConfiguration(telescope=telescope, camera=camera)
+    configuration = ObservatoryConfiguration(telescope=telescope, camera=camera)
     return {
         "telescope": {
             "name": telescope.name,

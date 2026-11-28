@@ -5,7 +5,7 @@ the wayfinding library. These tests use a real `ObservationPlanning` over
 a temporary store and a stand-in execution, and check the RPC methods
 keep the shape the app shows: added sequences appear as queued items,
 removing, reordering and changing work on the session's queue, and
-starting runs `advance_session` on a thread.
+starting runs `execution.run` on a thread.
 """
 
 import threading
@@ -16,21 +16,21 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from astrometricslib import AppConfiguration, Target
-from astrometricslib._internal.quality import QualityQueryResult
+from astrometricslib import AppConfiguration, Target, Telescope
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import ConfigurationError
 from backend.services.observatory.plan_service import PlanService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
 from wayfindinglib import ObservationPackage, ObservationPlanning
-from wayfindinglib._internal.control import Telescope
+from wayfindinglib.api.planning.sessions import PlanningSessions
 
 
-def _no_camera_profile(camera_name: str) -> None:
+def _no_camera_profile(camera: object = None) -> None:
     """Say that a camera has no profile, as the library does for one.
 
     Parameters
     ----------
-    camera_name : `str`
+    camera : `Camera` or `None`
         The camera asked about.
 
     Raises
@@ -38,7 +38,7 @@ def _no_camera_profile(camera_name: str) -> None:
     ConfigurationError
         Always.
     """
-    raise ConfigurationError(f"No profile for camera {camera_name!r}.")
+    raise ConfigurationError(f"No profile for camera {camera!r}.")
 
 
 @pytest.fixture
@@ -63,10 +63,15 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
         # The library's frame counting also reads frame judgments; no target
         # here has judged frames.
         quality=SimpleNamespace(
-            capture_settings=lambda ids=None: {}, query=lambda **kwargs: QualityQueryResult()
+            records=SimpleNamespace(
+                get_capture_settings=lambda ids=None: [],
+                get_calibration_identities=lambda target=None, **kwargs: [],
+                query=lambda **kwargs: Page.of([]),
+            )
         ),
         # No camera has a profile here, so no setting is checked.
-        processing=SimpleNamespace(calibration=SimpleNamespace(camera_profile=_no_camera_profile)),
+        config=SimpleNamespace(get_cameras=lambda: []),
+        calibration=SimpleNamespace(get_profile=_no_camera_profile),
     )
     telescope = Telescope(id="t1", name="Scope", focal_length_mm=450.0, focal_ratio=6.0)
     catalog = SimpleNamespace(
@@ -78,21 +83,23 @@ def executor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TargetImagingEx
     planning = ObservationPlanning(config, astrometrics=astrometrics)
     runs: list[Any] = []
 
-    def advance_session(session_id: str, stop: threading.Event) -> None:
+    def run(session: Any, stop: threading.Event) -> None:
         """Record the run.
 
         Parameters
         ----------
-        session_id : `str`
+        session : `ObservationSession`
             The session.
         stop : `threading.Event`
             The stop signal.
         """
-        runs.append(session_id)
+        runs.append(session.id)
 
     service = TargetImagingExecutor(
         wayfinder=SimpleNamespace(
-            planning=planning, execution=SimpleNamespace(advance_session=advance_session)
+            planning=planning,
+            execution=SimpleNamespace(run=run),
+            astrometrics=astrometrics,
         )
     )
     service.runs = runs
@@ -109,7 +116,7 @@ def _sequence(count: int = 3) -> dict[str, Any]:
     """
     return {
         "target_name": "M 81",
-        "items": [{"count": count, "exposure": 60.0, "filter": "Ha", "duration": 60.0 * count}],
+        "items": [{"count": count, "exposure_s": 60.0, "filter": "Ha", "duration": 60.0 * count}],
     }
 
 
@@ -120,7 +127,7 @@ def test_added_sequences_show_as_queued_items(executor: TargetImagingExecutor) -
 
     (item,) = executor.get_queue()
     assert item["target_name"] == "M 81"
-    assert item["items"] == [{"count": 3, "exposure": 60.0, "filter": "Ha", "duration": 180.0}]
+    assert item["items"] == [{"count": 3, "exposure_s": 60.0, "filter": "Ha", "duration": 180.0}]
     assert item["total_duration"] == pytest.approx(180.0)
     assert item["timing"] == {"mode": "soonest"}
     assert item["status"] == "queued"
@@ -147,7 +154,7 @@ def test_remove_reorder_and_modify_edit_the_queue(executor: TargetImagingExecuto
 
 
 def test_begin_runs_the_session_queue_on_a_thread(executor: TargetImagingExecutor) -> None:
-    """Starting the sequencer runs advance_session for its session."""
+    """Starting the sequencer runs execution.run for its session."""
     executor.begin_imaging()
     assert executor.runs == []
 
@@ -174,8 +181,8 @@ def test_pause_stops_the_loop_and_abort_also_closes_it(executor: TargetImagingEx
     """Pause raises the stop signal; abort also aborts the running session."""
     aborted: list[tuple[str, str]] = []
     execution = executor._wayfinder.execution
-    execution.abort_session = lambda session_id, reason: aborted.append((session_id, reason))
-    executor._running_session_id = "night-1"
+    execution.abort = lambda session, reason: aborted.append((session.id, reason))
+    executor._running_session = SimpleNamespace(id="night-1")
 
     executor.pause_imaging()
     assert executor._stop.is_set()
@@ -236,7 +243,7 @@ def test_adding_a_sequence_announces_the_package(executor: TargetImagingExecutor
     assert len(package_events) == 1
     assert package_events[0]["kind"] == "created"
     assert package_events[0]["targetId"] == "M 81"
-    stored = executor._wayfinder.planning.query_plans(kind="packages")
+    stored = list(executor._wayfinder.planning.packages.query())
     assert [package.id for package in stored] == [package_events[0]["packageId"]]
     assert isinstance(stored[0], ObservationPackage)
 
@@ -254,51 +261,49 @@ def test_the_sequencer_uses_tonights_one_session_and_follows_the_night(
 
     executor.enqueue_sequence(_sequence(1), {"mode": "soonest"})
     executor.enqueue_sequence(_sequence(2), {"mode": "soonest"})
-    assert len(planning.query_plans()) == 1
+    assert planning.sessions.query().total == 1
     assert len(executor.get_queue()) == 2
 
     # A restart (a fresh executor over the same library) adds no session.
     restarted = TargetImagingExecutor(wayfinder=executor._wayfinder)
     assert len(restarted.get_queue()) == 2
-    assert len(planning.query_plans()) == 1
+    assert planning.sessions.query().total == 1
 
     night["id"] = "2026-10-25"
     assert executor.get_queue() == []
     executor.enqueue_sequence(_sequence(3), {"mode": "soonest"})
-    assert len(planning.query_plans()) == 2
+    assert planning.sessions.query().total == 2
     assert [item["items"][0]["count"] for item in executor.get_queue()] == [3]
 
 
 def test_reading_the_queue_never_creates_a_session(tmp_path: Path) -> None:
     """With no session tonight, the queue is empty and nothing is created."""
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.get_plan.return_value = None
+    planning = SimpleNamespace(sessions=create_autospec(PlanningSessions, instance=True))
+    planning.sessions.get.return_value = None
     service = TargetImagingExecutor(wayfinder=SimpleNamespace(planning=planning, execution=None))
 
     assert service.get_queue() == []
     assert service.remove_from_queue("entry") is False
     assert service.reorder(["entry"]) is False
     assert service.modify_queue_item("entry", _sequence()) is False
-    planning.create_session.assert_not_called()
-    assert planning.get_plan.call_args.kwargs["observing_night_id"]
+    planning.sessions.create.assert_not_called()
+    assert planning.sessions.get.call_args.args[0]
 
 
 def test_the_session_is_asked_for_by_night_each_time(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every call asks the library for the night's session."""
-    planning = create_autospec(ObservationPlanning, instance=True)
+    planning = SimpleNamespace(sessions=create_autospec(PlanningSessions, instance=True))
     nights = iter(["2026-10-24", "2026-10-25"])
     monkeypatch.setattr(
         "backend.services.observatory.target_imaging_executor.observing_night_id",
         lambda timestamp: next(nights),
     )
     service = TargetImagingExecutor(wayfinder=SimpleNamespace(planning=planning, execution=None))
-    planning.create_session.side_effect = lambda **arguments: SimpleNamespace(
-        id=arguments["observing_night_id"]
-    )
+    planning.sessions.create.side_effect = lambda night: SimpleNamespace(id=night)
 
     assert service._session().id == "2026-10-24"
     assert service._session().id == "2026-10-25"
-    assert [call.kwargs["observing_night_id"] for call in planning.create_session.call_args_list] == [
+    assert [call.args[0] for call in planning.sessions.create.call_args_list] == [
         "2026-10-24",
         "2026-10-25",
     ]

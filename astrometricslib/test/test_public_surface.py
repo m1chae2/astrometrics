@@ -26,14 +26,33 @@ so a method renamed or folded into another shows up here. Together they
 are the one test a large, multi-step reorganization of this library's
 internal layers can be checked against without re-deriving, each time,
 whether the outside world would notice.
+
+The last tests check every public method against the public API design rules
+(`documentation/library_design/Public_API_Design_Guide.md`), with the rule
+code in `astrometricslib._internal.public_api_rules`, which wayfindinglib's
+surface test shares. Known departures are listed in
+`public_api_rules_baseline.txt` next to this file; a new departure fails, and
+so does a listed one that no longer occurs.
 """
 
 import ast
 import importlib
 from pathlib import Path
 
+import pytest
+
 import astrometricslib
+from astrometricslib._internal.public_api_rules import (
+    PublicMethod,
+    PublicObject,
+    baseline_problems,
+    find_violations,
+    walk_public_api,
+)
 from astrometricslib._internal.testing import astrometrics_with_drivers
+
+BASELINE = Path(__file__).with_name("public_api_rules_baseline.txt")
+"""Known departures from the public API design rules, emptied by issue #206."""
 
 # The public surface. Changing this set on purpose -- adding, removing, or
 # renaming an export -- is a real, visible change to the library's contract
@@ -43,14 +62,29 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "AppConfiguration",
     "Astrometrics",
     "CalibrationCatalog",
+    "Camera",
+    "CaptureSetting",
+    "EnhancementSettings",
     "FilterType",
+    "FilterWheel",
+    "Focuser",
     "FrameRecord",
+    "GuideScope",
+    "JobSummary",
+    "Mount",
+    "Observatories",
+    "ObservatoryConfiguration",
+    "PreviewBrightObject",
     "ProcessingPipelines",
     "QualityRecords",
+    "SkyPosition",
+    "StackingPipeline",
     "StellarCatalog",
     "StellarObject",
     "Target",
     "TargetCatalog",
+    "TargetFrames",
+    "Telescope",
     "Visualization",
     "configure_logging",
     "configure_offline_iers",
@@ -79,14 +113,28 @@ EXPECTED_MODULE_NAMES = {
         "StorageNotMountedError",
         "error_from_info",
         "to_error_info",
+        "MovedError",
+        "wrap_outside_error",
+    }),
+    "astrometricslib.arguments": frozenset({
+        "FrameChoice",
+        "Page",
+        "SettingNumber",
+        "TimeInput",
+        "check_choice",
+        "check_frames",
+        "check_include",
+        "check_limit",
+        "observing_night_id",
+        "reject_unused_arguments",
+        "to_epoch_seconds",
     }),
     "astrometricslib.reports": frozenset({
         "EARLIER_NIGHTS_VARIANT",
         "AstrometryPipelineQualityMetrics",
         "AstrometryQualitySummary",
-        "CaptureSetting",
         "ExposureGroupSummary",
-        "InputQualityReport",
+        "FrameQualityReport",
         "LimitTier",
         "MeasurementReference",
         "MeasurementStatus",
@@ -100,7 +148,6 @@ EXPECTED_MODULE_NAMES = {
         "StackSummary",
         "StarResultReference",
         "SubjectLevel",
-        "observing_night_id",
     }),
     "astrometricslib.jobs": frozenset({
         "DbLogHandler",
@@ -127,6 +174,7 @@ EXPECTED_MODULE_NAMES = {
         "running_as_job",
     }),
     "astrometricslib.parameters": frozenset({
+        "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
         "ConfigurationValues",
         "EquipmentKind",
         "EquipmentValues",
@@ -155,29 +203,21 @@ EXPECTED_MODULE_NAMES = {
         "TuningReport",
         "TuningResult",
         "TuningSkippedError",
-        "collect_tuners",
-        "read_tuned_record",
-        "run_tuning",
+        "register_tuner_package",
         "tune",
         "collect_parameters",
-        "current_parameter_context",
         "equipment_values_to_write",
         "factor_for",
         "frames_parameter_context",
-        "parameter_context",
-        "record_basis",
         "resolve_parameter",
         "run_basis_value",
-        "setup_parameter_context",
     }),
     "astrometricslib.drivers": frozenset({
-        "LIBRARY_DATA_KINDS",
         "OFFLINE_VARIABLE",
         "AbstractButler",
         "Butler",
         "DatasetSpec",
         "LaunchIdentity",
-        "LibraryFolders",
         "VersionedCache",
         "build_pixel_query",
         "bump_data_version",
@@ -189,12 +229,12 @@ EXPECTED_MODULE_NAMES = {
         "get_gaia_archive",
         "get_library_data_version",
         "get_simbad_driver",
+        "get_stacking_driver",
         "get_stack_quality_data_version",
         "get_target_camera_names",
         "get_target_data_version",
         "get_target_document_signs",
         "header_is_plate_solved",
-        "healpix_pixels_of_points",
         "is_loopback_host",
         "is_path_inside",
         "launch_identity_from_settings",
@@ -204,16 +244,12 @@ EXPECTED_MODULE_NAMES = {
         "pixel_source_id_range",
         "pixels_near_circles",
         "read_data_versions",
-        "read_launch_identity",
         "require_local_host",
         "require_mounted_storage",
         "require_online",
         "resolve_mounted_path",
         "scratch_directory",
         "stop_process_group",
-        "tile_of_source_id",
-        "tiles_for_cone",
-        "tiles_for_footprint",
     }),
 }
 """Names each public module of astrometricslib offers (its `__all__`)."""
@@ -267,108 +303,114 @@ def test_every_public_name_actually_resolves() -> None:
 
 
 SUB_API_MEMBERS = {
+    "observatories": {"configurations"},
+    "observatories.configurations": {"create", "get", "query", "scan", "update"},
     "targets": {
         "add",
-        "add_frames",
-        "sessions",
+        "count_by_camera",
+        "count_by_night",
         "create",
         "delete",
-        "display_turn",
-        "delete_images",
+        "frames",
         "get",
-        "get_frame",
-        "imaged_field_centers",
+        "measure_field_centers",
         "query",
-        "read_frame_header",
-        "reindex_frames",
-        "save",
-        "select_frames",
+        "resolve",
+        "update",
+    },
+    "targets.frames": {
+        "add",
+        "delete",
+        "get_header",
+        "get_newest",
+        "get_nights",
+        "get_rotation",
+        "get_set_aside",
+        "get_statuses",
+        "query",
+        "restore",
+        "scan",
     },
     "stars": {
-        "analyze_periodicity",
+        "count_by_class",
+        "count_by_target",
         "create",
-        "dataset_version",
         "delete",
-        "find_or_create_by_position",
         "get",
         "get_spectrum",
+        "get_statistics",
+        "measure_periodicity",
         "query",
+        "record_periodicity",
         "update",
     },
     "processing": {
-        "ANALYSIS_STAGES",
-        "DEFAULT_ANALYSIS_STAGES",
-        "SELECTABLE_ANALYSIS_STAGES",
-        "acquire_job_slot",
-        "calibration",
-        "find_stack_configuration",
-        "get_stack_identification",
-        "identify_stack",
-        "list_preview_bright_objects",
-        "process_target",
-        "remake_preview",
-        "measure_noise",
-        "open_in_siril",
-        "plate_solve",
-        "predict_stack",
-        "predict_stack_weights",
-        "set_preview_bright_object",
-        "stack",
-        "stack_summary",
-        "stop_stacking_programs",
+        "asteroids",
+        "astrometry",
+        "enhancement",
+        "photometry",
+        "spectroscopy",
+        "stacking",
     },
-    "processing.calibration": {
-        "add_frames",
+    "processing.stacking": {"get_stack", "get_summary", "predict", "predict_weights", "run"},
+    "processing.enhancement": {"get_bright_objects", "run"},
+    "processing.astrometry": {"get_identification", "get_named_stars", "identify", "run", "solve"},
+    "processing.photometry": {"run"},
+    "processing.spectroscopy": {"record_variation", "run"},
+    "processing.asteroids": {"run"},
+    "calibration": {
         "assess",
-        "camera_profile",
-        "measure_frames",
+        "frames",
+        "get_profile",
+        "match",
         "measure_sensor_noise",
         "query",
-        "reindex_frames",
-        "save",
+        "record_sensor_noise",
     },
-    "quality": {
-        "blocks",
-        "calibration_identities",
-        "choose_blink_pair",
-        "frame_statuses",
-        "get_aperture_record",
-        "capture_settings",
-        "forget",
-        "map_position",
-        "match_frame_positions",
-        "measure_detections",
-        "measure_folder",
-        "measure_frames",
-        "measure_stack",
-        "measure_star_profile",
-        "measure_tuned_parameters",
-        "metrics",
-        "put_back_set_aside_frames",
+    "calibration.frames": {"add", "record", "scan"},
+    "quality": {"blocks", "detections", "frames", "records", "stacks"},
+    "quality.records": {
+        "get",
+        "get_calibration_identities",
+        "get_capture_settings",
+        "get_metric",
+        "get_metrics",
+        "get_paths",
         "query",
-        "record_frame_measurements",
-        "resolve_rows",
-        "set_aside_frames",
     },
+    "quality.frames": {"get_blink_partner", "map_positions", "measure", "record"},
+    "quality.stacks": {
+        "get_aperture_record",
+        "measure",
+        "record_night_contributions",
+        "record_noise_growth",
+        "record_odd_even_noise",
+    },
+    "quality.detections": {"measure_detections", "measure_profile", "measure_widths"},
     "quality.blocks": {
-        "find_stars",
         "measure_aperture",
+        "measure_clipped_values",
+        "measure_robust_sigma",
         "measure_sky",
+        "measure_sky_corners",
         "measure_sky_gradient",
-        "robust_sigma",
-        "sigma_clip",
-        "sky_corners",
-        "solved_stars",
-        "star_widths",
+        "measure_stars",
     },
     "visualization": {
-        "get_last_captured_image",
-        "place_stack_picture_on_sky",
-        "plot",
-        "render_fits",
-        "stack_sky_picture_files",
+        "get_sky_picture",
+        "get_star_overlay",
+        "plot_asteroids",
+        "plot_astrometry",
+        "plot_focus",
+        "plot_image",
+        "plot_photometry",
+        "plot_spectroscopy",
+        "plot_star",
+        "plot_target",
+        "render",
+        "render_newest",
     },
-    "jobs": {"query"},
+    "jobs": {"get", "get_lineage", "get_log", "get_warnings", "query"},
 }
 """Each sub-API of `Astrometrics`, by attribute path, and its members."""
 
@@ -395,8 +437,10 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
 
     astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert _public_members(astrometrics) == {
+        "calibration",
         "config",
         "jobs",
+        "observatories",
         "processing",
         "quality",
         "stars",
@@ -430,9 +474,10 @@ def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
 
     astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
     assert astrometrics.processing._targets is astrometrics.targets
-    assert astrometrics.quality._targets is astrometrics.targets
-    assert astrometrics.processing.calibration._targets is astrometrics.targets
-    assert astrometrics.visualization._stars is astrometrics.stars
+    assert astrometrics.quality.records._targets is astrometrics.targets
+    assert astrometrics.quality.frames._targets is astrometrics.targets
+    assert astrometrics.processing._calibration is astrometrics.calibration
+    assert astrometrics.visualization._storage is astrometrics._catalog_access
 
 
 def test_each_public_module_offers_exactly_its_pinned_names() -> None:
@@ -484,3 +529,124 @@ def test_no_code_outside_the_libraries_imports_the_private_package() -> None:
                 if any(name.startswith("astrometricslib._internal") for name in names):
                     offenders.append(f"{path.relative_to(repository)}:{node.lineno}")
     assert not offenders, f"imports of astrometricslib._internal outside the library: {offenders}"
+
+
+def _rule_violations() -> set[str]:
+    """Check every public method of `Astrometrics` against the design rules.
+
+    Returns
+    -------
+    violations : `set` [`str`]
+        Lines of the form ``<qualified name>: <rule>``.
+    """
+    from unittest.mock import MagicMock
+
+    astrometrics = astrometrics_with_drivers(astrometricslib.AppConfiguration(), MagicMock())
+    methods, objects = walk_public_api(
+        astrometrics, "astrometrics", lambda value: type(value).__module__.startswith("astrometricslib.api.")
+    )
+    assert len(methods) > 50, "the walk from the root object found too few public methods"
+    return find_violations(methods, objects, fold_exempt_parents=("astrometrics.processing",))
+
+
+def test_public_methods_follow_the_design_rules_or_are_in_the_baseline() -> None:
+    """Every departure from the rules is listed; every listed one occurs."""
+    problems = baseline_problems(_rule_violations(), BASELINE)
+    assert not problems, "\n\n".join(problems)
+
+
+@pytest.mark.parametrize("library", ["astrometricslib", "wayfindinglib"])
+def test_each_baseline_file_says_issue_206_empties_it(library: str) -> None:
+    """Both baseline files exist and say in their header #206 empties them."""
+    path = Path(__file__).resolve().parents[2] / library / "test" / "public_api_rules_baseline.txt"
+    assert path.exists(), f"missing {path}"
+    header = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("#"))
+    assert "#206" in header and "empty this file" in header, path
+
+
+class _FakeApi:
+    """A sub-API that breaks each design rule once, to test the rule code."""
+
+    def get(self, star_id: str) -> int | None:
+        """Read one item.
+
+        Owner: astrometricslib._internal.public_api_rules.read_baseline
+
+        Returns
+        -------
+        item : `int` or `None`
+            Always `None`.
+        """
+        return None
+
+    def fetch_things(
+        self, target: str, paths: list[str], telescope: str, register_job: bool = True
+    ) -> int | str:
+        """Break the verb, default, banned-argument, union and owner rules.
+
+        Returns
+        -------
+        value : `int` or `str`
+            Always 0.
+        """
+        return 0
+
+    def set_tracking(self, enabled: bool, *, on_done: object = None, delay_seconds: float = 0.0) -> bool:
+        """Break the callback, unit and bool-return rules.
+
+        Owner: astrometricslib.no_such_module.no_such_function
+
+        Returns
+        -------
+        done : `bool`
+            Always `True`.
+        """
+        return True
+
+    def stop(self) -> None:
+        """Break the return-annotation rule, once its annotation is removed.
+
+        Owner: astrometricslib._internal.public_api_rules.find_violations
+        """
+
+
+# A missing return annotation is the case under test, so remove it here.
+del _FakeApi.stop.__annotations__["return"]
+
+
+def test_the_rule_code_finds_each_kind_of_departure() -> None:
+    """Each rule fires on the fake sub-API; a method that keeps them passes."""
+    api = _FakeApi()
+    methods = [PublicMethod(f"lib.area.thing.{name}", getattr(api, name)) for name in ("get", "fetch_things")]
+    methods += [PublicMethod(f"lib.area.{name}", getattr(api, name)) for name in ("set_tracking", "stop")]
+    methods.append(PublicMethod("lib.area.thing.deep.get", api.get))
+    objects = [
+        PublicObject("lib.area", 2),
+        PublicObject("lib.area.thing", 2),
+        PublicObject("lib.processing.x", 1),
+    ]
+    found = find_violations(methods, objects, fold_exempt_parents=("lib.processing",))
+    assert found == {
+        "lib.area.thing.fetch_things: verb",
+        "lib.area.thing.fetch_things: no-default(telescope)",
+        "lib.area.thing.fetch_things: banned-argument(register_job)",
+        "lib.area.thing.fetch_things: return-union",
+        "lib.area.thing.fetch_things: owner",
+        "lib.area.set_tracking: banned-argument(on_done)",
+        "lib.area.set_tracking: unit-suffix(delay_seconds)",
+        "lib.area.set_tracking: bool-return",
+        "lib.area.set_tracking: owner",
+        "lib.area.stop: no-return-annotation",
+        "lib.area.thing.deep.get: depth",
+        "lib.area.thing: fold",
+    }
+
+
+def test_the_baseline_comparison_reports_new_and_stale_entries(tmp_path: Path) -> None:
+    """A departure not listed and a listed line no longer found both fail."""
+    baseline = tmp_path / "baseline.txt"
+    baseline.write_text("# header\n\na.b.c: verb\na.b.d: owner\n", encoding="utf-8")
+    assert baseline_problems({"a.b.c: verb", "a.b.d: owner"}, baseline) == []
+    problems = baseline_problems({"a.b.c: verb", "a.b.e: verb"}, baseline)
+    assert len(problems) == 2
+    assert "a.b.e: verb" in problems[0] and "a.b.d: owner" in problems[1]

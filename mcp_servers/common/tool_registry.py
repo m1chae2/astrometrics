@@ -9,7 +9,9 @@ When a client calls a tool, the registry:
 3. for a server that reads files, refuses a path outside the library folders
    (the "sandbox");
 4. runs the tool and turns its result into MCP content: a picture becomes an
-   image, a model or record becomes JSON, and a long answer is cut short;
+   image, a model or record becomes JSON, and a long answer is cut short
+   (`reply_budget.shape_reply` cuts its heavy lists first and notes what
+   it left out);
 5. turns a failure into the shared error reply (see `tool_errors`).
 
 The library servers (astrometricslib-core, wayfindinglib-core) and the backend
@@ -34,8 +36,8 @@ from astrometricslib.drivers import is_path_inside, resolve_mounted_path
 from astrometricslib.exceptions import ErrorInfo, to_error_info
 from astrometricslib.jobs import log_context, new_request_id
 from mcp_servers.common.profile import find_withheld_tools, load_manifest, refusal_message
-from mcp_servers.common.reply_budget import fit_reply_to_budget
-from mcp_servers.common.tool_errors import ToolErrorContent, error_content
+from mcp_servers.common.reply_budget import serialize_reply, shape_reply
+from mcp_servers.common.tool_errors import ToolErrorContent, error_content, log_tool_failure
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +53,6 @@ FIGURE_DOTS_PER_INCH = 100
 """Resolution of a plot sent to a client. A 16 x 9 inch figure becomes a
 1600 x 900 picture, large enough to read axis labels and small enough (a few
 hundred kilobytes) for the MCP transport."""
-
-EXPECTED_ERROR_CODES = frozenset({"invalid_argument", "not_found", "conflict", "permission_denied"})
-"""Error codes caused by the call itself. They are logged as warnings, without
-a traceback; any other failure is logged with its traceback."""
 
 Remediation = Callable[[str, str], dict[str, Any]]
 """A function that takes a tool name and an error message and returns a hint
@@ -266,12 +264,9 @@ class ToolRegistry:
         try:
             result = await func(**arguments) if inspect.iscoroutinefunction(func) else func(**arguments)
             return result_content(result)
-        except Exception as exc:  # every failure becomes an error reply, never a crash
+        except Exception as exc:  # ruff: ignore[blind-except] -- MCP boundary: every failure becomes an error reply
             info = to_error_info(exc, request_id)
-            if info.code in EXPECTED_ERROR_CODES:
-                logger.warning("Tool %s failed (%s): %s", name, info.code, info.message)
-            else:
-                logger.exception("Tool %s failed (%s)", name, info.code)
+            log_tool_failure(name, exc, info)
             if self.remediation is not None:
                 info.details["tool"] = name
                 info.details["remediation"] = self.remediation(name, info.message)
@@ -355,47 +350,53 @@ def result_content(result: Any) -> list[Any]:
     Returns
     -------
     content : `list`
-        Content a tool already built is passed on. A picture (an object with
-        ``png_bytes`` and ``description``) and a matplotlib figure become an
-        image and a short text. Anything else becomes indented JSON text;
+        Content a tool already built is passed on. A picture (a
+        `RenderedImage`: an object with ``picture`` bytes and a
+        ``media_type``) and a matplotlib figure become an image and a short
+        text. Anything else becomes indented JSON text;
         a reply too long for `MAXIMUM_REPLY_BYTES` is sent without the
-        indentation. A target report, a ranking or a night review is first
-        shortened by `fit_reply_to_budget` (whole references or
-        candidates, never part of a statement). A list still too long keeps as
-        many whole items as fit (see `_whole_items_that_fit`); anything else is
-        cut.
+        indentation. The reply is first shortened by `shape_reply`: a
+        target report, a ranking or a night review loses whole references
+        or candidates (never part of a statement), and the heavy lists
+        (`HEAVY_LISTS`, such as a target's frames) are cut, with a second
+        text that says what was left out and how to ask for it. A list
+        still too long keeps as many whole items as fit (see
+        `_whole_items_that_fit`); anything else is cut.
     """
     if isinstance(result, list) and result and isinstance(result[0], (TextContent, ImageContent)):
         return result
-    if hasattr(result, "png_bytes") and hasattr(result, "description"):
+    if isinstance(getattr(result, "picture", None), bytes) and hasattr(result, "media_type"):
         # A picture goes back as a real image, not as base64 text.
         return [
             ImageContent(
-                type="image", data=base64.b64encode(result.png_bytes).decode("ascii"), mime_type="image/png"
+                type="image",
+                data=base64.b64encode(result.picture).decode("ascii"),
+                mime_type=result.media_type,
             ),
             TextContent(type="text", text=json.dumps(_picture_description(result), indent=2, default=str)),
         ]
     if callable(getattr(result, "savefig", None)):
         return _figure_as_image(result)
-    # The library replies in full to every caller. A target report, tonight's
-    # ranking or a night review is shortened here, before the character cut
-    # below, so what is cut is whole references and candidates (the most
-    # extreme evidence of each statement is kept) and the reply stays valid
-    # JSON. Any other result passes through unchanged.
-    serialized = _serialize_result(fit_reply_to_budget(result))
+    # The library replies in full to every caller. The reply is shortened
+    # here, before the character cut below, so what is cut is whole
+    # references, candidates and list items, and the reply stays valid JSON.
+    # A reply that fits passes through unchanged.
+    shaped = shape_reply(result)
+    notes = [TextContent(type="text", text=note) for note in shaped.notes]
+    serialized = serialize_reply(shaped.reply)
     text = json.dumps(serialized, indent=2, default=str)
     if len(text) > MAXIMUM_REPLY_BYTES:
         # The indentation alone can be a third of a long list; drop it before
         # cutting anything.
         text = json.dumps(serialized, separators=(",", ":"), default=str)
     if len(text) > MAXIMUM_REPLY_BYTES and isinstance(serialized, list):
-        return _whole_items_that_fit(serialized)
+        return _whole_items_that_fit(serialized) + notes
     if len(text) > MAXIMUM_REPLY_BYTES:
         text = text[:MAXIMUM_REPLY_BYTES] + (
             f"\n\n... [Output truncated: payload exceeded {MAXIMUM_REPLY_BYTES} bytes. "
             "Use specific filtering arguments or limit queries to avoid context blowout.]"
         )
-    return [TextContent(type="text", text=text)]
+    return [TextContent(type="text", text=text), *notes]
 
 
 def _whole_items_that_fit(items: list[Any]) -> list[TextContent]:
@@ -440,19 +441,16 @@ def _picture_description(picture: Any) -> dict[str, Any]:
 
     Parameters
     ----------
-    picture : `ViewableImage`
+    picture : `RenderedImage`
         The picture.
 
     Returns
     -------
     description : `dict` [`str`, `Any`]
-        Its description, with the automatic stretch it was drawn with when
-        it has one.
+        Every field but the picture's bytes: the file, the brightness range
+        shown, the sizes, the crop and the automatic stretch, if any.
     """
-    stretch = getattr(picture, "stretch_parameters", None)
-    if stretch is None:
-        return picture.description
-    return {**picture.description, "stretch_parameters": stretch.model_dump()}
+    return picture.model_dump(mode="json", exclude={"picture"})
 
 
 def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:
@@ -496,29 +494,3 @@ def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:
         ),
         TextContent(type="text", text=json.dumps(description, indent=2)),
     ]
-
-
-def _serialize_result(value: Any) -> Any:
-    """Turn models and records into plain JSON-ready values, recursively.
-
-    Parameters
-    ----------
-    value : `Any`
-        Value to convert.
-
-    Returns
-    -------
-    serialized : `Any`
-        The value as plain dicts, lists and scalars.
-    """
-    if callable(getattr(value, "serialize", None)):
-        return value.serialize()
-    if callable(getattr(value, "model_dump", None)):
-        return value.model_dump()
-    if callable(getattr(value, "to_dict", None)):
-        return value.to_dict()
-    if isinstance(value, list):
-        return [_serialize_result(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _serialize_result(item) for key, item in value.items()}
-    return value

@@ -17,6 +17,7 @@ from mcp_servers.inventory.tool_dispositions import (
     DECISIONS,
     DISPOSITIONS,
     categorize_tool,
+    decision_for,
 )
 from mcp_servers.inventory.tool_inventory import (
     TOOL_CLASSES,
@@ -37,22 +38,24 @@ from mcp_servers.inventory.tool_inventory import (
 @pytest.mark.parametrize(
     ("name", "expected_class"),
     [
-        ("observatory_mount_abort_motion", "safe-stop"),
+        ("observatory_mount_stop", "safe-stop"),
         ("observatory_safety_execute_safe_state", "safe-stop"),
         ("observatory_mount_slew", "actuate"),
-        ("observatory_imaging_capture_image", "actuate"),
+        ("observatory_imaging_capture", "actuate"),
         ("observatory_mount_sync", "actuate"),
-        ("observatory_mount_status", "observe"),
-        ("review_query", "compute"),
+        ("observatory_mount_get_status", "observe"),
+        ("review_nights_query", "compute"),
+        ("review_guiding_record_spectrum", "change-data"),
+        ("review_alignment_record_external", "ingest"),
         ("observatory_mount_compute_pointing_correction", "compute"),
         ("observatory_safety_save_rule_set", "change-data"),
         ("processing_process_target", "change-data"),
         ("processing_stack", "process"),
         ("star_get", "observe"),
-        ("star_find_or_create_by_position", "change-data"),
+        ("star_record_periodicity", "change-data"),
         ("calibration_query", "observe"),
-        ("quality_measure_stack", "compute"),
-        ("visualization_plot", "compute"),
+        ("quality_stacks_measure", "compute"),
+        ("visualization_plot_target", "compute"),
         ("electron_run_python", "unrestricted"),
         ("backend_call_rpc", "unrestricted"),
         ("ui_run_tests", "develop"),
@@ -187,7 +190,7 @@ def test_collect_inventory_covers_all_four_servers() -> None:
         ("star_get", "observe", "stars"),
         ("processing_stack", "process", "image-processing"),
         ("processing_process_target", "change-data", "image-processing"),
-        ("planning_get_visibility", "observe", "planning-sessions"),
+        ("planning_sessions_get", "observe", "planning-sessions"),
         ("execution_abort_session", "change-data", "planning-sessions"),
         ("observatory_mount_slew", "actuate", "observatory-control"),
         ("observatory_remote_sync_frames", "ingest", "observatory-sync"),
@@ -233,16 +236,16 @@ def test_a_tool_with_no_decision_stays_undecided() -> None:
 
 def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:
     """A class correction replaces the drafted class and records why."""
-    record = ToolRecord("srv", "star_analyze_periodicity", "", tool_class="compute")
+    record = ToolRecord("srv", "star_record_periodicity", "", tool_class="compute")
     apply_decisions(record)
     assert record.tool_class == "change-data"
-    assert record.disposition == "fix"
+    assert record.disposition == "withhold"
     assert "star catalog" in record.note
 
 
 def test_config_writers_are_withheld() -> None:
     """The tools that change configuration are withheld from AI clients."""
-    for name in ("observatory_equipment_set_active_camera", "observatory_equipment_set_active_telescope"):
+    for name in ("observatory_equipment_set_active", "observatory_equipment_set_pointing_limits"):
         assert DECISIONS[name].disposition == "withhold"
 
 
@@ -260,7 +263,7 @@ def test_every_hardware_control_tool_is_dropped() -> None:
 
 def test_delegation_mode_switches_count_as_configuration() -> None:
     """The Safe Mode toggle writes saved state, so an AI may not change it."""
-    for name in ("observatory_safety_enter_controller_mode", "observatory_safety_enter_monitoring_mode"):
+    for name in ("observatory_safety_set_mode", "observatory_safety_update"):
         record = ToolRecord("srv", name, "", tool_class="actuate")
         apply_decisions(record)
         assert (record.category, record.disposition) == ("observatory-config", "withhold")
@@ -268,7 +271,7 @@ def test_delegation_mode_switches_count_as_configuration() -> None:
 
 def test_tools_the_user_declined_are_dropped() -> None:
     """Tools the user declined stay dropped."""
-    dropped = ("observatory_guiding_refit_spectrum",)
+    dropped = ("review_guiding_record_spectrum",)
     for name in dropped:
         assert DECISIONS[name].disposition == "drop", name
 
@@ -289,13 +292,13 @@ def test_the_sync_tools_are_ingests_offered_to_the_investigator() -> None:
         record = ToolRecord("srv", name, "", tool_class=tool_class)
         apply_decisions(record)
         assert (record.tool_class, record.disposition) == ("ingest", "keep"), name
-    assert DECISIONS["observatory_guiding_refit_spectrum"].disposition == "drop"
+    assert DECISIONS["review_guiding_record_spectrum"].disposition == "drop"
 
 
 def test_each_control_child_has_one_status_read() -> None:
     """Every child with readable state has a status tool with a decision."""
     for child in ("mount", "imaging", "guiding", "safety", "equipment"):
-        decision = DECISIONS[f"observatory_{child}_status"]
+        decision = decision_for(f"observatory_{child}_get_status")
         assert (decision.disposition, decision.tool_class) == ("keep", "observe"), child
 
 
@@ -314,3 +317,30 @@ def test_default_output_dir_follows_xdg_cache_home(tmp_path: Path, monkeypatch: 
     assert tool_inventory.default_output_dir() == tmp_path / "astrometrics" / "mcp_tool_inventory"
     assert main([]) == 0
     assert (tmp_path / "astrometrics" / "mcp_tool_inventory" / tool_inventory.MANIFEST_FILE_NAME).is_file()
+
+
+def test_a_renamed_tool_keeps_its_reviewed_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The old name's row decides the new name; a bad rename is a problem."""
+    from mcp_servers.inventory import tool_dispositions
+
+    old_name, new_name = "star_get", "star_read_one"
+    monkeypatch.setattr(tool_dispositions, "TOOL_RENAMES", {old_name: new_name})
+    assert tool_dispositions.decision_for(new_name) is DECISIONS[old_name]
+    record = ToolRecord(server="astrometricslib-core", name=new_name, description="Reads one star.")
+    apply_decisions(record)
+    assert record.disposition == DECISIONS[old_name].disposition
+
+    served = (set(DECISIONS) - {old_name}) | {new_name}
+    problems = tool_dispositions.find_problems(served, set(TOOL_CLASSES))
+    assert not [problem for problem in problems if old_name in problem or new_name in problem]
+
+    problems = tool_dispositions.find_problems(set(DECISIONS) - {old_name}, set(TOOL_CLASSES))
+    assert f"rename {old_name!r} -> {new_name!r}, which no server serves" in problems
+
+
+def test_the_rename_table_holds_only_real_renames() -> None:
+    """Each rename maps a name with a decision to a name without one."""
+    from mcp_servers.inventory.tool_dispositions import TOOL_RENAMES
+
+    for old_name, new_name in TOOL_RENAMES.items():
+        assert old_name in DECISIONS and new_name not in DECISIONS

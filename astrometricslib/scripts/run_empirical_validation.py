@@ -4,7 +4,7 @@ Description: Executes empirical pipeline validation across ZWO ASI 533MM
 Pro target datasets for all five processing pipelines (Spectroscopy,
 Photometry, Moving Object Recovery, Astrometry, and Stacking). Applies
 fault-tolerant execution and incremental state saving
-(astrometrics.targets.save()) after each target/pipeline step.
+(astrometrics.targets._save()) after each target/pipeline step.
 """
 
 import argparse
@@ -78,15 +78,13 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
         if t:
             print(f"Running spectroscopy analysis on target: {t.id}")
             try:
-                res = astrometrics.processing.process_target(
-                    t, stages=["spectroscopy"], spectroscopy={"limit": 10}
-                ).results["spectroscopy"]
+                res = astrometrics.processing.spectroscopy.run(t, max_stars=10).results["spectroscopy"]
                 if res and "context" in res:
                     summary = t.quality.spectroscopy
                     failed_gates = failed_gate_names(summary)
                     print(f"  Target {t.id} Spectroscopy Completed. Failed gates: {failed_gates or 'none'}")
                     results[t.id] = {"status": "success", "failed_gates": failed_gates}
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {t.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Spectroscopy analysis error for {t.id}: {err}")
@@ -120,16 +118,14 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
         if target:
             zwo_frames = [
                 f
-                for f in target.frames
+                for f in astrometrics.targets.frames.query(target, filter_name="Luminance")
                 if not camera_name or f.camera.upper() == camera_name.upper() or f.camera == "Unknown"
             ]
             print(f"Running Photometry Analysis on target: {target.id} ({len(zwo_frames)} matching frames)")
             try:
-                res = astrometrics.processing.process_target(
-                    target,
-                    stages=["photometry"],
-                    photometry={"frames": zwo_frames, "filter_name": "Luminance"},
-                ).results["photometry"]
+                res = astrometrics.processing.photometry.run(target, frames=zwo_frames or None).results[
+                    "photometry"
+                ]
                 status = res.get("status", "completed")
                 stars_found = res.get("starsFound", 0)
                 stars_proc = res.get("starsProcessed", 0)
@@ -139,7 +135,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                 print(f"  Variable Star Candidates: {cand_count}")
                 results[target.id] = res
 
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {target.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Photometry error on {target.id}: {err}")
@@ -183,7 +179,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
         if target and target.stacking.stacked_image:
             print(f"Running Asteroid Detection Analysis on target: {target.id}")
             try:
-                astrometrics.processing.process_target(target, stages=["asteroids"])
+                astrometrics.processing.asteroids.run(target)
                 candidates = target.asteroid_detection.candidates
                 summary = target.asteroid_detection.quality_summary
                 metrics = summary.asteroid_detection_metrics.model_dump() if summary is not None else {}
@@ -196,7 +192,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
                 print(f"  SkyBoT Ephemeris Matched: {eph}")
                 results[target.id] = res
 
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {target.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Asteroid detection notice for {target.id}: {err}")
@@ -230,7 +226,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
         if target and target.stacking.stacked_image:
             print(f"Running Astrometry WCS Plate-Solve on target: {target.id}")
             try:
-                answer = astrometrics.processing.process_target(target, stages=["astrometry"])
+                answer = astrometrics.processing.astrometry.run(target)
                 res = answer.results["astrometry"]
                 if res:
                     wcs_found = res.get("wcs") is not None
@@ -241,7 +237,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                         "stars_detected": stars_count,
                     }
 
-                astrometrics.targets.save()
+                astrometrics.targets._save()
                 print(f"  Incremental save completed for target: {target.id}")
             except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Astrometry error for {target.id}: {err}")
@@ -323,7 +319,7 @@ def main() -> None:
         _ = run_stacking_validation(astrometrics, args.camera)
 
         # Final save
-        astrometrics.targets.save()
+        astrometrics.targets._save()
         print("\n==================================================")
         print("EMPIRICAL PIPELINE VALIDATION COMPLETED")
         print("==================================================")

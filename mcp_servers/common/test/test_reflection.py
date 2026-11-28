@@ -87,10 +87,11 @@ def test_generate_tool_schema_builds_json_schema():  # ruff: ignore[missing-retu
 async def test_a_background_job_method_records_its_own_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A `@background_job` method is called with register_job=True.
+    """A `@background_job` method runs as one recorded job.
 
-    The method records its own job, so the tool's reply carries that job's
-    id next to the real result of a fast call.
+    The server records the call as a job of the marked type, the method's
+    own job joins it, and the tool's reply carries that job's id next to
+    the real result of a fast call.
     """
     configuration = get_configuration()
     stacks_path = tmp_path / "stacks"
@@ -104,7 +105,7 @@ async def test_a_background_job_method_records_its_own_job(
         """A stand-in `Astrometrics`-like object with one marked method."""
 
         @background_job("unit_test_job", grace_period_seconds=2.0)
-        def do_work(self, target: str, register_job: bool = False) -> dict:
+        def do_work(self, target: str) -> dict:
             """Stand in for real pipeline work that records its own job.
 
             Returns
@@ -112,8 +113,8 @@ async def test_a_background_job_method_records_its_own_job(
             result : `dict`
                 A trivial, fixed result.
             """
-            received.update(target=target, register_job=register_job)
-            with registered_job(enabled=register_job, job_type="unit_test_job", target_id=target):
+            received.update(target=target)
+            with registered_job(job_type="unit_test_job", target_id=target):
                 return {"stackedImage": "Vega_Stacked.fits"}
 
     isolated_registry = ToolRegistry()
@@ -124,8 +125,8 @@ async def test_a_background_job_method_records_its_own_job(
 
     result = await isolated_registry.execute("fake_do_work", {"target": "Vega"})
 
-    assert "register_job" not in schema["properties"]
-    assert received == {"target": "Vega", "register_job": True}
+    assert set(schema["properties"]) == {"target"}
+    assert received == {"target": "Vega"}
     assert '"stackedImage": "Vega_Stacked.fits"' in result[0].text
     assert '"jobId": null' not in result[0].text
 
@@ -176,7 +177,7 @@ async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ru
 
 
 async def test_a_target_id_reaches_the_method_as_the_client_sent_it() -> None:
-    """The tool does not look targets up; the library method does."""
+    """A parameter typed only as `str` reaches the method as the text sent."""
 
     class FakeApi:
         """A stand-in with one method that takes a target."""
@@ -198,3 +199,44 @@ async def test_a_target_id_reaches_the_method_as_the_client_sent_it() -> None:
 
     assert '"target": "M 13"' in result[0].text
     assert '"type": "str"' in result[0].text
+
+
+async def test_a_client_default_fills_an_argument_the_client_leaves_out() -> None:
+    """A `ClientLimits` default fills an argument the client leaves out.
+
+    A query returns every match by default, so a tool gives it a page size
+    unless the client chose one, and the schema says so.
+    """
+    from mcp_servers.common.reflection import ClientLimits
+
+    received: list[int | None] = []
+
+    class FakeApi:
+        """A stand-in API with one query."""
+
+        def query(self, limit: int | None = None) -> int:
+            """Record the limit the method got.
+
+            Parameters
+            ----------
+            limit : `int` or `None`
+                Most items to return.
+
+            Returns
+            -------
+            count : `int`
+                How many calls were made.
+            """
+            received.append(limit)
+            return len(received)
+
+    registry = ToolRegistry()
+    limits = {"fake_query": ClientLimits(maximums={"limit": 200}, defaults={"limit": 50})}
+    register_reflected_tools(registry, FakeApi(), {"": "fake"}, limits=limits)
+    schema = next(t for t in registry.get_tool_definitions() if t.name == "fake_query").input_schema
+
+    await registry.execute("fake_query", {})
+    await registry.execute("fake_query", {"limit": 7})
+
+    assert received == [50, 7]
+    assert "uses 50 when it is left out" in schema["properties"]["limit"]["description"]

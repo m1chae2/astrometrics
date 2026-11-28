@@ -46,7 +46,8 @@ from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target, Telescope
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache, get_camera_data_versions
 from astrometricslib.exceptions import AstrometricsError, NotFoundError
 from astrometricslib.parameters import (
@@ -56,7 +57,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, QualityMeasurement, SubjectLevel, observing_night_id
+from astrometricslib.reports import QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.capture_history import normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import (
     READ_NOISE_METRIC,
@@ -80,7 +81,6 @@ from wayfindinglib.analytics.result_quality.sky_model import (
 )
 from wayfindinglib.data_access.equipment_catalog_reader import list_telescopes
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location, resolve_site_location
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import EfficiencyReference
 
@@ -142,13 +142,13 @@ ReferenceProvider = Callable[[CaptureSetting], EfficiencyReference | None]
 # -----------------------------------------------------------------------------
 
 
-def frame_exposure_seconds(exposure_text: str | float | None) -> float | None:
+def frame_exposure_s(exposure_text: str | float | None) -> float | None:
     """Read a frame record's exposure as seconds.
 
     Parameters
     ----------
     exposure_text : `str` or `float` or `None`
-        The frame record's ``exposure`` field.
+        The frame record's ``exposure_s`` field.
 
     Returns
     -------
@@ -182,7 +182,7 @@ def frame_times(target: Target) -> dict[str, float]:
     for frame in target.frames:
         if not str(frame.role).upper().endswith("LIGHT") or frame.timestamp is None:
             continue
-        half = (frame_exposure_seconds(frame.exposure) or 0.0) / 2.0
+        half = (frame_exposure_s(frame.exposure_s) or 0.0) / 2.0
         times[target.frame_subject_id(frame)] = float(frame.timestamp) + half
     return times
 
@@ -252,7 +252,7 @@ def set_aside_reasons(
     The stacker's quarantine step moves a frame to an ``_excluded`` folder.
     Three places can say so, and this reads them in order of trust. The first
     is the library's own listing of the ``_excluded`` folders
-    (``Astrometrics.quality.set_aside_frames``), which already prefers the
+    (``Astrometrics.targets.frames.get_set_aside``), which already prefers the
     stored rows, then the folder's manifest, then the folder alone. The
     second is a stored row whose ``action_taken`` says the frame was moved.
     The quarantine measurements (roundness, sky median) are stored for kept
@@ -585,7 +585,8 @@ class LibraryInputs:
         try:
             # A target already listed spares the library another listing.
             known = self._targets.get(target_id) if self._targets else None
-            listed = self.astrometrics.quality.set_aside_frames(known or target_id)
+            target = known or self.astrometrics.targets.get(target_id, required=True)
+            listed = list(self.astrometrics.targets.frames.get_set_aside(target))
         except (AstrometricsError, OSError, sqlite3.Error) as error:
             self.notes.append(f"The set-aside frames of {target_id} could not be listed: {error}")
             listed = []
@@ -601,8 +602,7 @@ class LibraryInputs:
         """
         if self._targets is None:
             self._targets = {
-                target.id: target
-                for target in self.astrometrics.targets.query(detail="objects", limit=None).objects
+                target.id: target for target in self.astrometrics.targets.query(include_empty=True).items
             }
         return self._targets
 
@@ -664,9 +664,9 @@ class LibraryInputs:
             for metric in (STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC, SKY_RATE_METRIC, READ_NOISE_METRIC):
                 try:
                     rows.extend(
-                        self.astrometrics.quality.query(
-                            metric=metric, level="frame", camera_id=camera, library_only=True
-                        ).rows
+                        self.astrometrics.quality.records.query(
+                            metric=metric, level="frame", camera=camera, library_only=True
+                        )
                     )
                 except (AstrometricsError, sqlite3.Error) as error:
                     self.notes.append(f"The library's {metric} rows for {camera} could not be read: {error}")
@@ -771,7 +771,14 @@ class LibraryInputs:
         notes_before = len(self.notes)
         rows = self.camera_rows(camera)
         ids = sorted({row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id})
-        settings = dict(self.astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+        settings = (
+            {
+                stored.id: stored.setting
+                for stored in self.astrometrics.quality.records.get_capture_settings(ids)
+            }
+            if ids
+            else {}
+        )
         owners = (
             self.target(target_id)
             for target_id in sorted({row.subject.target_id for row in rows if row.subject.target_id})
@@ -1054,7 +1061,9 @@ class LibraryInputs:
             that could not be fitted, with the reason.
         """
         representatives: dict[str, CaptureSetting] = {}
-        for setting in self.astrometrics.quality.capture_settings().values():
+        for setting in (
+            stored.setting for stored in self.astrometrics.quality.records.get_capture_settings()
+        ):
             representatives.setdefault(baseline_key(setting), setting)
         models: dict[str, SkyModel] = {}
         unavailable: list[str] = []
@@ -1120,7 +1129,7 @@ __all__ = [
     "ReferenceProvider",
     "build_target_observations",
     "dominant_setting",
-    "frame_exposure_seconds",
+    "frame_exposure_s",
     "frame_times",
     "set_aside_reasons",
     "stored_site",

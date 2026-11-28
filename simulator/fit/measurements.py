@@ -6,17 +6,15 @@ equipment, and returns plain `Candidate` records. Every candidate names the
 public call and parameters that produced it, the nights it rests on, a source
 kind from the fallback order (newest real record, history fit, envelope,
 default), and a date. Nothing is stored and the library is not written
-(the calls pass ``register_job=False`` where they could record a job).
+(the calls are reads, which record no job).
 
 The fallback order is, from best to worst: the newest real record, a fit to
 the recorded history, the performance envelope, then the simulator's own
 default. A row may offer several candidates; `simulator.fit.fitting` takes the
 first one in that order that has data.
 
-A reply marked ``truncated`` is refused (`TruncatedReplyError`): a cut-short
-list could be missing the newest record, and the fit must not use half an
-answer. A failed or empty call is a status, not an error: it adds a note and
-no candidate, and the row falls back one step.
+A failed or empty call is a status, not an error: it adds a note and no
+candidate, and the row falls back one step.
 
 Read this file with the library's guiding vocabulary in mind: a run is one
 stretch of guiding, a night is an observing night, and every length is in
@@ -44,7 +42,6 @@ __all__ = [
     "Candidate",
     "Measurements",
     "SourceKind",
-    "TruncatedReplyError",
     "collect_measurements",
 ]
 
@@ -56,10 +53,6 @@ SOURCE_ORDER: tuple[SourceKind, ...] = (
     "performance envelope",
     "simulator default",
 )
-#: The most recent guiding runs the controller settings are read from.
-GUIDING_RUN_LIMIT = 50
-#: The run counts asked for in turn when a reply is too large and cut short.
-GUIDING_RUN_LIMITS = (GUIDING_RUN_LIMIT, 20, 5)
 #: Sidereal hours per day of Universal Time, and Greenwich mean sidereal time
 #: (hours) at 2000 January 1, 12:00 UT (the standard linear formula; error
 #: well under a minute of time, which is enough to point at the meridian).
@@ -72,18 +65,12 @@ GOTO_MINIMUM_ATTEMPTS = 5
 #: A gap longer than this between two solves of one target starts a new
 #: target session (the same rule as the library's grouping of attempts).
 GOTO_SESSION_GAP_SECONDS = 7200.0
-#: The night argument that reads every night.
-GOTO_SESSION_ID = "all"
 #: If the median offset is smaller than this fraction of the median error,
 #: the errors scatter in direction and the systematic part is small.
 GOTO_SYSTEMATIC_FRACTION = 0.5
 #: Calibrations whose note starts with this were made for a simulator, not
 #: measured on the real mount.
 SIMULATOR_NOTE_PREFIX = "Simulator"
-
-
-class TruncatedReplyError(RuntimeError):
-    """A library reply was cut short, so the fit refuses to use it."""
 
 
 @dataclass(frozen=True)
@@ -173,25 +160,6 @@ def _pick(row: Mapping[str, Any], name: str) -> Any:
     return row.get(camel)
 
 
-def _refuse_truncated(reply: Any, call: str) -> None:
-    """Raise when a reply says it was cut short.
-
-    Parameters
-    ----------
-    reply : `object`
-        The reply, which may have a ``truncated`` flag.
-    call : `str`
-        The call's name, for the message.
-
-    Raises
-    ------
-    TruncatedReplyError
-        If ``reply.truncated`` is true.
-    """
-    if getattr(reply, "truncated", False):
-        raise TruncatedReplyError(f"{call} returned a truncated reply; it is not used.")
-
-
 def _guard(measurements: Measurements, label: str, work: Callable[[], None]) -> None:
     """Run one collection step; a failure becomes a note.
 
@@ -206,7 +174,7 @@ def _guard(measurements: Measurements, label: str, work: Callable[[], None]) -> 
     """
     try:
         work()
-    except (AstrometricsError, TruncatedReplyError, OSError, ValueError, AttributeError, KeyError) as error:
+    except (AstrometricsError, OSError, ValueError, AttributeError, KeyError) as error:
         LOGGER.warning("Fit: %s was not available: %s", label, error)
         measurements.notes.append(f"{label}: {type(error).__name__}: {error}")
 
@@ -223,7 +191,7 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
     """
     records = [
         record
-        for record in wayfinder.control.guiding.query_calibrations()
+        for record in wayfinder.control.guiding.query_guider_calibrations()
         if not record.source_note.startswith(SIMULATOR_NOTE_PREFIX)
     ]
     if records:
@@ -232,53 +200,43 @@ def _guide_rate(wayfinder: Wayfinder, measurements: Measurements) -> None:
             "guide_rate",
             Candidate(
                 "newest real record",
-                {"dec_rate_arcsec_per_s": newest.dec_rate_arcsec_per_sec},
-                "wayfinder.control.guiding.query_calibrations",
+                {"dec_rate_arcsec_per_s": newest.dec_rate_arcsec_per_s},
+                "wayfinder.control.guiding.query_guider_calibrations",
                 {},
                 [],
                 f"Guider calibration {newest.id!r}: the mount's Dec guide speed.",
                 _date(newest.calibrated_at.timestamp()),
             ),
         )
-    reply, limit = None, GUIDING_RUN_LIMIT
-    for limit in GUIDING_RUN_LIMITS:
-        # A reply too large to send is cut short; ask again for fewer runs
-        # rather than use a cut one (the newest runs are the ones used).
-        reply = wayfinder.review.query(kind="guiding_runs", limit=limit, register_job=False)
-        if not getattr(reply, "truncated", False):
-            break
-    _refuse_truncated(reply, "wayfinder.review.query(kind='guiding_runs')")
-    runs = [run for run in (reply.runs or []) if isinstance(run, dict)]
+    runs = [run.model_dump() for run in wayfinder.review.guiding.query_runs()]
     for run in reversed(runs):
-        rate = _pick(run, "dec_rate_arcsec_per_second")
+        rate = _pick(run, "dec_rate_arcsec_per_s")
         if rate:
             measurements.add(
                 "guide_rate",
                 Candidate(
                     "history fit",
                     {"dec_rate_arcsec_per_s": float(rate)},
-                    "wayfinder.review.query",
-                    {"kind": "guiding_runs", "limit": limit},
+                    "wayfinder.review.guiding.query_runs",
+                    {},
                     [str(_pick(run, "session_id"))],
                     "The Dec guide speed in the newest guiding run's log header.",
                     _date(_pick(run, "started_at")),
                 ),
             )
             break
-    controller = _controller_candidate(runs, limit)
+    controller = _controller_candidate(runs)
     if controller is not None:
         measurements.add("guide_controller", controller)
 
 
-def _controller_candidate(runs: list[dict], limit: int = GUIDING_RUN_LIMIT) -> Candidate | None:
+def _controller_candidate(runs: list[dict]) -> Candidate | None:
     """Build the controller candidate from the newest PHD2 run that has one.
 
     Parameters
     ----------
     runs : `list` [`dict`]
         Guiding run summaries, oldest first.
-    limit : `int`, optional
-        The run count the query asked for (recorded with the candidate).
 
     Returns
     -------
@@ -296,7 +254,7 @@ def _controller_candidate(runs: list[dict], limit: int = GUIDING_RUN_LIMIT) -> C
         for key, name in (
             ("minimum_move", "ra_minimum_move_px"),
             ("hysteresis", "ra_hysteresis"),
-            ("exposure_seconds", "guide_exposure_seconds"),
+            ("exposure_s", "guide_exposure_s"),
         ):
             value = _pick(run, name)
             if value is not None:
@@ -304,8 +262,8 @@ def _controller_candidate(runs: list[dict], limit: int = GUIDING_RUN_LIMIT) -> C
         return Candidate(
             "newest real record",
             values,
-            "wayfinder.review.query",
-            {"kind": "guiding_runs", "limit": limit},
+            "wayfinder.review.guiding.query_runs",
+            {},
             [str(_pick(run, "session_id"))],
             "The guide controller settings in the newest PHD2 run's log header (right ascension axis).",
             _date(_pick(run, "started_at")),
@@ -323,11 +281,11 @@ def _mount_error(wayfinder: Wayfinder, measurements: Measurements) -> None:
     measurements : `Measurements`
         Receives the candidates.
     """
-    result = wayfinder.review.measure_unguided_mount_error()
+    result = wayfinder.review.guiding.measure_unguided_error()
     summary = result.summary
     nights = list(summary.nights_used)
     date = nights[-1] if nights else None
-    call = "wayfinder.review.measure_unguided_mount_error"
+    call = "wayfinder.review.guiding.measure_unguided_error"
     periodic = summary.periodic_error
     if periodic is not None:
         measurements.add(
@@ -336,7 +294,7 @@ def _mount_error(wayfinder: Wayfinder, measurements: Measurements) -> None:
                 "history fit",
                 {
                     "amplitude_arcsec": periodic.amplitude_arcsec,
-                    "period_seconds": periodic.period_seconds,
+                    "period_s": periodic.period_s,
                 },
                 call,
                 {},
@@ -351,8 +309,8 @@ def _mount_error(wayfinder: Wayfinder, measurements: Measurements) -> None:
             Candidate(
                 "history fit",
                 {
-                    "ra_drift_arcsec_per_min": summary.ra.drift_median_arcsec_per_minute,
-                    "dec_drift_arcsec_per_min": summary.dec.drift_median_arcsec_per_minute,
+                    "ra_drift_arcsec_per_min": summary.ra.drift_median_arcsec_per_min,
+                    "dec_drift_arcsec_per_min": summary.dec.drift_median_arcsec_per_min,
                     "ra_random_rms_arcsec": summary.ra.random_step_median_arcsec / math.sqrt(2.0),
                     "dec_random_rms_arcsec": summary.dec.random_step_median_arcsec / math.sqrt(2.0),
                 },
@@ -378,7 +336,7 @@ def _backlash(wayfinder: Wayfinder, measurements: Measurements) -> None:
     measurements : `Measurements`
         Receives the candidate.
     """
-    analysis = wayfinder.review.measure_guiding_spectrum()
+    analysis = wayfinder.review.guiding.measure_spectrum()
     if analysis.dec_backlash_estimate_ms is None:
         measurements.notes.append(f"Dec backlash: no estimate ({analysis.message or 'no message'}).")
         return
@@ -387,7 +345,7 @@ def _backlash(wayfinder: Wayfinder, measurements: Measurements) -> None:
         Candidate(
             "history fit",
             {"backlash_ms": analysis.dec_backlash_estimate_ms},
-            "wayfinder.review.measure_guiding_spectrum",
+            "wayfinder.review.guiding.measure_spectrum",
             {},
             [],
             "The Dec backlash estimate from the guiding spectrum analysis.",
@@ -406,7 +364,7 @@ def _polar(wayfinder: Wayfinder, measurements: Measurements) -> None:
     measurements : `Measurements`
         Receives the candidate.
     """
-    status = wayfinder.control.mount.get_polar_alignment()
+    status = wayfinder.review.alignment.get_polar_alignment()
     if status.total_error_arcsec is None:
         measurements.notes.append("Polar alignment: no stored run.")
         return
@@ -415,7 +373,7 @@ def _polar(wayfinder: Wayfinder, measurements: Measurements) -> None:
         Candidate(
             "newest real record",
             {"total_error_arcsec": status.total_error_arcsec},
-            "wayfinder.control.mount.get_polar_alignment",
+            "wayfinder.review.alignment.get_polar_alignment",
             {},
             [],
             "A single polar alignment measurement, not a trend.",
@@ -498,7 +456,7 @@ def _mount_model(wayfinder: Wayfinder, measurements: Measurements) -> None:
     measurements : `Measurements`
         Receives the candidate.
     """
-    records = wayfinder.review.query_alignment_records(session_id=GOTO_SESSION_ID)
+    records = wayfinder.review.alignment.query()
     first = _first_attempts(list(records.attempts))
     if len(first) < GOTO_MINIMUM_ATTEMPTS:
         measurements.notes.append(
@@ -534,8 +492,8 @@ def _mount_model(wayfinder: Wayfinder, measurements: Measurements) -> None:
                 "typical_error_arcsec": typical,
                 "count": float(len(first)),
             },
-            "wayfinder.review.query_alignment_records",
-            {"session_id": GOTO_SESSION_ID},
+            "wayfinder.review.alignment.query",
+            {},
             nights,
             note,
             nights[-1] if nights else None,
@@ -553,7 +511,7 @@ def _envelope(wayfinder: Wayfinder, measurements: Measurements) -> None:
     measurements : `Measurements`
         Receives the candidate.
     """
-    envelope = wayfinder.review.get_performance_envelope()
+    envelope = wayfinder.review.performance.get_envelope()
     if envelope is None:
         measurements.notes.append("Performance envelope: no active telescope and camera.")
         return
@@ -566,7 +524,7 @@ def _envelope(wayfinder: Wayfinder, measurements: Measurements) -> None:
         Candidate(
             "performance envelope",
             {"fwhm_arcsec": float(width)},
-            "wayfinder.review.get_performance_envelope",
+            "wayfinder.review.performance.get_envelope",
             {},
             [],
             "The median measured star width (Moffat full width at half maximum) of the equipment's light "
@@ -628,11 +586,12 @@ def _sky(
     longitude_deg : `float`, optional
         The site's longitude, degrees east, for the meridian fallback.
     """
-    prediction = wayfinder.review.get_sky_rate_prediction(epoch_seconds, ra_deg, dec_deg)
+    moment = datetime.fromtimestamp(epoch_seconds, UTC)
+    prediction = wayfinder.review.performance.predict_sky_rate(ra_deg, dec_deg, time=moment)
     moved = ""
     if prediction.sky_rate_adu_per_s_per_px is None and prediction.setting_key and longitude_deg is not None:
         ra_deg = meridian_ra_degrees(epoch_seconds, longitude_deg)
-        prediction = wayfinder.review.get_sky_rate_prediction(epoch_seconds, ra_deg, dec_deg)
+        prediction = wayfinder.review.performance.predict_sky_rate(ra_deg, dec_deg, time=moment)
         moved = " The target was below the horizon, so the rate is for its declination on the meridian."
     if prediction.sky_rate_adu_per_s_per_px is None:
         measurements.notes.append(f"Sky rate: {prediction.message}")
@@ -643,8 +602,8 @@ def _sky(
         Candidate(
             "history fit",
             {"sky_rate_adu_per_s_per_px": prediction.sky_rate_adu_per_s_per_px},
-            "wayfinder.review.get_sky_rate_prediction",
-            {"epoch_seconds": epoch_seconds, "ra_deg": ra_deg, "dec_deg": dec_deg},
+            "wayfinder.review.performance.predict_sky_rate",
+            {"ra_deg": ra_deg, "dec_deg": dec_deg, "time": moment.isoformat()},
             [],
             f"Sky model fitted to {prediction.nights_used} nights"
             + (f", error {error:.0%} on unseen nights" if error is not None else "")
@@ -666,7 +625,7 @@ def _focus(wayfinder: Wayfinder, measurements: Measurements) -> None:
     measurements : `Measurements`
         Receives the candidate.
     """
-    fit = wayfinder.review.measure_focus_temperature_coefficient()
+    fit = wayfinder.review.performance.measure_focus_temperature()
     if fit.coefficient_steps_per_c is None:
         measurements.notes.append(f"Focus drift: {fit.message}")
         return
@@ -675,7 +634,7 @@ def _focus(wayfinder: Wayfinder, measurements: Measurements) -> None:
         Candidate(
             "history fit",
             {"steps_per_c": fit.coefficient_steps_per_c},
-            "wayfinder.review.measure_focus_temperature_coefficient",
+            "wayfinder.review.performance.measure_focus_temperature",
             {},
             list(fit.nights_used),
             f"Best focus moves {fit.coefficient_steps_per_c:.2f} focuser steps per degree C.",

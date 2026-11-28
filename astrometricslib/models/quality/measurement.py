@@ -124,7 +124,7 @@ class QualityMeasurement(BaseModel):
         The store's row id. Filled only when the measurement is read back.
     unit : `str` or `None`
         The metric's unit from its declaration. Not stored:
-        `QualityRecords.query` fills it on a read.
+        `quality.records.query` fills it on a read.
     """
 
     model_config = ConfigDict(populate_by_name=True)

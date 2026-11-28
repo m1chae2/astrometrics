@@ -2,9 +2,9 @@
 
 Description: The app's sequencer queue is the queue of one observing
 session in the wayfinding library. Adding a sequence records an
-observation package and queues it (`ObservationPlanning.add_to_queue`);
+observation package and queues it (``planning.sessions.add``);
 removing, reordering and changing entries edit the same queue; and
-starting the sequencer runs `ObservationExecution.advance_session` on a
+starting the sequencer runs `ObservationExecution.run` on a
 background thread until the queue is done. Each cycle checks safety,
 slews to the entry's target and captures its exposures.
 
@@ -20,11 +20,15 @@ Every queue edit goes through the plan service, so each one sends the
 import logging
 import threading
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
+from astrometricslib.exceptions import AstrometricsError
+from backend.services.error_logging import log_failure
 from backend.services.observatory.plan_service import PlanService
+from backend.services.subject_resolver import SubjectResolver
 from wayfindinglib import ObservationSession, Wayfinder
 
 logger = logging.getLogger(__name__)
@@ -57,7 +61,7 @@ class TargetImagingExecutor:
         """
         self._wayfinder = wayfinder
         self._plan_service = plan_service or PlanService(wayfinder=wayfinder)
-        self._running_session_id: str | None = None
+        self._running_session: ObservationSession | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -73,7 +77,7 @@ class TargetImagingExecutor:
         session : `ObservationSession`
             The session whose queue the sequencer shows.
         """
-        return self._wayfinder.planning.create_session(observing_night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.sessions.create(observing_night_id(time.time()))
 
     def _existing_session(self) -> ObservationSession | None:
         """Return tonight's session if it exists, without creating one.
@@ -83,7 +87,7 @@ class TargetImagingExecutor:
         session : `ObservationSession` or `None`
             Tonight's session, or `None` when none was made yet.
         """
-        return self._wayfinder.planning.get_plan(observing_night_id=observing_night_id(time.time()))
+        return self._wayfinder.planning.sessions.get(observing_night_id(time.time()))
 
     @staticmethod
     def _request(package_id: str, timing: dict[str, Any] | None) -> dict[str, Any]:
@@ -134,8 +138,8 @@ class TargetImagingExecutor:
             The new queue entry's id.
         """
         package = self._plan_service.create_package(sequence["target_name"], plan_items=sequence["items"])
-        change = self._plan_service.edit_plan(self._session().id, add=[self._request(package.id, timing)])
-        return change.session.queue[-1].id
+        session = self._plan_service.edit_plan(self._session().id, add=[self._request(package.id, timing)])
+        return session.queue[-1].id
 
     def enqueue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any]) -> dict[str, str]:
         """Add one sequence to the queue.
@@ -217,22 +221,49 @@ class TargetImagingExecutor:
         self._plan_service.edit_plan(session.id, order=order)
         return True
 
-    def create_plan(self, target_name: str, items: list[dict[str, Any]]) -> Any:
+    def create_plan(self, target_name: str, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Build an imaging sequence plan for a library target.
+
+        The plan is the sequencer's own shape; nothing is stored.
 
         Parameters
         ----------
         target_name : `str`
             The id of the library target the plan is for.
         items : `list` [`dict`]
-            The plan items, each with ``count``, ``exposure`` and ``filter``.
+            The plan items, each with ``count``, ``exposure_s`` (seconds) and
+            ``filter`` (``"L"`` when missing).
 
         Returns
         -------
-        plan : `SequencePlan`
-            The sequence plan from the wayfinding library's planning.
+        plan : `dict`
+            ``id``, ``target_name``, ``items`` (each with its ``duration``,
+            count times exposure), ``total_duration``, ``created_at`` and
+            ``status``.
+
+        Notes
+        -----
+        Raises `NotFoundError` if the library has no such target.
         """
-        return self._wayfinder.planning.create_sequence(target=target_name, plan_items=items)
+        target = SubjectResolver(self._wayfinder.astrometrics).target(target_name)
+        plan_items = []
+        for item in items:
+            count = int(item.get("count", 0))
+            exposure_s = float(item.get("exposure_s", 0.0))
+            plan_items.append({
+                "count": count,
+                "exposure_s": exposure_s,
+                "filter": str(item.get("filter", "L")),
+                "duration": count * exposure_s,
+            })
+        return {
+            "id": str(uuid.uuid4()),
+            "target_name": target.id,
+            "items": plan_items,
+            "total_duration": sum(item["duration"] for item in plan_items),
+            "created_at": str(time.time()),
+            "status": "planned",
+        }
 
     def get_queue(self) -> list[dict[str, Any]]:
         """Return the queue as the sequences the app shows.
@@ -254,9 +285,9 @@ class TargetImagingExecutor:
             items = [
                 {
                     "count": request.count,
-                    "exposure": request.exposure_sec,
+                    "exposure_s": request.exposure_s,
                     "filter": request.filter.value,
-                    "duration": request.count * request.exposure_sec,
+                    "duration": request.count * request.exposure_s,
                 }
                 for request in entry.exposure_requests
             ]
@@ -285,15 +316,17 @@ class TargetImagingExecutor:
             logger.warning("Imaging already in progress.")
             return
         self._stop.clear()
-        session_id = self._existing_session().id
-        self._running_session_id = session_id
+        running_session = self._existing_session()
+        self._running_session = running_session
 
         def run() -> None:
             """Run the queue; the top of a background thread."""
             try:
-                session = self._wayfinder.execution.advance_session(session_id, stop=self._stop)
+                session = self._wayfinder.execution.run(running_session, stop=self._stop)
                 if session is not None:
                     logger.info("Sequencer stopped: %s %s", session.status, session.status_detail)
+            except AstrometricsError as error:
+                log_failure(logger, error, "Imaging loop stopped")
             except Exception:  # the top of a background thread: log it, never lose it
                 logger.exception("Imaging loop crashed")
 
@@ -322,8 +355,8 @@ class TargetImagingExecutor:
     def abort_imaging(self) -> None:
         """Stop running the queue and skip every waiting entry."""
         self._stop.set()
-        session_id = self._running_session_id
-        if session_id is not None:
-            self._wayfinder.execution.abort_session(session_id, "Aborted from the sequencer.")
-            self._running_session_id = None
+        running_session = self._running_session
+        if running_session is not None:
+            self._wayfinder.execution.abort(running_session, "Aborted from the sequencer.")
+            self._running_session = None
         logger.info("Imaging aborted.")

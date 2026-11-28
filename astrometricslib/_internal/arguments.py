@@ -6,13 +6,13 @@ module. Each name is imported from the module where its code lives today, so
 moving the code later changes this file only.
 """
 
-from astrometricslib.pipelines.shared.api_arguments import (
+from astrometricslib.foundation.arguments import (
     check_choice,
     check_include,
     reject_unused_arguments,
-    resolve_target,
     to_epoch_seconds,
 )
+from astrometricslib.pipelines.shared.api_arguments import resolve_target
 
 __all__ = [
     "check_choice",

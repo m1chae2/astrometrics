@@ -44,7 +44,7 @@ def test_separating_limit_is_none_when_the_groups_overlap() -> None:
 
 def test_tune_skips_with_no_targets() -> None:
     """A library with no spectral target gives a skip, not a guess."""
-    no_targets = SimpleNamespace(objects=[])
+    no_targets = SimpleNamespace(items=())
     astrometrics = SimpleNamespace(targets=SimpleNamespace(query=lambda **_kwargs: no_targets))
     setup = SetupConfig(name="s", camera_name="cam", optic_name="optic")
     inputs = TuningInputs(setup, None, None, {"astrometrics": astrometrics})

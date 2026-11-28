@@ -68,7 +68,7 @@ def analyze(frame: np.ndarray, predict: float | None = None) -> dict:
         The result of `analyze_spectral_frame`.
     """
     return analyze_spectral_frame(
-        frame, (STAR_ROW, STAR_COLUMN), exposure_seconds=2.0, predict_exposure_seconds=predict, **GEOMETRY
+        frame, (STAR_ROW, STAR_COLUMN), exposure_s=2.0, predict_exposure_seconds=predict, **GEOMETRY
     )
 
 
@@ -115,16 +115,16 @@ def test_the_summary_groups_by_exposure_and_by_pier_side() -> None:
         "spectrum_width_px": 5.0,
     }
     rows = [
-        {**base, "exposure_seconds": 2.0, "pier_side": "EAST", "tilt_degrees": 4.1},
-        {**base, "exposure_seconds": 2.0, "pier_side": "WEST", "tilt_degrees": 1.0},
+        {**base, "exposure_s": 2.0, "pier_side": "EAST", "tilt_degrees": 4.1},
+        {**base, "exposure_s": 2.0, "pier_side": "WEST", "tilt_degrees": 1.0},
         {
             **base,
-            "exposure_seconds": 5.0,
+            "exposure_s": 5.0,
             "pier_side": "WEST",
             "tilt_degrees": 1.2,
             "spectrum_pixels_saturated": 9,
         },
-        {"exposure_seconds": 5.0, "pier_side": "WEST", "error": "no zero order"},
+        {"exposure_s": 5.0, "pier_side": "WEST", "error": "no zero order"},
     ]
     summary = summarize_spectral_frames(rows, minimum_contrast=10.0)
     assert summary["by_exposure"]["5"]["frames"] == 2
@@ -189,9 +189,7 @@ def analyze_horizontal(image: np.ndarray, **settings: float | str) -> dict:
         The result of `analyze_spectral_frame`.
     """
     column, row = ZERO_ORDER_XY[0], ZERO_ORDER_XY[1]
-    return analyze_spectral_frame(
-        image, (row, column), exposure_seconds=2.0, **HORIZONTAL_GEOMETRY, **settings
-    )
+    return analyze_spectral_frame(image, (row, column), exposure_s=2.0, **HORIZONTAL_GEOMETRY, **settings)
 
 
 def test_the_nikon_profile_gives_a_level_a_14_bit_frame_can_reach() -> None:
@@ -256,7 +254,7 @@ def test_the_prediction_uses_the_camera_level() -> None:
     result = analyze_spectral_frame(
         image,
         (ZERO_ORDER_XY[1], ZERO_ORDER_XY[0]),
-        exposure_seconds=2.0,
+        exposure_s=2.0,
         predict_exposure_seconds=4.0,
         saturation_threshold_adu=threshold,
         saturation_source=source,

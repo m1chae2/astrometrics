@@ -17,7 +17,7 @@ stored rows and says what they suggest:
   stars share one direction, which points at tracking, guiding, wind or
   flexure. A low coherence points at seeing or focus.
 * **Set-aside frames**: the frames the stacker's quarantine set aside as
-  trailed (`astrometrics.quality.set_aside_frames`). The review does not
+  trailed (`astrometrics.targets.frames.get_set_aside`). The review does not
   judge the frames again; the quarantine owns that rule.
 * **Corners**: the corner widths compared with the center width. They are
   reported only. The corner measurements are exploratory (AST-18), so no tilt
@@ -39,6 +39,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib import Target
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.parameters import (
     HardcodedKind,
@@ -47,7 +49,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import MeasurementStatus, observing_night_id
+from astrometricslib.reports import MeasurementStatus
 from wayfindinglib.analytics.performance_envelope import (
     BASELINE_SPREAD_MULTIPLIER,
     MINIMUM_BASELINE_SESSIONS,
@@ -236,7 +238,7 @@ def _read_set_aside_trailed(
         Oldest first; a frame with no capture time last.
     """
     found = []
-    for record in astrometrics.quality.set_aside_frames(target):
+    for record in astrometrics.targets.frames.get_set_aside(target):
         if record.kind != TRAILED_KIND:
             continue
         path = record.original_path or record.path
@@ -294,12 +296,14 @@ def read_stack_roundness_low_limit(astrometrics: Any, exclude_subject: str | Non
         stored elongation.
     """
     try:
-        result = astrometrics.quality.query(metric=STACK_ELONGATION_METRIC, level="stack", latest_only=True)
+        result = astrometrics.quality.records.query(
+            metric=STACK_ELONGATION_METRIC, level="stack", latest_only=True
+        )
     except InvalidArgumentError:
         return None
     elongations = [
         float(row.value)
-        for row in result.rows
+        for row in result
         if row.subject.channel is None
         and row.status != MeasurementStatus.NOT_MEASURED
         and row.value is not None
@@ -363,12 +367,14 @@ def _query_rows(astrometrics: Any, metric: str, level: str, target_id: str) -> l
         channel. Empty when the metric is not registered (yet).
     """
     try:
-        result = astrometrics.quality.query(metric=metric, level=level, target_id=target_id, latest_only=True)
+        result = astrometrics.quality.records.query(
+            metric=metric, level=level, target=Target(id=target_id), latest_only=True
+        )
     except InvalidArgumentError:
         return []
     return [
         row
-        for row in result.rows
+        for row in result
         if row.subject.channel is None
         and row.status != MeasurementStatus.NOT_MEASURED
         and row.value is not None
@@ -430,7 +436,7 @@ def _shape_from_rows(
         path=path,
         timestamp=timestamp,
         elongation=None if elongation_row is None else float(elongation_row.value),
-        angle_degrees=None if angle_row is None else float(angle_row.value),
+        angle_deg=None if angle_row is None else float(angle_row.value),
         direction_coherence=None if coherence_row is None else float(coherence_row.value),
         center_width_px=None if center_row is None else float(center_row.value),
         corner_widths_px={
@@ -609,7 +615,7 @@ def _direction_verdict(
     angle, coherence = _direction(source, frames)
     cut = float(resolve_parameter(SHARED_DIRECTION_COHERENCE).value)
     numbers: dict[str, float | None] = {
-        "angle_degrees": angle,
+        "angle_deg": angle,
         "coherence": coherence,
         "coherence_cut": cut,
     }
@@ -660,12 +666,12 @@ def _direction(
 
     Returns
     -------
-    angle_degrees, coherence : `float` or `None`
+    angle_deg, coherence : `float` or `None`
         The direction in degrees from 0 up to 180, and the coherence.
     """
-    if source is not None and source.angle_degrees is not None:
-        return source.angle_degrees, source.direction_coherence
-    angles = [frame.angle_degrees for frame in frames if frame.angle_degrees is not None]
+    if source is not None and source.angle_deg is not None:
+        return source.angle_deg, source.direction_coherence
+    angles = [frame.angle_deg for frame in frames if frame.angle_deg is not None]
     coherences = [frame.direction_coherence for frame in frames if frame.direction_coherence is not None]
     angle = None
     if angles:

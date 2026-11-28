@@ -225,10 +225,9 @@ def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any])
 
         start_time = time.time()
         try:
-            stacked_path = astrometrics.processing.stack(
+            stacked_path = astrometrics.processing.stacking.run(
                 target,
                 frames=spec_frames,
-                kind="spectral",
                 rejection_sigma=SWEEP_SIGMA,
                 filter_wfwhm=filter_wfwhm,
                 stack_weight="wfwhm",
@@ -250,7 +249,7 @@ def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any])
             continue
 
         row["zero_order_fwhm"] = measure_zero_order_stacked_fwhm(astrometrics, stacked_path)
-        row["rejected_fraction"] = astrometrics.quality.measure_stack(
+        row["rejected_fraction"] = astrometrics.quality.stacks.measure(
             stacked_path, include=["rejected_fraction"]
         ).rejected_fraction
         print(

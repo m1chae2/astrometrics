@@ -1,6 +1,6 @@
 """Purpose: What a night plan has captured so far, for the progress cards.
 
-Description: `ObservationPlanning.get_plan(session_id, include=["progress"])`
+Description: `wayfinder.planning.sessions.get(night, include=["progress"])`
 counts the frames that arrived and matches them to the session's entries.
 These models carry the answer: for each entry, how many light frames were
 requested and captured, how many carry a quality flag, how many are not judged
@@ -13,10 +13,34 @@ screen draws these numbers as they are and decides nothing.
 """
 
 from datetime import UTC, datetime
+from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from wayfindinglib.models.session.observation_session import ObservationSession, RunState
+
+class RunState(StrEnum):
+    """How far a session or one of its entries has got, from the frames.
+
+    The library works it out from the frames that arrived (see
+    `wayfindinglib.analytics.session_progress`). The value is typed so a
+    screen never has to decide it.
+
+    * `UPCOMING`: the night has not begun, or nothing has been captured yet.
+    * `IMAGING`: a frame arrived a short while ago, so it is imaged now.
+    * `IN_PROGRESS`: tonight, some frames are in, and nothing arrived lately.
+    * `COMPLETE`: every light frame requested has been captured and judged.
+    * `PARTLY_DONE`: the night is over and some, but not all, frames came in.
+    * `NOT_RUN`: the night is over and no frame came in.
+    * `UNKNOWN`: the frames could not be read, so the library cannot say.
+    """
+
+    UPCOMING = "upcoming"
+    IMAGING = "imaging"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    PARTLY_DONE = "partly_done"
+    NOT_RUN = "not_run"
+    UNKNOWN = "unknown"
 
 
 class RowProgress(BaseModel):
@@ -28,7 +52,7 @@ class RowProgress(BaseModel):
         The row's source key, when the library suggested it.
     filter_name : `str`
         The row's filter.
-    exposure_sec : `float`
+    exposure_s : `float`
         The row's frame length in seconds.
     requested : `int`
         How many frames the row asks for.
@@ -48,7 +72,10 @@ class RowProgress(BaseModel):
 
     source_key: str = Field(default="", alias="sourceKey")
     filter_name: str = Field(default="", alias="filterName")
-    exposure_sec: float = Field(alias="exposureSec")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSec", "exposure_sec"),
+    )
     requested: int
     captured: int
     judged: int
@@ -125,13 +152,3 @@ class SessionProgress(BaseModel):
     imaging_now_entry_id: str | None = Field(default=None, alias="imagingNowEntryId")
     run_state: RunState = Field(alias="runState")
     as_of: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="asOf")
-
-
-class ObservationSessionWithProgress(ObservationSession):
-    """A stored session plus its progress, as `get_plan` returns it.
-
-    The progress is worked out on each read and is not part of the stored
-    session. Do not write this object back.
-    """
-
-    progress: SessionProgress | None = Field(default=None, alias="progress")

@@ -2501,7 +2501,7 @@ class SpectroscopyPipeline:
         base_pos = (pos[0] + self.config.dispersion_offset_x, pos[1] + self.config.dispersion_offset_y)
 
         # extract_with_flare_mask[_traced]'s per-column tilt tracking
-        # (slope = -tan(angle_degrees)) is the negation of what
+        # (slope = -tan(angle_deg)) is the negation of what
         # get_dispersion_vector() -- and therefore detect_dispersion_angle
         # -- uses for horizontal dispersion (they already agree for
         # vertical), so horizontal needs a sign flip here to actually
@@ -2522,7 +2522,7 @@ class SpectroscopyPipeline:
                     max_offset_pixels,
                     extraction_radius,
                     self.config.dispersion_orientation,
-                    angle_degrees=flare_mask_angle,
+                    angle_deg=flare_mask_angle,
                     centerline_polynomial_degree=self.config.centerline_polynomial_degree,
                 )
             )
@@ -2534,7 +2534,7 @@ class SpectroscopyPipeline:
                 max_offset_pixels,
                 extraction_radius,
                 self.config.dispersion_orientation,
-                angle_degrees=flare_mask_angle,
+                angle_deg=flare_mask_angle,
             )
 
         # The extractor starts at the whole pixel nearest to
@@ -2738,7 +2738,7 @@ class SpectroscopyPipeline:
 
         Returns
         -------
-        angle_degrees : `float`
+        angle_deg : `float`
             The tilt of the camera, in degrees (0.0 when it could not be
             measured).
         contrast_sigma : `float`
@@ -2915,7 +2915,7 @@ class SpectroscopyPipeline:
 
         Returns
         -------
-        angle_degrees : `float`
+        angle_deg : `float`
             The tilt of the camera, in degrees.
         """
         if roi_half_width_px is None:

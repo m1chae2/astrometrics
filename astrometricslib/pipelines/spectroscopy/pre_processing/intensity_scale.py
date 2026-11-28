@@ -53,15 +53,15 @@ def counts_per_second_factor(header: Any) -> float | None:
     if header is None:
         return None
     try:
-        exposure_seconds = float(header.get("EXPTIME", 0.0) or 0.0)
+        exposure_s = float(header.get("EXPTIME", 0.0) or 0.0)
         bits_per_pixel = int(header.get("BITPIX", 0) or 0)
         stack_count = int(header.get("STACKCNT", 0) or 0)
     except TypeError, ValueError:
         return None
-    if exposure_seconds <= 0:
+    if exposure_s <= 0:
         return None
     if bits_per_pixel == FLOAT_STACK_BITPIX and stack_count > 0:
-        return resolve(FULL_SCALE_COUNTS).value / (exposure_seconds / stack_count)
+        return resolve(FULL_SCALE_COUNTS).value / (exposure_s / stack_count)
     if bits_per_pixel > 0 and stack_count == 0:
-        return 1.0 / exposure_seconds
+        return 1.0 / exposure_s
     return None

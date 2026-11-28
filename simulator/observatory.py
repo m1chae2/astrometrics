@@ -588,11 +588,11 @@ class SimulatedObservatory:
         The local ports for the INDI server and the stand-in PHD2.
     replay_night : `str`, optional
         The night to play (``YYYY-MM-DD``) for the replay kind.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         Seconds per simulated exposure for the simulated-sky kind.
     replay_options : `~collections.abc.Mapping`, optional
         Keyword arguments for `night_replay.build_plan` (``speed``,
-        ``window_seconds``, ``preload_frames``) in the replay kind.
+        ``window_s``, ``preload_frames``) in the replay kind.
     replay_staged : `bool`, optional
         `True` when the night was already staged in ``<root>/replay``, so
         `start` uses it as it is.
@@ -637,7 +637,7 @@ class SimulatedObservatory:
         indi_port: int,
         phd2_port: int,
         replay_night: str | None = None,
-        exposure_seconds: float = 60.0,
+        exposure_s: float = 60.0,
         replay_options: Mapping | None = None,
         replay_staged: bool = False,
         auto_start_replay: bool = True,
@@ -657,7 +657,7 @@ class SimulatedObservatory:
         self.indi_port = indi_port
         self.phd2_port = phd2_port
         self.replay_night = replay_night
-        self.exposure_seconds = exposure_seconds
+        self.exposure_s = exposure_s
         self.replay_options = dict(replay_options or {})
         self.replay_staged = replay_staged
         self.auto_start_replay = auto_start_replay
@@ -1018,7 +1018,7 @@ class SimulatedObservatory:
                     "--indi-port", str(self.indi_port),
                     "--standin", str(self.standin_home),
                     "--stats", str(stats / "driver_stats.json"),
-                    "--exposure-seconds", str(self.exposure_seconds),
+                    "--exposure-seconds", str(self.exposure_s),
                     "--target", self.sky_target_name,
                     "--ra-hours", str(SIMULATED_TARGET_RA_HOURS),
                     "--dec-degrees", str(SIMULATED_TARGET_DEC_DEGREES),

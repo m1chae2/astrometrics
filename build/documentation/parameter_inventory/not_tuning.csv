@@ -70,31 +70,20 @@ astrometricslib/_internal/drivers/sky_tiles.py,_GAIA_HEALPIX_LEVEL,Gaia ID forma
 astrometricslib/_internal/drivers/sky_tiles.py,_MAXIMUM_POINTS_PER_BLOCK,Memory cap on one block of sample points; no result change
 astrometricslib/_internal/drivers/sky_tiles.py,_SAMPLES_PER_PIXEL_WIDTH,Sampling resolution for pixel coverage; structure
 astrometricslib/_internal/drivers/sky_tiles.py,_SOURCE_ID_PIXEL_SHIFT,Gaia ID format constant
-astrometricslib/api/jobs.py,Jobs.query.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/jobs.py,Jobs.query.lines,Row or item cap that callers pass; plumbing
+astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_values.clip_sigma,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_values.maximum_passes,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/api/_quality_building_blocks.py,QualityBlocks.measure_clipped_values.minimum_count,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/api/_quality_building_blocks.py,QualityDetections.measure_profile.cut_angle_deg,A direction chosen by the caller; 0 means along a column
+astrometricslib/api/_target_frames.py,TargetFrames.query.offset,Pagination start; 0 means from the first row
+astrometricslib/api/calibration.py,CalibrationCatalog.query.offset,Pagination start; 0 means from the first row
+astrometricslib/api/jobs.py,Jobs.get_log.lines,Row or item cap that callers pass; plumbing
 astrometricslib/api/jobs.py,Jobs.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/jobs.py,MAXIMUM_JOBS,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_LINEAGE_RUNS,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_LOG_LINES,software plumbing
-astrometricslib/api/jobs.py,MAXIMUM_RESULT_LENGTH,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_TEXT_LENGTH,Reply size cap; plumbing
-astrometricslib/api/jobs.py,MAXIMUM_WARNINGS,Reply size cap; plumbing
-astrometricslib/api/jobs.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
-astrometricslib/api/quality.py,QualityRecords.measure_folder.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/quality.py,QualityRecords.measure_frames.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/quality.py,QualityRecords.measure_star_profile.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
-astrometricslib/api/quality.py,QualityRecords.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/stars.py,StellarCatalog.query.limit,Row or item cap that callers pass; plumbing
+astrometricslib/api/observatories.py,ObservatoryConfigurations.query.offset,Pagination start; 0 means from the first row
+astrometricslib/api/quality.py,QualityMeasurements.query.offset,Pagination start; 0 means from the first row
 astrometricslib/api/stars.py,StellarCatalog.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/targets.py,TargetCatalog.get_frame.index,Index of the frame or layer; 0 means the first
-astrometricslib/api/targets.py,TargetCatalog.imaged_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
-astrometricslib/api/targets.py,TargetCatalog.query.include_frames,Count of frames to list; 0 means none
-astrometricslib/api/targets.py,TargetCatalog.query.limit,Row or item cap that callers pass; plumbing
+astrometricslib/api/targets.py,TargetCatalog.measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/api/targets.py,TargetCatalog.query.offset,Pagination start; 0 means from the first row
-astrometricslib/api/visualization.py,DEFAULT_IMAGE_FIGURE_SIZE,Figure size of a render_fits figure; display only
-astrometricslib/api/visualization.py,Visualization.plot.limit,Row or item cap that callers pass; plumbing
-astrometricslib/api/visualization.py,Visualization.render_fits.index,Index of the frame or layer; 0 means the first
-astrometricslib/api/visualization.py,_DEFAULT_FIGURE_SIZES,Plumbing or protocol constant
+astrometricslib/api/visualization.py,CHART_STAR_LIMIT,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/_system_posix.py,PR_SET_PDEATHSIG,"The Linux prctl option number for the parent-death signal, fixed by the kernel API"
 astrometricslib/foundation/config.py,CONFIG_RECHECK_SECONDS,Plumbing or protocol constant
 astrometricslib/foundation/config.py,[Observatory.Constraints] max_altitude,"Physical limit of altitude, used as the setting's default"
@@ -108,10 +97,11 @@ astrometricslib/foundation/config.py,[Processing.Parallelism] worker_niceness,Pr
 astrometricslib/foundation/config.py,[Processing.Siril] flat_match_time_limit_seconds,Operational time budget of the flat-to-light match; not tuning
 astrometricslib/foundation/config.py,[Processing] prefetch_workers,Plumbing: worker count
 astrometricslib/foundation/errors.py,RPC_CODES,Plumbing or protocol constant
+astrometricslib/foundation/jobs/background.py,JOB_RECORD_WAIT_SECONDS,Extra wait for a slow disk to write the job row; plumbing
+astrometricslib/foundation/jobs/background.py,run_as_background_job.grace_period_seconds,How long a caller waits before answering with the job id; plumbing
 astrometricslib/foundation/jobs/runner.py,JobHandle.mark.progress_current,Progress value of a finished job; plumbing
-astrometricslib/foundation/jobs/runner.py,_JOB_RECORD_WAIT_SECONDS,Extra wait for a slow job-row write after the grace period; plumbing
+astrometricslib/foundation/jobs/runner.py,_BorrowedJobHandle.mark.progress_current,Progress value of a finished job; plumbing
 astrometricslib/foundation/jobs/runner.py,background_job.grace_period_seconds,Job wait before returning a handle; plumbing
-astrometricslib/foundation/jobs/runner.py,run_as_background_job.grace_period_seconds,Job wait before returning a handle; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore._connect.timeout,Timeout or wait; affects only failure handling
 astrometricslib/foundation/jobs/store.py,JobStore.get_jobs_by_target.limit,Row or item cap that callers pass; plumbing
 astrometricslib/foundation/jobs/store.py,JobStore.get_recent_jobs.limit,Row or item cap that callers pass; plumbing
@@ -140,6 +130,9 @@ astrometricslib/foundation/storage/process_locks.py,acquire_resource_slot.poll_i
 astrometricslib/foundation/storage/process_locks.py,describe_slot_holders.max_slots,Slot count of the shared work lock; plumbing
 astrometricslib/foundation/storage/process_locks.py,list_slot_holders.max_slots,Slot count of the shared work lock; plumbing
 astrometricslib/foundation/versioned_cache.py,VERSIONED_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
+astrometricslib/models/observatory_configuration.py,ARCSEC_PER_DEGREE,Unit conversion constant
+astrometricslib/models/observatory_configuration.py,SIDEREAL_DEGREES_PER_HOUR,unit or physical constant
+astrometricslib/models/page.py,Page.of.offset,Default start of a page: the first match
 astrometricslib/models/stellar_source.py,BRIGHTEST_CATALOG_MAGNITUDE,Physical limit of apparent magnitudes (Sirius)
 astrometricslib/pipelines/asteroid_detection/detection.py,_LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON,Division-by-zero guard
 astrometricslib/pipelines/asteroid_detection/detection.py,_POLAR_COS_DEC_LIMIT,Switch to exact distance near poles; accuracy guard
@@ -190,6 +183,7 @@ astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_MAX_AT
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,DEFAULT_REQUEST_DELAY_SECONDS,Request pacing to remote service
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,_RETRY_BACKOFF_BASE_SECONDS,Retry backoff base
 astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,derive_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
+astrometricslib/pipelines/astrometry/utilities/catalog_seeding.py,measure_field_centers.max_frames_per_target,Cap on frames read to find field centers; sampling only
 astrometricslib/pipelines/photometry/post_processing/known_variability_labels.py,split_scores_by_catalog_status.chunk_size,Query batch size; plumbing
 astrometricslib/pipelines/photometry/post_processing/record_noise_budget.py,[Observatory.Location] elevation,Site setting; the default of zero stands for sea level
 astrometricslib/pipelines/photometry/post_processing/record_quality.py,MAXIMUM_TIMESTAMP_REASONS_SHOWN,Display cap on quoted reasons
@@ -235,16 +229,19 @@ astrometricslib/pipelines/photometry/processing/variability_indices.py,false_ala
 astrometricslib/pipelines/photometry/run_warnings.py,_MAXIMUM_KEPT_WARNINGS,Row or item cap on distinct warnings kept; later ones are counted; plumbing
 astrometricslib/pipelines/photometry/session_tie.py,_MAXIMUM_CLIP_ROUNDS,Safety limit on the clipping loop; it settles in two or three rounds
 astrometricslib/pipelines/photometry/session_tie.py,_MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
+astrometricslib/pipelines/photometry/star_inspection.py,measure_star_profile.cut_angle_deg,A direction chosen by the caller; 0 means along a column
 astrometricslib/pipelines/shared/binned_sky_plane.py,block_medians.minimum_valid_fraction,Default that keeps every block: callers pass their own share
 astrometricslib/pipelines/shared/catalog_star_identity.py,_ALIAS_NAME_RANK_LIMIT,Which SIMBAD names are kept as aliases for display; no measurement uses them
 astrometricslib/pipelines/shared/catalog_star_identity.py,_MAXIMUM_ALIASES,Cap on the aliases kept for display; record size only
+astrometricslib/pipelines/shared/equipment.py,query_configurations.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/frame_scanning.py,HEADER_FIELDS_VERSION,Record format version: which header fields a frame record holds; not a measurement
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_LIFETIME_DAYS,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ANSWER_TILE_LEVEL,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/shared/gaia_star_colors.py,_ROW_LIMIT,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/shared/image_conversions.py,ImageConverter.convert_fits_to_png_with_stats.max_dimensions,Display size cap for an image; not used in results
-astrometricslib/pipelines/shared/image_conversions.py,get_frame.index,Index of the frame or layer; 0 means the first
-astrometricslib/pipelines/shared/image_conversions.py,render_data_url.max_dimensions,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,DEFAULT_MAX_DIMENSIONS,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,LARGEST_MAX_DIMENSIONS,Display size cap for an image; not used in results
+astrometricslib/pipelines/shared/image_conversions.py,SMALLEST_CROP_SIDE_PX,Smallest zoomed piece of a picture; display only
+astrometricslib/pipelines/shared/image_conversions.py,SMALLEST_MAX_DIMENSIONS,Display size cap for an image; not used in results
 astrometricslib/pipelines/shared/image_scaling.py,PREVIEW_SAMPLE_SEED,software plumbing
 astrometricslib/pipelines/shared/image_scaling.py,_AUTOSTRETCH_SKY_SAMPLE_COUNT,Sampling size for sky median
 astrometricslib/pipelines/shared/image_scaling.py,_FULL_SCALE_16_BIT,Largest value of a 16-bit integer image (data format)
@@ -255,6 +252,9 @@ astrometricslib/pipelines/shared/image_scaling.py,_SKY_MAXIMUM_CLIP_ROUNDS,Round
 astrometricslib/pipelines/shared/image_scaling.py,_SKY_MINIMUM_SAMPLE_PIXELS,Fewest sampled pixels that can describe the sky; a data-sufficiency floor
 astrometricslib/pipelines/shared/image_scaling.py,_WHITE_COUNT_STRIDE,Speed stride for counting
 astrometricslib/pipelines/shared/image_scaling.py,_autostretch_parameters.full_scale,Default full scale of a floating-point image (data format)
+astrometricslib/pipelines/shared/job_history.py,STALE_AFTER_MINUTES,display timeout for a job shown as dead
+astrometricslib/pipelines/shared/job_history.py,get_job_log.lines,Row or item cap that callers pass; plumbing
+astrometricslib/pipelines/shared/job_history.py,query_jobs.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/neighbor_masking.py,NeighborField.around.exclude_radius,Argument default of 0 meaning no star is excluded
 astrometricslib/pipelines/shared/quality/background_measurement.py,BACKGROUND_LEVEL_METHOD,Version number of the background estimator (a label for stored values; not tuning)
 astrometricslib/pipelines/shared/quality/calibration_frame_measurement.py,NEIGHBOR_NOISE_COLUMN_STEP,Pixel step set by color sensor pattern
@@ -269,13 +269,14 @@ astrometricslib/pipelines/shared/quality/saturation.py,NORMALISED_STACK_MAXIMUM,
 astrometricslib/pipelines/shared/quality/star_profile.py,MINIMUM_RADIUS_PX,Fewest pixels the four-number Moffat fit needs; refuses a smaller request
 astrometricslib/pipelines/shared/quality/star_profile.py,_BETA_LIMITS,Bounds that keep the Moffat fit from running off to a flat or a spiked curve
 astrometricslib/pipelines/shared/quality/star_profile.py,_CURVE_POINT_COUNT,Number of points drawn for the fitted curve; does not change a measured value
-astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_degrees,A direction chosen by the caller; 0 means along a column
+astrometricslib/pipelines/shared/quality/star_profile.py,measure_star_profile_in_file.cut_angle_deg,A direction chosen by the caller; 0 means along a column
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,BAYER_CELL_SIZE_PX,Sensor structure (Bayer cell)
 astrometricslib/pipelines/shared/quality/star_profile_fitting.py,MOFFAT_BETA_START,Starting guess for fit; no effect on result
-astrometricslib/pipelines/shared/quality/star_profile_fitting.py,_MINOR_AXIS_START_RATIO,"Starting guess for fit (minor axis 5 percent wider so the exact angle derivative is not zero); no effect on result beyond optimizer noise"
+astrometricslib/pipelines/shared/quality/star_profile_fitting.py,_MINOR_AXIS_START_RATIO,Starting guess for fit (minor axis 5 percent wider so the exact angle derivative is not zero); no effect on result beyond optimizer noise
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_ITERATIONS,"Rounds of sigma clipping for the ring sky plane; the same 5 rounds as the profile sky, and the fit settles in fewer"
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_CLIP_SIGMA,Clipping limit of the ring sky plane; the same 3 sigma as the profile sky
 astrometricslib/pipelines/shared/quality/star_ring.py,_SKY_MINIMUM_PIXELS,"Fewest pixels the sky annulus needs, as for the profile's sky; below it the profile sky is used"
+astrometricslib/pipelines/shared/quality/stored_measurements.py,query_measurements.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/quality/time_budget.py,FRAME_MEASUREMENT_TIME_BUDGET_SECONDS,Plumbing: time budget
 astrometricslib/pipelines/shared/registration_record.py,HOMOGRAPHY_LENGTH,Homography has nine entries
 astrometricslib/pipelines/shared/registration_record.py,REGISTRATION_RECORD_VERSION,software plumbing
@@ -287,13 +288,9 @@ astrometricslib/pipelines/shared/solved_star_list.py,SOLVED_STARS_FILE_VERSION,V
 astrometricslib/pipelines/shared/star_analysis.py,MAXIMUM_ROWS_PER_LIST,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,TOP_CANDIDATES,List length for display
 astrometricslib/pipelines/shared/star_analysis.py,_round.digits,Rounding digits for display
-astrometricslib/pipelines/shared/star_catalog_queries.py,MAXIMUM_MATCH_RANKING,Read cap for ranking
-astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_LIMITS,Reply size limits
-astrometricslib/pipelines/shared/star_catalog_queries.py,QUERY_MAXIMUM_RADIUS_DEGREES,Reply size cap on query radius
+astrometricslib/pipelines/shared/star_catalog_queries.py,query_stars.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/star_overlay.py,SUMMARY_PASS_MINIMUM,Overlay pass size
-astrometricslib/pipelines/shared/target_overview.py,MAXIMUM_FRAME_ROWS,Reply row cap
-astrometricslib/pipelines/shared/target_overview.py,QUALITY_LIST_LENGTH,Reply list length
-astrometricslib/pipelines/shared/target_overview.py,describe_target.include_frames,Count of frames to list; 0 means none
+astrometricslib/pipelines/shared/target_overview.py,query_targets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/shared/target_sessions.py,SESSION_NIGHT_BOUNDARY_HOUR,Noon night boundary convention; duplicates item 193
 astrometricslib/pipelines/shared/variable_star_catalogs.py,FIELD_QUERY_TIMEOUT_SECONDS,Network deadline for one VizieR request; does not change any result
 astrometricslib/pipelines/shared/variable_star_catalogs.py,FIELD_RADIUS_DEGREES,Request size only; stars are matched the same way whatever the grouping
@@ -349,11 +346,11 @@ astrometricslib/pipelines/spectroscopy/pre_processing/spectral_resolution.py,MIN
 astrometricslib/pipelines/spectroscopy/pre_processing/spectral_resolution.py,PROFILE_BLUR_LEVELS,Approximation level count
 astrometricslib/pipelines/spectroscopy/pre_processing/spectroscopy_instrument.py,_NM_TO_MM,unit or physical constant
 astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,MEDIAN_STANDARD_ERROR_FACTOR,Statistical constant sqrt(pi/2)
-astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor._compute_centroid_reference_point.angle_degrees,0 means no rotation; the caller passes the angle
+astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor._compute_centroid_reference_point.angle_deg,0 means no rotation; the caller passes the angle
 astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor._compute_centroid_reference_point.trail_side,Sign convention (+1 or -1); not tuned
 astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor._recentre_centroid_window.iterations,Iteration cap of a convergence loop
-astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor.extract_with_flare_mask.angle_degrees,0 means no rotation; the caller passes the angle
-astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor.extract_with_flare_mask_traced.angle_degrees,0 means no rotation; the caller passes the angle
+astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor.extract_with_flare_mask.angle_deg,0 means no rotation; the caller passes the angle
+astrometricslib/pipelines/spectroscopy/pre_processing/spectrum_extractor.py,SpectrumExtractor.extract_with_flare_mask_traced.angle_deg,0 means no rotation; the caller passes the angle
 astrometricslib/pipelines/spectroscopy/pre_processing/wavelength_zero_point.py,SEARCH_STEP_ANGSTROM,Numerical search grid step
 astrometricslib/pipelines/spectroscopy/processing/class_gap_calibration.py,CLASS_GAP_DEFINITION_VERSION,software plumbing
 astrometricslib/pipelines/spectroscopy/processing/class_gap_calibration.py,_MAXIMUM_BISECTION_STEPS,Bisection step cap
@@ -373,6 +370,10 @@ astrometricslib/pipelines/spectroscopy/runner.py,_CATALOG_SLICE_SIZE,Database re
 astrometricslib/pipelines/spectroscopy/spectrum_tuning_data.py,_LOAD_CHUNK_SIZE,Batch size for reading stored stars in a tuning run; affects only memory use
 astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py,_FRACTIONAL_PROMINENCE_STEP,Search step size
 astrometricslib/pipelines/spectroscopy/utilities/registration_quality.py,_UNBOUNDED_SIGMA,Unbounded sigma sentinel
+astrometricslib/pipelines/stacking/building_blocks.py,clipped_values.clip_sigma,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/pipelines/stacking/building_blocks.py,clipped_values.maximum_passes,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/pipelines/stacking/building_blocks.py,clipped_values.minimum_count,A script's own clipping choice; the pipelines pass their tuned values
+astrometricslib/pipelines/stacking/calibration_catalog.py,query_calibration_sets.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,CALIBRATION_MEASUREMENT_WORKERS,software plumbing
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,FAILURE_NOTES_LIMIT,"Save interval, log limit or placeholder; plumbing only."
 astrometricslib/pipelines/stacking/calibration_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
@@ -384,6 +385,7 @@ astrometricslib/pipelines/stacking/frame_measurement_run.py,FAILURE_NOTES_LIMIT,
 astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_COUNT,Plumbing: worker count
 astrometricslib/pipelines/stacking/frame_measurement_run.py,MEASUREMENT_WORKER_NICENESS,"Process niceness; courtesy value, no effect on results."
 astrometricslib/pipelines/stacking/frame_measurement_run.py,STAMP_SAVE_INTERVAL_FRAMES,"Save interval, log limit or placeholder; plumbing only."
+astrometricslib/pipelines/stacking/frame_queries.py,query_frames.offset,Pagination start; 0 means from the first row
 astrometricslib/pipelines/stacking/frame_screening.py,BACKGROUND_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUALITY_ROWS_WINDOW,Progress-bar windows; display only.
 astrometricslib/pipelines/stacking/frame_screening.py,QUARANTINE_WINDOW,Progress-bar windows; display only.
@@ -512,8 +514,8 @@ astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPT
 astrometricslib/pipelines/stacking/processing/group_star_gains.py,STAR_GAIN_EMPTY_APERTURE_SEED,software plumbing
 astrometricslib/pipelines/stacking/processing/image_registration.py,COVERED_PIXEL_THRESHOLD,"Sampling, numerics, plumbing or math constant."
 astrometricslib/pipelines/stacking/processing/image_registration.py,_INVERSE_ROUNDS,"Sampling, numerics, plumbing or math constant."
-astrometricslib/pipelines/stacking/processing/image_registration.py,_TERM_COUNT,"Number of terms of a quadratic in two variables; math constant."
-astrometricslib/pipelines/stacking/processing/image_registration.py,_WARP_ROWS_PER_BLOCK,"Memory block size of the resampling; plumbing."
+astrometricslib/pipelines/stacking/processing/image_registration.py,_TERM_COUNT,Number of terms of a quadratic in two variables; math constant.
+astrometricslib/pipelines/stacking/processing/image_registration.py,_WARP_ROWS_PER_BLOCK,Memory block size of the resampling; plumbing.
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_FRAMES,software plumbing
 astrometricslib/pipelines/stacking/stage_progress.py,LOOP_LOG_EVERY_SECONDS,software plumbing
 astrometricslib/pipelines/tasks.py,STACKING_TIMEOUT_BASE_SECONDS,Plumbing: timeout
@@ -543,7 +545,7 @@ astrometricslib/visualization/helpers.py,plot_target_dashboard.limit,Row or item
 astrometricslib/visualization/helpers.py,plot_target_photometry.limit,Row or item cap that callers pass; plumbing
 astrometricslib/visualization/helpers.py,plot_target_spectroscopy.limit,Row or item cap that callers pass; plumbing
 astrometricslib/visualization/image_display.py,DETECTION_MARKER_SIZE,Size of an overlay circle on a figure; display only
-astrometricslib/visualization/image_display.py,MARKER_RADIUS_PIXELS,Size of an overlay circle on a PNG; display only
+astrometricslib/visualization/image_display.py,IMAGE_FIGURE_SIZE,Figure size of a plot_image figure; display only
 astrometricslib/visualization/image_display.py,STAR_MARKER_SIZE,Size of an overlay circle on a figure; display only
 astrometricslib/visualization/layers/dispersion_overlay.py,DispersionOverlay.render.active_index,Index of the highlighted star; 0 means the first
 astrometricslib/visualization/layers/image_overlay.py,ImageOverlay.render.percentile,Display stretch percentile; not used in results
@@ -590,28 +592,28 @@ wayfindinglib/analytics/unguided_mount_error.py,_GRID_OVERSAMPLING,numerical gri
 wayfindinglib/analytics/unguided_mount_error.py,_MAD_TO_SIGMA,unit or physical constant
 wayfindinglib/analytics/unguided_mount_error.py,_NOISE_FLOOR_ARCSEC,Division guard for noise-free test data
 wayfindinglib/analytics/unguided_mount_error.py,reconstruct_unguided_error.sign,Sign convention (+1 or -1); not tuned
-wayfindinglib/api/control/guiding.py,GuidingControl.refit_spectrum.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/control/guiding.py,MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC,Input sanity limit
-wayfindinglib/api/control/guiding.py,MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL,Input sanity limit
-wayfindinglib/api/control/guiding.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
-wayfindinglib/api/control/guiding.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
-wayfindinglib/api/control/imaging.py,ImagingControl.capture_image.count,Frame count; 1 means one frame
-wayfindinglib/api/control/imaging.py,ImagingControl.capture_image.delay_seconds,Delay between frames; 0 means none
-wayfindinglib/api/control/imaging.py,ImagingControl.record_focus_model.thermal_coefficient_steps_per_c,0 means no model; the caller passes the fit
-wayfindinglib/api/control/imaging.py,MAXIMUM_BACKLASH_STEPS,Input sanity limit
-wayfindinglib/api/control/imaging.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
-wayfindinglib/api/control/imaging.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
-wayfindinglib/api/control/imaging.py,MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C,Input sanity limit
-wayfindinglib/api/execution.py,ObservationExecution.create_recorder.snapshot_interval_seconds,Recording cadence; plumbing
-wayfindinglib/api/planning.py,MAXIMUM_SOURCES,Reply size cap
-wayfindinglib/api/planning.py,ObservationPlanning.calculate_panels.rotation_deg,0 means no rotation; the caller passes the angle
-wayfindinglib/api/planning.py,ObservationPlanning.get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
-wayfindinglib/api/planning.py,ObservationPlanning.get_visibility.timezone_offset_hours,0 means UTC; the caller passes the offset
-wayfindinglib/api/planning.py,ObservationPlanning.query_sources.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.frame_guiding.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.get_live_session_status.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.query.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/api/review.py,ObservationReview.query_alignment_records.limit,Row or item cap that callers pass; plumbing
+wayfindinglib/api/control/guiding.py,GuidingControl.query_guider_calibrations.offset,Query paging offset; 0 means from the first item
+wayfindinglib/api/control/imaging.py,ImagingControl.capture.count,Frame count; 1 means one frame
+wayfindinglib/api/control/imaging.py,ImagingControl.capture.delay_s,Delay between frames; 0 means none
+wayfindinglib/api/control/imaging.py,ImagingControl.check_capture.count,Frame count; 1 means one frame
+wayfindinglib/api/control/imaging.py,ImagingControl.check_capture.delay_s,Delay between frames; 0 means none
+wayfindinglib/api/control/imaging.py,ImagingControl.query_focus_models.offset,Query paging offset; 0 means from the first item
+wayfindinglib/api/execution.py,ObservationExecution.create_recorder.snapshot_interval_s,Recording cadence; plumbing
+wayfindinglib/api/planning/catalogs.py,PlanningCatalogs.query.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/catalogs.py,PlanningCatalogs.query_sources.radius_deg,Search radius a caller passes; 1 degree is only a starting view
+wayfindinglib/api/planning/packages.py,PlanningPackages.create.priority,0 is the neutral priority; the caller sets the order
+wayfindinglib/api/planning/packages.py,PlanningPackages.query.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/packages.py,PlanningPackages.query_suggestion_log.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/sessions.py,PlanningSessions.query.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.cols,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.overlap_pct,0 means no overlap; the caller passes the overlap
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.rotation_deg,0 means no rotation; the caller passes the angle
+wayfindinglib/api/planning/sky.py,PlanningSky.get_panels.rows,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/api/planning/sky.py,PlanningSky.get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
+wayfindinglib/api/review/alignment.py,ReviewAlignment.query_nights.offset,Pagination start; 0 means from the first row
+wayfindinglib/api/review/guiding.py,ReviewGuiding.query_runs.offset,Pagination start; 0 means from the first row
+wayfindinglib/api/review/nights.py,ReviewNights.query.offset,Pagination start; 0 means from the first row
+wayfindinglib/api/review/nights.py,ReviewNights.query_ekos_sessions.offset,Pagination start; 0 means from the first row
 wayfindinglib/data_access/site_profile_reader.py,FALLBACK_SITE,"Stand-in site used only when Observatory.Location is missing, with a warning; a placeholder, not tuned (WAY-D131)"
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_HEALPIX_LEVEL,Download chunking choice; no result change
 wayfindinglib/drivers/catalog/deep_star_catalog_builder.py,DEFAULT_MAX_ATTEMPTS,Network retry count
@@ -671,10 +673,10 @@ wayfindinglib/drivers/indi_worker.py,_PARENT_LIVENESS_CHECK_SECONDS,Parent liven
 wayfindinglib/drivers/phd2/guide_log_parser.py,_PERCENT_THRESHOLD,Percent versus fraction format detection
 wayfindinglib/drivers/phd2/phd2_client.py,DEFAULT_PHD2_PORT,software plumbing
 wayfindinglib/drivers/phd2/phd2_client.py,PHD2Client.open_session.timeout_seconds,Timeout or wait; affects only failure handling
-wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.dither.settle_timeout_seconds,Timeout or wait; affects only failure handling
+wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.dither.settle_timeout_s,Timeout or wait; affects only failure handling
 wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.events_since.after,Event index to start after; 0 means from the start
 wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.find_star.timeout_seconds,Timeout or wait; affects only failure handling
-wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.guide.settle_timeout_seconds,Timeout or wait; affects only failure handling
+wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.guide.settle_timeout_s,Timeout or wait; affects only failure handling
 wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.set_connected.timeout_seconds,Timeout or wait; affects only failure handling
 wayfindinglib/drivers/phd2/phd2_client.py,PHD2Session.stop_capture.timeout_seconds,Timeout or wait; affects only failure handling
 wayfindinglib/drivers/phd2/phd2_client.py,_DEFAULT_COMMAND_TIMEOUT_SECONDS,Command timeout; failure reporting
@@ -705,8 +707,6 @@ wayfindinglib/drivers/stellarmate_interface.py,_OFFLINE_REPROBE_SECONDS,Offline 
 wayfindinglib/drivers/stellarmate_interface.py,_RSYNC_OVERALL_LIMIT_SECONDS,Transfer safety limit
 wayfindinglib/drivers/stellarmate_interface.py,_RSYNC_STALL_TIMEOUT_SECONDS,Transfer stall timeout; failure reporting
 wayfindinglib/drivers/stellarmate_interface.py,_SSH_PORT,software plumbing
-wayfindinglib/models/equipment_and_site/equipment.py,PLATE_SCALE_CONSTANT,Unit conversion constant
-wayfindinglib/models/equipment_and_site/equipment.py,SIDEREAL_DEGREES_PER_HOUR,unit or physical constant
 wayfindinglib/models/equipment_and_site/equipment_fingerprint.py,_FOCAL_LENGTH_DECIMALS,software plumbing
 wayfindinglib/models/equipment_and_site/equipment_fingerprint.py,_PIXEL_SCALE_DECIMALS,software plumbing
 wayfindinglib/models/planning/sky_source.py,BRIGHTEST_CATALOG_MAGNITUDE,"validity limit copied from astrometricslib, held equal by a test"
@@ -719,9 +719,18 @@ wayfindinglib/session_analysis/recurring_issues.py,_SEVERITY_RANK,Severity order
 wayfindinglib/session_analysis/rule_support.py,_SEVERITY_ORDER,Severity ordering
 wayfindinglib/session_analysis/sky/processing/measure_sky_performance.py,_MINIMUM_SPREAD,Division guard
 wayfindinglib/session_analysis/sky/sky_bins.py,_AZIMUTH_SECTOR_WIDTH,360 degrees divided by the 8 named sectors
+wayfindinglib/tasks/control_tasks/alignment_history.py,query_alignment_nights.offset,Pagination start; 0 means from the first row
 wayfindinglib/tasks/control_tasks/centering.py,IMAGE_WAIT_SECONDS,Wait timeout; plumbing
 wayfindinglib/tasks/control_tasks/centering.py,SETTLE_SECONDS,Decided not tuning in the #175 review (WAY-D139): operational wait after a slew
 wayfindinglib/tasks/control_tasks/centering_exposure.py,ARCSEC_PER_RADIAN,unit or physical constant
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_BACKLASH_STEPS,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_RECORD_ID_LENGTH,Input length limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_SOURCE_NOTE_LENGTH,Input length limit
+wayfindinglib/tasks/control_tasks/control_records.py,MAXIMUM_THERMAL_COEFFICIENT_STEPS_PER_C,Input sanity limit
+wayfindinglib/tasks/control_tasks/control_records.py,query_focus_models.offset,Query paging offset; 0 means from the first item
+wayfindinglib/tasks/control_tasks/control_records.py,query_guider_calibrations.offset,Query paging offset; 0 means from the first item
 wayfindinglib/tasks/control_tasks/frame_end_detection.py,COUNTDOWN_JUMP_SECONDS,Plumbing: detection of a clock jump
 wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_FRAMES,Reply size cap
 wayfindinglib/tasks/control_tasks/frame_guiding.py,MAXIMUM_QUALITY_FRAMES,Cost cap on measuring frames
@@ -732,17 +741,21 @@ wayfindinglib/tasks/control_tasks/guiding_log_ingestion.py,_REFIT_SAMPLE_LIMIT,R
 wayfindinglib/tasks/control_tasks/guiding_log_ingestion.py,refit_and_persist_guiding_spectrum.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/control_tasks/imaging_capture.py,READOUT_SECONDS,Decided not tuning in the #175 review (WAY-D139): operational wait for the readout
 wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.count,Frame count; 1 means one frame
-wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.delay_seconds,Delay between frames; 0 means none
+wayfindinglib/tasks/control_tasks/imaging_capture.py,capture_frames.delay_s,Delay between frames; 0 means none
+wayfindinglib/tasks/control_tasks/imaging_capture.py,check_capture.count,Frame count; 1 means one frame
+wayfindinglib/tasks/control_tasks/imaging_capture.py,check_capture.delay_s,Delay between frames; 0 means none
 wayfindinglib/tasks/control_tasks/live_guiding.py,HISTORY_LIMIT,History buffer size
 wayfindinglib/tasks/control_tasks/live_guiding.py,RETRY_SECONDS,Retry pause between cycles
+wayfindinglib/tasks/control_tasks/live_guiding.py,stop_loop.timeout_s,Wait for a thread to end; plumbing
+wayfindinglib/tasks/control_tasks/live_session_status_task.py,LIVE_SECTION_ITEMS,Reply count cap per section; size only
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,MAXIMUM_STATUS_CHARACTERS,Reply size cap; plumbing
 wayfindinglib/tasks/control_tasks/live_session_status_task.py,get_live_session_status.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/control_tasks/mount_error_tasks.py,_SAMPLE_READ_LIMIT,Read limit; plumbing
 wayfindinglib/tasks/control_tasks/mount_error_tasks.py,measure_guiding_spectrum.limit,Row or item cap that callers pass; plumbing
-wayfindinglib/tasks/control_tasks/night_history.py,DEFAULT_LIMIT,Reply count default
 wayfindinglib/tasks/control_tasks/night_history.py,MAXIMUM_LIMIT,Reply count cap
-wayfindinglib/tasks/control_tasks/night_history.py,MAXIMUM_REPLY_CHARACTERS,Reply size cap; plumbing
-wayfindinglib/tasks/control_tasks/night_history.py,SHRINK_LEVELS,Reply shrinking steps; size only
+wayfindinglib/tasks/control_tasks/night_history.py,query_ekos_sessions.offset,Pagination start; 0 means from the first row
+wayfindinglib/tasks/control_tasks/night_history.py,query_guiding_runs.offset,Pagination start; 0 means from the first row
+wayfindinglib/tasks/control_tasks/night_history.py,query_nights.offset,Pagination start; 0 means from the first row
 wayfindinglib/tasks/control_tasks/pointing_log_ingestion.py,compute_pointing_model.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/control_tasks/remote_transfer_tasks.py,EXAMPLE_FILE_COUNT,Example list size
 wayfindinglib/tasks/control_tasks/remote_transfer_tasks.py,PROGRESS_POLL_SECONDS,Progress poll interval
@@ -751,13 +764,23 @@ wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_GUIDE_FINGERPRINT_F
 wayfindinglib/tasks/control_tasks/session_analysis_tasks.py,_SAMPLE_READ_LIMIT,Read limit; plumbing
 wayfindinglib/tasks/control_tasks/target_changes.py,POSITION_WINDOW_SECONDS,Poll window; plumbing
 wayfindinglib/tasks/control_tasks/target_changes.py,_UNSOLVED_PLACEHOLDER,Sentinel for unsolved position
-wayfindinglib/tasks/control_tasks/target_changes.py,find_target_changes.limit,Row or item cap that callers pass; plumbing
 wayfindinglib/tasks/execution_tasks/queue_runner.py,POLL_SECONDS,Queue poll interval
+wayfindinglib/tasks/execution_tasks/session_execution.py,build_recorder.snapshot_interval_s,Recording cadence; plumbing
 wayfindinglib/tasks/execution_tasks/session_recorder.py,ObservationSessionRecorder.__init__.snapshot_interval_seconds,Recording cadence; plumbing
-wayfindinglib/tasks/planning_tasks/calibration_advisory_tasks.py,_EXPOSURE_MATCH_TOLERANCE_SECONDS,Float round-off tolerance
+wayfindinglib/tasks/planning_tasks/catalog_answers.py,query_catalogs.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/tasks/planning_tasks/catalog_answers.py,query_sources.radius_deg,Search radius a caller passes; 1 degree is only a starting view
 wayfindinglib/tasks/planning_tasks/depth_goal_tasks.py,DEPTH_GOAL_CACHE_MAXIMUM_ENTRIES,Plumbing: cache size
 wayfindinglib/tasks/planning_tasks/mosaic_tasks.py,calculate_panels.rotation_deg,0 means no rotation; the caller passes the angle
+wayfindinglib/tasks/planning_tasks/package_records.py,create_package.priority,0 is the neutral priority; the caller sets the order
+wayfindinglib/tasks/planning_tasks/package_records.py,query_packages.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/tasks/planning_tasks/package_records.py,query_suggestion_log.offset,Paging start that callers pass; 0 is the first match
 wayfindinglib/tasks/planning_tasks/scheduling.py,_DEFAULT_STEP_MINUTES,Unused in file; step default dead
+wayfindinglib/tasks/planning_tasks/session_records.py,query_sessions.offset,Paging start that callers pass; 0 is the first match
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.cols,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.overlap_pct,0 means no overlap; the caller passes the overlap
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.rotation_deg,0 means no rotation; the caller passes the angle
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_panels.rows,Grid size the caller chooses; 1 is a single panel
+wayfindinglib/tasks/planning_tasks/sky_answers.py,get_visibility.minimum_altitude_deg,0 is the horizon; callers pass the site limit
 wayfindinglib/tasks/planning_tasks/target_report_inputs.py,NOISE_HISTORY_CACHE_MAXIMUM_ENTRIES,software plumbing
 wayfindinglib/tasks/planning_tasks/target_report_tasks.py,EKOS_CONTEXT_CACHE_MAXIMUM_ENTRIES,software plumbing
 wayfindinglib/tasks/planning_tasks/target_report_tasks.py,GUIDE_SAMPLE_READ_LIMIT,Read limit; plumbing

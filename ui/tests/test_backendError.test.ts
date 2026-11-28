@@ -2,8 +2,9 @@
  * @fileoverview Unit tests for backend error handling in callBackend.
  *
  * Verifies that a JSON-RPC error carrying an ErrorInfo record becomes a
- * BackendError that keeps the code, details, retry flag and request id, and
- * that the toast shown for it depends on the error's code.
+ * BackendError that keeps the code, details, retry flag, request id and
+ * report, and that the toast shown for it depends on the error's code and
+ * report.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -52,6 +53,22 @@ describe('callBackend error handling', () => {
     expect(error.details).toEqual({ target: 'M 99' });
     expect(error.retryable).toBe(false);
     expect(error.requestId).toBe('abc123');
+    expect(error.report).toBe('error');
+  });
+
+  /** An error the backend marks as a status is never an error toast, even for an action. */
+  it('shows no toast for an error whose report is status', async () => {
+    const toast = vi.spyOn(toastModule, 'emitToast').mockImplementation(() => {});
+    global.fetch = errorReply({
+      code: 'external_service',
+      message: 'The observatory computer is not reachable.',
+      report: 'status',
+    });
+
+    const failure = (await callBackend('telescope:park' as any, {} as any).catch((e: unknown) => e)) as BackendError;
+
+    expect(failure.report).toBe('status');
+    expect(toast).not.toHaveBeenCalled();
   });
 
   /** An error with no data field still becomes a BackendError with the internal code. */

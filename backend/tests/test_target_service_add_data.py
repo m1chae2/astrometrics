@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib._internal.catalog import ReindexReport
 from astrometricslib.exceptions import InvalidArgumentError
 from backend.services.data.target_service import TargetService
 
@@ -28,12 +27,23 @@ def test_add_target_data_lets_the_library_place_a_finished_picture() -> None:
     """A picture goes to the library, which names it the processed image."""
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
-    service.astrometrics.targets.reindex_frames.return_value = ReindexReport(processed_image="/m31.png")
 
     result = service.add_target_data("M31", image_file="/m31.png")
 
     assert result == {"status": "success"}
     target = service.astrometrics.targets.get.return_value
-    service.astrometrics.targets.reindex_frames.assert_called_once_with(
-        target, paths=["/m31.png"], camera_id="Unknown"
-    )
+    service.astrometrics.targets.update.assert_called_once_with(target, processed_image="/m31.png")
+    service.astrometrics.targets.frames.add.assert_not_called()
+
+
+def test_add_target_data_adds_a_fits_file_as_a_frame() -> None:
+    """A FITS file goes to the library's frame add, with the camera."""
+    service = TargetService.__new__(TargetService)
+    service.astrometrics = MagicMock()
+    target = service.astrometrics.targets.get.return_value
+    target.frames = []
+
+    result = service.add_target_data("M31", image_file="/m31.fits", camera="ZWO")
+
+    service.astrometrics.targets.frames.add.assert_called_once_with(target, ["/m31.fits"], camera="ZWO")
+    assert result["status"] == "success"

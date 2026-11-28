@@ -19,7 +19,7 @@ def test_enclosure_constructs_with_defaults() -> None:
     )
     assert enclosure.present is True
     assert enclosure.clearance_tolerance_deg == pytest.approx(2.0)
-    assert enclosure.motion_timeout_sec == 180
+    assert enclosure.motion_timeout_s == 180
 
 
 def test_enclosure_present_false_distinguishable_from_default() -> None:

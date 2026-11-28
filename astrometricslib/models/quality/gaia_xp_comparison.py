@@ -15,7 +15,7 @@ calculations are in
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class GaiaXpBandResidual(BaseModel):
@@ -70,10 +70,26 @@ class GaiaXpComparison(BaseModel):
     # means the observed spectrum is too bright in the red compared with XP.
     # This is a tilt of the instrument response or of the extinction
     # correction.
-    slope_percent_per_1000_angstrom: float | None = Field(default=None, alias="slopePercentPer1000Angstrom")
+    slope_pct_per_1000_angstrom: float | None = Field(
+        default=None,
+        alias="slopePctPer1000Angstrom",
+        validation_alias=AliasChoices(
+            "slopePctPer1000Angstrom",
+            "slope_pct_per_1000_angstrom",
+            "slopePercentPer1000Angstrom",
+            "slope_percent_per_1000_angstrom",
+        ),
+    )
     # The one-sigma error of the slope, in the same unit.
-    slope_error_percent_per_1000_angstrom: float | None = Field(
-        default=None, alias="slopeErrorPercentPer1000Angstrom"
+    slope_error_pct_per_1000_angstrom: float | None = Field(
+        default=None,
+        alias="slopeErrorPctPer1000Angstrom",
+        validation_alias=AliasChoices(
+            "slopeErrorPctPer1000Angstrom",
+            "slope_error_pct_per_1000_angstrom",
+            "slopeErrorPercentPer1000Angstrom",
+            "slope_error_percent_per_1000_angstrom",
+        ),
     )
     # How far the observed spectrum's features sit redward of XP's, in
     # Angstroms, from the cross-correlation of the two spectra's logarithmic
@@ -145,9 +161,23 @@ class GaiaXpRunSummary(BaseModel):
     # The median over the compared stars of the signed slope, in percent of
     # the flux at 5500 Angstroms per 1000 Angstroms, and of its absolute
     # value. The gate `gaia_xp_agreement` judges the second.
-    median_slope_percent_per_1000_angstrom: float | None = Field(
-        default=None, alias="medianSlopePercentPer1000Angstrom"
+    median_slope_pct_per_1000_angstrom: float | None = Field(
+        default=None,
+        alias="medianSlopePctPer1000Angstrom",
+        validation_alias=AliasChoices(
+            "medianSlopePctPer1000Angstrom",
+            "median_slope_pct_per_1000_angstrom",
+            "medianSlopePercentPer1000Angstrom",
+            "median_slope_percent_per_1000_angstrom",
+        ),
     )
-    median_absolute_slope_percent_per_1000_angstrom: float | None = Field(
-        default=None, alias="medianAbsoluteSlopePercentPer1000Angstrom"
+    median_absolute_slope_pct_per_1000_angstrom: float | None = Field(
+        default=None,
+        alias="medianAbsoluteSlopePctPer1000Angstrom",
+        validation_alias=AliasChoices(
+            "medianAbsoluteSlopePctPer1000Angstrom",
+            "median_absolute_slope_pct_per_1000_angstrom",
+            "medianAbsoluteSlopePercentPer1000Angstrom",
+            "median_absolute_slope_percent_per_1000_angstrom",
+        ),
     )

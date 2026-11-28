@@ -55,8 +55,8 @@ import { ImageProcessingDisplay } from '../ImageProcessingDisplay';
 
 /** Two raw frames; the second has the longer exposure. */
 const RAW_FILES = [
-    { path: '/raw/a.fits', name: 'a.fits', camera: 'cam', iso: '', exposure: '10', filter: 'L', date: '' },
-    { path: '/raw/b.fits', name: 'b.fits', camera: 'cam', iso: '', exposure: '60', filter: 'L', date: '' },
+    { path: '/raw/a.fits', name: 'a.fits', camera: 'cam', gain: null, exposureS: 10, filter: 'L', date: '' },
+    { path: '/raw/b.fits', name: 'b.fits', camera: 'cam', gain: null, exposureS: 60, filter: 'L', date: '' },
 ];
 
 /** Sets what the backend returns for the target's files; a promise delays the reply. */

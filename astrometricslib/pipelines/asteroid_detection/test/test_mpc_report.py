@@ -108,7 +108,7 @@ def test_candidate_lines_are_in_time_order_and_count_frames_without_exposure_tim
             pixel_y=10.0,
             right_ascension_deg=150.0,
             declination_deg=-12.5,
-            exposure_seconds=exposure,
+            exposure_s=exposure,
         )
         for index, exposure in ((2, None), (0, 120.0), (1, 120.0))
     ]
@@ -147,7 +147,7 @@ def _detections_with_errors() -> list[FrameDetection]:
             pixel_y=10.0,
             right_ascension_deg=150.0 + 0.001 * index,
             declination_deg=-12.5,
-            exposure_seconds=None if index == 1 else 120.0,
+            exposure_s=None if index == 1 else 120.0,
             astrometric_error_ra_arcsec=None if index == 1 else 0.31 + 0.1 * index,
             astrometric_error_dec_arcsec=None if index == 1 else 0.42,
             astrometric_error_correlation=None if index == 1 else -0.25,

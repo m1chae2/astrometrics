@@ -4,6 +4,8 @@
  * The backend sends every failure as an `ErrorInfo` record inside the JSON-RPC
  * `error.data` field. `BackendError` keeps that record so the UI can decide
  * what to show from the error's code instead of reading its message text.
+ * The record's `report` says how to show it: `status` (a status chip shows it,
+ * so no error message), `error` (an error message) or `notify`.
  */
 
 import type { ErrorInfo } from '../types/backendTypes';
@@ -21,6 +23,9 @@ export type BackendErrorCode =
     | 'processing'
     | 'internal';
 
+/** How the backend says an error is shown: a status, an error message, or a notification. */
+export type BackendErrorReport = 'status' | 'error' | 'notify';
+
 /** A failure reported by the backend. */
 export class BackendError extends Error {
     /** The error code, such as `not_found` or `hardware`. */
@@ -31,6 +36,8 @@ export class BackendError extends Error {
     readonly retryable: boolean;
     /** The id of the failed call. The backend writes it on every log line of the call. */
     readonly requestId: string | null;
+    /** How to show the error. A `status` error is shown by a status chip, not as an error message. */
+    readonly report: BackendErrorReport;
 
     /**
      * @param info The error record from the backend.
@@ -42,6 +49,7 @@ export class BackendError extends Error {
         this.details = info.details ?? {};
         this.retryable = info.retryable ?? false;
         this.requestId = info.requestId ?? null;
+        this.report = info.report === 'status' || info.report === 'notify' ? info.report : 'error';
     }
 }
 

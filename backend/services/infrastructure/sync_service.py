@@ -15,6 +15,7 @@ import threading
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib import Target
 from astrometricslib.exceptions import AstrometricsError
 from backend.services.infrastructure import thread_management
 from backend.services.infrastructure.background_logging import background_log_context
@@ -61,6 +62,7 @@ class SyncService:
         suggestion_trigger: Callable[[list[str]], None] | None = None,
         socket_manager: Any = None,
         calibration_trigger: Callable[[Iterable[str]], Any] | None = None,
+        targets: Any = None,
     ) -> None:
         """Keep the observatory control.
 
@@ -76,22 +78,48 @@ class SyncService:
             so the package suggestions can be refreshed (new frames change
             what is complete). It must not raise; a failure is logged here too.
         socket_manager : `SocketManager`, optional
-            Sends the ``library:frames_updated`` event as soon as new frames
-            are copied and indexed, before they are measured, and the
+            Sends the ``library:frames_updated`` event when a sync added
+            frames, and the
             ``library:guiding_updated`` event when a log sync stores guiding
             samples. None sends nothing.
         calibration_trigger : `Callable`, optional
             Called with the set of frame kinds (``"dark"``, ``"bias"``) a
             calibration folder sync added, so they are measured. It must not
             raise; a failure is logged here too.
+        targets : `TargetCatalog`, optional
+            ``astrometrics.targets``, which turns the id the UI sends into
+            the `Target` the library copies frames for.
         """
         self._calibration_trigger = calibration_trigger
+        self._targets = targets
         self._observatory = observatory_api
         self._measurement_announcer = measurement_announcer
         self._suggestion_trigger = suggestion_trigger
         self._socket_manager = socket_manager
         self._log_sync_lock = threading.Lock()
         self._log_sync_thread: threading.Thread | None = None
+
+    def _sync_frames(self, object_id: str, dry_run: bool = False) -> Any:
+        """Ask the library to copy one target's or calibration folder's frames.
+
+        Parameters
+        ----------
+        object_id : `str`
+            A target id, or ``Bias``, ``Dark`` or ``Flat``.
+        dry_run : `bool`, optional
+            Only plan the copy.
+
+        Returns
+        -------
+        result : `FrameSyncResult`
+            The library's result.
+        """
+        remote = self._observatory.remote
+        if object_id.strip().lower() in CALIBRATION_FOLDER_NAMES:
+            return remote.sync_frames(kind=object_id.strip().lower(), dry_run=dry_run)
+        target = self._targets.get(object_id) if self._targets is not None else None
+        # A remote folder with no library target yet: the copy creates it.
+        return remote.sync_frames(target or Target(id=object_id), dry_run=dry_run)
 
     def start_sync(
         self,
@@ -129,7 +157,7 @@ class SyncService:
             library's plan as plain data.
         """
         if dry_run:
-            plan = self._observatory.remote.sync_frames(object_id, dry_run=True)
+            plan = self._sync_frames(object_id, dry_run=True)
             return {"started": False, "target_id": object_id, "dry_run": True, "plan": _plain(plan)}
 
         def run() -> None:
@@ -141,14 +169,10 @@ class SyncService:
             """Copy the frames, tell the app and call the finish listener."""
             result = None
             try:
-
-                def announce_copied(frames_added: int) -> None:
-                    """Tell the app the new frames are in the library."""
-                    self._announce_frames_updated(object_id, frames_added)
-
-                result = self._observatory.remote.sync_frames(
-                    object_id, on_copied=announce_copied, register_job=True
-                )
+                result = self._sync_frames(object_id)
+                added = getattr(result, "transferred", None) or 0
+                if added:
+                    self._announce_frames_updated(object_id, added)
                 self._announce_measurements(object_id, result)
                 self._trigger_calibration_measurement(object_id, result)
                 self._trigger_suggestions(object_id)
@@ -177,9 +201,8 @@ class SyncService:
     def _announce_frames_updated(self, object_id: str, frames_added: int) -> None:
         """Tell the app that frames were added, so its frame lists reload.
 
-        This runs after the copy and re-index, before the frames are
-        measured, so a new frame shows up at once. A failure is logged and
-        never changes the sync's result.
+        This runs when the sync ends, after the new frames were measured.
+        A failure is logged and never changes the sync's result.
 
         Parameters
         ----------
@@ -394,9 +417,9 @@ class SyncService:
             plain data.
         """
         if dry_run:
-            plan = self._observatory.remote.sync_logs(dry_run=True, register_job=False)
+            plan = self._observatory.remote.sync_logs(dry_run=True)
             return {"status": "plan", "plan": _plain(plan)}
-        result = self._observatory.remote.sync_logs(register_job=True)
+        result = self._observatory.remote.sync_logs()
         guide_logs = result.guide_logs
         downloaded = (guide_logs.to_download or 0) if guide_logs and guide_logs.supported else 0
         ingested = result.ingested if isinstance(result.ingested, dict) else {}

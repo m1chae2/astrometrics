@@ -106,7 +106,7 @@ def warm_start_up_caches() -> None:
         """Build the sky engine and load its catalog with a tiny query."""
         started_at = time.monotonic()
         try:
-            container.wayfinder.planning.query_sources(0.0, 0.0, 0.01, limit=None)
+            container.wayfinder.planning.catalogs.query_sources(0.0, 0.0, 0.01)
             logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
         except Exception:
             # Warm-up runs in the background; a failure only makes the first
@@ -177,10 +177,10 @@ def warm_night_reviews(night_count: int = NIGHT_REVIEW_WARMUP_COUNT) -> None:
         started_at = time.monotonic()
         try:
             review = container.wayfinder.review
-            nights = review.query(kind="nights", limit=night_count, register_job=False).night_list or []
-            for night in reversed(list(nights)[-night_count:]):
+            nights = list(review.nights.query())
+            for night in reversed(nights[-night_count:]):
                 try:
-                    review.query(kind="night_quality", session_id=night.night_id, register_job=False)
+                    review.nights.get(night.night_id, required=True)
                 except Exception:
                     # A failed night only means a slower first open.
                     logger.warning("Night review warm-up failed for %s", night.night_id, exc_info=True)

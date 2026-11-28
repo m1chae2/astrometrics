@@ -16,9 +16,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
 from wayfindinglib.models.quality.statements import Confidence, NeedsAttention, TargetStatement
 
@@ -212,12 +213,12 @@ class StartingPoint(BaseModel):
     ----------
     capture_setting : `CaptureSetting` or `None`
         The setting the numbers are for, when it is known.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         Exposure long enough that sky noise dominates read noise, in
         seconds. ``None`` when it cannot be computed.
     exposure_reason : `str`
         How it was found, or why it was not computed.
-    clipping_cap_seconds : `float` or `None`
+    clipping_cap_s : `float` or `None`
         The longest exposure that keeps the target and bright stars from
         clipping, in seconds. ``None`` is "not computed".
     clipping_cap_reason : `str`
@@ -229,9 +230,21 @@ class StartingPoint(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     capture_setting: CaptureSetting | None = Field(default=None, alias="captureSetting")
-    exposure_seconds: float | None = Field(default=None, gt=0.0, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        gt=0.0,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     exposure_reason: str = Field(min_length=1, alias="exposureReason")
-    clipping_cap_seconds: float | None = Field(default=None, gt=0.0, alias="clippingCapSeconds")
+    clipping_cap_s: float | None = Field(
+        default=None,
+        gt=0.0,
+        alias="clippingCapS",
+        validation_alias=AliasChoices(
+            "clippingCapS", "clipping_cap_s", "clippingCapSeconds", "clipping_cap_seconds"
+        ),
+    )
     clipping_cap_reason: str = Field(min_length=1, alias="clippingCapReason")
     confidence: Confidence
 

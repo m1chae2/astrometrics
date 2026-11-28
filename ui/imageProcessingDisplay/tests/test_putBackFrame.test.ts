@@ -15,8 +15,8 @@ vi.mock('../../common/services/backendApi', () => ({
 vi.mock('../../common/services/targetService', () => ({
     fetchTargetFiles: async () => ({
         files: [
-            { path: '/lib/a.fits', name: 'a.fits', camera: 'ZWO', iso: '', exposure: '60', filter: 'L', date: '2026-11-01 21:00:00' },
-            { path: '/lib/b.fits', name: 'b.fits', camera: 'ZWO', iso: '', exposure: '60', filter: 'L', date: '2026-11-01 21:05:00' },
+            { path: '/lib/a.fits', name: 'a.fits', camera: 'ZWO', gain: null, exposureS: 60, filter: 'L', date: '2026-11-01 21:00:00' },
+            { path: '/lib/b.fits', name: 'b.fits', camera: 'ZWO', gain: null, exposureS: 60, filter: 'L', date: '2026-11-01 21:05:00' },
         ],
         stackedImage: null, stackedSpectralTarget: null, totalExposure: 120,
     }),
@@ -28,7 +28,7 @@ const report = {
     frames: [
         { path: '/lib/a.fits', name: 'a.fits', state: 'included' },
         { path: '/lib/b.fits', name: 'b.fits', state: 'not_stacked' },
-        { path: '/lib/_excluded/c.fits', name: 'c.fits', state: 'set_aside', kind: 'trailed', reason: 'star roundness 0.62', date: '2026-11-01 21:10:00', exposure: '60', restorable: true },
+        { path: '/lib/_excluded/c.fits', name: 'c.fits', state: 'set_aside', kind: 'trailed', reason: 'star roundness 0.62', date: '2026-11-01 21:10:00', exposureS: 60, restorable: true },
     ],
 };
 

@@ -475,8 +475,8 @@ class MovingObjectDetector:
             # truly nearest, not just to whichever chain happens to be
             # listed first (which can silently swap track identity in a
             # crowded field).
-            elapsed_seconds = np.abs(unmatched_detections[0].timestamp - chain_ends.timestamp[:chain_count])
-            elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
+            elapsed_s = np.abs(unmatched_detections[0].timestamp - chain_ends.timestamp[:chain_count])
+            elapsed_hours = elapsed_s / _SECONDS_PER_HOUR
             # Capped at a few arcminutes so that a gap of hours inside
             # one night cannot grow the radius to a whole field of view,
             # where two unrelated stars would look like a mover.

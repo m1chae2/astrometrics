@@ -7,11 +7,16 @@ the program does, so nothing here opens a database connection itself.
 """
 
 import hashlib
+import logging
 import os
+import sqlite3
 import threading
 from typing import Any
 
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import Target
+
+logger = logging.getLogger(__name__)
 
 #: File endings of a finished, processed picture of a target (as opposed to a
 #: FITS frame). Such a file becomes the target's processed image, not a frame.
@@ -35,7 +40,7 @@ def is_processed_image(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in PROCESSED_IMAGE_EXTENSIONS
 
 
-def _mark_touched(api: Any, target_id: str) -> None:
+def mark_touched(api: Any, target_id: str) -> None:
     """Remember that a target was changed so it can be saved later.
 
     This prevents accidentally saving over someone else's changes
@@ -365,7 +370,7 @@ def list_targets(api: Any) -> list[Any]:
         held_ids = tuple(target.id for target in api._targets)
         if version is not None and getattr(api, "_listed_state", None) == (version, held_ids):
             for target in api._targets:
-                _mark_touched(api, target.id)
+                mark_touched(api, target.id)
             return api._targets
         stored_targets = api._catalog_access.get("target_catalog", {}) or []
         held = {target.id: target for target in api._targets}
@@ -381,9 +386,31 @@ def list_targets(api: Any) -> list[Any]:
             merged.append(current)
         api._targets = merged
         for target in merged:
-            _mark_touched(api, target.id)
+            mark_touched(api, target.id)
         record_listed_state(api, version)
         return merged
+
+
+def look_at_targets(api: Any) -> list[Any]:
+    """Read every target, as `list_targets` does, marking none as changed.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets.
+
+    Returns
+    -------
+    targets : `list`
+        Every target. Looking is not editing, so none is saved later because
+        of this read.
+    """
+    with _catalog_lock(api):
+        touched_before = set(getattr(api, "_touched_target_ids", set()))
+        try:
+            return list(list_targets(api))
+        finally:
+            api._touched_target_ids = touched_before
 
 
 def record_listed_state(api: Any, version: int | None) -> None:
@@ -444,7 +471,7 @@ def refresh_target(api: Any, target_id: str) -> None:
             _merge_stored_into_held(api, held, stored[0])
             refreshed[held.id] = version
         for target in api._targets:
-            _mark_touched(api, target.id)
+            mark_touched(api, target.id)
 
 
 def get_target(api: Any, target_id: str) -> Any | None:
@@ -478,8 +505,136 @@ def get_target(api: Any, target_id: str) -> Any | None:
             target = _find_target(api._targets, target_id)
 
         if target is not None:
-            _mark_touched(api, target.id)
+            mark_touched(api, target.id)
         return target
+
+
+def find_target(api: Any, target_id: str, required: bool = False) -> Any | None:
+    """Find a target by its id, up to date with what storage holds.
+
+    The target is first brought up to date with storage (`refresh_target`),
+    which reads nothing when nothing was written since the last read, so a
+    target another program added or changed is seen.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system managing the loaded targets.
+    target_id : `str`
+        The target's id. Underscores, spaces and capital letters may differ.
+    required : `bool`, optional
+        Raise `NotFoundError` instead of returning `None`.
+
+    Returns
+    -------
+    target : `Target` or `None`
+        The target, or `None` when no target matches.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``target_id`` is not a non-empty string.
+    NotFoundError
+        If ``required`` is `True` and no target matches.
+    """
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise InvalidArgumentError("target_id must be a non-empty target id.")
+    refresh_target(api, target_id)
+    found = get_target(api, target_id)
+    if found is None and required:
+        raise NotFoundError(f"No target with id {target_id!r} in the library.", details={"target": target_id})
+    return found
+
+
+def assign_configurations(api: Any, target: Target) -> None:
+    """Point each of a target's frames at its observatory configuration.
+
+    Creates the configurations the frames imply when none covers them (see
+    `astrometricslib.pipelines.shared.equipment`). A store that cannot be
+    reached leaves the frames as they are, with one warning: the frames are
+    still indexed.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets; it holds the settings.
+    target : `Target`
+        The target. Its frames are changed in place.
+    """
+    from astrometricslib._internal.drivers.observatory_configuration_store import (
+        ObservatoryConfigurationStore,
+    )
+    from astrometricslib.foundation.errors import AstrometricsError
+    from astrometricslib.pipelines.shared.equipment import seed_configurations
+
+    try:
+        seed_configurations(ObservatoryConfigurationStore(api._config), api._config, [target])
+    except (sqlite3.Error, OSError, AstrometricsError) as problem:
+        logger.warning("Could not match the frames of %r to their configurations: %s", target.id, problem)
+
+
+def add_target(api: Any, target: Target) -> Target:
+    """Add a `Target` object to the catalog and save it.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets.
+    target : `Target`
+        The target. One with the id of a held target replaces nothing: the
+        held one is saved as it is.
+
+    Returns
+    -------
+    target : `Target`
+        The target the catalog now holds under that id.
+    """
+    with _catalog_lock(api):
+        held = _find_target(api._targets, target.id)
+        if held is None or held.id != target.id:
+            api._targets.append(target)
+            held = target
+        mark_touched(api, held.id)
+        save_targets(api)
+        return held
+
+
+def create_named_target(api: Any, name: str, simbad: Any = None) -> Target:
+    """Create a target by name, or give the one that has the name already.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets.
+    name : `str`
+        The target's id. With ``simbad``, a catalog name such as ``"M 57"``.
+    simbad : `SimbadDriver`, optional
+        Look the name up in SIMBAD and store its position (see
+        `create_target_from_catalog`). Left out, a bare target with no
+        position is made.
+
+    Returns
+    -------
+    target : `Target`
+        The new target, or the existing one.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If ``name`` is not text, or is empty when no catalog is asked.
+
+    Notes
+    -----
+    With ``simbad``, a name with no catalog position raises `NotFoundError`
+    (see `create_target_from_catalog`).
+    """
+    if not isinstance(name, str):
+        raise InvalidArgumentError("A target's name must be text.")
+    if simbad is not None:
+        return create_target_from_catalog(api, name, simbad)
+    if not name.strip():
+        raise InvalidArgumentError("A target needs a non-empty name.")
+    return create_target(api, name)
 
 
 def reindex_frames(
@@ -549,7 +704,7 @@ def create_target(api: Any, target_id: str, ra: str | None = None, dec: str | No
     # Scan filesystem for frames matching the new target ID
     reindex_frames(new_target)
     api._targets.append(new_target)
-    _mark_touched(api, new_target.id)
+    mark_touched(api, new_target.id)
     save_targets(api)
     return new_target
 
@@ -603,75 +758,99 @@ def create_target_from_catalog(api: Any, target_id: str, simbad: Any) -> Any:
     if position.major_axis_arcmin:
         new_target.major_axis_arcmin = position.major_axis_arcmin
     if position.object_type or position.major_axis_arcmin:
-        _mark_touched(api, new_target.id)
+        mark_touched(api, new_target.id)
         save_targets(api)
     return new_target
 
 
-def update_target(api: Any, target_id: str, updates: dict) -> Any | None:
-    """Change specific information about a target.
+def update_target(api: Any, target: Target, changes: dict[str, Any]) -> Target:
+    """Change fields of a target, save it, and give it back.
+
+    ``processed_image`` is a short name for ``stacking.processed_image``:
+    the finished picture (a ``.jpg``, ``.png`` or ``.tiff``) of the target.
+    A new id has its underscores turned into spaces. A position typed in by
+    a person is trusted: changing ``ra`` or ``dec`` clears
+    ``position_unverified`` unless it is given too.
 
     Parameters
     ----------
     api : `Any`
         The system that manages the targets.
-    target_id : `str`
-        The name of the target to update.
-    updates : `dict`
-        A dictionary where the keys are what to change (like "ra")
-        and the values are the new information.
+    target : `Target`
+        The target. The catalog's own object for it is changed.
+    changes : `dict` [`str`, `Any`]
+        Field name -> new value.
 
     Returns
     -------
-    target : `Any` or `None`
-        The updated target, or None if the target wasn't found.
+    target : `Target`
+        The changed target.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a name is not a field of `Target`, or a value does not fit it.
+    NotFoundError
+        If the catalog holds no target with the target's id.
     """
-    target = get_target(api, target_id)
-    if not target:
-        return None
+    from pydantic import ValidationError
 
-    for key, value in updates.items():
-        if hasattr(target, key):
-            if key == "id" and isinstance(value, str):
-                value = value.replace("_", " ")
-            setattr(target, key, value)
+    unknown = sorted(key for key in changes if key not in Target.model_fields and key != "processed_image")
+    if unknown:
+        raise InvalidArgumentError(f"Target has no field {', '.join(unknown)}.", details={"unknown": unknown})
+    with _catalog_lock(api):
+        held = get_target(api, target.id)
+        if held is None:
+            raise NotFoundError(
+                f"No target with id {target.id!r} in the library.", details={"target": target.id}
+            )
+        try:
+            for key, value in changes.items():
+                if key == "processed_image":
+                    held.stacking.processed_image = str(value or "")
+                    continue
+                if key == "id" and isinstance(value, str):
+                    value = value.replace("_", " ")
+                setattr(held, key, value)
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                f"Cannot update {target.id!r}: {error}", details={"target": target.id}
+            ) from error
+        if ("ra" in changes or "dec" in changes) and "position_unverified" not in changes:
+            held.position_unverified = False
+        mark_touched(api, held.id)
+        save_targets(api)
+        return held
 
-    # A position typed in by a person is trusted: it is no longer a guess
-    # taken from a frame center.
-    if ("ra" in updates or "dec" in updates) and "position_unverified" not in updates:
-        target.position_unverified = False
 
-    save_targets(api)
-    return target
-
-
-def delete_target(api: Any, target_id: str) -> bool:
+def delete_target(api: Any, target: Target) -> None:
     """Remove a target completely from the database.
 
     Parameters
     ----------
     api : `Any`
         The system that manages the targets.
-    target_id : `str`
-        The name of the target to remove.
+    target : `Target`
+        The target to remove.
 
-    Returns
-    -------
-    was_deleted : `bool`
-        True if it was successfully deleted, False if it wasn't found.
+    Raises
+    ------
+    NotFoundError
+        If no target with the target's id is stored or held.
     """
     with _catalog_lock(api):
-        target = get_target(api, target_id)
-        if target:
-            targets = api._catalog_access.get("target_catalog", {})
-            filtered_targets = [t for t in targets if t.id != target.id]
-            api._catalog_access.put(filtered_targets, "target_catalog", {})
-            api._targets = api._catalog_access.get("target_catalog", {}) or []
-            getattr(api, "_touched_target_ids", set()).discard(target.id)
-            _saved_fingerprints(api).pop(target.id, None)
-            remember_stored_state(api, api._targets)
-            return True
-        return False
+        held = get_target(api, target.id)
+        if held is None:
+            raise NotFoundError(
+                f"No target with id {target.id!r} in the library.", details={"target": target.id}
+            )
+        targets = api._catalog_access.get("target_catalog", {})
+        filtered_targets = [t for t in targets if t.id != held.id]
+        api._catalog_access.put(filtered_targets, "target_catalog", {})
+        api._targets = api._catalog_access.get("target_catalog", {}) or []
+        getattr(api, "_touched_target_ids", set()).discard(held.id)
+        _saved_fingerprints(api).pop(held.id, None)
+        remember_stored_state(api, api._targets)
 
 
 def save_targets(api: Any) -> None:

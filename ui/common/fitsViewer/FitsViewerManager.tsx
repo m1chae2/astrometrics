@@ -19,8 +19,8 @@ interface Props {
   /** Metadata for the FITS frame. */
   frameInfo?: {
     objectId: string;
-    iso: string;
-    exposure: string;
+    gain: number | null;
+    exposureS: number | null;
     index?: number;
     min?: number;
     max?: number;

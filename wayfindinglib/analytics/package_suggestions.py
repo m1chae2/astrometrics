@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, CaptureSetting, Target
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import (
     EquipmentKind,
@@ -31,7 +31,7 @@ from astrometricslib.parameters import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.reports import CaptureSetting, SubjectLevel
+from astrometricslib.reports import SubjectLevel
 from wayfindinglib.analytics.result_quality.forecast import NORMALIZED_NOISE_METRIC, PINNED_STACK_METRICS
 from wayfindinglib.models.quality.rule import QualityRule
 from wayfindinglib.models.quality.statements import ProposedAction
@@ -120,7 +120,7 @@ def read_target_noise(astrometrics: Astrometrics, target_id: str) -> TargetNoise
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The science library handle (`quality.query`).
+        The science library handle (`quality.records.query`).
     target_id : `str`
         The target.
 
@@ -131,13 +131,13 @@ def read_target_noise(astrometrics: Astrometrics, target_id: str) -> TargetNoise
         read failed. `None` means "unknown", never "below the goal".
     """
     try:
-        rows = astrometrics.quality.query(
+        rows = astrometrics.quality.records.query(
             metric=NORMALIZED_NOISE_METRIC,
             level=SubjectLevel.STACK.value,
-            target_id=target_id,
+            target=Target(id=target_id),
             library_only=True,
             latest_only=True,
-        ).rows
+        )
     except AstrometricsError, OSError:
         return None
     pinned = PINNED_STACK_METRICS[NORMALIZED_NOISE_METRIC]
@@ -175,8 +175,8 @@ def capture_setting_key(setting: CaptureSetting | None) -> str:
         setting.camera,
         setting.telescope,
         setting.filter_name,
-        None if setting.exposure_seconds is None else f"{setting.exposure_seconds:g}",
-        setting.gain_setting,
+        None if setting.exposure_s is None else f"{setting.exposure_s:g}",
+        setting.gain,
         setting.offset,
         setting.binning,
     )
@@ -245,9 +245,9 @@ def _round_action(action: ProposedAction | None) -> dict[str, Any]:
         return {}
     values: dict[str, Any] = {}
     for name in (
-        "exposure_seconds",
+        "exposure_s",
         "frame_count",
-        "gain_setting",
+        "gain",
         "offset",
         "binning",
         "filter_name",
@@ -258,7 +258,7 @@ def _round_action(action: ProposedAction | None) -> dict[str, Any]:
         value = getattr(action, name)
         if value is None:
             continue
-        if name == "exposure_seconds":
+        if name == "exposure_s":
             value = round(float(value))
         elif name == "frame_count":
             value = int(float(f"{value:.2g}"))

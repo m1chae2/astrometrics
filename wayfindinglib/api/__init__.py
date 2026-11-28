@@ -4,7 +4,7 @@ Description: `ObservatoryControl` (operate the observatory),
 `ObservationPlanning` (decide what to observe),
 `ObservationExecution` (run and recover an observing session) and
 `ObservationReview` (how the nights went) live here, in `control/`,
-`planning.py`, `execution.py` and `review.py`. Import them from the
+`planning.py`, `execution.py` and `review/`. Import them from the
 package root, `wayfindinglib`, not from this subpackage; never import
 `wayfindinglib.tasks` or `wayfindinglib.drivers` directly.
 

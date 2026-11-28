@@ -20,9 +20,9 @@ def test_gaps_are_taken_within_each_session_and_pauses_are_left_out() -> None:
 def test_only_analyses_with_a_period_count() -> None:
     """An analysis with no dominant period, or a zero one, is ignored."""
     analyses = [
-        SimpleNamespace(dominant_period_seconds=480.0),
-        SimpleNamespace(dominant_period_seconds=None),
-        SimpleNamespace(dominant_period_seconds=0.0),
-        SimpleNamespace(dominant_period_seconds=640.0),
+        SimpleNamespace(dominant_period_s=480.0),
+        SimpleNamespace(dominant_period_s=None),
+        SimpleNamespace(dominant_period_s=0.0),
+        SimpleNamespace(dominant_period_s=640.0),
     ]
     assert dominant_periods(analyses) == [480.0, 640.0]

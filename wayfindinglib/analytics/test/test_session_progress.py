@@ -27,10 +27,9 @@ from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     QueuedObservationPackage,
     QueueEntryStatus,
-    RunState,
     StartTimeMode,
 )
-from wayfindinglib.models.session.session_progress import SessionProgress
+from wayfindinglib.models.session.session_progress import RunState, SessionProgress
 
 NOW = datetime(2026, 10, 25, 3, 0, tzinfo=UTC)
 START = NOW - timedelta(hours=6)
@@ -56,7 +55,7 @@ def _entry(entry_id: str, target_id: str, count: int, **changes: object) -> Queu
         The entry.
     """
     row = ExposureRequest(
-        frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=count, counted_from=START
+        frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=count, counted_from=START
     )
     return QueuedObservationPackage(
         id=entry_id,

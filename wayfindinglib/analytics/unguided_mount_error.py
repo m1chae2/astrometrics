@@ -262,7 +262,7 @@ class GuideRunSeries:
     ra_pulse_ms, dec_pulse_ms : `numpy.ndarray`
         The corrections sent after each frame, signed: east and north
         positive, in milliseconds.
-    ra_rate_arcsec_per_second, dec_rate_arcsec_per_second : `float` or `None`
+    ra_rate_arcsec_per_s, dec_rate_arcsec_per_s : `float` or `None`
         How far the star moves on the sky per second of pulse, in
         arcseconds. For right ascension it includes the cosine of the
         declination, as the guide log's section rate does.
@@ -275,8 +275,8 @@ class GuideRunSeries:
     dec_error_arcsec: np.ndarray
     ra_pulse_ms: np.ndarray
     dec_pulse_ms: np.ndarray
-    ra_rate_arcsec_per_second: float | None
-    dec_rate_arcsec_per_second: float | None
+    ra_rate_arcsec_per_s: float | None
+    dec_rate_arcsec_per_s: float | None
 
 
 def split_stretches(times: np.ndarray) -> list[slice]:
@@ -405,7 +405,7 @@ class _Fit:
     residual: np.ndarray
     degrees_of_freedom: int
     inflation: float
-    period_seconds: float | None = None
+    period_s: float | None = None
 
 
 def _design(relative_times: np.ndarray, piece_index: np.ndarray, frequency_hz: float | None) -> np.ndarray:
@@ -472,7 +472,7 @@ def _inflation_from_residual(residual: np.ndarray, piece_index: np.ndarray) -> f
 
 
 def _finish_fit(
-    design: np.ndarray, values: np.ndarray, piece_index: np.ndarray, period_seconds: float | None
+    design: np.ndarray, values: np.ndarray, piece_index: np.ndarray, period_s: float | None
 ) -> _Fit:
     """Fit once and work out the covariance of the fitted numbers.
 
@@ -483,11 +483,11 @@ def _finish_fit(
         variance and the inflation) and the leftovers.
     """
     coefficients, residual = _least_squares(design, values)
-    freedom = max(1, values.size - design.shape[1] - (1 if period_seconds is not None else 0))
+    freedom = max(1, values.size - design.shape[1] - (1 if period_s is not None else 0))
     variance = float(residual @ residual) / freedom
     inflation = _inflation_from_residual(residual, piece_index)
     covariance = np.linalg.pinv(design.T @ design) * variance * inflation
-    return _Fit(coefficients, covariance, residual, freedom, inflation, period_seconds)
+    return _Fit(coefficients, covariance, residual, freedom, inflation, period_s)
 
 
 def _search_period(
@@ -573,20 +573,20 @@ def _periodic_error_from_fit(
     phase_variance = (
         cosine**2 * covariance[0, 0] + sine**2 * covariance[1, 1] - 2.0 * sine * cosine * covariance[0, 1]
     ) / safe_amplitude**4
-    period = float(fit.period_seconds or 0.0)
+    period = float(fit.period_s or 0.0)
     noise = math.sqrt(float(fit.residual @ fit.residual) / max(1, fit.degrees_of_freedom) * fit.inflation)
     # Montgomery and O'Donoghue (1999) equation 10: the frequency error, from
     # the noise, the amplitude, the length of the run and the sample count.
     frequency_error = math.sqrt(6.0) / math.pi * noise / (safe_amplitude * duration * math.sqrt(sample_count))
     amplitude_uncertainty = math.sqrt(max(amplitude_variance, 0.0))
     return PeriodicErrorFit(
-        period_seconds=period,
-        period_uncertainty_seconds=period**2 * frequency_error,
+        period_s=period,
+        period_uncertainty_s=period**2 * frequency_error,
         amplitude_arcsec=amplitude,
         amplitude_uncertainty_arcsec=amplitude_uncertainty,
         phase_radians=math.atan2(cosine, sine) % (2.0 * math.pi),
         phase_uncertainty_radians=math.sqrt(max(phase_variance, 0.0)),
-        reference_epoch_seconds=reference_epoch,
+        reference_epoch_s=reference_epoch,
         significance=amplitude / max(amplitude_uncertainty, _NOISE_FLOOR_ARCSEC),
     )
 
@@ -606,8 +606,8 @@ def _axis_terms(fit: _Fit, piece_count: int, piece_index: np.ndarray) -> AxisErr
     steps = np.diff(residual)[same_piece]
     return AxisErrorTerms(
         samples=int(residual.size),
-        drift_arcsec_per_minute=drift,
-        drift_uncertainty_arcsec_per_minute=drift_uncertainty,
+        drift_arcsec_per_min=drift,
+        drift_uncertainty_arcsec_per_min=drift_uncertainty,
         random_rms_arcsec=float(np.sqrt(np.mean(residual**2))),
         random_step_rms_arcsec=float(np.sqrt(np.mean(steps**2))) if steps.size else 0.0,
     )
@@ -634,7 +634,7 @@ def _build_axis_series(
     """
     errors = series.ra_error_arcsec if axis == "ra" else series.dec_error_arcsec
     pulses = series.ra_pulse_ms if axis == "ra" else series.dec_pulse_ms
-    rate = series.ra_rate_arcsec_per_second if axis == "ra" else series.dec_rate_arcsec_per_second
+    rate = series.ra_rate_arcsec_per_s if axis == "ra" else series.dec_rate_arcsec_per_s
     empty = np.array([])
     if rate is None or rate <= 0.0:
         return empty, empty, empty.astype(int), [f"The log gives no {axis.upper()} guide rate."]
@@ -702,7 +702,7 @@ def measure_run(series: GuideRunSeries) -> UnguidedRunError:
         run_id=series.run_id,
         session_id=series.session_id,
         started_at=float(series.times[0]) if series.times.size else 0.0,
-        duration_seconds=float(series.times[-1] - series.times[0]) if series.times.size else 0.0,
+        duration_s=float(series.times[-1] - series.times[0]) if series.times.size else 0.0,
         samples_used=0,
     )
     for axis in ("ra", "dec"):
@@ -812,19 +812,19 @@ def _pool_periodic_error(runs: Sequence[UnguidedRunError]) -> PeriodicErrorFit |
     if not fits:
         return None
     period, period_uncertainty, period_scatter = _robust_pool(
-        [f.period_seconds for f in fits], [f.period_uncertainty_seconds for f in fits]
+        [f.period_s for f in fits], [f.period_uncertainty_s for f in fits]
     )
     amplitude, amplitude_uncertainty, amplitude_scatter = _robust_pool(
         [f.amplitude_arcsec for f in fits], [f.amplitude_uncertainty_arcsec for f in fits]
     )
     return PeriodicErrorFit(
-        period_seconds=period,
-        period_uncertainty_seconds=period_uncertainty,
+        period_s=period,
+        period_uncertainty_s=period_uncertainty,
         amplitude_arcsec=amplitude,
         amplitude_uncertainty_arcsec=amplitude_uncertainty,
         significance=math.sqrt(sum(f.significance**2 for f in fits)),
         runs_used=len(fits),
-        period_scatter_seconds=period_scatter,
+        period_scatter_s=period_scatter,
         amplitude_scatter_arcsec=amplitude_scatter,
     )
 
@@ -839,12 +839,12 @@ def _pool_axis(terms: Sequence[AxisErrorTerms]) -> PooledAxisTerms | None:
     """
     if not terms:
         return None
-    drifts = np.array([t.drift_arcsec_per_minute for t in terms])
+    drifts = np.array([t.drift_arcsec_per_min for t in terms])
     return PooledAxisTerms(
         runs_used=len(terms),
         samples=sum(t.samples for t in terms),
-        drift_median_arcsec_per_minute=float(np.median(drifts)),
-        drift_spread_arcsec_per_minute=_robust_spread(drifts),
+        drift_median_arcsec_per_min=float(np.median(drifts)),
+        drift_spread_arcsec_per_min=_robust_spread(drifts),
         random_median_arcsec=float(np.median([t.random_rms_arcsec for t in terms])),
         random_step_median_arcsec=float(np.median([t.random_step_rms_arcsec for t in terms])),
     )

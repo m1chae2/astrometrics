@@ -30,6 +30,7 @@ the time a frame must be older than to be ``included``.
 
 import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import frame_uses_color_filter_array
 from astrometricslib.foundation.parameters import resolve
@@ -209,7 +210,7 @@ def build_frame_statuses(
             )
         )
     for record in set_aside:
-        exposure = record.exposure_seconds
+        exposure = record.exposure_s
         statuses.append(
             FrameStatus(
                 path=record.path,
@@ -220,10 +221,164 @@ def build_frame_statuses(
                 camera=record.camera,
                 filter=record.filter,
                 date=record.date or "",
-                exposure="" if exposure is None else f"{float(exposure):g}",
+                exposure_s=None if exposure is None else float(exposure),
                 original_path=record.original_path,
                 restorable=bool(record.restorable),
                 restore_note=record.restore_note or "",
             )
         )
     return FrameStatusReport(frames=statuses, stacked_at=stacked_at)
+
+
+def list_set_aside_frames_with_reasons(target: Target, config: Any) -> list[SetAsideFrameRecord]:
+    """List the frames in a target's `_excluded` folders, with reasons.
+
+    The stacker moves frames with clouds or trailed stars into an `_excluded`
+    folder and stores the move with the frame's quality rows. For each frame
+    in those folders the reason comes from the stored rows if they carry the
+    action taken, else from the folder's `excluded_frames.json` file, else it
+    is empty; ``reason_source`` says which. Nothing is moved, measured or
+    written, and a library with no quality database gives the folder-based
+    answer without creating one.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    config : `AppConfiguration`
+        The settings: the frames folder and the quality database.
+
+    Returns
+    -------
+    frames : `list` [`SetAsideFrameRecord`]
+        One entry per frame file in an `_excluded` folder. Empty when none.
+    """
+    from astrometricslib._internal.drivers.quality_store import QualityStore, quality_database_path
+    from astrometricslib.pipelines.stacking.metrics import (
+        FRAME_QUARANTINE_ROUNDNESS,
+        FRAME_QUARANTINE_SKY_MEDIAN,
+    )
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import target_folder_names
+    from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import (
+        build_set_aside_records,
+        find_excluded_folders,
+    )
+
+    folders = find_excluded_folders(str(config.get_frames_path()), target_folder_names(target.id))
+    if not folders:
+        return []
+    store = QualityStore(quality_database_path(config))
+    rows = [
+        row
+        for metric in (FRAME_QUARANTINE_ROUNDNESS, FRAME_QUARANTINE_SKY_MEDIAN)
+        for row in store.query(metric=metric, target_id=target.id, latest_only=True)
+    ]
+    setting_ids = sorted({
+        row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
+    })
+    settings = store.get_capture_settings(setting_ids) if setting_ids else {}
+    return build_set_aside_records(
+        target.id, folders, rows, {key: value.exposure_s for key, value in settings.items()}
+    )
+
+
+def report_frame_statuses(target: Target, config: Any) -> FrameStatusReport:
+    """Say what state each frame of a target is in, for a status column.
+
+    Each frame of the target is ``not_stacked`` when it was taken after the
+    newest stack file was written (or there is no stack), ``flagged`` when it
+    is in the stack and its stored star elongation is at least the warning
+    level but the quarantine kept it, and ``included`` otherwise. The frames
+    in the target's `_excluded` folders follow as ``set_aside``, with the
+    stacker's kind and reason (`list_set_aside_frames_with_reasons`). The
+    newest stack file is looked for among the imaging stack, the spectral
+    stack and each saved stack configuration. Nothing is written.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    config : `AppConfiguration`
+        The settings: the frames and stacks folders.
+
+    Returns
+    -------
+    report : `FrameStatusReport`
+        ``frames`` and ``stacked_at``.
+    """
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import stored_star_elongations
+    from astrometricslib.utilities.frame_identity import frame_subject_id
+
+    stacked_at = latest_stack_time(target, str(config.get_stacks_path()))
+    stored = stored_star_elongations(target.id)
+    elongations = {
+        frame.path: stored[subject_id]
+        for frame in target.frames
+        if (subject_id := frame_subject_id(frame.path, target.id)) in stored
+    }
+    return build_frame_statuses(
+        target.frames, list_set_aside_frames_with_reasons(target, config), stacked_at, elongations
+    )
+
+
+def restore_set_aside_frames(catalog: Any, target: Target, frames: Sequence[FrameRecord | str]) -> Any:
+    """Move chosen set-aside frames back into their target, and scan it.
+
+    Each frame must lie in one of the target's `_excluded` folders. A frame
+    whose original place is taken, or that has no `excluded_frames.json`
+    entry saying where it came from, stays where it is. The target is read
+    again afterwards, so it lists the moved frames, and saved; the next
+    stack may set them aside again.
+
+    Parameters
+    ----------
+    catalog : `TargetCatalog`
+        The target catalog's state.
+    target : `Target`
+        The target.
+    frames : `Sequence` [`FrameRecord` or `str`]
+        The set-aside frames, as ``frames.query(target, status="set_aside")``
+        gives them, or their paths.
+
+    Returns
+    -------
+    restored : `Page` [`FrameRecord`]
+        The target's records of the frames that went back, at their original
+        paths.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a frame is not in one of the target's `_excluded` folders.
+    """
+    from astrometricslib.foundation.errors import InvalidArgumentError
+    from astrometricslib.models.page import Page
+    from astrometricslib.pipelines.shared.target_frames import scan_frames
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+        restore_quarantined_frames,
+        target_folder_names,
+    )
+    from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import find_excluded_folders
+
+    paths = [item if isinstance(item, str) else item.path for item in frames]
+    folders = {
+        os.path.realpath(folder): folder
+        for folder in find_excluded_folders(
+            str(catalog._config.get_frames_path()), target_folder_names(target.id)
+        )
+    }
+    files_by_folder: dict[str, set[str]] = {}
+    for path in paths:
+        folder = os.path.realpath(os.path.dirname(path))
+        if folder not in folders:
+            raise InvalidArgumentError(
+                f"'{path}' is not in an _excluded folder of {target.id}.", details={"path": path}
+            )
+        files_by_folder.setdefault(folders[folder], set()).add(os.path.basename(path))
+    restored: list[str] = []
+    for folder, file_names in files_by_folder.items():
+        restored.extend(restore_quarantined_frames(folder, file_names))
+    if restored:
+        scan_frames(catalog, target)
+    by_path = {os.path.realpath(frame.path): frame for frame in target.frames}
+    return Page.of([by_path[real] for path in restored if (real := os.path.realpath(path)) in by_path])

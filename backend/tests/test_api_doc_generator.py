@@ -16,7 +16,7 @@ def test_the_astrometricslib_reference_lists_its_public_modules() -> None:
     """Each public module has a block, with its names."""
     text = generate_astrometricslib_docs()
 
-    for module in ("exceptions", "reports", "jobs", "drivers"):
+    for module in ("arguments", "exceptions", "reports", "jobs", "drivers"):
         assert f"### `astrometricslib.{module}`" in text
     assert "`NotFoundError`" in text
     assert "`observing_night_id" in text
@@ -47,11 +47,11 @@ def test_signatures_show_short_type_names() -> None:
     import astrometricslib
     from backend.services.infrastructure.api_doc_generator import format_signature, short_type_names
 
-    signature = format_signature(astrometricslib.TargetCatalog.delete_images)
+    signature = format_signature(astrometricslib.TargetFrames.delete)
 
     assert "-> ImageDeletionResult" in signature
     assert "Target | None" in signature
-    assert "paths: list[str]" in signature
+    assert "Sequence[str]" in signature
     assert "astrometricslib." not in signature
     assert short_type_names("dict[str, numpy.ndarray] | pathlib.Path") == "dict[str, ndarray] | Path"
 
@@ -88,7 +88,7 @@ def test_every_entry_has_a_unique_anchor() -> None:
     entries = api_doc_entries()
     anchors = {entry["anchor_id"] for entry in entries}
 
-    assert "api-TargetCatalog-delete_images" in anchors
+    assert "api-TargetFrames-get_rotation" in anchors
     assert "api-astrometricslib-capture_job_logs" in anchors
     assert "api-exceptions-NotFoundError" in anchors
     for topic_id in ("api/astrometricslib", "api/wayfindinglib"):
@@ -97,19 +97,19 @@ def test_every_entry_has_a_unique_anchor() -> None:
         assert [anchor for anchor, count in counts.items() if count > 1] == []
     page = get_api_topic_content("api/astrometricslib")
     assert page is not None
-    assert "`TargetCatalog.delete_images(" in page["content"]
-    assert "{#api-TargetCatalog-delete_images}" in page["content"]
+    assert "`TargetFrames.get_rotation(" in page["content"]
+    assert "{#api-TargetFrames-get_rotation}" in page["content"]
 
 
 def test_find_doc_entries_by_bare_name() -> None:
     """A bare name finds every class that has a method of that name."""
     from backend.services.infrastructure.api_doc_generator import find_doc_entries
 
-    assert find_doc_entries("delete_images") == [
+    assert find_doc_entries("get_rotation") == [
         {
             "topic_id": "api/astrometricslib",
-            "anchor_id": "api-TargetCatalog-delete_images",
-            "qualified_name": "TargetCatalog.delete_images",
+            "anchor_id": "api-TargetFrames-get_rotation",
+            "qualified_name": "TargetFrames.get_rotation",
             "suggestion": False,
         }
     ]
@@ -131,13 +131,13 @@ def test_find_doc_entries_by_console_path() -> None:
     """A path through the console's preloaded objects finds its class."""
     from backend.services.infrastructure.api_doc_generator import find_doc_entries
 
-    by_method = find_doc_entries("astrometrics.targets.delete_images")
+    by_method = find_doc_entries("astrometrics.targets.frames.get_rotation")
     by_object = find_doc_entries("astrometrics.targets")
 
-    assert [entry["anchor_id"] for entry in by_method] == ["api-TargetCatalog-delete_images"]
+    assert [entry["anchor_id"] for entry in by_method] == ["api-TargetFrames-get_rotation"]
     assert [entry["anchor_id"] for entry in by_object] == ["api-TargetCatalog"]
-    assert find_doc_entries("wayfinder.planning.get_visibility")[0]["qualified_name"] == (
-        "ObservationPlanning.get_visibility"
+    assert find_doc_entries("wayfinder.planning.sky.get_visibility")[0]["qualified_name"] == (
+        "PlanningSky.get_visibility"
     )
 
 
@@ -145,10 +145,10 @@ def test_find_doc_entries_suggests_close_names() -> None:
     """A misspelled name gives close names marked as suggestions."""
     from backend.services.infrastructure.api_doc_generator import find_doc_entries
 
-    suggestions = find_doc_entries("delete_imagse")
+    suggestions = find_doc_entries("get_rotatoin")
 
     assert suggestions
     assert all(entry["suggestion"] for entry in suggestions)
-    assert "TargetCatalog.delete_images" in [entry["qualified_name"] for entry in suggestions]
+    assert "TargetFrames.get_rotation" in [entry["qualified_name"] for entry in suggestions]
     assert find_doc_entries("zzzzqqqq") == []
     assert find_doc_entries("") == []

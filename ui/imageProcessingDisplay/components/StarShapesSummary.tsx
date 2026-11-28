@@ -23,7 +23,7 @@ interface StarShapesSummaryProps {
     /** The File Browser's status of each frame by path. */
     frameStatuses?: ReadonlyMap<string, FrameStatusInfo>;
     /** The exposure of each frame in seconds, by path, or `undefined` when not known. */
-    exposureSeconds?: ReadonlyMap<string, number>;
+    exposureS?: ReadonlyMap<string, number>;
     /** Called with a frame's path when its mark is clicked. */
     onSelectFrame: (path: string) => void;
 }
@@ -33,7 +33,7 @@ interface StarShapesSummaryProps {
  * @param props See {@link StarShapesSummaryProps}.
  * @return The block, or `null` when there is no target review to show.
  */
-export const StarShapesSummary: React.FC<StarShapesSummaryProps> = ({ review, selectedPath, frameReport = null, frameStatuses, exposureSeconds, onSelectFrame }) => {
+export const StarShapesSummary: React.FC<StarShapesSummaryProps> = ({ review, selectedPath, frameReport = null, frameStatuses, exposureS, onSelectFrame }) => {
     const flaggedPaths = useMemo(() => new Set((review?.standoutFrames ?? []).map((frame) => frame.path)), [review]);
     const frames = frameReport?.frames ?? null;
     const measured = useMemo(
@@ -52,7 +52,7 @@ export const StarShapesSummary: React.FC<StarShapesSummaryProps> = ({ review, se
                         selectedPath={selectedPath}
                         frames={frames}
                         statuses={frameStatuses}
-                        exposureSeconds={exposureSeconds}
+                        exposureS={exposureS}
                         onSelectFrame={onSelectFrame}
                     />
                 ) : (

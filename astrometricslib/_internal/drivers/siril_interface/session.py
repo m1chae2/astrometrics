@@ -791,8 +791,8 @@ class SirilSession:
                         # warned about and the worst share of negative pixels.
                         diagnostics = self.last_run_diagnostics
                         diagnostics["negative_pixel_frames"] = diagnostics.get("negative_pixel_frames", 0) + 1
-                        diagnostics["negative_pixel_max_percent"] = max(
-                            diagnostics.get("negative_pixel_max_percent", 0), negative_percentage
+                        diagnostics["negative_pixel_max_pct"] = max(
+                            diagnostics.get("negative_pixel_max_pct", 0), negative_percentage
                         )
                     if status_queue is not None and ("status: success" in line or "status: error" in line):
                         status_queue.put(line)

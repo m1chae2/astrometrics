@@ -24,7 +24,7 @@ guiding runs and the equipment's current limits.
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from wayfindinglib.models.quality.statements import TargetStatement
 
@@ -45,9 +45,9 @@ class SkySample(BaseModel):
         axis).
     value : `float`
         The measurement.
-    altitude_degrees : `float` or `None`
+    altitude_deg : `float` or `None`
         Altitude of the pointing, in degrees.
-    azimuth_degrees : `float` or `None`
+    azimuth_deg : `float` or `None`
         Azimuth of the pointing, in degrees, from north through east.
     pier_side : `str` or `None`
         ``"East"`` or ``"West"``, the side of the pier the telescope was on.
@@ -58,8 +58,16 @@ class SkySample(BaseModel):
     night: str
     metric: str
     value: float
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
-    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float | None = Field(
+        default=None,
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     pier_side: str | None = Field(default=None, alias="pierSide")
 
 
@@ -104,7 +112,7 @@ class SkyInputQuality(BaseModel):
     guiding_nights_excluded : `int`
         Nights whose guiding runs were left out because the night's guiding
         data was unreliable (an impossible calibration or a weak guide star).
-    altitude_range_degrees : `list` [`float`]
+    altitude_range_deg : `list` [`float`]
         Lowest and highest altitude any measurement has, or empty.
     coverage : `list` [`SkyCoverageBin`]
         The data in each part of the sky the telescope can reach.
@@ -113,7 +121,7 @@ class SkyInputQuality(BaseModel):
         ``"dimension label"``.
     minimum_nights_per_bin : `int`
         Fewest nights a part must have to be judged.
-    configured_minimum_altitude_degrees : `float` or `None`
+    configured_minimum_altitude_deg : `float` or `None`
         The lowest altitude the telescope is configured to observe at.
     has_enough_data : `bool`
         Whether enough nights exist to analyse at all.
@@ -127,12 +135,25 @@ class SkyInputQuality(BaseModel):
     samples_by_metric: dict[str, int] = Field(default_factory=dict, alias="samplesByMetric")
     samples_without_position: int = Field(default=0, alias="samplesWithoutPosition")
     guiding_nights_excluded: int = Field(default=0, alias="guidingNightsExcluded")
-    altitude_range_degrees: list[float] = Field(default_factory=list, alias="altitudeRangeDegrees")
+    altitude_range_deg: list[float] = Field(
+        default_factory=list,
+        alias="altitudeRangeDeg",
+        validation_alias=AliasChoices(
+            "altitudeRangeDeg", "altitude_range_deg", "altitudeRangeDegrees", "altitude_range_degrees"
+        ),
+    )
     coverage: list[SkyCoverageBin] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
     minimum_nights_per_bin: int = Field(default=0, alias="minimumNightsPerBin")
-    configured_minimum_altitude_degrees: float | None = Field(
-        default=None, alias="configuredMinimumAltitudeDegrees"
+    configured_minimum_altitude_deg: float | None = Field(
+        default=None,
+        alias="configuredMinimumAltitudeDeg",
+        validation_alias=AliasChoices(
+            "configuredMinimumAltitudeDeg",
+            "configured_minimum_altitude_deg",
+            "configuredMinimumAltitudeDegrees",
+            "configured_minimum_altitude_degrees",
+        ),
     )
     has_enough_data: bool = Field(default=False, alias="hasEnoughData")
 
@@ -217,7 +238,7 @@ class SkyPerformance(BaseModel):
     ----------
     metrics : `list` [`SkyMetricResult`]
         One per metric that has enough data.
-    suggested_minimum_altitude_degrees : `float` or `None`
+    suggested_minimum_altitude_deg : `float` or `None`
         The altitude below which stars were measurably wider, taken as the
         top of the highest poor altitude band. `None` if no altitude band is
         poor.
@@ -226,8 +247,15 @@ class SkyPerformance(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     metrics: list[SkyMetricResult] = Field(default_factory=list)
-    suggested_minimum_altitude_degrees: float | None = Field(
-        default=None, alias="suggestedMinimumAltitudeDegrees"
+    suggested_minimum_altitude_deg: float | None = Field(
+        default=None,
+        alias="suggestedMinimumAltitudeDeg",
+        validation_alias=AliasChoices(
+            "suggestedMinimumAltitudeDeg",
+            "suggested_minimum_altitude_deg",
+            "suggestedMinimumAltitudeDegrees",
+            "suggested_minimum_altitude_degrees",
+        ),
     )
 
 

@@ -127,9 +127,8 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 
   astrometrics = Astrometrics()
   target = astrometrics.targets.get("M 13")
-  astrometrics.processing.process_target(target, stages=["spectroscopy"])
-  ids = astrometrics.stars.query(target_id=target.id, has_spectra=True, detail="ids", limit=2000).ids
-  for star in map(astrometrics.stars.get, ids):
+  astrometrics.processing.spectroscopy.run(target)
+  for star in astrometrics.stars.query(target=target, has_spectra=True):
       own = star.spectroscopy.self_determined_spectral_type
       if star.spectral_type and own not in ("", "Unknown"):
           print(
@@ -137,7 +136,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
           )
   ```
   <!-- impl: astrometricslib.Astrometrics -->
-  <!-- impl: astrometricslib.ProcessingPipelines.process_target -->
+  <!-- impl: astrometricslib.pipelines.pipeline_runs.run_spectroscopy -->
   <!-- impl: astrometricslib.models.stellar_source.ladder_position -->
 - **Acceptance criterion:** A good sky stage removes the red excess and brings K stars back to K.
 - **What to look at:** The sky share of each star's un-subtracted spectrum, by band (0 to 1; above about 0.5 the "spectrum" is mostly sky), and the mean error in subtype steps against the catalog type, with and without subtraction. A good sky stage removes the red excess and brings K stars back to K.
@@ -492,8 +491,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   )  # internal
 
   astrometrics = Astrometrics()
-  ids = astrometrics.stars.query(has_spectra=True, detail="ids", limit=2000).ids
-  for star in map(astrometrics.stars.get, ids):
+  for star in astrometrics.stars.query(has_spectra=True):
       s = star.spectroscopy
       print(
           star.id,
@@ -1096,7 +1094,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
       line_spread=load_line_spread_profile("ZWO ASI 533MM Pro"),
   )
   print(
-      comparison.slope_percent_per_1000_angstrom,
+      comparison.slope_pct_per_1000_angstrom,
       comparison.residual_rms_fraction,
       comparison.wavelength_shift_angstrom,
   )
@@ -1233,7 +1231,7 @@ python -m astrometricslib.scripts.calibrate_class_gap_against_snr
 - **Status:** Partly measured. Two star fields and one camera, checked against catalog positions and not a plate solution.
 - **Data you need:** A spectral stack with no plate solution, of a target whose catalog rows came from more than one camera or stack, and a second target where they did not.
 - **Procedure:**
-  1. Run `process_target(target, stages=["spectroscopy"])` and count named detections, stored stars and stars at a signal-to-noise of 7 or above.
+  1. Run `processing.spectroscopy.run(target)` and count named detections, stored stars and stars at a signal-to-noise of 7 or above.
   2. Refit the map with 5-fold hold-out and with random subsets of 6 to 24 stars, and record the largest held-out error.
   3. Repeat the naming with detections shifted by 8 fixed offsets, to count chance names.
 - **Acceptance criterion:** Set after the result: matches flat across the radius, chance names far below real names, no temporary star ids stored, and stored position-only stars carry no catalog-derived values.

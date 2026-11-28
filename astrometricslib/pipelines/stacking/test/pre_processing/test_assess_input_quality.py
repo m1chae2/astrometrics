@@ -25,7 +25,7 @@ from astrometricslib.pipelines.stacking.pre_processing.stack_calibration_health 
 )
 
 SPLIT = {
-    "exposure_seconds": 60.0,
+    "exposure_s": 60.0,
     "low_group_count": 8,
     "low_group_median": 1000.0,
     "high_group_count": 2,
@@ -99,7 +99,7 @@ def test_a_background_split_is_described_and_fails_the_background_gate() -> None
 
 def test_a_split_without_an_exposure_length_has_no_prefix() -> None:
     """The single-dictionary shape names no exposure length."""
-    split = {key: value for key, value in SPLIT.items() if key != "exposure_seconds"}
+    split = {key: value for key, value in SPLIT.items() if key != "exposure_s"}
     assert describe_background_splits(split).startswith("8 frame(s)")
     assert describe_background_splits(None) is None
     assert describe_background_splits([]) is None

@@ -1,4 +1,4 @@
-"""What `Processing.identify_stack` returns: the named stars of one stack.
+"""What `processing.astrometry.identify` returns: the named stars of one stack.
 
 Each star the stack's own star finder detected gets a name: the most
 familiar catalog designation (a proper name, a Bayer or Flamsteed name, an HD

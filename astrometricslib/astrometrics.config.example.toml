@@ -96,10 +96,10 @@ remote_pictures_path = "/home/stellarmate/Pictures"
 # you leave out:
 #   pressure_hpa              = air pressure in hectopascals (millibars)
 #   temperature_c             = air temperature in degrees Celsius
-#   relative_humidity_percent = 0 to 100
+#   relative_humidity_pct = 0 to 100
 # pressure_hpa = "845"
 # temperature_c = "5"
-# relative_humidity_percent = "30"
+# relative_humidity_pct = "30"
 
 ["Observatory.Optics"]
 # Every telescope or camera lens you use, by name. The name is stored as the
@@ -213,8 +213,8 @@ saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-s
 # The D5300 records no offset, so the offset is 0. See the ZWO section below
 # for what each field means.
 bias_levels = [
-    { gain_setting = "100", offset = "0", binning = "1x1", bias_level_adu = { value = 597.93, kind = "measured", source = "Mean of 22 bias frames (ISO 100); frame-to-frame spread 0.12 ADU. Measured 2026-10-31 (validation register STK-48)." } },
-    { gain_setting = "800", offset = "0", binning = "1x1", bias_level_adu = { value = 599.08, kind = "measured", source = "Mean of 89 bias frames (ISO 800) from two sessions 5 months apart (599.01 and 599.15); frame-to-frame spread 0.21 ADU. Measured 2026-10-31 (validation register STK-48)." } },
+    { gain = 100, offset = 0, binning = "1x1", bias_level_adu = { value = 597.93, kind = "measured", source = "Mean of 22 bias frames (ISO 100); frame-to-frame spread 0.12 ADU. Measured 2026-10-31 (validation register STK-48)." } },
+    { gain = 800, offset = 0, binning = "1x1", bias_level_adu = { value = 599.08, kind = "measured", source = "Mean of 89 bias frames (ISO 800) from two sessions 5 months apart (599.01 and 599.15); frame-to-frame spread 0.21 ADU. Measured 2026-10-31 (validation register STK-48)." } },
 ]
 # Gain and read noise per ISO (see the ZWO section below for what each field
 # means). Only ISO 800 is measured: the library holds flats only at ISO 800,
@@ -223,7 +223,7 @@ bias_levels = [
 # Bayer channels together (the green channels alone give 0.242). Derived by
 # photon transfer with measure_sensor_noise; validation register PHO-22.
 sensor_noise = [
-    { gain_setting = "800", offset = "0", binning = "1x1", gain_e_per_adu = { value = 0.237, kind = "measured", source = "Photon transfer on 26 pairs of 0.04 s sky flats (Nikkor 300mm, 2022-11-26), central 1000 x 1000 pixels, signal about 1000 ADU; pair-to-pair spread 0.010. The 16 pairs of 0.01 s flats of 2022-11-13 give 0.250 (spread 0.059). Measured 2026-11-25 (validation register PHO-22)." }, read_noise_e = { value = 1.70, kind = "measured", source = "Root-mean-square noise of 44 bias pairs (ISO 800, sessions 2023-10-07 and 2024-03-18), 7.19 ADU times the gain of 0.237; the median-based estimate is 6.29 ADU (1.49 e-). Measured 2026-11-25 (validation register PHO-22)." } },
+    { gain = 800, offset = 0, binning = "1x1", gain_e_per_adu = { value = 0.237, kind = "measured", source = "Photon transfer on 26 pairs of 0.04 s sky flats (Nikkor 300mm, 2022-11-26), central 1000 x 1000 pixels, signal about 1000 ADU; pair-to-pair spread 0.010. The 16 pairs of 0.01 s flats of 2022-11-13 give 0.250 (spread 0.059). Measured 2026-11-25 (validation register PHO-22)." }, read_noise_e = { value = 1.70, kind = "measured", source = "Root-mean-square noise of 44 bias pairs (ISO 800, sessions 2023-10-07 and 2024-03-18), 7.19 ADU times the gain of 0.237; the median-based estimate is 6.29 ADU (1.49 e-). Measured 2026-11-25 (validation register PHO-22)." } },
 ]
 
 ["Observatory.Camera.ZWO ASI533MM Pro"]
@@ -251,8 +251,9 @@ photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source =
 # zero may use the entry at another offset (see "offset" below). It never
 # borrows any other nearby setting.
 # Each entry is one inline table:
-#   gain_setting   the camera's gain setting (or the ISO of a DSLR), as the
+#   gain           the camera's gain setting (or the ISO of a DSLR), as the
 #                  header's GAIN card writes it; 0.0 and 0 are the same
+#                  (older files name this key gain_setting; it is still read)
 #   offset         the camera's offset. A frame at another offset uses the
 #                  entry of the same gain and binning at the nearest offset
 #                  when it is not clipped at zero (the offset does not change
@@ -270,7 +271,7 @@ photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source =
 # single gain_e_per_adu and read_noise_e per camera, are ignored until you run
 # astrometricslib/scripts/migrate_camera_profiles.py.
 sensor_noise = [
-    { gain_setting = "0", offset = "10", binning = "1x1", temperature_c = -10.0, gain_e_per_adu = { value = 0.783, kind = "measured", source = "Photon transfer on 15 flat pairs (gain 0, offset 10, 0.55 s, -10 C), central 1000 x 1000 pixels, in stored 16-bit ADU. Measured 2026-10-11." }, read_noise_e = { value = 3.8, kind = "measured", source = "Root-mean-square noise of 5 bias-frame pairs (gain 0, offset 10, -10 C), 4.88 ADU times the gain. The ZWO datasheet gives 3.8 e- at Gain 0 and the median-based estimate 3.3 e-. Measured 2026-10-11." } },
+    { gain = 0, offset = 10, binning = "1x1", temperature_c = -10.0, gain_e_per_adu = { value = 0.783, kind = "measured", source = "Photon transfer on 15 flat pairs (gain 0, offset 10, 0.55 s, -10 C), central 1000 x 1000 pixels, in stored 16-bit ADU. Measured 2026-10-11." }, read_noise_e = { value = 3.8, kind = "measured", source = "Root-mean-square noise of 5 bias-frame pairs (gain 0, offset 10, -10 C), 4.88 ADU times the gain. The ZWO datasheet gives 3.8 e- at Gain 0 and the median-based estimate 3.3 e-. Measured 2026-10-11." } },
 ]
 # Optional. The bias level of the camera at each setting it is used at: the
 # mean pixel value of a bias frame, in stored ADU. The calibration checks
@@ -278,14 +279,14 @@ sensor_noise = [
 # value steps. A setting with no entry is not checked, and the check says so.
 # The level changes with the offset, so an entry is used for its own offset
 # only. Each entry is one inline table:
-#   gain_setting, offset, binning   the setting, as for sensor_noise
+#   gain, offset, binning   the setting, as for sensor_noise
 #   temperature_c                   optional; the sensor temperature
 #   bias_level_adu                  { value, kind, source }
 bias_levels = [
-    { gain_setting = "0", offset = "10", binning = "1x1", temperature_c = -10.0, bias_level_adu = { value = 394.85, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 10, cooling down from -10.3 to -0.5 C); frame-to-frame spread 0.33 ADU. The level moves by 0.075 ADU per degree. Measured 2026-10-31 (validation register STK-48)." } },
-    { gain_setting = "0", offset = "20", binning = "1x1", bias_level_adu = { value = 794.83, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 20); frame-to-frame spread 0.34 ADU. Measured 2026-10-31 (validation register STK-48)." } },
-    { gain_setting = "0", offset = "30", binning = "1x1", bias_level_adu = { value = 1194.86, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 30); frame-to-frame spread 0.33 ADU. Measured 2026-10-31 (validation register STK-48)." } },
-    { gain_setting = "0", offset = "50", binning = "1x1", bias_level_adu = { value = 1994.83, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 50); frame-to-frame spread 0.32 ADU. Measured 2026-10-31 (validation register STK-48)." } },
+    { gain = 0, offset = 10, binning = "1x1", temperature_c = -10.0, bias_level_adu = { value = 394.85, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 10, cooling down from -10.3 to -0.5 C); frame-to-frame spread 0.33 ADU. The level moves by 0.075 ADU per degree. Measured 2026-10-31 (validation register STK-48)." } },
+    { gain = 0, offset = 20, binning = "1x1", bias_level_adu = { value = 794.83, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 20); frame-to-frame spread 0.34 ADU. Measured 2026-10-31 (validation register STK-48)." } },
+    { gain = 0, offset = 30, binning = "1x1", bias_level_adu = { value = 1194.86, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 30); frame-to-frame spread 0.33 ADU. Measured 2026-10-31 (validation register STK-48)." } },
+    { gain = 0, offset = 50, binning = "1x1", bias_level_adu = { value = 1994.83, kind = "measured", source = "Mean of 20 bias frames (gain 0, offset 50); frame-to-frame spread 0.32 ADU. Measured 2026-10-31 (validation register STK-48)." } },
 ]
 quantum_efficiency = { wavelength_nm = [400.0, 420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 550.0, 600.0, 650.0, 700.0, 750.0, 800.0, 850.0, 900.0, 950.0, 1000.0], quantum_efficiency_fraction = [0.7, 0.82, 0.88, 0.91, 0.92, 0.9, 0.89, 0.88, 0.78, 0.62, 0.48, 0.36, 0.27, 0.19, 0.13, 0.08, 0.06], kind = "datasheet", source = "Read off the sensitivity graph published by ZWO." }
 # Optional. The wavelength, in nm, that calibration treats as the start of

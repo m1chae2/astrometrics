@@ -27,6 +27,7 @@ from astrometricslib._internal.drivers.camera_profile_store import camera_identi
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError
+from astrometricslib.models.observatory_configuration import ObservatoryConfiguration
 from astrometricslib.models.target import FrameRecord, StackConfigurationResult, Target
 from astrometricslib.utilities.frame_identity import frame_is_spectral
 
@@ -252,6 +253,58 @@ def choose_stack_configuration(
         f"{', '.join(keys) or 'none recorded (stack the target first)'}.",
         details=details,
     )
+
+
+def find_configuration_stack(
+    target: Target,
+    configuration: ObservatoryConfiguration | None = None,
+    config: AppConfiguration | None = None,
+) -> StackConfigurationResult | None:
+    """Find the target's imaging stack of one observatory configuration.
+
+    A stack records the configuration its frames share
+    (``configuration_id``). A stack recorded before frames had one is
+    matched by its camera (aliases count) and its focal length, rounded to
+    whole millimeters, against the configuration's camera and telescope.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    configuration : `ObservatoryConfiguration`, optional
+        The equipment. Left out, the target's preferred stack, or its only
+        one.
+    config : `AppConfiguration`, optional
+        The config whose camera profiles give the aliases.
+
+    Returns
+    -------
+    stack : `StackConfigurationResult` or `None`
+        The one matching stack with a stack file, or `None` when there is no
+        match or more than one.
+    """
+    recorded = [item for item in target.stacking.stacks_by_configuration.values() if item.stacked_image]
+    if configuration is None:
+        preferred = [item for item in recorded if item.is_preferred]
+        chosen = preferred or recorded
+        return chosen[0] if len(chosen) == 1 else None
+    by_id = [item for item in recorded if item.configuration_id == configuration.id]
+    if len(by_id) == 1:
+        return by_id[0]
+    focal_length = round(float(configuration.telescope.focal_length_mm))
+    camera_names = (configuration.camera.name, *configuration.camera.aliases)
+    by_equipment = [
+        item
+        for item in recorded
+        if item.configuration_id is None
+        and item.focal_length_mm is not None
+        and round(float(item.focal_length_mm)) == focal_length
+        and any(
+            item.camera and camera_identity(item.camera, config) == camera_identity(name, config)
+            for name in camera_names
+        )
+    ]
+    return by_equipment[0] if len(by_equipment) == 1 else None
 
 
 def _camera_is(recorded_camera: str, wanted: str | None, config: AppConfiguration | None) -> bool:

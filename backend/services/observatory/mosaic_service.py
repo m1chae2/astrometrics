@@ -1,14 +1,21 @@
 """Purpose: Serve the Mosaic Planner's preview and create requests.
 
 Description: The UI previews a mosaic grid, then creates it. Both ask
-`Wayfinder.planning`: `calculate_panels` works out the panel centers and
-`create_mosaic` adds one library target per panel. The create reply is one
-item per panel in the shape the app's sequencer queue takes, so the UI can
-queue the panels straight away.
+``Wayfinder.planning``: ``sky.get_panels`` works out the panel centers and
+``packages.create_mosaic`` adds one library target per panel. The create
+reply is one item per panel in the shape the app's sequencer queue takes,
+so the UI can queue the panels straight away.
 """
 
 import uuid
 from typing import Any
+
+from pydantic import ValidationError
+
+from astrometricslib import SkyPosition
+from astrometricslib.exceptions import InvalidArgumentError
+from backend.services.subject_resolver import SubjectResolver
+from wayfindinglib import MosaicPanel
 
 
 class MosaicService:
@@ -47,12 +54,12 @@ class MosaicService:
         panels : `list` [`MosaicPanel`]
             One panel per grid cell.
         """
-        return self.wayfinder.planning.calculate_panels(
-            ra_deg=float(center_ra),
-            dec_deg=float(center_dec),
-            rows=grid.get("rows", 1),
-            cols=grid.get("cols", 1),
-            overlap_percent=float(grid.get("overlap", 0.0)),
+        center = SkyPosition(ra_deg=float(center_ra) % 360.0, dec_deg=float(center_dec))
+        return self.wayfinder.planning.sky.get_panels(
+            center,
+            grid.get("rows", 1),
+            grid.get("cols", 1),
+            overlap_pct=float(grid.get("overlap", 0.0)),
             rotation_deg=float(rotation_deg),
         )
 
@@ -70,8 +77,8 @@ class MosaicService:
         panels : `list` [`dict`]
             The panels, as `preview_mosaic` returned them.
         image_config : `dict`
-            ``type``, ``count``, ``exposure``, ``filter`` and an optional
-            ``delay`` for every panel.
+            ``type``, ``count``, ``exposure_s``, ``filter`` and an optional
+            ``delay_s`` for every panel.
         dither_config : `dict`
             The dithering for every panel; kept only when ``enabled``.
 
@@ -79,17 +86,31 @@ class MosaicService:
         -------
         plan_items : `list` [`dict`]
             One sequencer item per panel, with the panel's center and name.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a panel is not in the shape the preview gives.
         """
-        plan = self.wayfinder.planning.create_mosaic(parent_target_id, panels, packages=False)
+        parent = SubjectResolver(self.wayfinder.astrometrics).target(parent_target_id)
+        try:
+            panel_models = [MosaicPanel.model_validate(panel) for panel in panels]
+        except ValidationError as error:
+            raise InvalidArgumentError(
+                "Each panel needs row, col, ra_str, dec_str, ra_deg, dec_deg and panel_id, as the preview "
+                "gives them.",
+                details={"error": str(error)},
+            ) from error
+        plan = self.wayfinder.planning.packages.create_mosaic(parent, panel_models)
         dither = dither_config if dither_config.get("enabled") else None
         return [
             {
                 "id": str(uuid.uuid4()),
                 "type": image_config["type"],
                 "count": image_config["count"],
-                "exposure": image_config["exposure"],
+                "exposure_s": image_config["exposure_s"],
                 "filter": image_config["filter"],
-                "delay": image_config.get("delay", 0),
+                "delay_s": image_config.get("delay_s", 0),
                 "coordinates": {"ra": panel.ra_deg, "dec": panel.dec_deg},
                 "dither": dither,
                 "name": panel.panel_id,

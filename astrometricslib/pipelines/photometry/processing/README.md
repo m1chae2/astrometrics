@@ -233,6 +233,7 @@ Three modules turn a run's inputs into numbers that a reader can compare with th
 - `instrumental_artifacts.py` finds the stars that cannot be judged: steps in the field, saturation and the frame edge.
 - `variability_indices.py` fits the noise model and computes the three indices, the false-alarm probability and the q-value.
 - `periodicity_search.py` runs the cycle and dip searches.
+- `star_periodicity.py` runs both searches for any one catalog star: `measure_star_periodicity` saves nothing and `record_star_periodicity` saves the results (the owners of `StellarCatalog.measure_periodicity` and `record_periodicity`).
 - `period_checks.py` runs the held-out and alias checks.
 - `family_wise_correction.py` adjusts the false-alarm probability for every search made on the target.
 - `noise_budget.py` gives the photon, sky, read and scintillation noise of a measurement.

@@ -171,8 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     astrometrics = Astrometrics()
     everything = [
-        astrometrics.targets.get(listed.id)
-        for listed in astrometrics.targets.query(detail="objects", limit=None).objects
+        astrometrics.targets.get(listed.id) for listed in astrometrics.targets.query(include_empty=True).items
     ]
     selected = select_targets([t for t in everything if t], arguments.targets, arguments.camera)
     failures = 0
@@ -203,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             image = "set" if recorded else "left as it was"
             print(f"{label}: {made} preview; processed image {image}")
     if arguments.apply:
-        astrometrics.targets.save()
+        astrometrics.targets._save()
     return 1 if failures else 0
 
 

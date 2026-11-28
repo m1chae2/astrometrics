@@ -10,10 +10,11 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
-from astrometricslib import FrameRecord, Target
+from astrometricslib import CaptureSetting, FrameRecord, Target
 from astrometricslib._internal.frames import frame_subject_id
-from astrometricslib._internal.quality import MeasurementOrigin, QualityQueryResult, QualitySubject
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject, StoredCaptureSetting
+from astrometricslib.arguments import Page
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.efficiency import (
     PINNED_METRIC_VERSIONS,
     READ_NOISE_METRIC,
@@ -26,8 +27,8 @@ SETTING = CaptureSetting(
     camera="CamA",
     telescope="Scope",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=10,
     binning=1,
 )
@@ -54,7 +55,7 @@ def make_target(spec: tuple[str, str, str], nights: int, frames_per_night: int =
                 FrameRecord(
                     path=f"/lib/lights/{target_id}/Scope/CamA/n{night}_{index:03d}.fits",
                     timestamp=moment.timestamp(),
-                    exposure="60",
+                    exposure_s=60,
                 )
             )
     return Target(id=target_id, ra=ra, dec=dec, frames=frames)
@@ -149,37 +150,40 @@ class FakeLibrary:
         """
         self.rows = rows
         self.targets = SimpleNamespace(
-            query=lambda **_k: SimpleNamespace(objects=targets),
-            get=lambda target_id: next((target for target in targets if target.id == target_id), None),
+            query=lambda **_k: SimpleNamespace(items=tuple(targets)),
+            get=lambda target_id, required=False: next(
+                (target for target in targets if target.id == target_id), None
+            ),
+            frames=SimpleNamespace(get_set_aside=lambda _target: ()),
         )
         self.quality = SimpleNamespace(
-            query=self._query,
-            capture_settings=lambda ids=None: {1: SETTING},
-            set_aside_frames=lambda target_id: [],
+            records=SimpleNamespace(
+                query=self._query,
+                get_calibration_identities=lambda target=None, **_k: [],
+                get_capture_settings=lambda ids=None: [StoredCaptureSetting(id=1, setting=SETTING)],
+            )
         )
 
     def _query(
         self,
         metric: str | None = None,
         level: str | None = None,
-        target_id: str | None = None,
-        observing_night_id: str | None = None,
+        target: Target | None = None,
+        night: str | None = None,
         **_: Any,
-    ) -> QualityQueryResult:
-        """Answer ``quality.query`` from the stored rows.
+    ) -> Page:
+        """Answer ``quality.records.query`` from the stored rows.
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows that match.
         """
-        return QualityQueryResult(
-            rows=[
-                row
-                for row in self.rows
-                if (metric is None or row.metric == metric)
-                and (level is None or row.subject.level.value == level)
-                and (target_id is None or row.subject.target_id == target_id)
-                and (observing_night_id is None or row.subject.observing_night_id == observing_night_id)
-            ]
-        )
+        return Page.of([
+            row
+            for row in self.rows
+            if (metric is None or row.metric == metric)
+            and (level is None or row.subject.level.value == level)
+            and (target is None or row.subject.target_id == target.id)
+            and (night is None or row.subject.observing_night_id == night)
+        ])

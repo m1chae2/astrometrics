@@ -21,8 +21,10 @@ import type { StatusChipStatus } from '../common/components/StatusChip';
 export interface SequenceItemRow {
     type: string;
     count: number;
-    exposure: number;
-    delay: number;
+    /** The exposure of one frame, in seconds. */
+    exposure_s: number;
+    /** The wait between frames, in seconds. */
+    delay_s: number;
     filter: string;
 }
 
@@ -84,7 +86,7 @@ export function formatExposureRequest(request: ExposureRequest): string {
     const lead = request.frameType === FrameType.LIGHT
         ? filterLabel(request.filter ?? FilterType.NONE)
         : labelFromFrameType(request.frameType);
-    return `${lead} ${request.count} x ${request.exposureSec} s`;
+    return `${lead} ${request.count} x ${request.exposureS} s`;
 }
 
 /**
@@ -120,8 +122,8 @@ export function packageToSequenceItems(observationPackage: ObservationPackage): 
     return (observationPackage.exposure_requests ?? []).map((request) => ({
         type: labelFromFrameType(request.frameType),
         count: request.count,
-        exposure: request.exposureSec,
-        delay: request.delaySec ?? 0,
+        exposure_s: request.exposureS,
+        delay_s: request.delayS ?? 0,
         filter: request.filter ?? FilterType.NONE,
     }));
 }
@@ -146,9 +148,9 @@ export function packageFromSequence(
         exposure_requests: items.map((item) => ({
             frameType: frameTypeFromLabel(item.type || 'Light'),
             filter: item.filter as FilterType,
-            exposureSec: item.exposure,
+            exposureS: item.exposure_s,
             count: item.count,
-            delaySec: item.delay || 0,
+            delayS: item.delay_s || 0,
         })),
     };
 }

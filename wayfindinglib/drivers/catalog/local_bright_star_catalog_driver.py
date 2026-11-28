@@ -73,7 +73,7 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
         return "Bright Stars (Hipparcos)"
 
     @property
-    def maximum_query_radius_degrees(self) -> float:
+    def maximum_query_radius_deg(self) -> float:
         """The largest radius, in degrees, this driver accepts."""
         return 180.0
 

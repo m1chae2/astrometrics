@@ -105,15 +105,15 @@ def test_the_loss_account_is_stated_against_the_users_own_baseline() -> None:
     assert entry.target_id == "HD 1"
     assert entry.goal.value == "faint_point_source"
     assert entry.frames_taken == 4
-    assert entry.captured_seconds == pytest.approx(240.0)
+    assert entry.captured_s == pytest.approx(240.0)
     account = entry.loss_account
     assert account is not None
     assert account.reference_name.startswith("baseline:")
     causes = {share.cause for share in account.kept_frame_deficit}
     assert "seeing" in causes
     assert any(cause.startswith("sky_brightness") for cause in causes)
-    assert entry.efficiency_effective_seconds is not None
-    assert entry.efficiency_effective_seconds < entry.captured_seconds
+    assert entry.efficiency_effective_s is not None
+    assert entry.efficiency_effective_s < entry.captured_s
     assert account.transparency_included is False
 
 
@@ -131,7 +131,7 @@ def test_set_aside_frames_recorded_by_rows_are_counted_apart() -> None:
     # quarantine row exists), so both paths of the account are used.
     for index in range(3):
         extra = FrameRecord(
-            path=f"/lib/lights/HD 1/Scope/CamA/moved_{index}.fits", timestamp=stamp, exposure="60"
+            path=f"/lib/lights/HD 1/Scope/CamA/moved_{index}.fits", timestamp=stamp, exposure_s=60
         )
         metric = STAR_WIDTH_EFFECTIVE_ARCSEC_METRIC if index < 2 else "frame.quarantine_roundness"
         rows.append(make_row(metric, 1, 0.5, target, extra, moved))
@@ -140,7 +140,7 @@ def test_set_aside_frames_recorded_by_rows_are_counted_apart() -> None:
 
     account = entry.loss_account
     assert account is not None
-    assert account.set_aside_seconds == pytest.approx(180.0)
+    assert account.set_aside_s == pytest.approx(180.0)
     assert "_excluded" in account.set_aside[0].cause
     assert entry.frames_set_aside == 3
 
@@ -214,7 +214,7 @@ def test_a_night_with_only_guiding_still_answers(monkeypatch: pytest.MonkeyPatch
         equipment_fingerprint="x",
         input_quality=GuidingInputQuality(
             runs=1,
-            guided_seconds=3600.0,
+            guided_s=3600.0,
             frames_total=100,
             frames_lost=20,
             lost_fraction=0.2,
@@ -305,17 +305,14 @@ def test_a_night_without_rotation_or_focus_rows_says_so() -> None:
 
 def test_a_target_with_two_goals_states_each_setting_goal() -> None:
     """Decision U2: a grating and an imaging setting are judged apart."""
-    from astrometricslib import Target
-    from astrometricslib.reports import CaptureSetting
+    from astrometricslib import CaptureSetting, Target
     from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
     from wayfindinglib.models.quality.efficiency import ScienceGoal
 
-    imaging = CaptureSetting(camera="Cam", filter_name="L", exposure_seconds=60.0)
-    grating = CaptureSetting(camera="Cam", filter_name="Star Analyzer 200", exposure_seconds=20.0)
+    imaging = CaptureSetting(camera="Cam", filter_name="L", exposure_s=60.0)
+    grating = CaptureSetting(camera="Cam", filter_name="Star Analyzer 200", exposure_s=20.0)
     observations = [
-        FrameObservation(
-            frame_id=f"{name}{index}", capture_setting=setting, night_id="n", exposure_seconds=seconds
-        )
+        FrameObservation(frame_id=f"{name}{index}", capture_setting=setting, night_id="n", exposure_s=seconds)
         for name, setting, seconds in (("i", imaging, 60.0), ("g", grating, 20.0))
         for index in range(3)
     ]

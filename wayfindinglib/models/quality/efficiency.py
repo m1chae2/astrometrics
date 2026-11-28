@@ -12,14 +12,14 @@ reason; no value is invented for it. A frame better than the reference is
 capped at a factor of 1, and the factor says so.
 
 Two different "effective times" exist and must not be mixed:
-`weight_effective_seconds` is the weighted time the stacker reports, and
-`efficiency_effective_seconds` is eta times the captured time.
+`weight_effective_s` is the weighted time the stacker reports, and
+`efficiency_effective_s` is eta times the captured time.
 """
 
 from enum import StrEnum
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class EfficiencyReferenceKind(StrEnum):
@@ -149,9 +149,9 @@ class EfficiencyResult(BaseModel):
         Efficiency, above 0 and at most 1. ``None`` when it cannot be found.
     factors : `list` [`EfficiencyFactor`]
         One factor for each cause, included or not.
-    captured_seconds : `float`
+    captured_s : `float`
         Exposure time captured, in seconds.
-    efficiency_effective_seconds : `float` or `None`
+    efficiency_effective_s : `float` or `None`
         Eta times the captured time, in seconds. ``None`` when eta is.
     """
 
@@ -162,9 +162,21 @@ class EfficiencyResult(BaseModel):
     reference: EfficiencyReference
     eta: float | None = Field(default=None, gt=0.0, le=1.0)
     factors: list[EfficiencyFactor] = Field(default_factory=list)
-    captured_seconds: float = Field(ge=0.0, alias="capturedSeconds")
-    efficiency_effective_seconds: float | None = Field(
-        default=None, ge=0.0, alias="efficiencyEffectiveSeconds"
+    captured_s: float = Field(
+        ge=0.0,
+        alias="capturedS",
+        validation_alias=AliasChoices("capturedS", "captured_s", "capturedSeconds", "captured_seconds"),
+    )
+    efficiency_effective_s: float | None = Field(
+        default=None,
+        ge=0.0,
+        alias="efficiencyEffectiveS",
+        validation_alias=AliasChoices(
+            "efficiencyEffectiveS",
+            "efficiency_effective_s",
+            "efficiencyEffectiveSeconds",
+            "efficiency_effective_seconds",
+        ),
     )
 
     @model_validator(mode="after")
@@ -179,10 +191,10 @@ class EfficiencyResult(BaseModel):
         Raises
         ------
         ValueError
-            If only one of `eta` and `efficiency_effective_seconds` is set.
+            If only one of `eta` and `efficiency_effective_s` is set.
         """
-        if (self.eta is None) != (self.efficiency_effective_seconds is None):
-            raise ValueError("eta and efficiency_effective_seconds must both be set or both be None.")
+        if (self.eta is None) != (self.efficiency_effective_s is None):
+            raise ValueError("eta and efficiency_effective_s must both be set or both be None.")
         return self
 
 
@@ -221,13 +233,13 @@ class LossAccount(BaseModel):
         The science goal the account is stated for.
     reference_name : `str`
         The name of the reference efficiency is measured against.
-    set_aside_seconds : `float`
+    set_aside_s : `float`
         Total exposure time of the frames set aside, in seconds.
     set_aside : `list` [`LossShare`]
         The same time split by the reason frames were set aside.
     kept_frame_deficit : `list` [`LossShare`]
         Captured minus effective time of the kept frames, split by cause.
-    cause_unknown_seconds : `float` or `None`
+    cause_unknown_s : `float` or `None`
         The part of the deficit that no listed cause explains. ``None``
         means "not measured": it exists only where efficiency is measured
         independently of the causes.
@@ -243,10 +255,21 @@ class LossAccount(BaseModel):
 
     goal: ScienceGoal
     reference_name: str = Field(alias="referenceName")
-    set_aside_seconds: float = Field(ge=0.0, alias="setAsideSeconds")
+    set_aside_s: float = Field(
+        ge=0.0,
+        alias="setAsideS",
+        validation_alias=AliasChoices("setAsideS", "set_aside_s", "setAsideSeconds", "set_aside_seconds"),
+    )
     set_aside: list[LossShare] = Field(default_factory=list, alias="setAside")
     kept_frame_deficit: list[LossShare] = Field(default_factory=list, alias="keptFrameDeficit")
-    cause_unknown_seconds: float | None = Field(default=None, ge=0.0, alias="causeUnknownSeconds")
+    cause_unknown_s: float | None = Field(
+        default=None,
+        ge=0.0,
+        alias="causeUnknownS",
+        validation_alias=AliasChoices(
+            "causeUnknownS", "cause_unknown_s", "causeUnknownSeconds", "cause_unknown_seconds"
+        ),
+    )
     cause_unknown_reason: str = Field(min_length=1, alias="causeUnknownReason")
     transparency_included: bool = Field(alias="transparencyIncluded")
     transparency_reason: str = Field(min_length=1, alias="transparencyReason")

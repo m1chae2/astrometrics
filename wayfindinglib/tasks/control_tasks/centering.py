@@ -15,8 +15,8 @@ points is off by some arcminutes. Centering closes that gap in a loop:
    where it really points (a sync) and slew to the target again.
 
 Each iteration is recorded as an alignment attempt in the log database,
-so `review.query(kind="alignment")` can show it. A call to
-`control.mount.abort_motion` stops the loop before its next step.
+so `review.alignment.query` can show it. A call to
+`control.mount.stop` stops the loop before its next step.
 """
 
 from __future__ import annotations
@@ -26,18 +26,24 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.exceptions import AstrometricsError, PlateSolveFailedError
+from astrometricslib import SkyPosition
+from astrometricslib.exceptions import (
+    AstrometricsError,
+    HardwareError,
+    InvalidArgumentError,
+    PlateSolveFailedError,
+)
 from wayfindinglib.models.session.correction_result import PointingCorrection
-from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations
 from wayfindinglib.tasks.control_tasks.centering_exposure import choose_centering_exposure
 from wayfindinglib.tasks.control_tasks.imaging_capture import READOUT_SECONDS
 from wayfindinglib.tasks.control_tasks.pointing_correction import compute_pointing_correction
 
 if TYPE_CHECKING:
+    from astrometricslib import StellarObject, Target
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["SETTLE_SECONDS", "center_on"]
+__all__ = ["SETTLE_SECONDS", "center_on", "slew_to"]
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +73,14 @@ def _centering_image_path(context: ControlContext) -> Path:
     return folder / "latest.fits"
 
 
-def _capture_frame(context: ControlContext, exposure_seconds: float) -> Path | None:
+def _capture_frame(context: ControlContext, exposure_s: float) -> Path | None:
     """Take one centering frame and write it to disk.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the main camera and the configuration.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length.
 
     Returns
@@ -85,10 +91,10 @@ def _capture_frame(context: ControlContext, exposure_seconds: float) -> Path | N
     camera = context.camera_driver
     hardware_operations._run_sync(camera.set_image_reception(True))
     try:
-        if not hardware_operations.capture_image(context, exposure_seconds):
+        if not hardware_operations.capture_image(context, exposure_s):
             return None
         data = hardware_operations._run_sync(
-            camera.wait_for_new_image(exposure_seconds + READOUT_SECONDS + IMAGE_WAIT_SECONDS)
+            camera.wait_for_new_image(exposure_s + READOUT_SECONDS + IMAGE_WAIT_SECONDS)
         )
     finally:
         hardware_operations._run_sync(camera.set_image_reception(False))
@@ -119,7 +125,7 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     PlateSolveFailedError
         If the star pattern could not be matched.
     """
-    solution = context.astrometrics.processing.plate_solve(str(path))
+    solution = context.astrometrics.processing.astrometry.solve(str(path))
     if solution is None:
         raise PlateSolveFailedError(f"No plate solution for {path.name}.")
     return solution.ra_deg, solution.dec_deg
@@ -166,7 +172,7 @@ def center_on(
     tolerance_arcsec: float | None = None,
     max_iterations: int | None = None,
     target_name: str | None = None,
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
 ) -> bool:
     """Slew to `position` and refine the pointing until it is centered.
 
@@ -185,9 +191,9 @@ def center_on(
         ``alignment_iteration_limit`` when omitted.
     target_name : `str`, optional
         Name stored with each recorded attempt.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         Exposure length of each centering frame. When omitted it is the
-        ``alignment_exposure_seconds`` setting. With
+        ``alignment_exposure_s`` setting. With
         ``alignment_exposure_from_equipment`` on, it is chosen once, before
         the first frame, by `choose_centering_exposure`: the shortest
         exposure expected to show enough stars to solve, or the setting when
@@ -197,28 +203,27 @@ def center_on(
     -------
     centered : `bool`
         `True` once a solve is within the tolerance; `False` if the
-        iterations ran out or `control.mount.abort_motion` stopped the
-        loop.
+        iterations ran out or `control.mount.stop` stopped the loop.
     """
     config = context.correction_config
     if tolerance_arcsec is not None:
         config = config.model_copy(update={"alignment_convergence_tolerance_arcsec": tolerance_arcsec})
     iterations = max_iterations if max_iterations is not None else config.alignment_iteration_limit
     context.motion_stop.clear()
-    if exposure_seconds is None and config.alignment_exposure_from_equipment:
+    if exposure_s is None and config.alignment_exposure_from_equipment:
         choice = choose_centering_exposure(context, position)
-        exposure_seconds = choice.exposure_seconds
-        logger.info("Centering exposure %.1f s (%s): %s", exposure_seconds, choice.source, choice.reason)
-    elif exposure_seconds is None:
-        exposure_seconds = config.alignment_exposure_seconds
-        logger.info("Centering exposure %.1f s (the alignment_exposure_seconds setting)", exposure_seconds)
+        exposure_s = choice.exposure_s
+        logger.info("Centering exposure %.1f s (%s): %s", exposure_s, choice.source, choice.reason)
+    elif exposure_s is None:
+        exposure_s = config.alignment_exposure_s
+        logger.info("Centering exposure %.1f s (the alignment_exposure_s setting)", exposure_s)
     hardware_operations.slew(context, position)
     for iteration in range(1, iterations + 1):
         time.sleep(SETTLE_SECONDS)
         if context.motion_stop.is_set():
             logger.info("Centering stopped before iteration %s", iteration)
             return False
-        path = _capture_frame(context, exposure_seconds)
+        path = _capture_frame(context, exposure_s)
         if path is None:
             logger.warning("Centering iteration %s: the camera sent no frame", iteration)
             _record(context, "failed", None, target_name)
@@ -251,3 +256,60 @@ def center_on(
         hardware_operations.slew(context, position)
     logger.warning("Centering did not converge in %s iterations", iterations)
     return False
+
+
+def slew_to(
+    context: ControlContext,
+    destination: Target | StellarObject | SkyPosition,
+    center: bool = False,
+    tolerance_arcsec: float | None = None,
+    max_iterations: int | None = None,
+) -> None:
+    """Slew the mount to a destination, and center it by plate solving.
+
+    The work behind ``control.mount.slew``.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the drivers, the policy and the target catalog.
+    destination : `Target`, `StellarObject` or `SkyPosition`
+        Where to point, in ICRS (J2000).
+    center : `bool`, optional
+        Refine the pointing by plate solving after the slew (`center_on`).
+    tolerance_arcsec : `float`, optional
+        Largest pointing error that counts as centered. Only with
+        ``center=True``.
+    max_iterations : `int`, optional
+        Most solve-and-correct rounds. Only with ``center=True``.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `tolerance_arcsec` or `max_iterations` is given without
+        ``center=True``.
+    HardwareError
+        If centering did not reach the tolerance in its rounds. A centering
+        run stopped by ``control.mount.stop`` ends without an error.
+
+    Notes
+    -----
+    The slew itself raises `PermissionDeniedError` in monitor mode and
+    `HardwareError` if the mount refuses it.
+    """
+    position = hardware_operations.resolve_destination(context, destination)
+    if not center:
+        if tolerance_arcsec is not None or max_iterations is not None:
+            raise InvalidArgumentError("tolerance_arcsec and max_iterations are used only with center=True.")
+        hardware_operations.slew(context, position)
+        return
+    target_name = destination if isinstance(destination, str) else getattr(destination, "id", None)
+    centered = center_on(
+        context,
+        position,
+        tolerance_arcsec=tolerance_arcsec,
+        max_iterations=max_iterations,
+        target_name=target_name,
+    )
+    if not centered and not context.motion_stop.is_set():
+        raise HardwareError("Centering did not reach the pointing tolerance.")

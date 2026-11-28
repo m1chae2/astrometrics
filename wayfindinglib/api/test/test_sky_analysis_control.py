@@ -1,7 +1,7 @@
 """Purpose: End-to-end tests for the sky and recurring-issue analyses.
 
 Description: Runs the sky-coverage and recurring-issue analyses behind
-`review.query` (`night_analysis.sky_coverage_analysis` and
+`review.nights` (`night_analysis.sky_coverage_analysis` and
 `recurring_issues`) against a real isolated configuration, Butler and
 log database, with the science library's frames replaced by synthetic ones.
 Checks that a planted low-altitude effect is found across nights, that nights
@@ -12,7 +12,7 @@ is reported as recurring.
 import numpy as np
 import pytest
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.capture_night_helpers import Library
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
@@ -38,13 +38,13 @@ def _add_night(library: Library, day: int, low_factor: float = 1.0) -> str:
                     path=f"/frames/{day}_{index}.fits",
                     target_id="Target",
                     timestamp=start + 60.0 * index,
-                    exposure_seconds=30.0,
+                    exposure_s=30.0,
                     filter_name="Luminance",
                     is_spectral=False,
                     star_width_arcsec=float(5.0 * factor * (1.0 + generator.normal(0.0, 0.02))),
                     roundness=0.9,
-                    altitude_degrees=altitude,
-                    azimuth_degrees=180.0,
+                    altitude_deg=altitude,
+                    azimuth_deg=180.0,
                     pier_side="WEST",
                 )
             )
@@ -126,5 +126,5 @@ def test_exposure_lengths_reach_the_guiding_analysis(control: ObservatoryControl
     )
 
     (result,) = analysis.performance.exposure_feasibility
-    assert result.exposure_seconds == pytest.approx(30.0)
+    assert result.exposure_s == pytest.approx(30.0)
     assert result.windows >= 10

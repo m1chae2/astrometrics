@@ -7,9 +7,11 @@ frames) and predicts the rate for a pointing and a time. Nothing here writes.
 
 from __future__ import annotations
 
+import time as _time
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
+from astrometricslib.arguments import TimeInput, to_epoch_seconds
 from astrometricslib.exceptions import ConfigurationError, InvalidArgumentError
 from wayfindinglib.analytics.capture_history import equipment_spellings, normalize_name
 from wayfindinglib.analytics.result_quality.efficiency import baseline_key
@@ -72,7 +74,7 @@ def get_sky_rate_prediction(
     camera_names = equipment_spellings(astrometrics, camera.name)
     telescope_name = normalize_name(telescope.name)
     representatives = {}
-    for setting in astrometrics.quality.capture_settings().values():
+    for setting in (stored.setting for stored in astrometrics.quality.records.get_capture_settings()):
         if normalize_name(setting.camera) not in camera_names:
             continue
         if normalize_name(setting.telescope) != telescope_name:
@@ -123,3 +125,44 @@ def get_sky_rate_prediction(
             else "The target is below the horizon at that time."
         ),
     )
+
+
+def predict_sky_rate(
+    context: ControlContext,
+    ra_deg: float,
+    dec_deg: float,
+    time: TimeInput | None = None,
+    filter_name: str | None = None,
+    exclude_nights: Collection[str] | None = None,
+) -> SkyRatePrediction:
+    """Predict the sky rate of the active equipment for a pointing and time.
+
+    The owner of `review.performance.predict_sky_rate`: it reads the time
+    and passes on to `get_sky_rate_prediction`.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the active equipment, the science library and the site.
+    ra_deg, dec_deg : `float`
+        The pointing, in ICRS degrees.
+    time : `str`, `datetime` or `astropy.time.Time`, optional
+        The moment. Now when omitted. Text is ISO 8601; no time zone means
+        UTC.
+    filter_name : `str`, optional
+        The filter. The setting with the most fitted nights when omitted.
+    exclude_nights : `Collection` [`str`], optional
+        Nights whose frames are left out of the model.
+
+    Returns
+    -------
+    prediction : `SkyRatePrediction`
+        As `get_sky_rate_prediction` gives it.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if `time` cannot be read or the
+    declination is out of range.
+    """
+    epoch_seconds = _time.time() if time is None else to_epoch_seconds(time, "time")
+    return get_sky_rate_prediction(context, epoch_seconds, ra_deg, dec_deg, filter_name, exclude_nights)

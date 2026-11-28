@@ -35,7 +35,7 @@ class CatalogDriver(abc.ABC):
         """Human-readable label shown in the UI (e.g. 'SIMBAD', 'GAIA DR3')."""
 
     @property
-    def maximum_query_radius_degrees(self) -> float:
+    def maximum_query_radius_deg(self) -> float:
         """Maximum query radius accepted by this driver.
 
         Subclasses should override to enforce service-specific limits and
@@ -59,7 +59,7 @@ class CatalogDriver(abc.ABC):
         """Query the catalog for objects in a circular sky region.
 
         The caller is responsible for clamping radius_degrees to
-        maximum_query_radius_degrees before calling this method.
+        maximum_query_radius_deg before calling this method.
         Implementations should still handle oversized radii gracefully.
 
         Parameters

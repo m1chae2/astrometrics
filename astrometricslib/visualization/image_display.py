@@ -1,7 +1,7 @@
-"""Purpose: Draw the app's star overlays on a picture of one image.
+"""Purpose: Draw one image as a Matplotlib figure, with the star overlays.
 
-Description: `Visualization.render_fits` draws a frame or a stack as a PNG
-(``kind="image"``) or as a Matplotlib figure (``kind="figure"``). With
+Description: `plot_image` is the owner of ``Visualization.plot_image``. It
+draws a frame, a stack or an array as a figure at full resolution. With
 ``overlays`` it also marks what Image Processing shows, read from the files
 saved next to a stack:
 
@@ -14,12 +14,11 @@ saved next to a stack:
   identification) is a record with photometry (a light curve) are drawn and
   named.
 
-This module finds the marks once (`collect_overlay_marks`) and draws them
-either on a Matplotlib figure (`draw_image_figure`) or on a PNG
-(`draw_marks_on_picture`), so both kinds show the same marks in the same
-colors. The figure is made with `matplotlib.pyplot`, so a Jupyter notebook
-shows it in the page and the app's Command Console opens it in a figure
-window. Nothing is saved.
+This module finds the marks (`collect_overlay_marks`) and draws them on the
+figure (`draw_image_figure`). The axes count pixels from 1, as FITS and DS9
+do. The figure is made with `matplotlib.pyplot`, so a Jupyter notebook shows
+it in the page and the app's Command Console opens it in a figure window.
+Nothing is saved.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
@@ -35,19 +33,21 @@ from astrometricslib.foundation.errors import InvalidArgumentError
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
-    from astrometricslib.api.stars import StellarCatalog
-    from astrometricslib.models.target import ViewableImage
     from astrometricslib.pipelines.shared.image_conversions import DisplayPixels
 
 __all__ = [
+    "IMAGE_FIGURE_SIZE",
     "IMAGE_OVERLAYS",
     "OverlayMark",
     "check_overlays",
     "collect_overlay_marks",
     "draw_image_figure",
-    "draw_marks_on_picture",
     "figure_name",
+    "plot_image",
 ]
+
+IMAGE_FIGURE_SIZE = (10.0, 8.0)
+"""Size of the figure `plot_image` draws, in inches."""
 
 IMAGE_OVERLAYS = ("detections", "stars")
 """The overlays that can be drawn on a FITS file."""
@@ -63,10 +63,6 @@ STAR_MARKER_SIZE = 140.0
 """Area of a named star's circle on a figure, in points squared (13 points
 across)."""
 
-MARKER_RADIUS_PIXELS = {"detections": 5, "stars": 7}
-"""Radius of each overlay's circle on a PNG, in picture pixels. These match
-the figure's circles at its usual size."""
-
 
 @dataclass(frozen=True)
 class OverlayMark:
@@ -78,10 +74,10 @@ class OverlayMark:
         Which overlay the mark belongs to: ``"detections"`` or ``"stars"``.
     column : `float`
         Column of the mark, in full-frame pixels, where the first pixel's
-        center is 0.
+        center is 1.
     row : `float`
         Row of the mark, in full-frame pixels, where the first pixel's
-        center is 0.
+        center is 1.
     label : `str` or `None`
         The name written beside the circle, or `None` for none.
     """
@@ -122,7 +118,7 @@ def check_overlays(overlays: Sequence[str] | str | None) -> tuple[str, ...]:
     return names
 
 
-def _photometry_star_names(stars: StellarCatalog, keys: list[str], target_id: str | None) -> dict[str, str]:
+def _photometry_star_names(storage: Any, keys: list[str], target_id: str | None) -> dict[str, str]:
     """Find the library stars with photometry and the names the lists show.
 
     The overlay labels a star with its library record's name, so a star reads
@@ -130,8 +126,8 @@ def _photometry_star_names(stars: StellarCatalog, keys: list[str], target_id: st
 
     Parameters
     ----------
-    stars : `StellarCatalog`
-        The library's star catalog.
+    storage : `AbstractCatalogAccess`
+        The catalog storage, which holds the star records.
     keys : `list` [`str`]
         The library ids of the stack's stars.
     target_id : `str` or `None`
@@ -144,22 +140,21 @@ def _photometry_star_names(stars: StellarCatalog, keys: list[str], target_id: st
         Each id that has photometry, mapped to its record's name (its id
         when the record has no name).
     """
-    if target_id:
-        answer = stars.query(target_id=target_id, has_photometry=True, detail="summary", limit=None)
-    elif keys:
-        answer = stars.query(ids=keys, has_photometry=True, detail="summary", limit=None)
-    else:
-        return {}
+    from astrometricslib.pipelines.shared.star_catalog_queries import get_star
+
     names: dict[str, str] = {}
-    for row in answer.stars or []:
-        star_id = row.get("id")
-        if isinstance(star_id, str) and star_id:
-            names[star_id] = str(row.get("name") or star_id)
+    for key in keys:
+        star = get_star(storage, key)
+        if star is None or star.id != key or not star.has_photometry:
+            continue
+        if target_id and target_id not in (star.target_ids or []):
+            continue
+        names[key] = str(star.name or key)
     return names
 
 
 def collect_overlay_marks(
-    path: str, overlays: Sequence[str], stars: StellarCatalog | None, target_id: str | None
+    path: str, overlays: Sequence[str], storage: Any, target_id: str | None = None
 ) -> tuple[list[OverlayMark], list[str]]:
     """Find the marks of the chosen overlays on a FITS file.
 
@@ -169,10 +164,10 @@ def collect_overlay_marks(
         The FITS file (a frame or a stack).
     overlays : `Sequence` [`str`]
         The checked overlay names (see `check_overlays`).
-    stars : `StellarCatalog` or `None`
-        The library's star catalog, used to keep only the named stars with
+    storage : `AbstractCatalogAccess` or `None`
+        The catalog storage, used to keep only the named stars with
         photometry. Without it, the ``"stars"`` overlay draws nothing.
-    target_id : `str` or `None`
+    target_id : `str` or `None`, optional
         The target the stack belongs to. With it, only that target's stars
         with photometry are named, as in Image Processing.
 
@@ -188,7 +183,7 @@ def collect_overlay_marks(
     if "detections" in overlays:
         notes.append(_detection_marks(path, marks))
     if "stars" in overlays:
-        notes.append(_named_star_marks(path, stars, target_id, marks))
+        notes.append(_named_star_marks(path, storage, target_id, marks))
     return marks, notes
 
 
@@ -215,23 +210,20 @@ def _detection_marks(path: str, marks: list[OverlayMark]) -> str:
         return f"no detections ({error})"
     if not measurement.detections:
         return "no stars detected"
-    # The detections are in 1-based pixels (the first pixel's center is 1, 1);
-    # the marks use 0-based pixels (the first pixel's center is 0, 0).
-    marks.extend(OverlayMark("detections", star.x - 1.0, star.y - 1.0) for star in measurement.detections)
+    # The detections and the marks both count pixels from 1.
+    marks.extend(OverlayMark("detections", star.x, star.y) for star in measurement.detections)
     return f"{len(measurement.detections):,} detections"
 
 
-def _named_star_marks(
-    path: str, stars: StellarCatalog | None, target_id: str | None, marks: list[OverlayMark]
-) -> str:
+def _named_star_marks(path: str, storage: Any, target_id: str | None, marks: list[OverlayMark]) -> str:
     """Add the stack's named stars that have photometry to the marks.
 
     Parameters
     ----------
     path : `str`
         The stack.
-    stars : `StellarCatalog` or `None`
-        The library's star catalog.
+    storage : `AbstractCatalogAccess` or `None`
+        The catalog storage, which holds the star records.
     target_id : `str` or `None`
         The stack's target, if known.
     marks : `list` [`OverlayMark`]
@@ -244,20 +236,20 @@ def _named_star_marks(
     """
     from astrometricslib.pipelines.astrometry.processing.stack_identification import read_stack_identification
 
-    if stars is None:
+    if storage is None:
         return "no star names (no star catalog)"
     identification = read_stack_identification(path)
     if identification is None:
         return "no star names (identify the stack first)"
     library_ids = list(dict.fromkeys(star.library_id for star in identification.stars if star.library_id))
-    with_photometry = _photometry_star_names(stars, library_ids, target_id)
+    with_photometry = _photometry_star_names(storage, library_ids, target_id)
     if not with_photometry:
         return "no stars with photometry yet (run Analyze Target)"
     shown = 0
     for star in identification.stars:
         if star.library_id in with_photometry:
-            # The identification is in 1-based pixels; the marks are 0-based.
-            marks.append(OverlayMark("stars", star.x - 1.0, star.y - 1.0, with_photometry[star.library_id]))
+            # The identification and the marks both count pixels from 1.
+            marks.append(OverlayMark("stars", star.x, star.y, with_photometry[star.library_id]))
             shown += 1
     return f"{shown:,} {'star' if shown == 1 else 'stars'} with photometry"
 
@@ -288,19 +280,18 @@ def draw_image_figure(
     -------
     figure : `matplotlib.figure.Figure`
         The figure. The first row of pixels is at the top, as in the app's
-        viewer, and the axes count full-frame pixels even for a crop.
+        viewer, and the axes count full-frame pixels from 1, even for a
+        crop.
     """
     import matplotlib.pyplot as plt
 
-    box = display.crop_box or {
-        "left": 0,
-        "top": 0,
-        "width": display.full_width,
-        "height": display.full_height,
-    }
+    crop = display.crop
+    first_column, first_row = (crop.left_px, crop.top_px) if crop is not None else (1, 1)
+    width = crop.width_px if crop is not None else display.full_width
+    height = crop.height_px if crop is not None else display.full_height
     # Each pixel is drawn centered on its whole-number position.
-    left, right = box["left"] - 0.5, box["left"] + box["width"] - 0.5
-    top, bottom = box["top"] - 0.5, box["top"] + box["height"] - 0.5
+    left, right = first_column - 0.5, first_column + width - 0.5
+    top, bottom = first_row - 0.5, first_row + height - 0.5
     figure, axes = plt.subplots(figsize=figsize)
     style: dict[str, Any] = {
         "origin": "upper",
@@ -345,56 +336,6 @@ def draw_image_figure(
     return figure
 
 
-def draw_marks_on_picture(
-    picture: ViewableImage, marks: Sequence[OverlayMark], notes: Sequence[str]
-) -> ViewableImage:
-    """Draw marks on a rendered PNG, in the overlays' colors.
-
-    Parameters
-    ----------
-    picture : `ViewableImage`
-        The PNG and its description, from `render_viewable_image`. The
-        description gives the crop and the picture size, which place each
-        mark.
-    marks : `Sequence` [`OverlayMark`]
-        The marks to draw, in full-frame pixels.
-    notes : `Sequence` [`str`]
-        One note per overlay. They are added to the description under
-        ``"overlays"``.
-
-    Returns
-    -------
-    picture : `ViewableImage`
-        A color PNG with the marks, and the description with the notes.
-    """
-    from PIL import Image, ImageDraw
-
-    description = dict(picture.description)
-    full = description["full_frame_size"]
-    box = description.get("crop") or {"left": 0, "top": 0, "width": full["width"], "height": full["height"]}
-    size = description["picture_size"]
-    scale_x = size["width"] / box["width"]
-    scale_y = size["height"] / box["height"]
-    image = Image.open(BytesIO(picture.png_bytes)).convert("RGB")
-    draw = ImageDraw.Draw(image)
-    for mark in marks:
-        # A source pixel's center at c lands at (c + 0.5) * scale - 0.5 once
-        # the piece is resized.
-        x = (mark.column - box["left"] + 0.5) * scale_x - 0.5
-        y = (mark.row - box["top"] + 0.5) * scale_y - 0.5
-        radius = MARKER_RADIUS_PIXELS[mark.overlay]
-        if not (-radius <= x <= size["width"] + radius and -radius <= y <= size["height"] + radius):
-            continue
-        color = OVERLAY_COLORS[mark.overlay]
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), outline=color, width=1)
-        if mark.label:
-            draw.text((x + radius + 2, y - radius - 10), mark.label, fill=color)
-    buffer = BytesIO()
-    image.save(buffer, format="PNG", compress_level=1)
-    description["overlays"] = list(notes)
-    return picture.model_copy(update={"png_bytes": buffer.getvalue(), "description": description})
-
-
 def figure_name(path: str | None) -> str:
     """Name an image for a figure's title.
 
@@ -409,3 +350,63 @@ def figure_name(path: str | None) -> str:
         The file name, or ``"array"``.
     """
     return os.path.basename(path) if path is not None else "array"
+
+
+def plot_image(
+    image: Any,
+    *,
+    storage: Any,
+    overlays: Sequence[str] | str | None = None,
+    crop: tuple[float, float, int] | None = None,
+    stretch: bool = True,
+    brightness: tuple[float, float] | None = None,
+) -> Figure:
+    """Draw a FITS file, a frame or an array as a figure, with overlays.
+
+    Parameters
+    ----------
+    image : `str`, `FrameRecord` or `numpy.ndarray`
+        The image (see `image_conversions.image_source`).
+    storage : `AbstractCatalogAccess`
+        The catalog storage, which names the stars of the ``"stars"``
+        overlay.
+    overlays : `Sequence` [`str`], `str` or `None`, optional
+        What to mark on a file: ``"detections"``, ``"stars"`` or both.
+    crop : `tuple` [`float`, `float`, `int`], optional
+        Column and row of the center of a zoomed piece, counted from 1, and
+        its side, in full-image pixels.
+    stretch : `bool`, optional
+        Brighten faint detail automatically. Defaults to `True`.
+    brightness : `tuple` [`float`, `float`], optional
+        The pixel values to draw black and white. It replaces ``stretch``.
+
+    Returns
+    -------
+    figure : `matplotlib.figure.Figure`
+        The figure, with what each overlay drew (or why it drew nothing) in
+        its title.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If overlays are asked for on an array, which has no saved
+        detections or names.
+    """
+    from astrometricslib.pipelines.shared import image_conversions
+
+    names = check_overlays(overlays)
+    path, pixels = image_conversions.image_source(image)
+    if names and path is None:
+        raise InvalidArgumentError(
+            "An array has no saved detections or names, so it takes no overlays.",
+            details={"overlays": list(names)},
+        )
+    display = image_conversions.scale_for_display(
+        path,
+        pixels,
+        stretch,
+        image_conversions.check_brightness(brightness),
+        image_conversions.check_crop(crop),
+    )
+    marks, notes = collect_overlay_marks(path, names, storage) if names and path is not None else ([], [])
+    return draw_image_figure(display, figure_name(path), marks, notes, IMAGE_FIGURE_SIZE)

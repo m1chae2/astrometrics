@@ -280,7 +280,7 @@ export function useStarMeasurement(input: StarMeasurementInput): StarMeasurement
     } else if (measurement) {
       // The angle runs from +y (up a column) toward +x; screen rows grow downward when the first row is at the top.
       // A turned picture turns the cut with it.
-      const angle = (starProfile.cutAngleDegrees * Math.PI) / 180;
+      const angle = (starProfile.cutAngleDeg * Math.PI) / 180;
       const halfLength = profileView?.cutHalfLengthPx ?? measurement.cut_half_length_px;
       const turnedHalfCut = turnStep(Math.sin(angle) * halfLength, Math.cos(angle) * halfLength * (firstRowAtTop ? 1 : -1), turn);
       const alongX = turnedHalfCut.x * stepX;

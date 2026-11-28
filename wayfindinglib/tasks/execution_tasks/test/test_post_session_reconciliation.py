@@ -67,8 +67,8 @@ class _FakeFrame:
     """A stand-in frame record with the fields reconciliation reads."""
 
     timestamp: float
-    iso: str = "800"
-    offset: str = "0"
+    gain: int | None = 800
+    offset: int = 0
     path: str = "frame.fits"
 
 
@@ -85,6 +85,7 @@ class _FakeTargetRegistry:
     def __init__(self, targets: dict[str, _FakeTarget]) -> None:
         """Keep the targets by id."""
         self._targets = targets
+        self.frames = self
 
     def get(self, target_id: str) -> _FakeTarget | None:
         """Return the target with this id, if any.
@@ -96,17 +97,17 @@ class _FakeTargetRegistry:
         """
         return self._targets.get(target_id)
 
-    def sessions(self, target: _FakeTarget, night_date: date | None = None) -> list[Any]:
+    def get_nights(self, target: _FakeTarget, night: date | None = None) -> list[Any]:
         """Group a target's frames into sessions, as the library does.
 
         Returns
         -------
         sessions : `list`
-            The target's sessions, only those of `night_date` when given.
+            The target's sessions, only those of `night` when given.
         """
         target_id = next(key for key, value in self._targets.items() if value is target)
         found = derive_target_sessions(target_id, target.frames)
-        return [session for session in found if night_date is None or session.night_date == night_date]
+        return [session for session in found if night is None or session.night_date == night]
 
 
 class _FakeAstrometrics:
@@ -191,7 +192,7 @@ def test_reconcile_session_persists_the_session_and_writes_no_calibration_stats(
         "entry-1",
         "M 81",
         QueueEntryStatus.COMPLETED,
-        [ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=20)],
+        [ExposureRequest(frame_type=FrameType.DARK, exposure_s=300.0, count=20)],
     )
     session = _session("session-1", "cam-1", SessionStatus.COMPLETED, [entry])
     butler.put(session, "observation_session", {"session_id": session.id})

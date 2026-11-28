@@ -85,7 +85,7 @@ def test_backoff_interval_applied_between_attempts() -> None:
         "mount-1",
         DeviceSummaryState.FAULT,
         "connection lost",
-        RecoveryPolicy(max_attempts=3, initial_interval_sec=10, backoff_multiplier=2.0),
+        RecoveryPolicy(max_attempts=3, initial_interval_s=10, backoff_multiplier=2.0),
         return_to_standby=lambda: None,
         re_enable=lambda: None,
         read_state=lambda: DeviceSummaryState.FAULT,

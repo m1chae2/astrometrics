@@ -1,19 +1,20 @@
 """Purpose: Say what the wayfindinglib-core MCP server offers.
 
 Description: The server reflects the public methods of `Wayfinder`. The
-tools pass the client's arguments to the methods as they are: the methods
-accept target ids, ISO times and position dictionaries themselves.
+tools turn the client's ids into library objects (a target, a star) and its
+frame filters into a frame choice before the call.
 ``control`` itself holds only the driver properties, which are not tools. Its
 operations live on six children, so each child gets its own prefix, such
-as ``observatory_mount_park``. ``review`` is a sub-API of its own, with the
-prefix ``review``, such as ``review_query``. The server's manifest,
+as ``observatory_mount_park``. ``planning`` holds four objects and
+``review`` five, each with a prefix of its own, such as
+``planning_sessions_get`` and ``review_nights_query``. The server's manifest,
 ``tool_manifest.json`` in this folder, decides which tools a profile may use.
 """
 
 from pathlib import Path
 
 from mcp_servers.common.app_job_tools import APP_JOB_TOOLS
-from mcp_servers.common.reflection import register_reflected_tools
+from mcp_servers.common.reflection import ClientLimits, register_reflected_tools
 from mcp_servers.common.tool_registry import ToolRegistry
 from wayfindinglib import Wayfinder
 
@@ -26,13 +27,34 @@ MANIFEST_PATH = Path(__file__).resolve().parent / "tool_manifest.json"
 CONTROL_CHILDREN = ("mount", "imaging", "guiding", "remote", "safety", "equipment")
 """The children of `Wayfinder.control` that hold its operations."""
 
+REVIEW_CHILDREN = ("nights", "targets", "guiding", "performance", "alignment")
+"""The objects of `Wayfinder.review` that hold its reads."""
+
 BRANCH_PREFIXES = {
     **{f"control.{child}": f"observatory_{child}" for child in CONTROL_CHILDREN},
-    "planning": "planning",
+    "planning.sessions": "planning_sessions",
+    "planning.packages": "planning_packages",
+    "planning.sky": "planning_sky",
+    "planning.catalogs": "planning_catalogs",
     "execution": "execution",
-    "review": "review",
+    **{f"review.{child}": f"review_{child}" for child in REVIEW_CHILDREN},
 }
 """Sub-API of `Wayfinder` -> the prefix of its tools' names."""
+
+SOURCES_DEFAULT_STARS = 100
+"""How many stars one ``planning_catalogs_query_sources`` call lists when the
+client gives no limit. The library lists every match by default."""
+
+SOURCES_MAXIMUM_STARS = 300
+"""Most stars one ``planning_catalogs_query_sources`` call lists for an AI
+client."""
+
+CLIENT_LIMITS = {
+    "planning_catalogs_query_sources": ClientLimits(
+        maximums={"limit": SOURCES_MAXIMUM_STARS}, defaults={"limit": SOURCES_DEFAULT_STARS}
+    ),
+}
+"""By tool name, the reply caps an AI client gets."""
 
 
 def build_registry() -> ToolRegistry:
@@ -47,5 +69,5 @@ def build_registry() -> ToolRegistry:
         their work as its own job.
     """
     registry = ToolRegistry(sandbox_paths=True)
-    register_reflected_tools(registry, Wayfinder(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS)
+    register_reflected_tools(registry, Wayfinder(), BRANCH_PREFIXES, skip=APP_JOB_TOOLS, limits=CLIENT_LIMITS)
     return registry

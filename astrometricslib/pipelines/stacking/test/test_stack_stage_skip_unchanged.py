@@ -72,7 +72,7 @@ def make_target(light_files: list[Path]) -> Target:
                 path=str(path),
                 filter=FilterType.L,
                 camera="ZWO ASI 533MM Pro",
-                exposure="120.0",
+                exposure_s=120.0,
                 timestamp=float(index) * 120.0,
             )
             for index, path in enumerate(light_files)

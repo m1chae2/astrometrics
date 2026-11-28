@@ -1,4 +1,4 @@
-"""Purpose: Tests of `parse_coordinate_text`.
+"""Purpose: Tests of `parse_coordinate_text` and the coordinate writers.
 
 Description: Checks that coordinate text becomes degrees and that bad text
 or an impossible declination is refused. A table of inputs the app can send
@@ -134,3 +134,14 @@ def test_something_that_is_not_text_is_refused(not_text: object) -> None:
     """A missing or numeric value raises `InvalidArgumentError`."""
     with pytest.raises(InvalidArgumentError):
         parse_coordinate_text(cast("str", not_text), is_right_ascension=True)
+
+
+def test_the_status_texts_are_written_from_degrees() -> None:
+    """Degrees become the texts the telescope status shows."""
+    from backend.services.coordinate_text import format_angle, format_declination, format_right_ascension
+
+    assert format_right_ascension(83.82208) == "5h 35m 17.30s"
+    assert format_declination(-5.39111) == "-5° 23′ 28.0″"
+    assert format_declination(5.0) == "+5° 00′ 00.0″"
+    assert format_angle(12.5) == "12° 30′ 0.0″"
+    assert format_right_ascension(None) == format_declination(None) == format_angle(None) == "Unknown"

@@ -1,11 +1,13 @@
 """Purpose: End-to-end tests for the session-quality analysis on the facade.
 
-Description: Runs the guiding analysis behind `review.query`
-(`night_analysis.guiding_night_analysis` and `guiding_night_summaries`) against
+Description: Runs the guiding analysis behind `review.guiding.get_night`
+(`night_analysis.guiding_night_analysis`) against
 a real isolated configuration, a real Butler and a real log database filled
 with synthetic nights. The main thing verified is that a night is judged only
 against the equipment's earlier nights, never against itself.
 """
+
+from datetime import UTC, datetime
 
 import pytest
 
@@ -65,8 +67,10 @@ def test_a_bad_night_is_not_judged_against_itself(control: ObservatoryControl) -
     record_guiding_night(control, 8, snr=28.0, lost=220)
 
     analysis = night_analysis.guiding_night_analysis(control._context, night)
-    envelope_before = ObservationReview(control).get_performance_envelope(before_night=night)
-    envelope_with_everything = ObservationReview(control).get_performance_envelope()
+    envelope_before = ObservationReview(control).performance.get_envelope(
+        until=datetime.fromtimestamp(FIRST_NIGHT + 6 * 86400.0, UTC)
+    )
+    envelope_with_everything = ObservationReview(control).performance.get_envelope()
 
     assert [r.rule for r in analysis.recommendations if r.kind == StatementKind.WARNING] != []
     assert envelope_before.thresholds["guide_snr_low_limit"].sample_count == 6
@@ -126,19 +130,6 @@ def test_estimated_samples_never_reach_the_analysis(control: ObservatoryControl)
     assert analysis.input_quality.samples_analyzed == 400
 
 
-def test_the_summary_has_one_row_per_night_oldest_first(control: ObservatoryControl) -> None:
-    """Verify the overview lists every night with its flag and kinds."""
-    nights = record_good_history(control)
-    bad = record_guiding_night(control, 6, snr=30.0, lost=200)
-
-    rows = night_analysis.guiding_night_summaries(control._context)
-
-    assert [row["sessionId"] for row in rows] == [*nights, bad]
-    assert "check_guide_signal" in rows[-1]["recommendations"]
-    assert all("check_guide_signal" not in row["recommendations"] for row in rows[:-1])
-    assert all("flagged" not in row and "flagReasons" not in row for row in rows)
-
-
 def test_the_analysis_is_not_stored(control: ObservatoryControl) -> None:
     """Verify analysing a night writes nothing, so nothing can go stale."""
     night = record_guiding_night(control, 0)
@@ -148,7 +139,6 @@ def test_the_analysis_is_not_stored(control: ObservatoryControl) -> None:
     samples_before = len(control._context.records.get_guiding_samples(limit=100000))
 
     night_analysis.guiding_night_analysis(control._context, night)
-    night_analysis.guiding_night_summaries(control._context)
 
     after = {
         name: len(control._context.butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")

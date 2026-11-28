@@ -17,18 +17,18 @@ from backend.services.observatory.mosaic_service import MosaicService
 from wayfindinglib._internal.control import EquipmentStatus
 from wayfindinglib._internal.planning import MosaicPanel
 from wayfindinglib.api.control.equipment import EquipmentControl
-from wayfindinglib.api.planning import ObservationPlanning
+from wayfindinglib.api.planning.sky import PlanningSky
 
 
 def test_list_cameras_reads_the_camera_profiles_section_and_keeps_the_noise() -> None:
     """The camera list reads `camera_profiles` and keeps the noise."""
-    noise_entry = {"gainSetting": "0", "gain": {"value": 0.78, "status": "measured"}}
+    noise_entry = {"gain": 0, "gainEPerAdu": {"value": 0.78, "status": "measured"}}
     profiles = [{"name": "ASI533", "pixelSizeUm": 3.76, "sensorNoise": [noise_entry]}]
     equipment = create_autospec(EquipmentControl, instance=True)
-    equipment.status.return_value = EquipmentStatus(camera_profiles=profiles)
-    service = EquipmentService(SimpleNamespace(equipment=equipment))
+    equipment.get_status.return_value = EquipmentStatus(camera_profiles=profiles)
+    service = EquipmentService(SimpleNamespace(equipment=equipment), configurations=None)
     assert service.list_camera_profiles() == profiles
-    equipment.status.assert_called_once_with(include=["camera_profiles"])
+    equipment.get_status.assert_called_once_with(include=["camera_profiles"])
 
 
 def test_mosaic_preview_returns_the_panels_with_their_corners() -> None:
@@ -44,11 +44,11 @@ def test_mosaic_preview_returns_the_panels_with_their_corners() -> None:
         panel_id="P1_1",
         corners=corners,
     )
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.calculate_panels.return_value = [panel]
+    planning = SimpleNamespace(sky=create_autospec(PlanningSky, instance=True))
+    planning.sky.get_panels.return_value = [panel]
     result = MosaicService(SimpleNamespace(planning=planning)).preview_mosaic(
         10.0, 20.0, {"rows": 1, "cols": 1, "overlap": 0}, rotation_deg=15.0
     )
     assert [c.model_dump() for c in result[0].corners] == corners
     assert result[0].rotation_convention.startswith("Degrees east of north")
-    assert planning.calculate_panels.call_args.kwargs["rotation_deg"] == pytest.approx(15.0)
+    assert planning.sky.get_panels.call_args.kwargs["rotation_deg"] == pytest.approx(15.0)

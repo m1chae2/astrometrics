@@ -1008,7 +1008,7 @@ class SpectroscopyCalibrationTuner:
             "fitted_grating_distance_mm": tuned_grating_distance_mm,
             "fitted_dispersion_start_px": tuned_x0,
             "rms_error_nm": round(float(best_rms), 3),
-            "detected_angle_degrees": round(detected_angle, 4),
+            "detected_angle_deg": round(detected_angle, 4),
             "detailed_calibration": detailed_calibration,
             "use_flare_mask_extraction": use_flare_mask_extraction,
             "max_extraction_length_px": max_extraction_length_px,

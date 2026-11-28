@@ -69,7 +69,7 @@ In this tutorial, you will learn how to query the internal database for identifi
 :link: /notebooks/astrometrics/user_guide/08_visualization
 :link-type: doc
 
-In this tutorial, you will learn how to use the `astrometrics.visualization` registry to render two kinds of dashboard: one showing an entire target's field of stars, and one focused on a single star's light curve and spectrum.
+In this tutorial, you will learn how to use the `astrometrics.visualization` chart methods to draw two kinds of dashboard: one showing an entire target's field of stars, and one focused on a single star's light curve and spectrum.
 :::
 
 :::{grid-item-card} 9. End-to-End Image Processing: M 13

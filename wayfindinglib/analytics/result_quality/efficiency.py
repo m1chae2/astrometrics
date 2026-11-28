@@ -38,8 +38,8 @@ No value is invented for it. Transparency (cloud and haze) is never included
 until a zero point that is not exploratory exists.
 
 Two effective times exist: the stacker's weighted time
-(`weight_effective_seconds`) and the time found here
-(`efficiency_effective_seconds`). They are never mixed.
+(`weight_effective_s`) and the time found here
+(`efficiency_effective_s`). They are never mixed.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib import CaptureSetting, Telescope
 from astrometricslib.parameters import (
     EquipmentKind,
     HardcodedKind,
@@ -59,8 +60,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.quality.efficiency import (
     EfficiencyFactor,
@@ -344,7 +344,7 @@ class FrameObservation(BaseModel):
         The observing night the frame belongs to.
     target_id : `str` or `None`
         The target.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure time of the frame, in seconds. Falls back on the
         capture setting's exposure.
     star_width_effective_arcsec : `float` or `None`
@@ -378,7 +378,7 @@ class FrameObservation(BaseModel):
     capture_setting: CaptureSetting
     night_id: str | None = None
     target_id: str | None = None
-    exposure_seconds: float | None = Field(default=None, gt=0.0)
+    exposure_s: float | None = Field(default=None, gt=0.0)
     star_width_effective_arcsec: float | None = Field(default=None, gt=0.0)
     sky_rate_e_per_s_per_px: float | None = Field(default=None, ge=0.0)
     sky_noise_e: float | None = Field(default=None, ge=0.0)
@@ -396,12 +396,12 @@ class FrameObservation(BaseModel):
 
         Returns
         -------
-        exposure_seconds : `float` or `None`
+        exposure_s : `float` or `None`
             The exposure time in seconds, or ``None`` if neither is known.
         """
-        if self.exposure_seconds:
-            return self.exposure_seconds
-        return self.capture_setting.exposure_seconds or None
+        if self.exposure_s:
+            return self.exposure_s
+        return self.capture_setting.exposure_s or None
 
 
 class ReferenceOutcome(BaseModel):
@@ -468,7 +468,7 @@ class FrameEfficiency(BaseModel):
     ----------
     frame_id : `str`
         The frame.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The frame's exposure time, in seconds.
     eta : `float` or `None`
         The product of the included factors, above 0 and at most 1. ``None``
@@ -482,7 +482,7 @@ class FrameEfficiency(BaseModel):
     model_config = _MODEL_CONFIG
 
     frame_id: str
-    exposure_seconds: float = Field(gt=0.0)
+    exposure_s: float = Field(gt=0.0)
     eta: float | None = Field(default=None, gt=0.0, le=1.0)
     factors: list[EfficiencyFactor] = Field(default_factory=list)
     regime: NoiseRegimeAssessment
@@ -519,11 +519,11 @@ class EfficiencyAssessment(BaseModel):
         One result per frame that was assessed.
     frames_set_aside : `int`
         Frames skipped because the stacker set them aside.
-    set_aside_seconds : `float`
+    set_aside_s : `float`
         Their total exposure time, in seconds.
     frames_without_efficiency : `list` [`FrameIssue`]
         Kept frames that could not be assessed, with the reason. Their time
-        is not in `result.captured_seconds`.
+        is not in `result.captured_s`.
     regime_mixed : `bool`
         Whether the frames were not all in one regime. The result's regime
         is then the regime of most of the captured time.
@@ -536,7 +536,7 @@ class EfficiencyAssessment(BaseModel):
     result: EfficiencyResult
     frame_results: list[FrameEfficiency] = Field(default_factory=list)
     frames_set_aside: int = Field(default=0, ge=0)
-    set_aside_seconds: float = Field(default=0.0, ge=0.0)
+    set_aside_s: float = Field(default=0.0, ge=0.0)
     frames_without_efficiency: list[FrameIssue] = Field(default_factory=list)
     regime_mixed: bool = False
     notes: list[str] = Field(default_factory=list)
@@ -714,7 +714,7 @@ def baseline_key(setting: CaptureSetting) -> str:
         setting.camera,
         part(setting.telescope),
         part(setting.filter_name),
-        part(setting.gain_setting, "gain"),
+        part(setting.gain, "gain"),
         part(setting.offset, "offset"),
         part(setting.binning, "bin"),
     ])
@@ -1135,7 +1135,7 @@ def frame_efficiency(
     eta = math.prod(included) if included else None
     return FrameEfficiency(
         frame_id=observation.frame_id,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         eta=eta,
         factors=factors,
         regime=regime,
@@ -1176,12 +1176,12 @@ def assess_efficiency(
     frame_results: list[FrameEfficiency] = []
     issues: list[FrameIssue] = []
     set_aside_count = 0
-    set_aside_seconds = 0.0
+    set_aside_s = 0.0
     assumed: set[str] = set()
     for observation in observations:
         if observation.set_aside_reason is not None:
             set_aside_count += 1
-            set_aside_seconds += observation.effective_exposure_seconds or 0.0
+            set_aside_s += observation.effective_exposure_seconds or 0.0
             continue
         assumed.update(observation.assumed_fields)
         found = frame_efficiency(observation, goal, reference)
@@ -1197,8 +1197,8 @@ def assess_efficiency(
         else:
             frame_results.append(found)
 
-    captured = sum(item.exposure_seconds for item in frame_results)
-    effective = sum(item.exposure_seconds * (item.eta or 0.0) for item in frame_results)
+    captured = sum(item.exposure_s for item in frame_results)
+    effective = sum(item.exposure_s * (item.eta or 0.0) for item in frame_results)
     eta = effective / captured if captured > 0.0 else None
     regime, mixed = _set_regime(frame_results)
     notes: list[str] = []
@@ -1215,14 +1215,14 @@ def assess_efficiency(
         reference=reference,
         eta=eta,
         factors=_typical_factors(frame_results),
-        capturedSeconds=captured,
-        efficiencyEffectiveSeconds=effective if eta is not None else None,
+        capturedS=captured,
+        efficiencyEffectiveS=effective if eta is not None else None,
     )
     return EfficiencyAssessment(
         result=result,
         frame_results=frame_results,
         frames_set_aside=set_aside_count,
-        set_aside_seconds=set_aside_seconds,
+        set_aside_s=set_aside_s,
         frames_without_efficiency=issues,
         regime_mixed=mixed,
         notes=notes,
@@ -1245,7 +1245,7 @@ def _set_regime(frame_results: Sequence[FrameEfficiency]) -> tuple[NoiseRegime, 
     """
     seconds: dict[NoiseRegime, float] = {}
     for item in frame_results:
-        seconds[item.regime.regime] = seconds.get(item.regime.regime, 0.0) + item.exposure_seconds
+        seconds[item.regime.regime] = seconds.get(item.regime.regime, 0.0) + item.exposure_s
     if not seconds:
         return NoiseRegime.UNKNOWN, False
     best = max(seconds, key=lambda regime: seconds[regime])
@@ -1278,7 +1278,7 @@ def _typical_factors(frame_results: Sequence[FrameEfficiency]) -> list[Efficienc
         for item in frame_results:
             for factor in item.factors:
                 if factor.cause == template.cause and factor.included and factor.value is not None:
-                    values.append((item.exposure_seconds, factor.value))
+                    values.append((item.exposure_s, factor.value))
                     capped = capped or factor.capped_reason is not None
         if not values:
             typical.append(template)
@@ -1344,7 +1344,7 @@ def split_kept_frame_deficit(
     for item in frame_results:
         if item.eta is None or item.eta >= 1.0:
             continue
-        loss = item.exposure_seconds * (1.0 - item.eta)
+        loss = item.exposure_s * (1.0 - item.eta)
         total_log = math.log(item.eta)
         for factor in item.factors:
             if not factor.included or factor.value is None or factor.value >= 1.0:
@@ -1416,9 +1416,9 @@ def frame_observations_from_measurements(
     ----------
     measurements : `Iterable` [`QualityMeasurement`]
         Rows from the measurement store (for example
-        ``QualityRecords.query``). Rows of other metrics are ignored.
+        ``quality.records.query``). Rows of other metrics are ignored.
     capture_settings : `Mapping` [`int`, `CaptureSetting`]
-        The capture settings by id (``QualityRecords.capture_settings``).
+        The capture settings by id (``quality.records.get_capture_settings``).
     start_epoch_by_frame : `Mapping` [`str`, `float`], optional
         When each frame's exposure began, by frame id.
     direction_by_frame : `Mapping` [`str`, `tuple`], optional

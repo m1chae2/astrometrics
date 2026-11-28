@@ -337,8 +337,8 @@ def test_target_stack_frames_homogeneous_validation() -> None:
     target_mixed = Target(
         id="MixedTarget",
         frames=[
-            FrameRecord(path="/path/to/frame1.fits", type="light", filter="SPEC", exposure="10.0"),
-            FrameRecord(path="/path/to/frame2.fits", type="light", filter="Ha", exposure="10.0"),
+            FrameRecord(path="/path/to/frame1.fits", type="light", filter="SPEC", exposure_s=10.0),
+            FrameRecord(path="/path/to/frame2.fits", type="light", filter="Ha", exposure_s=10.0),
         ],
     )
     with pytest.raises(
@@ -351,8 +351,8 @@ def test_target_stack_frames_homogeneous_validation() -> None:
     target_homog = Target(
         id="SpectralTarget",
         frames=[
-            FrameRecord(path="/path/to/frame1.fits", type="light", filter="SPEC", exposure="10.0"),
-            FrameRecord(path="/path/to/frame2.fits", type="light", filter="SPEC", exposure="10.0"),
+            FrameRecord(path="/path/to/frame1.fits", type="light", filter="SPEC", exposure_s=10.0),
+            FrameRecord(path="/path/to/frame2.fits", type="light", filter="SPEC", exposure_s=10.0),
         ],
     )
 
@@ -393,9 +393,9 @@ def test_target_add_frame_validation(tmp_path: Path) -> None:
     # 1. Add standard frame
     rec1 = add_frame(target, str(standard_fit))
     assert rec1.filter.name == "L"
-    assert rec1.exposure == "5.0"
-    assert rec1.iso == "800"
-    assert target.exposure_sec == pytest.approx(5.0)
+    assert rec1.exposure_s == pytest.approx(5.0)
+    assert rec1.gain == 800
+    assert target.exposure_s == pytest.approx(5.0)
     assert len(target.frames) == 1
 
     # 2. Add duplicate frame
@@ -406,8 +406,8 @@ def test_target_add_frame_validation(tmp_path: Path) -> None:
     # 3. Add spectral frame to the same target (multi-modal target support)
     rec3 = add_frame(target, str(spectral_fit))
     assert rec3.filter.name == "SPEC"
-    assert rec3.exposure == "10.0"
-    assert target.exposure_sec == pytest.approx(15.0)
+    assert rec3.exposure_s == pytest.approx(10.0)
+    assert target.exposure_s == pytest.approx(15.0)
     assert len(target.frames) == 2
 
 

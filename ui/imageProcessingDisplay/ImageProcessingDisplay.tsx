@@ -44,16 +44,16 @@ import { isStackChoicePath, stackFilterMatch } from './utils/stackChoices';
 /**
  * Pick the raw frame with the highest exposure time.
  *
- * @param files - The frames in the file list; `exposure` may read "30s" or "30".
+ * @param files - The frames in the file list, with their exposure in seconds (null when not known).
  * @returns The frame to show, or `undefined` for an empty list.
  */
-function highestExposureFile<T extends { exposure: string }>(files: T[]): T | undefined {
+function highestExposureFile<T extends { exposureS: number | null }>(files: T[]): T | undefined {
   let bestFile = files[0];
   let maxExposure = -1;
   files.forEach((file) => {
-    const exposureSeconds = parseFloat(file.exposure);
-    if (!isNaN(exposureSeconds) && exposureSeconds > maxExposure) {
-      maxExposure = exposureSeconds;
+    const exposureS = file.exposureS;
+    if (exposureS !== null && exposureS > maxExposure) {
+      maxExposure = exposureS;
       bestFile = file;
     }
   });

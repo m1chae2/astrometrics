@@ -16,11 +16,7 @@ and the active-telescope choice can be stored in one save.
 """
 
 from astrometricslib import AppConfiguration
-from wayfindinglib.data_access.equipment_catalog_reader import (
-    list_telescopes,
-    mount_section_name_for,
-    telescope_section_name_for,
-)
+from wayfindinglib.data_access.equipment_catalog_reader import list_telescopes
 
 TELESCOPE_LIMIT_KEYS = (
     "altitude_limits_enabled",
@@ -71,9 +67,7 @@ def build_telescope_limits_update(
         raise ValueError(f"'{telescope_id}' is not a known telescope")
     # Re-running the model checks rejects bad values (for example min > max).
     merged = type(current).model_validate({**current.model_dump(), **limits})
-    section_name = mount_section_name_for(config, telescope_id) or telescope_section_name_for(
-        config, telescope_id
-    )
+    section_name = config.get_telescope_limits_section(telescope_id)
     if section_name is None:
         raise ValueError(
             f"No config section exists for telescope '{telescope_id}'; limits are not saved"

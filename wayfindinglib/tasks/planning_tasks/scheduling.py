@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
+from astrometricslib import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.observation_package import ObservationPackage
 from wayfindinglib.models.planning.planning_config import PlanningConfig

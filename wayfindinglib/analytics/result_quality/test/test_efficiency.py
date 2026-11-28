@@ -10,18 +10,17 @@ from datetime import UTC, datetime
 
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import (
     PIXEL_BLUR_FWHM_SQUARED_FACTOR,
     MeasurementOrigin,
     QualitySubject,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement
 from wayfindinglib.analytics.result_quality import efficiency as eff
 from wayfindinglib.models.quality.efficiency import EfficiencyReference, NoiseRegime, ScienceGoal
 
-SETTING = CaptureSetting(
-    camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0, gain_setting=100
-)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0, gain=100)
 
 
 def _observation(
@@ -55,7 +54,7 @@ def _observation(
         frame_id=frame_id,
         capture_setting=SETTING,
         night_id=night,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         star_width_effective_arcsec=width,
         sky_rate_e_per_s_per_px=sky,
         read_noise_e=read,
@@ -177,7 +176,7 @@ def test_baseline_needs_three_nights_and_takes_the_tenth_percentile() -> None:
 
 def test_baseline_key_ignores_exposure_and_marks_missing_parts() -> None:
     """The key has camera, telescope, filter, gain, offset and binning only."""
-    other = SETTING.model_copy(update={"exposure_seconds": 10.0})
+    other = SETTING.model_copy(update={"exposure_s": 10.0})
     assert eff.baseline_key(SETTING) == eff.baseline_key(other)
     assert eff.baseline_key(SETTING).endswith("gain100|?|?")
 
@@ -295,10 +294,10 @@ def test_assessment_effective_time_and_set_aside_are_kept_apart() -> None:
     frames = [_observation("a"), _observation("b", width=4.0), _observation("c", set_aside_reason="clouded")]
     assessment = eff.assess_efficiency(frames, ScienceGoal.FAINT_POINT_SOURCE, reference)
     assert assessment.frames_set_aside == 1
-    assert assessment.set_aside_seconds == pytest.approx(60.0)
-    assert assessment.result.captured_seconds == pytest.approx(120.0)
+    assert assessment.set_aside_s == pytest.approx(60.0)
+    assert assessment.result.captured_s == pytest.approx(120.0)
     etas = [item.eta for item in assessment.frame_results]
-    assert assessment.result.efficiency_effective_seconds == pytest.approx(60.0 * sum(etas))
+    assert assessment.result.efficiency_effective_s == pytest.approx(60.0 * sum(etas))
     assert assessment.result.eta == pytest.approx(sum(etas) / 2)
 
 
@@ -308,7 +307,7 @@ def test_loss_split_adds_up_exactly() -> None:
     frames = [_observation(f"f{i}", width=2.5 + i * 0.4, sky=0.8 + 0.3 * i) for i in range(5)]
     assessment = eff.assess_efficiency(frames, ScienceGoal.FAINT_POINT_SOURCE, reference)
     shares = eff.split_kept_frame_deficit(assessment.frame_results)
-    deficit = assessment.result.captured_seconds - (assessment.result.efficiency_effective_seconds or 0.0)
+    deficit = assessment.result.captured_s - (assessment.result.efficiency_effective_s or 0.0)
     assert sum(share.seconds for share in shares) == pytest.approx(deficit)
     assert {share.cause for share in shares} <= {"seeing", "sky_brightness", "read_noise"}
 

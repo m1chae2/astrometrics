@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import AppConfiguration, Astrometrics, FilterType, ProcessingPipelines
+from astrometricslib import AppConfiguration, Astrometrics, FilterType
 from astrometricslib.exceptions import (
     FITS_READ_ERRORS,
     AstrometricsError,
@@ -17,7 +17,9 @@ from astrometricslib.exceptions import (
     NotFoundError,
 )
 from astrometricslib.jobs import RunAbandonedError, RunAbandonment, bind_abandonment
+from backend.services.error_logging import log_failure
 from backend.services.infrastructure.base_service import BaseBackgroundService
+from backend.services.processing.equipment_choice import stack_for_equipment
 
 if TYPE_CHECKING:
     from backend.services.data.stellar_service import StellarService
@@ -37,13 +39,15 @@ STACK_IDENTIFICATION_LOG_PREFIX = "stack_astrometry_"
 # detections that are mostly noise.
 MASTER_STACK_STAR_LIMIT = 10
 
-# The stages a client may ask for with the `stages` argument of
-# `analysis:analyze_image` (`run_analysis`) are the library's
-# `ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES`. They run in that order.
-# Photometry and spectroscopy need astrometry, which the library adds on its
-# own when it is missing or old. Spectral variation needs spectroscopy, which
-# the library also adds when its result is missing or older than the spectral
-# stack.
+SELECTABLE_STAGES = ("astrometry", "photometry", "spectroscopy", "spectral_variation")
+"""The stages a client may ask for with the `stages` argument of
+`analysis:analyze_image` (`run_analysis`), in the order they run. Each is one
+library pipeline call: ``processing.astrometry.run``, ``photometry.run``,
+``spectroscopy.run`` and ``spectroscopy.record_variation``. Photometry and
+spectroscopy need astrometry, which the library runs first when it is missing
+or old. Spectral variation needs spectroscopy, which the library also runs
+first when its result is missing or older than the spectral stack. The
+experimental asteroid search is left out: only a script asks for it."""
 
 SPECTRAL_STAGES = ("spectroscopy", "spectral_variation")
 """The stages that work on spectra. Their stack is kept only for a target's
@@ -73,20 +77,40 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Cannot store {type(value).__name__} in a job result.")
 
 
-def _without_none(values: dict[str, Any]) -> dict[str, Any]:
-    """Drop the entries whose value is `None`.
+class _CombinedOutcome:
+    """The results of several pipeline runs of one analysis job, merged.
 
-    Parameters
-    ----------
-    values : `dict` [`str`, `Any`]
-        The entries.
-
-    Returns
-    -------
-    kept : `dict` [`str`, `Any`]
-        The entries that have a value.
+    It has the fields of the library's run result that the job's closing
+    message reads: ``stages_run``, ``prerequisites_run``, ``stages_skipped``
+    and ``results``.
     """
-    return {name: value for name, value in values.items() if value is not None}
+
+    def __init__(self) -> None:
+        """Start with no stage run."""
+        self.stages_run: list[str] = []
+        self.prerequisites_run: list[str] = []
+        self.stages_skipped: dict[str, str] = {}
+        self.results: dict[str, Any] = {}
+
+    def add(self, outcome: Any) -> None:
+        """Add one pipeline run's result.
+
+        A stage that an earlier run of this job already ran (an added
+        astrometry) is listed once.
+
+        Parameters
+        ----------
+        outcome : `ProcessTargetResult`
+            The library's answer for one pipeline run.
+        """
+        for stage in outcome.stages_run:
+            if stage not in self.stages_run:
+                self.stages_run.append(stage)
+        for stage in outcome.prerequisites_run:
+            if stage not in self.prerequisites_run:
+                self.prerequisites_run.append(stage)
+        self.stages_skipped.update(outcome.stages_skipped)
+        self.results.update(outcome.results)
 
 
 def _existing_file(path: str | None) -> bool:
@@ -254,6 +278,36 @@ class AnalysisOrchestrator(BaseBackgroundService):
     Handles spectroscopy extraction and photometry analysis.
     """
 
+    def _as_current_job(self, job_id: str, target_id: str) -> Any:
+        """Make this service's job row the current job of the library.
+
+        A pipeline run records a job unless it runs inside one. Inside this
+        block the backend's own row is the current job, so the run joins
+        it: its stage progress moves this job's bar, and no second job is
+        listed.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The backend's job row.
+        target_id : `str`
+            The target the job works on.
+
+        Returns
+        -------
+        context : `AbstractContextManager`
+            ``running_as_job`` over the job store, or a do-nothing context
+            when this service has no job store.
+        """
+        import contextlib
+
+        from astrometricslib.jobs import running_as_job
+
+        repository = self._job_service.repository if self._job_service else None
+        if repository is None:
+            return contextlib.nullcontext()
+        return running_as_job(job_id, repository, job_type="analysis", target_id=target_id)
+
     def __init__(
         self,
         config_service: AppConfiguration | None = None,
@@ -278,7 +332,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # already-running check below.
         self._analyze_submit_lock = threading.Lock()
         # The stop switch of each running star identification, by job id.
-        self._identification_stops: dict[str, threading.Event] = {}
+        self._identification_stops: dict[str, RunAbandonment] = {}
         # The give-up switch of each running analysis job, by job id.
         self._analysis_abandonments: dict[str, RunAbandonment] = {}
 
@@ -307,8 +361,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         type : `str`, optional
             The kind of analysis when the sent files choose the stages.
         stages : `list` [`str`], optional
-            The stages to run, from the library's
-            ``SELECTABLE_ANALYSIS_STAGES``. When left out, the backend
+            The stages to run, from `SELECTABLE_STAGES`. Each runs one
+            library pipeline. When left out, the backend
             chooses (see `_default_stages`): photometry and spectroscopy for
             a target with both stacks, or the stage of its one stack when no
             files are sent; otherwise the kind of the sent files decides.
@@ -336,26 +390,28 @@ class AnalysisOrchestrator(BaseBackgroundService):
             Before any job starts: if the ``stages`` list is empty or names a
             stage that cannot be chosen; if the camera and optic name no
             stack of the target, or more than one; or if a spectral stage is
-            asked for a stack that is not the main one. Also, before any job
-            starts, `NotFoundError` comes from `_default_stages` or
-            `_check_stage_sources` when no files are sent and a stage has
-            nothing to work on (no stack, or no raw spectrum frames).
+            asked for a stack that is not the main one.
+        NotFoundError
+            Before any job starts: if a camera or optic is given for a target
+            that is not in the library, or (from `_default_stages` or
+            `_check_stage_sources`) no files are sent and a stage has nothing
+            to work on (no stack, or no raw spectrum frames).
         """
         chosen_stages = self._checked_stages(stages)
         target = self._target_service.get_targets(target_id) if self._target_service else None
         configuration_record = None
         configuration: dict[str, Any] = {}
         if camera_id or focal_length_mm is not None:
-            configuration_record = self.astrometrics.processing.find_stack_configuration(
-                target_id, camera_id, focal_length_mm
-            )
-            configuration = _without_none({
-                "camera_id": configuration_record.camera or None,
-                "focal_length_mm": configuration_record.focal_length_mm,
-            })
+            if target is None:
+                raise NotFoundError(f"No target {target_id!r} in the library.", details={"target": target_id})
+            configuration_record = stack_for_equipment(self.astrometrics, target, camera_id, focal_length_mm)
         other_stack = configuration_record is not None and not _same_file(
             configuration_record.stacked_image, target.stacking.stacked_image if target else None
         )
+        if other_stack:
+            # The pipelines analyze this stack, and photometry measures the
+            # frames of its camera and optic.
+            configuration = {"stack_path": configuration_record.stacked_image}
         if other_stack and chosen_stages:
             spectral_requested = [stage for stage in chosen_stages if stage in SPECTRAL_STAGES]
             if spectral_requested:
@@ -423,7 +479,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         """
         if stages is None:
             return None
-        selectable = ProcessingPipelines.SELECTABLE_ANALYSIS_STAGES
+        selectable = SELECTABLE_STAGES
         unknown = sorted({str(stage) for stage in stages} - set(selectable))
         if unknown or not stages:
             raise InvalidArgumentError(
@@ -609,7 +665,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             if active:
                 stop = self._identification_stops.get(active[0].id)
                 if stop is not None:
-                    stop.set()
+                    stop.abandon()
                     return {"cancelled": True, "own_process": True, "reason": None}
                 abandonment = self._analysis_abandonments.get(active[0].id)
                 outcome = self.cancel_processing(active[0].id)
@@ -654,7 +710,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         """
         checked = self._checked_stack_path(stack_path)
         try:
-            frame_count = int(self.astrometrics.targets.read_frame_header(checked).get("STACKCNT", 0) or 0)
+            frame_count = int(self.astrometrics.targets.frames.get_header(checked).get("STACKCNT", 0) or 0)
         except (NotFoundError, *FITS_READ_ERRORS) as error:
             raise InvalidArgumentError(f"The stack could not be read: {error}") from error
         if frame_count <= 1:
@@ -665,13 +721,16 @@ class AnalysisOrchestrator(BaseBackgroundService):
         log_file = str(self._config_service.get_logs_path() / log_name)
         with self._analyze_submit_lock:
             if self._job_service:
-                active = self._job_service.get_jobs_for_target(
-                    target_id, job_type="analysis", status="started"
-                )
+                # The library reports progress to the job, which makes it
+                # "running" once it starts work.
+                active = [
+                    *self._job_service.get_jobs_for_target(target_id, job_type="analysis", status="started"),
+                    *self._job_service.get_jobs_for_target(target_id, job_type="analysis", status="running"),
+                ]
                 for job in active:
                     if _is_identification_job(job):
                         return {"status": "already_running", "jobId": job.id}
-            stop = threading.Event()
+            stop = RunAbandonment()
             job_id = self._submit_job(
                 target_id, "analysis", self._run_stack_identification, checked, stop, log_file_path=log_file
             )
@@ -722,7 +781,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                     answer["message"] = latest.message
                 elif latest.status == "failed":
                     answer["error"] = latest.message
-        identification = self.astrometrics.processing.get_stack_identification(checked)
+        identification = self.astrometrics.processing.astrometry.get_identification(checked)
         answer["identification"] = None if identification is None else _identification_payload(identification)
         return answer
 
@@ -746,9 +805,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
         return self._stellar_service._checked_image_path(stack_path)
 
     def _run_stack_identification(
-        self, job_id: str, target_id: str, stack_path: str, stop: threading.Event, **kwargs: Any
+        self, job_id: str, target_id: str, stack_path: str, stop: RunAbandonment, **kwargs: Any
     ) -> dict[str, Any]:
         """Name the stack's stars, logging to the job and reporting progress.
+
+        The job row is the library's current job (`_as_current_job`), so the
+        library reports its progress to it; ``stop`` is the run's
+        abandonment, which the Cancel button sets.
 
         Returns
         -------
@@ -759,29 +822,17 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         job = self._job_service.get_job(job_id) if self._job_service else None
 
-        def report(share: float, message: str) -> None:
-            """Store the progress on the job record.
-
-            Parameters
-            ----------
-            share : `float`
-                The share done, 0 to 1.
-            message : `str`
-                What is being done.
-            """
-            logger.info("[%s] %s (%.0f%%)", target_id, message, share * 100)
-            if self._job_service:
-                self._job_service.update_job(job_id, progress=share * 100, status_message=message)
-
         try:
-            with capture_job_logs(
-                job_id=job_id,
-                log_file_path=job.log_file_path if job else None,
-                job_store=self._job_service.repository if self._job_service else None,
+            with (
+                capture_job_logs(
+                    job_id=job_id,
+                    log_file_path=job.log_file_path if job else None,
+                    job_store=self._job_service.repository if self._job_service else None,
+                ),
+                bind_abandonment(stop),
+                self._as_current_job(job_id, target_id),
             ):
-                identification = self.astrometrics.processing.identify_stack(
-                    stack_path, progress=report, should_stop=stop.is_set
-                )
+                identification = self.astrometrics.processing.astrometry.identify(stack_path)
                 result = {
                     "status": "finished",
                     "kind": "stack_identification",
@@ -993,7 +1044,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             and (not filter_name or filter_name.upper() in ["NONE", "UNKNOWN", "LUMINANCE", "L", "ALL"])
         ):
             try:
-                header = self.astrometrics.targets.read_frame_header(unmatched_paths[0])
+                header = self.astrometrics.targets.frames.get_header(unmatched_paths[0])
                 fit_filter = header.get("FILTER")
                 if fit_filter and str(fit_filter).upper() in [
                     "SPEC",
@@ -1061,12 +1112,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
         stages: list[str],
         configuration: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Run the stages a client chose, as one library call.
+        """Run the stages a client chose, one library pipeline call each.
 
-        The library adds astrometry first when a chosen stage needs it and
-        its result is missing or older than the stack. Astrometry and
-        spectroscopy use the target's stack. A sent file takes the stack's
-        place only for a stage whose stack the target lacks.
+        The stages run in `SELECTABLE_STAGES` order, inside this one job. The
+        library runs astrometry first when a stage needs it and its result is
+        missing or older than the stack. Astrometry and spectroscopy use the
+        target's stack. A sent file takes the stack's place only for a stage
+        whose stack the target lacks.
 
         Parameters
         ----------
@@ -1081,9 +1133,8 @@ class AnalysisOrchestrator(BaseBackgroundService):
         stages : `list` [`str`]
             The checked stages.
         configuration : `dict`, optional
-            ``camera_id`` and ``focal_length_mm`` of the stack to analyze,
-            passed to the library, which analyzes that camera and optic's
-            stack and its frames. Empty or left out: the main stack.
+            ``stack_path``: another camera and optic's stack to analyze
+            instead of the main stack. Empty or left out: the main stack.
 
         Returns
         -------
@@ -1103,45 +1154,45 @@ class AnalysisOrchestrator(BaseBackgroundService):
         sent_light_paths = [path for path in paths if path not in spectral_paths]
         sent_spectral_paths = [path for path in paths if path in spectral_paths]
 
-        astrometry_options: dict[str, Any] = {}
-        imaging_stack = target.stacking.stacked_image
-        if not (imaging_stack and os.path.exists(imaging_stack)) and sent_light_paths:
-            astrometry_options["path"] = sent_light_paths[0]
+        other_stack = (configuration or {}).get("stack_path")
+        imaging_stack = other_stack
+        if imaging_stack is None and not _existing_file(target.stacking.stacked_image) and sent_light_paths:
+            imaging_stack = sent_light_paths[0]
 
-        spectroscopy_options: dict[str, Any] = {}
-        spectral_stack = target.spectral_stacking.stacked_image
-        if spectral_stack and os.path.exists(spectral_stack):
-            spectroscopy_options = {"path": spectral_stack, "limit": MASTER_STACK_STAR_LIMIT}
+        spectral_stack = None
+        max_stars = None
+        if _existing_file(target.spectral_stacking.stacked_image):
+            spectral_stack, max_stars = target.spectral_stacking.stacked_image, MASTER_STACK_STAR_LIMIT
         elif sent_spectral_paths:
-            spectroscopy_options = {"path": sent_spectral_paths[0]}
+            spectral_stack = sent_spectral_paths[0]
 
         # A raw spectral frame the app sent is a frame to follow. Without
         # one, the stage follows every spectral frame of the target.
-        spectral_variation_options: dict[str, Any] = {}
-        if sent_spectral_paths and "spectral_variation" in stages:
-            spectral_variation_options["frames"] = [
-                frame for frame in target.frames if frame.path in set(sent_spectral_paths)
-            ]
+        variation_frames = [
+            frame for frame in target.frames if frame.path in set(sent_spectral_paths)
+        ] or None
+
+        processing = self.astrometrics.processing
+        calls = {
+            "astrometry": lambda: processing.astrometry.run(target, imaging_stack),
+            "photometry": lambda: processing.photometry.run(
+                target, self._photometry_frames(target, filter_name, other_stack), imaging_stack
+            ),
+            "spectroscopy": lambda: processing.spectroscopy.run(target, spectral_stack, max_stars=max_stars),
+            "spectral_variation": lambda: processing.spectroscopy.record_variation(target, variation_frames),
+        }
 
         self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
         self._record_steps(job_id, requested=list(stages))
-        with self.astrometrics.processing.acquire_job_slot():
-            outcome = self.astrometrics.processing.process_target(
-                target,
-                stages=stages,
-                astrometry=astrometry_options or None,
-                photometry={"filter_name": filter_name, "use_astrometry_seed": True},
-                spectroscopy=spectroscopy_options or None,
-                spectral_variation=spectral_variation_options or None,
-                run_prerequisites=True,
-                # This job is already tracked (job_id), so the stages
-                # register none of their own.
-                register_job=False,
-                **(configuration or {}),
-                on_stages_planned=lambda requested, added: self._record_steps(
-                    job_id, requested=list(requested), prerequisites=list(added)
-                ),
-            )
+        outcome = _CombinedOutcome()
+        with self._as_current_job(job_id, target_id):
+            for stage in SELECTABLE_STAGES:
+                if stage not in stages:
+                    continue
+                outcome.add(calls[stage]())
+                self._record_steps(
+                    job_id, requested=list(stages), prerequisites=list(outcome.prerequisites_run)
+                )
         self._update_job_progress(job_id, target_id, 2, 2, filter_name=filter_name)
         skipped = dict(outcome.stages_skipped)
         for stage, stage_result in outcome.results.items():
@@ -1161,9 +1212,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
             self._job_service.update_job(job_id, status_message=message)
         logger.info("[%s] %s", target_id, message)
         try:
-            self._target_service.save_targets()
-        except AstrometricsError, sqlite3.Error, OSError:
-            logger.exception("[%s] Failed to record target after the analysis", target_id)
+            self._target_service.save_target(target)
+        except (AstrometricsError, sqlite3.Error, OSError) as error:
+            log_failure(logger, error, "[%s] Failed to record target after the analysis", target_id)
         if self._notification_service and outcome.stages_run:
             self._notification_service.notify(target_id, message, status="success")
 
@@ -1181,6 +1232,53 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 for stage, stage_result in outcome.results.items()
             },
         }
+
+    def _photometry_frames(self, target: Any, filter_name: str | None, stack_path: str | None) -> Any:
+        """Choose the frames photometry measures when the app names a filter.
+
+        Parameters
+        ----------
+        target : `Target`
+            The target.
+        filter_name : `str` or `None`
+            The filter the app sent.
+        stack_path : `str` or `None`
+            Another camera and optic's stack being analyzed, or `None` for
+            the main stack.
+
+        Returns
+        -------
+        frames : `list` [`FrameRecord`] or `None`
+            `None` when no filter was sent (the library chooses the frames
+            of the analyzed stack's camera and optic). Otherwise the frames
+            of that filter taken with the analyzed stack's camera and optic.
+        """
+        if not filter_name:
+            return None
+        frames = list(self.astrometrics.targets.frames.query(target, filter_name=filter_name))
+        analyzed = stack_path or target.stacking.stacked_image
+        record = next(
+            (
+                item
+                for item in target.stacking.stacks_by_configuration.values()
+                if _same_file(item.stacked_image, analyzed)
+            ),
+            None,
+        )
+        if record is not None and record.camera:
+            frames = [
+                frame
+                for frame in frames
+                if frame.camera == record.camera
+                and (
+                    record.focal_length_mm is None
+                    or (
+                        frame.focal_length_mm is not None
+                        and round(frame.focal_length_mm) == round(record.focal_length_mm)
+                    )
+                )
+            ]
+        return frames
 
     def _record_steps(self, job_id: str, **steps: Any) -> None:
         """Save the steps of a chosen-stages run on the job record.
@@ -1266,17 +1364,16 @@ class AnalysisOrchestrator(BaseBackgroundService):
     ) -> dict[str, Any]:
         """Pipeline for multi-frame aperture photometry.
 
-        Measures stellar brightness,. performs plate solving on reference/light
+        Measures stellar brightness, performs plate solving on reference/light
         frames, and calculates light curves for identified stars.
 
         Returns
         -------
         result : `dict`
-            The photometry stage's result from
-            `ProcessingPipelines.process_target`.
+            The photometry result from ``processing.photometry.run``.
         """
         log = logger or logging
-        log.info("[%s] Running the photometry stage of processing.process_target", target_id)
+        log.info("[%s] Running processing.photometry.run", target_id)
 
         # Resolve the Target domain object
         target = self._target_service.get_targets(target_id)
@@ -1286,27 +1383,18 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # Photometry needs astrometry, which the library runs first when it is
         # missing or older than the imaging stack. A target with no stack
         # solves the first image the app sent instead.
-        astrometry_options: dict[str, Any] | None = None
-        imaging_stack = target.stacking.stacked_image
-        if not (imaging_stack and os.path.exists(imaging_stack)) and paths:
-            astrometry_options = {"path": paths[0]}
+        solve_path = None
+        if not _existing_file(target.stacking.stacked_image) and paths:
+            solve_path = paths[0]
 
         self._update_job_progress(job_id, target_id, 1, 2, filter_name=filter_name)
         try:
-            with self.astrometrics.processing.acquire_job_slot():
-                # The worker count comes from the configured photometry
-                # workers. Each session's stars are identified against a
-                # real catalog (reusing an existing FITS-header WCS when
-                # present) instead of tracked as anonymous detections.
-                res = self.astrometrics.processing.process_target(
-                    target,
-                    stages=["photometry"],
-                    astrometry=astrometry_options,
-                    photometry={"filter_name": filter_name, "use_astrometry_seed": True},
-                    # This orchestrator already created and is tracking
-                    # its own job (job_id, above) for this exact call, via
-                    # _submit_job/job_wrapper, so the stage registers none.
-                    register_job=False,
+            # This orchestrator already created and is tracking its own job
+            # (job_id) for this exact call; it is the current job, so the
+            # pipeline joins it instead of recording its own.
+            with self._as_current_job(job_id, target_id):
+                res = self.astrometrics.processing.photometry.run(
+                    target, self._photometry_frames(target, filter_name, None), solve_path
                 ).results["photometry"]
             self._update_job_progress(job_id, target_id, 2, 2, filter_name=filter_name)
 
@@ -1326,7 +1414,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             )
 
             try:
-                self._target_service.save_targets()
+                self._target_service.save_target(target)
             except AstrometricsError, sqlite3.Error, OSError:
                 log.exception("[%s] Failed to record target after photometry analysis", target_id)
 

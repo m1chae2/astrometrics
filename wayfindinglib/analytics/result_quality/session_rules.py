@@ -209,10 +209,10 @@ SESSION_RULES: tuple[QualityRule, ...] = (
         _RECOMMENDATION,
         Severity.ADVICE,
         ActionClass.CAPTURE_SETTINGS,
-        "Only {clean_fraction:.0%} of {exposure_seconds:g} s exposures would have had clean guiding.",
+        "Only {clean_fraction:.0%} of {exposure_s:g} s exposures would have had clean guiding.",
         "An exposure length that rarely has clean guiding wastes frames; a shorter one may work.",
         plain_wording=(
-            "Only about {clean_percent:.0f}% of {exposure_seconds:g} s frames would have guided cleanly, so "
+            "Only about {clean_percent:.0f}% of {exposure_s:g} s frames would have guided cleanly, so "
             "frames this long may be wasted. Try shorter frames, or check the guiding."
         ),
     ),
@@ -344,7 +344,7 @@ SESSION_RULES: tuple[QualityRule, ...] = (
         "Stars were measurably wider below {suggested:g} degrees altitude.",
         "A higher minimum altitude avoids the low bands where stars were wider.",
         plain_wording=(
-            "Stars looked wider below {suggested_minimum_altitude_degrees:g} degrees above the horizon, so a "
+            "Stars looked wider below {suggested_minimum_altitude_deg:g} degrees above the horizon, so a "
             "higher minimum altitude would likely help sharp work. Set it in your plans."
         ),
     ),

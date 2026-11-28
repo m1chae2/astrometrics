@@ -252,10 +252,31 @@ def _capture_setting(profile: Mapping[str, Any]) -> tuple[float, float] | None:
         if not entries:
             continue
         try:
-            return float(entries[0]["gain_setting"]), float(entries[0]["offset"])
+            return float(_entry_gain(entries[0])), float(entries[0]["offset"])
         except KeyError, TypeError, ValueError:
             continue
     return None
+
+
+def _entry_gain(entry: Mapping[str, Any]) -> Any:
+    """Read the gain setting of one camera profile entry.
+
+    Parameters
+    ----------
+    entry : `~collections.abc.Mapping`
+        One ``bias_levels`` or ``sensor_noise`` entry of the profile.
+
+    Returns
+    -------
+    gain : `Any`
+        The entry's ``gain``, or its ``gain_setting`` when the entry was
+        written before that key was renamed.
+
+    Notes
+    -----
+    Raises `KeyError` when the entry has neither key.
+    """
+    return entry["gain"] if "gain" in entry else entry["gain_setting"]
 
 
 def _bias_level_adu(profile: Mapping[str, Any], gain: float, offset: float) -> float | None:
@@ -279,8 +300,7 @@ def _bias_level_adu(profile: Mapping[str, Any], gain: float, offset: float) -> f
     for entry in profile.get("bias_levels") or []:
         try:
             if not (
-                math.isclose(float(entry["gain_setting"]), gain)
-                and math.isclose(float(entry["offset"]), offset)
+                math.isclose(float(_entry_gain(entry)), gain) and math.isclose(float(entry["offset"]), offset)
             ):
                 continue
             recorded = entry["bias_level_adu"]

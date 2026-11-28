@@ -30,6 +30,7 @@ from astrometricslib.foundation.paths import (
     resolve_mounted_path,
     state_directory,
 )
+from astrometricslib.models.observatory_configuration import Camera, GuideScope, Telescope
 from astrometricslib.models.tuned_parameter import (
     EquipmentKind,
     ParameterRole,
@@ -1607,6 +1608,67 @@ class AppConfiguration:
         """
         return load_observatory_setups(self)
 
+    def get_telescopes(self) -> list[Telescope]:
+        """Return every telescope the settings list, with its safety limits.
+
+        See `astrometricslib.foundation.equipment_settings` for the sections
+        read.
+
+        Returns
+        -------
+        telescopes : `list` [`Telescope`]
+            Every telescope with a readable focal length.
+        """
+        from astrometricslib.foundation.equipment_settings import read_telescopes
+
+        return read_telescopes(self)
+
+    def get_cameras(self) -> list[Camera]:
+        """Return every camera the settings list, with its sensor size.
+
+        Returns
+        -------
+        cameras : `list` [`Camera`]
+            Every camera with a readable pixel size and sensor size.
+        """
+        from astrometricslib.foundation.equipment_settings import read_cameras
+
+        return read_cameras(self)
+
+    def get_guide_scopes(self) -> list[GuideScope]:
+        """Return every guide scope the settings list.
+
+        Returns
+        -------
+        guide_scopes : `list` [`GuideScope`]
+            Every guide scope with a readable focal length. Empty when
+            guiding goes through the main telescope.
+        """
+        from astrometricslib.foundation.equipment_settings import read_guide_scopes
+
+        return read_guide_scopes(self)
+
+    def get_telescope_limits_section(self, telescope_name: str) -> str | None:
+        """Return the settings section that holds a telescope's safety limits.
+
+        A writer that saves new limits there changes exactly what
+        `get_telescopes` reads back.
+
+        Parameters
+        ----------
+        telescope_name : `str`
+            The telescope's name.
+
+        Returns
+        -------
+        section_name : `str` or `None`
+            The mount section of the telescope's setup when there is one,
+            else the telescope's own section, else `None`.
+        """
+        from astrometricslib.foundation.equipment_settings import limits_section_name_for
+
+        return limits_section_name_for(self, telescope_name)
+
     def get_observatory_site(self) -> ObservatorySite | None:
         """Return the observatory's position on Earth, if the config gives one.
 
@@ -2074,6 +2136,9 @@ class AppConfiguration:
     def get_schema(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return a validated AppConfigSchema for the current configuration.
 
+        The equipment is not part of it: `get_telescopes`, `get_cameras` and
+        `get_guide_scopes` give the equipment models.
+
         Returns
         -------
         schema : `AppConfigSchema`
@@ -2081,18 +2146,8 @@ class AppConfiguration:
         """
         from astrometricslib.foundation.config_schema import (
             AppConfigSchema,
-            CameraConfig,
             ParallelismConfig,
             ProcessingConfig,
-            TelescopeConfig,
-        )
-
-        # Build telescope config
-        telescope = TelescopeConfig(
-            hostname=self.get_telescope_hostname(),
-            focal_length_mm=self.get_focal_length_mm(),
-            focal_ratio=self.get_focal_ratio(),
-            remote_pictures_path=self.get_remote_pictures_path(),
         )
 
         # Build processing config
@@ -2112,19 +2167,6 @@ class AppConfiguration:
             quarantine_bad_frames_enabled=self.get_quarantine_bad_frames_enabled(),
         )
 
-        # Build camera configs
-        cameras = []
-        for cam_name in self.get_available_cameras():
-            cameras.append(
-                CameraConfig(
-                    name=cam_name,
-                    models=self.get_available_cameras(),  # Simplified for now
-                    default_primary_camera=self.app_config.get(
-                        "Observatory.Camera", "default_primary_camera", fallback=None
-                    ),
-                )
-            )
-
         # Build parallelism config
         parallelism = ParallelismConfig(
             target_workers=str(self.get_target_workers()),
@@ -2133,6 +2175,4 @@ class AppConfiguration:
             worker_niceness=self.get_worker_niceness(),
         )
 
-        return AppConfigSchema(
-            telescope=telescope, processing=processing, cameras=cameras, parallelism=parallelism
-        )
+        return AppConfigSchema(processing=processing, parallelism=parallelism)

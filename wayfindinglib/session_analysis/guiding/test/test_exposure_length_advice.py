@@ -44,9 +44,7 @@ def _advice(
         The exposure-length advice, if any was given.
     """
     input_quality = GuidingInputQuality(has_enough_samples=True, limits_equipment_match="exact", **quality)
-    performance = GuidingPerformance(
-        exposure_feasibility=feasibility, longest_reliable_exposure_seconds=reliable
-    )
+    performance = GuidingPerformance(exposure_feasibility=feasibility, longest_reliable_exposure_s=reliable)
     found = recommend_for_guiding(input_quality, performance, make_envelope())
     return next((r for r in found if r.rule == "exposure_length_limited"), None)
 
@@ -60,7 +58,7 @@ def _result(length: float, clean: float, lost: float = 0.0, jump: float = 0.0, w
         A length with 100 windows.
     """
     return ExposureFeasibility(
-        exposure_seconds=length,
+        exposure_s=length,
         windows=100,
         clean_fraction=clean,
         lost_fraction=lost,

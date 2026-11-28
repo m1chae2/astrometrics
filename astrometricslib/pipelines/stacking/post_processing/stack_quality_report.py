@@ -214,7 +214,7 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
         zero_pixel_fraction=metrics.zero_pixel_fraction,
         exposure_groups=[
             {
-                "exposure_seconds": group.exposure_seconds,
+                "exposure_s": group.exposure_s,
                 "frames_submitted": group.frames_submitted,
                 "frames_stacked": group.frames_stacked,
                 "saturated": group.saturated,

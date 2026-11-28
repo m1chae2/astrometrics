@@ -41,6 +41,7 @@ class Container:
         # Core Infrastructure
         self.config_service = None
         self.calibration = None
+        self.calibration_service = None
 
         # Domain Services
         self.astrometrics = None
@@ -52,6 +53,7 @@ class Container:
         self.sync_service = None
         self.quality_measurement_service = None
         self.stack_review_service = None
+        self.job_history_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.auto_download_service = None
@@ -75,7 +77,6 @@ class Container:
         self.maintenance_service = None
         self.library_backup_service = None
         self.target_imaging_executor = None
-        self.execution_service = None
         self.stellar_service = None
 
         self.initialized = False
@@ -156,7 +157,9 @@ class Container:
             self.auto_download_service.stop()
         if self.astrometrics is not None:
             try:
-                self.astrometrics.processing.stop_stacking_programs()
+                from astrometricslib.drivers import get_stacking_driver
+
+                get_stacking_driver().stop_running_programs()
             except Exception:  # shutdown must go on to stop the rest
                 logger.exception("Could not stop the stacking programs at shutdown")
         if self.wayfinder is not None:
@@ -211,8 +214,11 @@ class Container:
         self.maintenance_service = MaintenanceService(self.job_service)
         # Reuse the library's one calibration catalog, and load its index
         # from disk now (the first question builds and loads it).
-        self.calibration = self.astrometrics.processing.calibration
+        self.calibration = self.astrometrics.calibration
         self.calibration.query()
+        from backend.services.processing.calibration_service import CalibrationService
+
+        self.calibration_service = CalibrationService(self.astrometrics)
 
         # 3. Initialize Hardware Drivers: the Wayfinder builds its own (above).
 
@@ -220,7 +226,7 @@ class Container:
 
         self.settings_service = SettingsService(
             self.config_service,
-            equipment=self.wayfinder.control.equipment,
+            configurations=self.astrometrics.observatories.configurations,
         )
 
         # 4. Initialize Infrastructure Services
@@ -252,9 +258,9 @@ class Container:
         # 5. Initialize Domain Services with proper DI
         from backend.services.observatory.alignment_service import AlignmentService
 
-        # The service reads the stored attempts through `review`, and the
-        # INDI session and the external-alignment polling go through
-        # `control.mount`.
+        # The service reads the stored attempts, the polar alignment and the
+        # external-alignment polling through `review.alignment`, and runs
+        # centering through `control.mount`.
         self.alignment_service = AlignmentService(
             observatory_api=self.wayfinder.control,
             review=self.wayfinder.review,
@@ -270,7 +276,10 @@ class Container:
 
         from backend.services.observatory.equipment_service import EquipmentService
 
-        self.equipment_service = EquipmentService(observatory_api=self.wayfinder.control)
+        self.equipment_service = EquipmentService(
+            observatory_api=self.wayfinder.control,
+            configurations=self.astrometrics.observatories.configurations,
+        )
 
         self.image_processing_service = ImageProcessingService(
             processing_api=self.astrometrics.processing,
@@ -302,6 +311,9 @@ class Container:
         from backend.services.processing.stack_review_service import StackReviewService
 
         self.stack_review_service = StackReviewService(astrometrics=self.astrometrics)
+        from backend.services.processing.job_history_service import JobHistoryService
+
+        self.job_history_service = JobHistoryService(self.astrometrics)
         self.quality_measurement_service = QualityMeasurementService(
             astrometrics=self.astrometrics,
             socket_manager=self.socket_manager,
@@ -313,6 +325,7 @@ class Container:
             suggestion_trigger=self.suggestion_refresh_worker.request,
             socket_manager=self.socket_manager,
             calibration_trigger=self.image_processing_service.measure_new_calibration_frames,
+            targets=self.astrometrics.targets,
         )
 
         # The telescope status reports a running copy of new frames.
@@ -344,12 +357,6 @@ class Container:
         from backend.services.observatory.indi_diagnostics_service import IndiDiagnosticsService
 
         self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
-
-        # Adapter over wayfindinglib's Observation Execution astrometrics,
-        # which had no route into the application at all before this.
-        from backend.services.observatory.execution_service import ExecutionService
-
-        self.execution_service = ExecutionService(wayfinder=self.wayfinder)
 
         from backend.services.observatory.mosaic_service import MosaicService
 

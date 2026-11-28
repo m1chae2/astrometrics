@@ -48,6 +48,9 @@ class ServicePausedError(ExternalServiceError):
     without one, and log a warning.
     """
 
+    report = "status"
+    log_level = "WARNING"
+
 
 class FailureKind(enum.Enum):
     """The kinds of trouble the gateway tells apart."""

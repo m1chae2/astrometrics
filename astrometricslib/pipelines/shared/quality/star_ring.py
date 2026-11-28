@@ -578,7 +578,7 @@ def _fit_harmonics(angle: np.ndarray, ratio: np.ndarray) -> tuple[list[RingHarmo
                 amplitude_debiased=float(debiased),
                 significance=float(significance),
                 significant=bool(significance >= threshold),
-                direction_degrees=float(direction),
+                direction_deg=float(direction),
             )
         )
     return harmonics, constant, None

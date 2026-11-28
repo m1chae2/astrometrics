@@ -24,7 +24,7 @@ describe('summarizeTrace', () => {
       ...[1_100_000, 1_300_000, 1_500_000, 1_700_000, 1_900_000].map((ts) => ({ ph: 'I', name: 'DrawFrame', pid: 1, tid: 2, ts })),
     ];
     const summary = summarizeTrace(events, { starMeasuresMs: [4, 6], overlayMeasuresMs: [10, 10] });
-    expect(summary.windowSeconds).toBeCloseTo(1);
+    expect(summary.windowS).toBeCloseTo(1);
     expect(summary.fps).toBeCloseTo(5);
     expect(summary.frameMsP50).toBeCloseTo(200);
     expect(summary.mainThread.busyMs).toBeCloseTo(400);
@@ -49,7 +49,7 @@ describe('summarizeTrace with the zoom marks', () => {
     const measures = { starMeasuresMs: [], overlayMeasuresMs: [] };
     const zoom = summarizeTrace(events, measures, { start: ZOOM_START_MARK, end: ZOOM_END_MARK });
     const pan = summarizeTrace(events, measures);
-    expect(zoom.windowSeconds).toBeCloseTo(1);
+    expect(zoom.windowS).toBeCloseTo(1);
     expect(zoom.fps).toBeCloseTo(4);
     expect(zoom.mainThread.busyMs).toBeCloseTo(200);
     expect(pan.fps).toBeCloseTo(2);

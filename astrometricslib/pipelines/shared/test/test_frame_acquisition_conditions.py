@@ -44,8 +44,8 @@ def test_captures_sky_position_and_airmass(tmp_path: Path) -> None:
     )
 
     assert record.airmass == pytest.approx(1.21)
-    assert record.altitude_degrees == pytest.approx(55.9)
-    assert record.azimuth_degrees == pytest.approx(160.8)
+    assert record.altitude_deg == pytest.approx(55.9)
+    assert record.azimuth_deg == pytest.approx(160.8)
 
 
 def test_captures_pixel_scale_and_binning(tmp_path: Path) -> None:
@@ -89,7 +89,7 @@ def test_non_numeric_header_value_does_not_raise(tmp_path: Path) -> None:
 
     assert record.airmass is None
     # The rest of the record must still be populated.
-    assert record.exposure == "30.0"
+    assert record.exposure_s == pytest.approx(30.0)
 
 
 def test_refresh_populates_an_already_indexed_frame(tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ def test_refresh_of_a_missing_file_reports_failure(tmp_path: Path) -> None:
     from astrometricslib.models.target import FrameRecord
     from astrometricslib.pipelines.shared.frame_scanning import refresh_acquisition_conditions
 
-    record = FrameRecord(path=str(tmp_path / "gone.fits"), role="LIGHT", exposure="30.0")
+    record = FrameRecord(path=str(tmp_path / "gone.fits"), role="LIGHT", exposure_s=30.0)
 
     assert refresh_acquisition_conditions(record) is False
 
@@ -151,11 +151,11 @@ def test_refresh_replaces_the_stand_in_iso_with_the_header_value(tmp_path: Path)
     )
 
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", ISOSPEED=200.0))
-    record.iso = "800"
+    record.gain = 800
     record.header_fields_version = None
 
     assert refresh_acquisition_conditions(record) is True
-    assert record.iso == "200"
+    assert record.gain == 200
     assert record.header_fields_version == HEADER_FIELDS_VERSION
 
 
@@ -164,7 +164,7 @@ def test_refresh_keeps_the_stored_iso_when_the_header_has_none(tmp_path: Path) -
     from astrometricslib.pipelines.shared.frame_scanning import refresh_acquisition_conditions
 
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits"))
-    record.iso = "400"
+    record.gain = 400
 
     assert refresh_acquisition_conditions(record) is True
-    assert record.iso == "400"
+    assert record.gain == 400

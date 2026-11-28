@@ -76,7 +76,7 @@ const GroupTable: React.FC<{ groups: PredictedGroup[] }> = ({ groups }) => (
         </thead>
         <tbody>
             {groups.map((group) => (
-                <tr key={`${group.exposure_seconds}-${group.night ?? ''}`}>
+                <tr key={`${group.exposure_s}-${group.night ?? ''}`}>
                     <th scope="row" title={`gain ${group.gain}, offset ${group.offset}, binning ${group.binning}`}>
                         {groupLabel(group)}
                     </th>

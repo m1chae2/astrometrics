@@ -2,8 +2,9 @@
 
 Description: The AI's job tools (``mcp_servers/backend/app_jobs.py``) call
 the same RPC methods as the app's buttons. These tests check the backend
-side: ``processing:stack`` can choose the frames itself and still starts the
-one ``stacking`` job the Stack button starts, with its progress and Cancel;
+side: ``processing:stack`` can choose the frames itself (through the library's
+frame query) and still starts the one ``stacking`` job the Stack button
+starts, with its progress and Cancel;
 the frame and log syncs record a ``remote_sync`` job and can report a plan;
 and the app hears about a job that another program recorded in the shared
 job list. The library calls are stand-ins.
@@ -17,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from astrometricslib import FrameRecord, Target
 from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.jobs import JobStore, ProcessingJob
 from backend import startup
@@ -26,7 +28,6 @@ from backend.services.infrastructure.sync_service import SyncService
 from backend.services.processing import image_processing_service
 from backend.services.processing.image_processing_service import (
     ImageProcessingService,
-    start_siril_processing_task,
 )
 from backend.services.processing.job_service import JobService
 
@@ -65,9 +66,23 @@ def test_a_stack_chosen_by_frame_choice_is_the_stack_buttons_job(
 
     The job is the one the Stack button starts: same type, same row.
     """
-    service, processing, job_service = _stacking_service(tmp_path)
+    service, _processing, job_service = _stacking_service(tmp_path)
     release = threading.Event()
     seen: dict[str, Any] = {}
+    asked: dict[str, Any] = {}
+
+    def frames_for_selection(astrometrics: Any, target: Any, **choice: Any) -> list[FrameRecord]:
+        """Record the choice and give two frames.
+
+        Returns
+        -------
+        frames : `list` [`FrameRecord`]
+            The chosen frames.
+        """
+        asked.update(choice)
+        return [FrameRecord(path="/lights/L_013.fits"), FrameRecord(path="/lights/L_014.fits")]
+
+    monkeypatch.setattr(image_processing_service, "frames_for_selection", frames_for_selection)
 
     def fake_task(job_id: str, target_id: str, image_files: Any, **kwargs: Any) -> str:
         """Record what the worker was given and wait to be released.
@@ -86,41 +101,37 @@ def test_a_stack_chosen_by_frame_choice_is_the_stack_buttons_job(
     reply = service.stack_target("M 13", kind="imaging", filter_name="L", first_file="013", force=True)
 
     assert reply["status"] == "started"
-    processing.predict_stack.assert_called_once_with(
-        "M 13", checks=False, kind="imaging", filter_name="L", first_file="013"
-    )
+    assert asked == {"kind": "imaging", "filter_name": "L", "first_file": "013"}
     job = job_service.get_job(reply["jobId"])
     assert (job.job_type, job.target_id, job.status) == ("stacking", "M 13", "started")
     assert [active.id for active in job_service.get_active_jobs()] == [reply["jobId"]]
 
     release.set()
     service._jobs[reply["jobId"]]["future"].result(timeout=5.0)
-    assert seen["selection"] == {"kind": "imaging", "filter_name": "L", "first_file": "013"}
     assert seen["stack_options"] == {"force": True}
-    assert seen["image_files"] is None
+    assert seen["image_files"] == ["/lights/L_013.fits", "/lights/L_014.fits"]
+    assert "selection" not in seen
     assert job_service.get_job(reply["jobId"]).status == "completed"
 
 
 def test_a_frame_list_and_a_frame_choice_are_refused_together(tmp_path: Path) -> None:
     """The Stack button's list and a frame choice cannot be mixed."""
-    service, processing, job_service = _stacking_service(tmp_path)
+    service, _processing, job_service = _stacking_service(tmp_path)
 
     with pytest.raises(InvalidArgumentError, match="not both"):
         service.stack_target("M 13", image_files=["/lights/a.fits"], filter_name="L")
 
-    processing.predict_stack.assert_not_called()
     assert job_service.get_recent_jobs() == []
 
 
 def test_a_mixed_frame_list_is_refused_and_starts_no_job(tmp_path: Path) -> None:
     """A refused mix of imaging and spectral frames makes no job."""
-    service, processing, job_service = _stacking_service(tmp_path)
-    frames = [SimpleNamespace(path="/lights/a.fits"), SimpleNamespace(path="/lights/b.fits")]
-    service._target_service.get_targets.return_value = SimpleNamespace(frames=frames)
-    processing.predict_stack.side_effect = InvalidArgumentError(
-        "These frames mix imaging and spectral frames (1 imaging, 1 spectral). "
-        "Select only one kind and stack again."
-    )
+    service, _processing, job_service = _stacking_service(tmp_path)
+    frames = [
+        FrameRecord(path="/lights/a.fits", filter="Luminance", camera="Cam"),
+        FrameRecord(path="/lights/b.fits", filter="SPEC", camera="Cam"),
+    ]
+    service._target_service.get_targets.return_value = Target(id="M 57", frames=frames)
     with pytest.raises(InvalidArgumentError, match="mix imaging and spectral"):
         service.stack_target("M 57", image_files=["/lights/a.fits", "/lights/b.fits"])
     assert job_service.get_recent_jobs() == []
@@ -137,6 +148,11 @@ def test_the_apps_cancel_reaches_a_stack_the_ai_started(
         "start_siril_processing_task",
         lambda *arguments, **kwargs: release.wait(timeout=5.0),
     )
+    monkeypatch.setattr(
+        image_processing_service,
+        "frames_for_selection",
+        lambda *_arguments, **_choice: [FrameRecord(path="/lights/spec_1.fits", filter="SPEC")],
+    )
 
     reply = service.stack_target("M 13", kind="spectral")
     outcome = service.cancel_processing_jobs("M 13")
@@ -144,30 +160,6 @@ def test_the_apps_cancel_reaches_a_stack_the_ai_started(
 
     assert outcome == {"status": "cancelled", "message": None}
     assert job_service.get_job(reply["jobId"]).status in ("cancelled", "completed")
-
-
-def test_the_worker_lets_the_library_choose_the_frames() -> None:
-    """With a frame choice the library's stack gets the choice, not a list."""
-    target_service = MagicMock()
-    target_service.astrometrics.processing.stack.return_value = SimpleNamespace(stacked_path="/stacks/x.fits")
-    target_service.read_saved_target.return_value = None
-
-    final_path = start_siril_processing_task(
-        job_id="job-1",
-        target_id="M 13",
-        image_files=None,
-        target_service=target_service,
-        selection={"kind": "spectral", "since": "2026-11-20T00:00:00"},
-        stack_options={"denoise": False},
-    )
-
-    assert final_path == "/stacks/x.fits"
-    call = target_service.astrometrics.processing.stack.call_args
-    assert call.kwargs["kind"] == "spectral"
-    assert call.kwargs["since"] == "2026-11-20T00:00:00"
-    assert call.kwargs["denoise"] is False
-    assert call.kwargs["register_job"] is False
-    assert "frames" not in call.kwargs
 
 
 class _Remote:
@@ -178,7 +170,7 @@ class _Remote:
         self.frame_calls: list[dict[str, Any]] = []
         self.log_calls: list[dict[str, Any]] = []
 
-    def sync_frames(self, target: str, **kwargs: Any) -> SimpleNamespace:
+    def sync_frames(self, target: Any = None, **kwargs: Any) -> SimpleNamespace:
         """Record the call.
 
         Returns
@@ -186,7 +178,7 @@ class _Remote:
         result : `types.SimpleNamespace`
             A plan or a successful sync with no measurements.
         """
-        self.frame_calls.append({"target": target, **kwargs})
+        self.frame_calls.append({"target": getattr(target, "id", target), **kwargs})
         return SimpleNamespace(model_dump=lambda mode="python": {"to_transfer": 3}, measurements=None)
 
     def sync_logs(self, **kwargs: Any) -> SimpleNamespace:
@@ -206,14 +198,14 @@ class _Remote:
 
 
 def test_a_frame_sync_records_a_remote_sync_job() -> None:
-    """The app's sync asks the library to record the copy as a job."""
+    """The app's sync leaves the job to the library, which records one."""
     remote = _Remote()
     service = SyncService(observatory_api=SimpleNamespace(remote=remote))
 
     assert service.start_sync("M 13") == {"started": True, "target_id": "M 13"}
     thread_management._syncing["M 13"].join(timeout=5.0)
 
-    assert remote.frame_calls[0]["register_job"] is True
+    assert remote.frame_calls[0] == {"target": "M 13", "dry_run": False}
 
 
 def test_a_frame_sync_dry_run_gives_the_plan_and_starts_nothing() -> None:
@@ -238,7 +230,7 @@ def test_a_log_sync_records_a_job_and_its_dry_run_does_not() -> None:
 
     assert plan == {"status": "plan", "plan": {"guide_logs": {"to_download": 1}}}
     assert summary["status"] == "success"
-    assert remote.log_calls == [{"dry_run": True, "register_job": False}, {"register_job": True}]
+    assert remote.log_calls == [{"dry_run": True}, {}]
 
 
 def test_the_app_hears_about_a_job_another_program_recorded(

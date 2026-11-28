@@ -86,14 +86,14 @@ def test_group_entries_come_from_the_diagnostics() -> None:
     diagnostics = {
         "exposure_group_summaries": [
             {
-                "exposure_seconds": 60.0,
+                "exposure_s": 60.0,
                 "frames_submitted": 14,
                 "frames_stacked": 14,
                 "dark_applied": False,
                 "saturated": False,
             },
             {
-                "exposure_seconds": 300.0,
+                "exposure_s": 300.0,
                 "frames_submitted": 20,
                 "frames_stacked": 20,
                 "dark_applied": True,
@@ -106,22 +106,22 @@ def test_group_entries_come_from_the_diagnostics() -> None:
     _record_exposure_groups(summary, diagnostics)
 
     groups = summary.stacking_metrics.exposure_groups
-    assert [group.exposure_seconds for group in groups] == [60.0, 300.0]
+    assert [group.exposure_s for group in groups] == [60.0, 300.0]
     assert [group.dark_applied for group in groups] == [False, True]
     assert [group.saturated for group in groups] == [False, True]
 
 
 def test_a_stored_row_with_the_removed_exposure_recommendation_still_loads() -> None:
-    """An old row holding `recommendedExposureSeconds` loads and drops it."""
+    """An old row holding `recommendedExposureS` loads and drops it."""
     metrics = StackingPipelineQualityMetrics.model_validate({
         "isSpectral": False,
         "framesSubmitted": 10,
         "framesStacked": 10,
-        "recommendedExposureSeconds": 42.5,
+        "recommendedExposureS": 42.5,
     })
 
-    assert not hasattr(metrics, "recommended_exposure_seconds")
-    assert "recommendedExposureSeconds" not in metrics.model_dump(by_alias=True)
+    assert not hasattr(metrics, "recommended_exposure_s")
+    assert "recommendedExposureS" not in metrics.model_dump(by_alias=True)
 
 
 def test_a_stack_without_group_entries_has_none() -> None:
@@ -173,12 +173,12 @@ def test_a_mostly_zero_spectral_stack_is_flagged_but_a_nearly_clean_one_is_not(t
 def test_the_negative_pixel_warning_from_siril_is_recorded_and_flagged(tmp_path: Path) -> None:
     """Siril's 99% warning surfaces in the summary and its flags."""
     summary = make_summary()
-    diagnostics = {"negative_pixel_max_percent": 99, "negative_pixel_frames": 40}
+    diagnostics = {"negative_pixel_max_pct": 99, "negative_pixel_frames": 40}
 
     measure_calibration_health(summary, write_stack(tmp_path / "s.fits", 0.0), diagnostics)
     _record_output_gates(summary)
 
-    assert summary.stacking_metrics.negative_pixel_max_percent == 99
+    assert summary.stacking_metrics.negative_pixel_max_pct == 99
     assert any("negative pixels" in reason for reason in failed_reasons(summary))
 
 
@@ -186,12 +186,10 @@ def test_a_small_negative_share_is_recorded_but_not_flagged(tmp_path: Path) -> N
     """Below the limit the percentage is kept without raising a flag."""
     summary = make_summary()
 
-    measure_calibration_health(
-        summary, write_stack(tmp_path / "s.fits", 0.0), {"negative_pixel_max_percent": 10}
-    )
+    measure_calibration_health(summary, write_stack(tmp_path / "s.fits", 0.0), {"negative_pixel_max_pct": 10})
     _record_output_gates(summary)
 
-    assert summary.stacking_metrics.negative_pixel_max_percent == 10
+    assert summary.stacking_metrics.negative_pixel_max_pct == 10
     assert not any("negative pixels" in reason for reason in failed_reasons(summary))
 
 
@@ -203,7 +201,7 @@ def test_a_group_left_out_of_the_combined_image_is_named_in_a_notice_row() -> No
         {
             "exposure_group_summaries": [
                 {
-                    "exposure_seconds": 0.5,
+                    "exposure_s": 0.5,
                     "frames_submitted": 60,
                     "frames_stacked": 0,
                     "dark_applied": False,

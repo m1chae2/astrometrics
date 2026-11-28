@@ -121,6 +121,7 @@ export function describeFollow(method: string): string {
   if (method === 'sky') return 'Followed by sky position';
   if (method === 'stack alignment') return 'Followed by stack alignment';
   if (method === 'stack alignment + sky') return 'Followed by stack alignment and sky position';
+  if (method === 'star matching') return 'Followed by matching the stars';
   return 'Same pixel (guess)';
 }
 
@@ -129,7 +130,7 @@ export interface StarProfilePanelProps {
   /** What the panel shows. A closed state draws nothing. */
   state: StarProfileState;
   /** The angle of the cut now in use, in degrees. */
-  cutAngleDegrees: number;
+  cutAngleDeg: number;
   /** Called with the new angle on every move of the slider. */
   onCutAngleChange: (degrees: number) => void;
   /** Called when the user closes the panel. */
@@ -192,14 +193,14 @@ function labelFwhm(fwhm: number, halfMaximum: number, halfRange: number, logScal
  * @param props The measurement, whether the brightness axis is logarithmic, and the angle of the cut.
  * @returns The plot.
  */
-function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; halfLengthPx: number }): React.ReactElement {
+function ProfilePlot({ measurement, logScale, angleDeg, halfLengthPx }: { measurement: StarProfileMeasurement; logScale: boolean; angleDeg: number; halfLengthPx: number }): React.ReactElement {
   const chosen = chooseFit(measurement);
   const { traces, halfRange, halfMaximum, fwhm, floorValue, highestValue } = useMemo(() => {
     // A log axis cannot draw zero or less, so those values are raised to a small floor: the sky noise, or a tiny part of the peak.
     const floor = measurement.sky_noise > 0 ? measurement.sky_noise : Math.abs(measurement.peak) * 1e-4;
     const lift = (values: number[]): number[] => (logScale ? values.map((value) => Math.max(value, floor)) : values);
     // The cut is rebuilt in the browser from the cutout, so it follows the slider with no call to the backend.
-    const cut = rebuildCut(measurement, angleDegrees, halfLengthPx);
+    const cut = rebuildCut(measurement, angleDeg, halfLengthPx);
     const list: PlotlyTrace[] = [{
       x: cut.distance,
       y: lift(cut.values),
@@ -239,7 +240,7 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
     return {
       traces: list, halfRange: reach, halfMaximum: half, fwhm: width, floorValue: floor, highestValue: Math.max(floor, ...plotted),
     };
-  }, [measurement, chosen, logScale, angleDegrees, halfLengthPx]);
+  }, [measurement, chosen, logScale, angleDeg, halfLengthPx]);
   const layout = useMemo(() => {
     const base = buildLayout({
       xTitle: 'distance through the star (px)',
@@ -276,15 +277,15 @@ function ProfilePlot({ measurement, logScale, angleDegrees, halfLengthPx }: { me
  * @param props The measurement, the axis kind, the cut angle and the picture's row order.
  * @returns The plot.
  */
-function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: {
-  measurement: StarProfileMeasurement; logScale: boolean; angleDegrees: number; firstRowAtTop: boolean; turn: number;
+function RingPlot({ measurement, logScale, angleDeg, firstRowAtTop, turn }: {
+  measurement: StarProfileMeasurement; logScale: boolean; angleDeg: number; firstRowAtTop: boolean; turn: number;
 }): React.ReactElement {
   const { traces, floorValue, highestValue, fewPixels } = useMemo(() => {
     const floor = measurement.sky_noise > 0 ? measurement.sky_noise : Math.abs(measurement.peak) * 1e-4;
     const lift = (values: number[]): number[] => (logScale ? values.map((value) => Math.max(value, floor)) : values);
     const values = lift(measurement.ring_bin_values);
     const list: PlotlyTrace[] = [{
-      x: measurement.ring_bin_angle_degrees, y: values, type: 'scatter', mode: 'lines+markers',
+      x: measurement.ring_bin_angle_deg, y: values, type: 'scatter', mode: 'lines+markers',
       line: { color: readThemeToken('--plot-accent', '#3584e4'), width: 1.5 }, marker: { color: readThemeToken('--text-dim', '#aaaaaa'), size: 4 },
       hovertemplate: '%{x:.0f}°: %{y:.3g}<extra></extra>', name: 'around the star',
     }];
@@ -297,7 +298,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
         hovertemplate: 'fitted: %{y:.3g} at %{x:.0f}°<extra></extra>',
       });
     }
-    const fewPixels = hasFewPixels(measurement.ring_bin_counts, measurement.ring_bin_angle_degrees);
+    const fewPixels = hasFewPixels(measurement.ring_bin_counts, measurement.ring_bin_angle_deg);
     return { traces: list, floorValue: floor, highestValue: Math.max(floor, ...values, ...curveValues), fewPixels };
   }, [measurement, logScale]);
   const layout = useMemo(() => {
@@ -306,7 +307,7 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
       yTitle: logScale ? 'above sky, log' : 'above sky',
       margin: { l: 56, r: 10, t: 8, b: 56 },
     });
-    const partner = (angleDegrees + 180) % 360;
+    const partner = (angleDeg + 180) % 360;
     const markerLine = (angle: number) => ({
       type: 'line', xref: 'x', yref: 'paper', x0: angle, x1: angle, y0: 0, y1: 1,
       line: { color: readThemeToken('--plot-reference-line', '#aaaaaa'), width: 1, dash: 'dot' },
@@ -323,10 +324,10 @@ function RingPlot({ measurement, logScale, angleDegrees, firstRowAtTop, turn }: 
       yaxis: logScale
         ? { ...base.yaxis, type: 'log', autorange: false, range: [Math.log10(floorValue), Math.log10(highestValue * 1.5)] }
         : { ...base.yaxis, type: 'linear' },
-      shapes: [markerLine(angleDegrees), markerLine(partner)],
+      shapes: [markerLine(angleDeg), markerLine(partner)],
       showlegend: false,
     };
-  }, [logScale, angleDegrees, firstRowAtTop, turn, floorValue, highestValue]);
+  }, [logScale, angleDeg, firstRowAtTop, turn, floorValue, highestValue]);
   return (
     <div className="star-profile__plot-area star-profile__plot-area--ring">
       <BasePlot data={traces} layout={layout} config={{ responsive: true, displayModeBar: false }} data-testid="star-profile-ring-plot" />
@@ -386,7 +387,7 @@ function HarmonicBars({ harmonics }: { harmonics: RingHarmonic[] }): React.React
  * @returns The panel, or null when it is closed.
  */
 export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
-  state, cutAngleDegrees, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null, starName = null,
+  state, cutAngleDeg, onCutAngleChange, onClose, pictureNote, cutLengthPx = null, onCutLengthChange, onViewChange, followNote = null, starName = null,
   identity = null, frameWidthPx = null, onOpenInManager,
 }) => {
   // Kept while the panel is open, and for the next star.
@@ -469,12 +470,12 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
               </span>
             </div>
             {tabId === 'line' ? (
-              <ProfilePlot measurement={measurement} logScale={logScale} angleDegrees={cutAngleDegrees} halfLengthPx={cutHalfLengthPx} />
+              <ProfilePlot measurement={measurement} logScale={logScale} angleDeg={cutAngleDeg} halfLengthPx={cutHalfLengthPx} />
             ) : (
               <RingPlot
                 measurement={measurement}
                 logScale={logScale}
-                angleDegrees={cutAngleDegrees}
+                angleDeg={cutAngleDeg}
                 firstRowAtTop={anchor?.firstRowAtTop ?? false}
                 turn={anchor?.turn ?? 0}
               />
@@ -491,13 +492,13 @@ export const StarProfilePanel: React.FC<StarProfilePanelProps> = ({
             )}
           </div>
           <div className="star-profile__slider-row">
-            <span className="star-profile__slider-label">{`Cut angle ${cutAngleDegrees}°`}</span>
+            <span className="star-profile__slider-label">{`Cut angle ${cutAngleDeg}°`}</span>
             <Slider
               aria-label="Cut angle in degrees"
               min={0}
               max={179}
               step={1}
-              value={cutAngleDegrees}
+              value={cutAngleDeg}
               onChange={(event) => onCutAngleChange(Number(event.target.value))}
             />
             <InfoButton text={CUT_ANGLE_EXPLANATION} label="About the cut angle" />

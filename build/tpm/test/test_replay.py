@@ -145,7 +145,7 @@ def test_window_is_late_busy_and_split_at_the_right_time(
     """Earlier frames are preload; window frames are live, with offsets."""
     logs, frames = made_up_night
     plan = night_replay.build_plan(
-        window_seconds=360.0,
+        window_s=360.0,
         preload_frames=4,
         log_directory=logs,
         frames_directory=frames,
@@ -170,10 +170,10 @@ def test_speed_packs_more_night_into_the_same_real_time(made_up_night: tuple[Pat
     logs, frames = made_up_night
     start = datetime(2026, 10, 4, 2, 8, 0)
     slow = night_replay.build_plan(
-        speed=1.0, window_seconds=300.0, window_start=start, log_directory=logs, frames_directory=frames
+        speed=1.0, window_s=300.0, window_start=start, log_directory=logs, frames_directory=frames
     )
     fast = night_replay.build_plan(
-        speed=2.0, window_seconds=300.0, window_start=start, log_directory=logs, frames_directory=frames
+        speed=2.0, window_s=300.0, window_start=start, log_directory=logs, frames_directory=frames
     )
     assert fast["window"]["night_seconds"] == pytest.approx(600.0)
     assert len(fast["guide"]["events"]) > len(slow["guide"]["events"])
@@ -188,7 +188,7 @@ def test_stage_cuts_the_logs_at_the_window_and_copies_frames(
     """The stand-in logs end at the window start; frames are copies."""
     logs, frames = made_up_night
     plan = night_replay.build_plan(
-        window_seconds=360.0, preload_frames=3, log_directory=logs, frames_directory=frames
+        window_s=360.0, preload_frames=3, log_directory=logs, frames_directory=frames
     )
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()

@@ -72,7 +72,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds, frame_iso_value
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_s, frame_gain_value
 from astrometricslib.pipelines.shared.target_sessions import compute_session_night
 
 # The fewest frames a group of one exposure length may have and still be
@@ -123,7 +123,7 @@ class ExposureGroup:
 
     Attributes
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The mean exposure length of the frames in the group, in seconds.
     frames : `list`
         The frame records in the group, in their original order.
@@ -131,20 +131,20 @@ class ExposureGroup:
         The observing night of the group's frames (``YYYY-MM-DD``, see
         `split_groups_by_night`), or `None` when the group was not split by
         night.
-    iso : `float` or `None`
-        The ISO (or gain setting) the group's frames share, or `None` when it
+    gain : `float` or `None`
+        The gain setting (or ISO) the group's frames share, or `None` when it
         is not known or the frames differ. Frames at different ISOs never
         share a group, so the sky of two groups can be compared per unit ISO
         (`normalize_sky_ratios_by_iso`).
     """
 
-    exposure_seconds: float
+    exposure_s: float
     frames: list[Any] = field(default_factory=list)
     night: str | None = None
-    iso: float | None = None
+    gain: float | None = None
 
 
-def exposure_group_key(exposure_seconds: float) -> float:
+def exposure_group_key(exposure_s: float) -> float:
     """Round an exposure length to the value frames are grouped by.
 
     Three significant figures, not three decimal places: the camera's
@@ -153,7 +153,7 @@ def exposure_group_key(exposure_seconds: float) -> float:
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         An exposure length in seconds.
 
     Returns
@@ -161,7 +161,7 @@ def exposure_group_key(exposure_seconds: float) -> float:
     key : `float`
         The length rounded to three significant figures.
     """
-    return float(f"{exposure_seconds:.3g}")
+    return float(f"{exposure_s:.3g}")
 
 
 @dataclass(frozen=True)
@@ -373,9 +373,7 @@ def exposure_group_holds_folded_frames(frames: list[Any]) -> bool:
         ignored: a split into several groups never happens with one.
     """
     keys = {
-        exposure_group_key(exposure)
-        for frame in frames
-        if (exposure := frame_exposure_seconds(frame)) is not None
+        exposure_group_key(exposure) for frame in frames if (exposure := frame_exposure_s(frame)) is not None
     }
     return len(keys) > 1
 
@@ -413,17 +411,17 @@ def split_frames_by_exposure(
     groups : `list` [`ExposureGroup`]
         The groups, shortest exposure first. Always at least one.
     """
-    exposures = [frame_exposure_seconds(frame) for frame in frames]
-    isos = [frame_iso_value(frame) for frame in frames]
+    exposures = [frame_exposure_s(frame) for frame in frames]
+    isos = [frame_gain_value(frame) for frame in frames]
     folding = plan_exposure_folding(exposures, minimum_frames_per_group, maximum_fold_ratio, isos)
     group_lengths = folding.group_lengths
     if not frames or group_lengths[0] is None:
-        return [ExposureGroup(_mean_exposure(exposures), list(frames), iso=exposure_group_iso(frames))]
+        return [ExposureGroup(_mean_exposure(exposures), list(frames), gain=exposure_group_iso(frames))]
     kept = [index for index, reason in enumerate(folding.left_out_reasons) if reason is None]
     group_keys = {(group_lengths[index], folding.group_isos[index]) for index in kept}
     if len(group_keys) == 1:
         members = [frames[index] for index in kept]
-        return [ExposureGroup(group_lengths[kept[0]], members, iso=folding.group_isos[kept[0]])]
+        return [ExposureGroup(group_lengths[kept[0]], members, gain=folding.group_isos[kept[0]])]
 
     members_by_key: dict[tuple[float, float | None], list[Any]] = defaultdict(list)
     for index in kept:
@@ -433,9 +431,9 @@ def split_frames_by_exposure(
         members = members_by_key[group_key]
         groups.append(
             ExposureGroup(
-                _mean_exposure([frame_exposure_seconds(frame) for frame in members]),
+                _mean_exposure([frame_exposure_s(frame) for frame in members]),
                 members,
-                iso=group_key[1],
+                gain=group_key[1],
             )
         )
     return groups
@@ -471,10 +469,10 @@ def find_frames_left_out_of_exposure_groups(
         the frames. Empty when every frame has a group.
     """
     folding = plan_exposure_folding(
-        [frame_exposure_seconds(frame) for frame in frames],
+        [frame_exposure_s(frame) for frame in frames],
         minimum_frames_per_group,
         maximum_fold_ratio,
-        [frame_iso_value(frame) for frame in frames],
+        [frame_gain_value(frame) for frame in frames],
     )
     return [
         (frame, reason)
@@ -556,7 +554,7 @@ def split_groups_by_night(
         position = {id(frame): index for index, frame in enumerate(group.frames)}
         for night in sorted(large):
             members = sorted(large[night], key=lambda frame: position[id(frame)])
-            result.append(ExposureGroup(group.exposure_seconds, members, night.isoformat(), group.iso))
+            result.append(ExposureGroup(group.exposure_s, members, night.isoformat(), group.gain))
     return result
 
 
@@ -574,7 +572,7 @@ def exposure_group_iso(frames: list[Any]) -> float | None:
         The one ISO every frame has, or `None` when a frame has no readable
         ISO or the frames differ.
     """
-    isos = {frame_iso_value(frame) for frame in frames}
+    isos = {frame_gain_value(frame) for frame in frames}
     return isos.pop() if len(isos) == 1 else None
 
 
@@ -612,7 +610,7 @@ def _frames_of_representative_exposure(frames: list[Any]) -> list[Any]:
     readable = [
         (float(f"{exposure:.3g}"), frame)
         for frame in frames
-        if (exposure := frame_exposure_seconds(frame)) is not None
+        if (exposure := frame_exposure_s(frame)) is not None
     ]
     if not readable:
         return []
@@ -645,12 +643,12 @@ def representative_exposure_seconds(frames: list[Any]) -> float:
 
     Returns
     -------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The mean exposure of the frames of the most common length, in
         seconds, or 0.0 when no frame has a readable exposure length.
     """
     members = _frames_of_representative_exposure(frames)
-    return _mean_exposure([frame_exposure_seconds(frame) for frame in members])
+    return _mean_exposure([frame_exposure_s(frame) for frame in members])
 
 
 def representative_exposure_frames(frames: list[Any]) -> list[Any]:

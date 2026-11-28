@@ -36,10 +36,10 @@ from typing import Any
 
 from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
-    DECISIONS,
     DISPOSITIONS,
     INTERIM_BLOCKS,
     categorize_tool,
+    decision_for,
     find_problems,
 )
 
@@ -161,7 +161,7 @@ def _rule(pattern: str, tool_class: str, confidence: str, reason: str) -> Classi
 CLASSIFICATION_RULES = (
     # Exact names first: these tools are known cases.
     _rule(
-        r"^observatory_(mount_abort_motion|safety_execute_safe_state)$",
+        r"^observatory_(mount_stop|safety_execute_safe_state)$",
         "safe-stop",
         "high",
         "Stops motion or secures the equipment.",
@@ -222,12 +222,12 @@ CLASSIFICATION_RULES = (
         "Adds or changes targets in the catalog.",
     ),
     _rule(
-        r"^star_(create|update|find_or_create_by_position)$",
+        r"^star_(create|update|record_periodicity)$",
         "change-data",
         "high",
         "Adds or changes stars in the catalog.",
     ),
-    _rule(r"^calibration_reindex_frames$", "change-data", "medium", "Probably rebuilds stored calibration."),
+    _rule(r"^calibration_frames_scan$", "change-data", "medium", "Rebuilds and saves the calibration index."),
     _rule(
         r"^processing_process_target$",
         "change-data",
@@ -236,27 +236,25 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^processing_acquire_.+_slot$", "change-data", "low", "Takes a work slot (a lock). Check."),
     _rule(
-        r"^planning_(add_to_queue|reorder_queue|remove_from_queue|set_entry_exposures|add_checklist_items"
-        r"|set_framing|update_package|reopen_package|dismiss_package|undismiss_package|delete_package"
-        r"|tick_checklist_item)$",
+        r"^planning_(sessions_(add|remove|update)|packages_(update|restore|delete))$",
         "change-data",
         "high",
-        "Changes the saved queue or checklist.",
+        "Changes the saved queue, checklist or packages.",
     ),
     _rule(
-        r"^planning_refresh_suggestions$",
+        r"^planning_packages_record_suggestions$",
         "change-data",
         "high",
         "Writes suggested and finished packages and tonight's checklist.",
     ),
     _rule(
-        r"^planning_(build_deep_star_catalog|create_mosaic)$",
+        r"^planning_(catalogs_record_deep_catalog|packages_create_mosaic)$",
         "change-data",
         "high",
         "Builds or stores catalog or plan data.",
     ),
     _rule(
-        r"^planning_create_(package|session)$",
+        r"^planning_(packages|sessions)_create$",
         "change-data",
         "high",
         "Records packages and sessions.",
@@ -268,53 +266,47 @@ CLASSIFICATION_RULES = (
         "Builds a sequence plan and writes nothing.",
     ),
     _rule(
-        r"^observatory_(safety_apply_promotion_decision|equipment_set_active_.+)$",
+        r"^observatory_(safety_update|equipment_set_active_.+)$",
         "change-data",
         "high",
         "Writes settings to local storage.",
     ),
     _rule(
-        r"^execution_build_divergence_record$",
-        "compute",
-        "high",
-        "Builds a divergence record and writes nothing.",
-    ),
-    _rule(
-        r"^observatory_guiding_(drain_external_pulses|refit_spectrum)$",
+        r"^(observatory_guiding_drain_external_pulses|review_guiding_record_spectrum)$",
         "change-data",
         "low",
         "Clears or refits stored guiding state. Check.",
     ),
     _rule(
-        r"^execution_(abort_session|reconcile_session|create_recorder)$",
+        r"^execution_(abort|reconcile|create_recorder)$",
         "change-data",
         "low",
         "Closes or records a session in the database. Stopping the mount is a different tool. Check.",
     ),
     # Hardware.
     _rule(
-        r"^observatory_(mount_(slew|sync|park|unpark|set_tracking|manual_move|set_slew_rate|run_.+)"
-        r"|imaging_(capture_image|stop_capture|set_filter|focus_move)|guiding_(pulse|expose|run_.+)"
-        r"|safety_(open|close)_enclosure|equipment_(connect|disconnect|set_device_property))$",
+        r"^observatory_(mount_(slew|sync|park|unpark|set_tracking|move|set_slew_rate|run_.+)"
+        r"|imaging_(capture|stop|set_filter|move_focuser)|guiding_(pulse|capture|start|stop|run_.+)"
+        r"|safety_(open|close)_enclosure|equipment_(connect|set_device_property))$",
         "actuate",
         "high",
         "Moves or commands equipment.",
     ),
     _rule(
-        r"^observatory_safety_enter_(controller|monitoring)_mode$",
+        r"^observatory_safety_set_mode$",
         "actuate",
         "low",
         "Switches who controls the hardware. Check.",
     ),
     _rule(
-        r"^execution_(advance_session|execute_meridian_flip|recover_.+)$",
+        r"^execution_(run|execute_meridian_flip|recover_.+)$",
         "actuate",
         "high",
         "Runs or recovers an observing session.",
     ),
     # Reads.
     _rule(
-        r"^observatory_remote_(list|check_connection)$",
+        r"^observatory_remote_(query_folders|query_files|check_connection)$",
         "observe",
         "medium",
         "Reads, but contacts the remote computer over the network.",
@@ -326,43 +318,43 @@ CLASSIFICATION_RULES = (
         "Name says it reads.",
     ),
     _rule(
-        r"^observatory_(equipment_(cooling_ramp_rate|summarize_device)|[a-z]+_status)$",
+        r"^observatory_(equipment_(cooling_ramp_rate|summarize_device)|[a-z]+_get_status|imaging_check_capture)$",
         "observe",
         "high",
         "Returns a stored, derived or measured value.",
     ),
     _rule(
-        r"^review_query(_alignment_sessions)?$",
+        r"^review_(nights|guiding|alignment|targets|performance)_(query|query_[a-z_]+|get|get_[a-z_]+|measure_[a-z_]+|predict_[a-z_]+)$",
         "compute",
         "high",
         "Reads recorded nights and calculates the analyses.",
     ),
     _rule(
-        r"^observatory_remote_sync_(frames|logs)$",
+        r"^(observatory_remote_sync_(frames|logs)|review_alignment_record_external)$",
         "ingest",
         "high",
         "Brings new data from the telescope computer into the library. Never deletes.",
     ),
     _rule(
-        r"^quality_measure_frames$",
+        r"^quality_frames_measure$",
         "compute",
         "high",
         "Measures frames and returns statistics. Saves nothing.",
     ),
     _rule(
-        r"^(review_frame_guiding|planning_get_visibility)$",
+        r"^(review_targets_get_frame_guiding|planning_sky_get_visibility)$",
         "compute",
         "high",
         "Calculates from stored records and the sky. Saves nothing.",
     ),
     _rule(
-        r"^planning_get_deep_catalog_status$",
+        r"^planning_catalogs_predict_deep_catalog$",
         "compute",
         "high",
-        "Reads the catalog file; the estimate queries the Gaia archive. Saves nothing.",
+        "Queries the Gaia archive for a sample of chunks. Saves nothing.",
     ),
     _rule(
-        r"^observatory_remote_frame_locations$",
+        r"^observatory_remote_get_frame_locations$",
         "observe",
         "high",
         "Lists the frame files on the telescope computer, the drive and the library. Changes nothing.",
@@ -382,32 +374,34 @@ CLASSIFICATION_RULES = (
     ),
     _rule(r"^star_query$", "observe", "high", "Reads library stars. Row counts are capped."),
     _rule(
-        r"^(target_query|target_imaged_field_centers|planning_query_sources|planning_lookup_coordinates"
-        r"|planning_query_plans|planning_query_catalogs)$",
+        r"^(target_query|target_measure_field_centers|planning_catalogs_query(_sources)?"
+        r"|planning_sessions_(get|query)|planning_packages_(get|get_for_target|query|query_suggestion_log"
+        r"|get_depth_goal)|planning_sky_(get_tonight_advice|get_constellation_lines|get_panels)"
+        r"|planning_catalogs_get_deep_status)$",
         "observe",
         "high",
         "Reads targets or stars in short, capped records.",
     ),
     _rule(
-        r"^processing_stack_summary$",
+        r"^processing_stacking_get_summary$",
         "observe",
         "high",
         "Reads the summary saved with a target's stack. Measures and saves nothing.",
     ),
     _rule(
-        r"^visualization_render_fits$",
+        r"^visualization_render(_newest)?$",
         "observe",
         "high",
         "Draws a picture of a frame. Saves nothing.",
     ),
     _rule(
-        r"^jobs_query$",
+        r"^jobs_(get|query|get_log|get_warnings|get_lineage)$",
         "observe",
         "high",
         "Reads the job history and lineage. The logs database is opened read-only.",
     ),
     _rule(
-        r"^quality_(query|metrics|set_aside_frames)$",
+        r"^(quality_records_query|quality_records_get_metrics?|target_frames_get_set_aside)$",
         "observe",
         "high",
         (
@@ -419,10 +413,10 @@ CLASSIFICATION_RULES = (
         r"^calibration_query$",
         "observe",
         "high",
-        "Reads calibration counts. refresh reloads the index into memory and writes nothing.",
+        "Reads calibration counts. Writes nothing.",
     ),
     _rule(
-        r"^quality_measure_stack$",
+        r"^quality_stacks_measure$",
         "compute",
         "high",
         "Measures a stack and compares it with another. Saves nothing.",
@@ -628,11 +622,12 @@ def apply_decisions(record: ToolRecord) -> None:
     ----------
     record : `ToolRecord`
         The record to update in place. It already has a drafted class. A
-        tool with no row in ``DECISIONS`` stays ``undecided``, so no
+        tool with no row in ``DECISIONS`` (under its name, or under an old
+        name that ``TOOL_RENAMES`` maps to it) stays ``undecided``, so no
         client gets it.
     """
     record.interim_block = INTERIM_BLOCKS.get(record.name, "")
-    decision = DECISIONS.get(record.name)
+    decision = decision_for(record.name)
     if decision:
         record.note = decision.note
         record.disposition = decision.disposition

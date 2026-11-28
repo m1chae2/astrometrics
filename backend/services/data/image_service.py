@@ -1,13 +1,16 @@
 """Draw FITS frames for the app's viewer, measure stars on them, delete them.
 
-The service is a thin adapter over the library's `Visualization.render_fits`,
+The service is a thin adapter over the library's `Visualization.render`,
 `QualityRecords` and `TargetCatalog`. It turns the paths the app sends into
 paths on this computer, refuses a path outside the folders the app may read
 (`image_paths.resolve_allowed_image`), and shapes each picture the way the
-viewer reads it. A frame's header is read through ``target:get_frame_header``
+viewer reads it (`ViewerImage`): the library gives the picture's bytes, and
+this service turns them into a data URL and adds the file's FITS header. A
+frame's header alone is read through ``target:get_frame_header``
 (`TargetService.get_frame_header`).
 """
 
+import base64
 import logging
 import os
 import threading
@@ -15,7 +18,10 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from astrometricslib.drivers import resolve_mounted_path
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from backend.services.data.image_paths import PROCESSED_PICTURE_ENDING, resolve_allowed_image
 
 logger = logging.getLogger(__name__)
@@ -62,7 +68,42 @@ def _detection_source(resolved: str) -> str:
     return stack if same_size else resolved
 
 
-def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
+class ViewerImage(BaseModel):
+    """A picture the way the app's viewer reads it.
+
+    Attributes
+    ----------
+    id : `str`
+        What the picture shows, such as the target id or the frame's folder.
+    min, max : `float`
+        The brightness range shown, in pixel values (0 and 255 for a JPEG).
+    image_data : `str`
+        The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
+    headers : `list` [`dict` [`str`, `str`]]
+        The FITS header of the file that was drawn: ``key``, ``value`` and
+        ``comment`` of each card.
+    path : `str` or `None`
+        The file that was drawn.
+    stretch_parameters : `dict` [`str`, `float`] or `None`
+        The automatic stretch the picture was drawn with (``blackPoint``,
+        ``whitePoint``, ``midtones``), or `None` when it was drawn without
+        one.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(default="", alias="id")
+    min: float = Field(alias="min")
+    max: float = Field(alias="max")
+    image_data: str = Field(alias="imageData")
+    headers: list[dict[str, str]] = Field(default_factory=list, alias="headers")
+    path: str | None = Field(default=None, alias="path")
+    stretch_parameters: dict[str, float] | None = Field(default=None, alias="stretchParameters")
+
+
+def _viewer_payload(
+    picture: Any | None, image_id: str, read_header: Callable[[str], Any]
+) -> dict[str, Any] | None:
     """Shape a rendered picture the way the app's viewer reads it.
 
     The viewer reads the picture as ``imageData``; the last-image panel
@@ -72,6 +113,11 @@ def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
     ----------
     picture : `RenderedImage` or `None`
         The picture the library drew.
+    image_id : `str`
+        What the picture shows, copied into the reply.
+    read_header : `Callable` [[`str`], `astropy.io.fits.Header`]
+        Reads a file's FITS header (the library's
+        ``targets.frames.get_header``).
 
     Returns
     -------
@@ -81,7 +127,28 @@ def _viewer_payload(picture: Any | None) -> dict[str, Any] | None:
     """
     if picture is None:
         return None
-    payload = picture.model_dump(by_alias=True)
+    headers: list[dict[str, str]] = []
+    if picture.path:
+        try:
+            header = read_header(picture.path)
+            headers = [
+                {"key": key, "value": str(header[key]), "comment": str(header.comments[key] or "")}
+                for key in header.keys()
+                if key
+            ]
+        except (OSError, ValueError, NotFoundError) as error:
+            logger.warning("Could not read the header of %s while drawing it: %s", picture.path, error)
+    stretch = picture.stretch_parameters
+    encoded = base64.b64encode(picture.picture).decode("ascii")
+    payload = ViewerImage(
+        id=image_id,
+        min=picture.black,
+        max=picture.white,
+        image_data=f"data:{picture.media_type};base64,{encoded}",
+        headers=headers,
+        path=picture.path,
+        stretch_parameters=None if stretch is None else stretch.model_dump(by_alias=True),
+    ).model_dump(by_alias=True)
     payload["image_data"] = payload["imageData"]
     return payload
 
@@ -115,7 +182,7 @@ class ImageService:
         return self.target_service.astrometrics
 
     def get_light_frame_data_by_id(
-        self, target_id: str, iso: str, exposure: str, index: int = 0, stretch: bool = True
+        self, target_id: str, gain: float | None, exposure_s: float, index: int = 0, stretch: bool = True
     ) -> dict[str, Any] | None:
         """Draw one of a target's frames, chosen by gain, exposure and order.
 
@@ -123,10 +190,11 @@ class ImageService:
         ----------
         target_id : `str`
             The target whose frame to draw.
-        iso : `str`
-            The gain or ISO of the frame.
-        exposure : `str`
-            The exposure length of the frame.
+        gain : `float` or `None`
+            The gain or ISO of the frame, or `None` for a frame whose gain
+            is not known (any gain then matches).
+        exposure_s : `float`
+            The exposure length of the frame, in seconds.
         index : `int`, optional
             Which matching frame, by order. Defaults to 0.
         stretch : `bool`, optional
@@ -136,21 +204,65 @@ class ImageService:
         -------
         result : `dict` or `None`
             The picture as a data URL, with its brightness range.
-        """
-        picture = self._astrometrics.visualization.render_fits(
-            target=target_id, iso=iso, exposure=exposure, index=index, stretch=stretch, kind="data_url"
-        )
-        return _viewer_payload(picture)
 
-    def get_target_frame_by_id(self, target_id: str, iso: str, exposure: str, index: int = 0) -> str:
+        Notes
+        -----
+        A gain or exposure that is not a number raises
+        `InvalidArgumentError`, and no matching frame `NotFoundError`.
+        """
+        path = self.get_target_frame_by_id(target_id, gain, exposure_s, index)
+        picture = self._astrometrics.visualization.render(path, stretch=stretch)
+        # The reply uses the stored target id, whatever spelling the app sent.
+        shown_id = self.target_service.subjects.target(target_id).id
+        return _viewer_payload(picture, shown_id, self._astrometrics.targets.frames.get_header)
+
+    def get_target_frame_by_id(
+        self, target_id: str, gain: float | None, exposure_s: float, index: int = 0
+    ) -> str:
         """Find the path of a target's frame by gain, exposure and order.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose frame to find.
+        gain : `float` or `None`
+            The gain or ISO of the frame, or `None` for a frame whose gain
+            is not known (any gain then matches).
+        exposure_s : `float`
+            The exposure length of the frame, in seconds.
+        index : `int`, optional
+            Which matching frame, by order. Defaults to 0.
 
         Returns
         -------
         path : `str`
-            Filesystem path of the matching frame.
+            Filesystem path of the matching frame. An index past the last
+            match gives the last one.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the gain or exposure is not a number.
+        NotFoundError
+            If no light frame has that gain and exposure.
         """
-        return self._astrometrics.targets.get_frame(target_id, iso, exposure, index)
+        target = self.target_service.subjects.target(target_id)
+        try:
+            gain_number = None if gain is None else float(gain)
+            exposure_number = float(exposure_s)
+        except (TypeError, ValueError) as error:
+            raise InvalidArgumentError(
+                "The gain and exposure must be numbers.", details={"gain": gain, "exposure_s": exposure_s}
+            ) from error
+        matches = self._astrometrics.targets.frames.query(
+            target, gain=gain_number, exposure_s=exposure_number
+        )
+        if not len(matches):
+            raise NotFoundError(
+                f"No frame found for gain {gain}, exposure {exposure_s} s, index {index}",
+                details={"target": target.id, "gain": gain, "exposure_s": exposure_s, "index": index},
+            )
+        return matches[max(0, min(index, len(matches) - 1))].path
 
     def _resolve(self, path: str) -> str:
         """Give the real path of an image the app sent, in the allowed folders.
@@ -192,11 +304,12 @@ class ImageService:
         Returns
         -------
         result : `dict`
-            The library's answer (`QualityRecords.map_position`): ``x`` and
-            ``y`` (1-based, on the second image), ``method`` ("sky", "stack
-            alignment", "stack alignment + sky", "same pixel" or "none") and
-            ``note``. When the position cannot be followed, ``x`` and ``y`` are
-            `None`, ``method`` is "none" and ``note`` says why.
+            The library's answer (`quality.frames.map_positions`, for one
+            point): ``x`` and ``y`` (1-based, on the second image), ``method``
+            ("sky", "stack alignment", "stack alignment + sky", "star
+            matching", "same pixel" or "none") and ``note``. When the
+            position cannot be followed, ``x`` and ``y`` are `None`,
+            ``method`` is "none" and ``note`` says why.
 
         Notes
         -----
@@ -205,7 +318,11 @@ class ImageService:
         library's `NotFoundError`.
         """
         source, destination = self._resolve(from_path), self._resolve(to_path)
-        return self._astrometrics.quality.map_position(source, float(x), float(y), destination).model_dump()
+        mapping = self._astrometrics.quality.frames.map_positions(
+            source, destination, points=[(float(x), float(y))]
+        )
+        (point,) = mapping.points
+        return {"x": point.mapped_x, "y": point.mapped_y, "method": mapping.method, "note": mapping.note}
 
     def measure_star_profile(
         self,
@@ -213,7 +330,7 @@ class ImageService:
         x: float,
         y: float,
         radius_px: float | None = None,
-        cut_angle_degrees: float = 0.0,
+        cut_angle_deg: float = 0.0,
         cut_half_length_px: float | None = None,
         search_radius_px: float | None = None,
     ) -> dict[str, Any]:
@@ -229,7 +346,7 @@ class ImageService:
         radius_px : `float`, optional
             How far from the star's center the profile reaches. The star's
             width sets it when left out.
-        cut_angle_degrees : `float`, optional
+        cut_angle_deg : `float`, optional
             The direction of the straight cut, from +y toward +x.
         cut_half_length_px : `float`, optional
             How far the cut reaches each way from the center.
@@ -249,12 +366,11 @@ class ImageService:
         `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
         resolved = self._resolve(path)
-        result = self._astrometrics.quality.measure_star_profile(
+        result = self._astrometrics.quality.detections.measure_profile(
             resolved,
-            x,
-            y,
+            (x, y),
             radius_px=radius_px,
-            cut_angle_degrees=cut_angle_degrees,
+            cut_angle_deg=cut_angle_deg,
             cut_half_length_px=cut_half_length_px,
             search_radius_px=search_radius_px,
         )
@@ -293,7 +409,7 @@ class ImageService:
             resolved,
             self._detection_cache,
             self._detection_cache_lock,
-            lambda: self._astrometrics.quality.measure_detections(resolved).model_dump(),
+            lambda: self._astrometrics.quality.detections.measure_detections(resolved).model_dump(),
         )
 
     @staticmethod
@@ -360,36 +476,8 @@ class ImageService:
             could not be removed, with the reason).
         """
         resolved_paths = [resolve_mounted_path(path) for path in paths]
-        result = self._astrometrics.targets.delete_images(resolved_paths, target=target_id).model_dump()
-        if target_id is None:
-            self._forget_measurements_of_deleted(result["deleted"])
-        return result
-
-    def _forget_measurements_of_deleted(self, deleted_paths: list[str]) -> None:
-        """Forget the measurements of frames deleted without a target.
-
-        The library forgets the measurements itself when it is given the
-        target. When the caller names none, the target is read from the
-        library's folder layout (``lights/<target>/...``), so a deleted
-        frame never leaves its numbers behind. A path that is not under a
-        ``lights`` folder, or whose target is not in the library, is left.
-
-        Parameters
-        ----------
-        deleted_paths : `list` [`str`]
-            The paths the library reports as deleted.
-        """
-        subject_ids: list[str] = []
-        for path in deleted_paths:
-            parts = os.path.normpath(path).split(os.sep)
-            positions = [i for i, part in enumerate(parts) if part.lower() == "lights" and i + 2 < len(parts)]
-            if not positions:
-                continue
-            target = self._astrometrics.targets.get(parts[positions[-1] + 1])
-            if target is not None:
-                subject_ids.append(target.frame_subject_id(path))
-        if subject_ids:
-            self._astrometrics.quality.forget(subject_ids)
+        target = None if target_id is None else self._astrometrics.targets.get(target_id)
+        return self._astrometrics.targets.frames.delete(target, resolved_paths).model_dump()
 
     def get_last_image(self, stretch: bool = True) -> dict[str, Any] | None:
         """Find the most recently created FITS file and draw it.
@@ -404,7 +492,12 @@ class ImageService:
         result : `dict` or `None`
             The picture as a data URL, or `None` if no FITS file exists.
         """
-        return _viewer_payload(self._astrometrics.visualization.get_last_captured_image(stretch=stretch))
+        picture = self._astrometrics.visualization.render_newest(stretch=stretch)
+        # The panel names the picture after the folder the frame is in.
+        folder = (
+            os.path.basename(os.path.dirname(picture.path)) if picture is not None and picture.path else ""
+        )
+        return _viewer_payload(picture, folder, self._astrometrics.targets.frames.get_header)
 
     def convert_fits(self, path: str, maxdim: int = 2000, stretch: bool = True) -> dict[str, Any] | None:
         """Draw a FITS file, named by its path, for the viewer.
@@ -430,7 +523,7 @@ class ImageService:
         A path outside the library folders and the scratch folder raises
         `InvalidArgumentError` (`image_paths.resolve_allowed_image`).
         """
-        picture = self._astrometrics.visualization.render_fits(
-            self._resolve(path), kind="data_url", max_dimensions=maxdim, stretch=stretch
+        picture = self._astrometrics.visualization.render(
+            self._resolve(path), max_dimensions=maxdim, stretch=stretch
         )
-        return _viewer_payload(picture)
+        return _viewer_payload(picture, "", self._astrometrics.targets.frames.get_header)

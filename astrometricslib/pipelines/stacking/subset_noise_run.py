@@ -757,7 +757,7 @@ def _subset_group_subject(
             relative = f"{SUBSET_FOLDER_NAME}/{label}/groups/{os.path.basename(group.stack_path)}"
         name = relative
     else:
-        name = f"{stack_name}#group-{index}-{group.exposure_seconds:g}s"
+        name = f"{stack_name}#group-{index}-{group.exposure_s:g}s"
     return context.stack_subject(name).model_copy(update={"variant": label})
 
 
@@ -1002,11 +1002,12 @@ def _stack_and_measure(
     if membership is not None and membership.members:
         weights = normalized_weights(membership)
         exposures = [
-            float(member.frame.exposure) if member.frame.exposure else None for member in membership.members
+            float(member.frame.exposure_s) if member.frame.exposure_s else None
+            for member in membership.members
         ]
         result.frames_stacked = len(membership.members)
         result.effective_frame_count = effective_frame_count(weights)
-        result.effective_time_seconds = effective_exposure_seconds(weights, exposures)
+        result.effective_time_s = effective_exposure_seconds(weights, exposures)
     if library is not None:
         result.expected_noise_ratio = expected_noise_ratio(
             library.effective_count, result.effective_frame_count

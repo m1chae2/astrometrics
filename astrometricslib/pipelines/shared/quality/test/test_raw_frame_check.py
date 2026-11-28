@@ -184,7 +184,7 @@ def test_an_empty_folder_gives_an_empty_report(tmp_path: Path) -> None:
 
 
 def test_the_diagnostics_api_runs_the_check_on_a_targets_frames(tmp_path: Path) -> None:
-    """`measure_frames(kind="raw_check")` checks a target's lights."""
+    """``quality.frames.measure`` runs the batch check on a target's lights."""
     from astrometricslib.models.target import FrameRecord, Target
 
     _write_batch(tmp_path, _clean_batch(3))
@@ -194,8 +194,9 @@ def test_the_diagnostics_api_runs_the_check_on_a_targets_frames(tmp_path: Path) 
     ]
 
     diagnostics = QualityRecords(AppConfiguration(), MagicMock())
-    report = diagnostics.measure_frames(Target(id="T", frames=frames), kind="raw_check", register_job=False)
+    report = diagnostics.frames.measure(Target(id="T", frames=frames).frames).checks
 
+    assert report is not None
     assert report.batch["frame_count"] == 3
     assert report.frames_checked == 3
 

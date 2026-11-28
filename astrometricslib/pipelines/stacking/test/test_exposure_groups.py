@@ -20,7 +20,7 @@ from astropy.io import fits
 
 from astrometricslib.foundation.constants import FULL_SCALE_COUNTS
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
-from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_s
 from astrometricslib.pipelines.shared.quality.clipped_frames import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.shared.quality.saturation import SATURATION_MASK_FRACTION_OF_CEILING
 from astrometricslib.pipelines.stacking.frame_screening import (
@@ -71,7 +71,8 @@ def _frames(*exposures: object) -> list[SimpleNamespace]:
         One frame per exposure, numbered in order.
     """
     return [
-        SimpleNamespace(name=f"frame_{index}", exposure=exposure) for index, exposure in enumerate(exposures)
+        SimpleNamespace(name=f"frame_{index}", exposure_s=exposure)
+        for index, exposure in enumerate(exposures)
     ]
 
 
@@ -88,15 +89,15 @@ def _group_gains(per_second_images: list, usable_masks: list, reference_index: i
 
 def test_exposure_is_read_from_strings_numbers_and_dictionaries() -> None:
     """The exposure length can be a string, a number or a dictionary entry."""
-    assert frame_exposure_seconds(SimpleNamespace(exposure="0.5")) == pytest.approx(0.5)
-    assert frame_exposure_seconds(SimpleNamespace(exposure=5)) == pytest.approx(5.0)
-    assert frame_exposure_seconds({"exposure": "2.0"}) == pytest.approx(2.0)
+    assert frame_exposure_s(SimpleNamespace(exposure_s=0.5)) == pytest.approx(0.5)
+    assert frame_exposure_s(SimpleNamespace(exposure_s=5)) == pytest.approx(5.0)
+    assert frame_exposure_s({"exposure": "2.0"}) == pytest.approx(2.0)
 
 
 @pytest.mark.parametrize("bad_value", [None, "", "abc", 0, -1.0, float("nan"), float("inf")])
 def test_unreadable_exposures_give_none(bad_value: object) -> None:
     """A missing, non-numeric, non-positive or infinite exposure is `None`."""
-    assert frame_exposure_seconds(SimpleNamespace(exposure=bad_value)) is None
+    assert frame_exposure_s(SimpleNamespace(exposure_s=bad_value)) is None
 
 
 def test_frames_with_one_exposure_stay_in_one_group() -> None:
@@ -104,7 +105,7 @@ def test_frames_with_one_exposure_stay_in_one_group() -> None:
     groups = split_frames_by_exposure(_frames("30.0", "30", 30.0, "30.0", "30.0", "30.0"))
 
     assert len(groups) == 1
-    assert groups[0].exposure_seconds == pytest.approx(30.0)
+    assert groups[0].exposure_s == pytest.approx(30.0)
     assert len(groups[0].frames) == 6
 
 
@@ -113,7 +114,7 @@ def test_a_bracketed_session_is_split_by_exposure_shortest_first() -> None:
     exposures = ["0.5"] * 60 + ["1.0"] * 20 + ["2.0"] * 20 + ["3.0"] * 20 + ["5.0"] * 20
     groups = split_frames_by_exposure(_frames(*exposures))
 
-    assert [group.exposure_seconds for group in groups] == pytest.approx([0.5, 1.0, 2.0, 3.0, 5.0])
+    assert [group.exposure_s for group in groups] == pytest.approx([0.5, 1.0, 2.0, 3.0, 5.0])
     assert [len(group.frames) for group in groups] == [60, 20, 20, 20, 20]
 
 
@@ -131,7 +132,7 @@ def test_the_cameras_shortest_exposures_do_not_divide_by_zero() -> None:
 
     assert len(groups) == 1
     assert len(groups[0].frames) == 94
-    assert [frame.exposure for frame, _ in left_out] == ["3.2e-05", "3.2e-05", "1320.000064"]
+    assert [frame.exposure_s for frame, _ in left_out] == ["3.2e-05", "3.2e-05", "1320.000064"]
 
 
 def test_frames_keep_their_original_order_inside_a_group() -> None:
@@ -165,7 +166,7 @@ def test_a_tiny_group_is_folded_into_the_nearest_exposure() -> None:
     assert len(groups) == 2
     assert len(groups[0].frames) == 21
     assert len(groups[1].frames) == 20
-    assert any(frame.exposure == "2.0" for frame in groups[0].frames)
+    assert any(frame.exposure_s == "2.0" for frame in groups[0].frames)
 
 
 def test_when_no_group_is_big_enough_everything_stays_together() -> None:
@@ -220,11 +221,11 @@ def test_the_m31_case_leaves_out_only_the_20_s_frame() -> None:
     groups = split_frames_by_exposure(frames)
     left_out = find_frames_left_out_of_exposure_groups(frames)
 
-    assert [frame.exposure for frame, _ in left_out] == [20.0]
+    assert [frame.exposure_s for frame, _ in left_out] == [20.0]
     assert folding.group_lengths[-2:] == [60.0, 60.0]
     assert len(groups) == 1
     assert len(groups[0].frames) == 119
-    assert not any(math.isclose(frame.exposure, 20.0) for frame in groups[0].frames)
+    assert not any(math.isclose(frame.exposure_s, 20.0) for frame in groups[0].frames)
 
 
 def test_each_short_length_folds_into_the_nearest_group_within_the_limit() -> None:
@@ -268,8 +269,8 @@ def test_no_left_out_frames_when_no_length_is_large_enough_or_one_length() -> No
 
 def test_the_screening_step_records_each_left_out_frame_and_keeps_the_rest() -> None:
     """A left-out frame is dropped from the stack and recorded with why."""
-    frames = [SimpleNamespace(path=f"/lights/frame_{index}.fits", exposure="60.0") for index in range(20)] + [
-        SimpleNamespace(path="/lights/short.fits", exposure="20.0")
+    frames = [SimpleNamespace(path=f"/lights/frame_{index}.fits", exposure_s=60.0) for index in range(20)] + [
+        SimpleNamespace(path="/lights/short.fits", exposure_s=20.0)
     ]
     screening = FrameScreening(frames=list(frames))
 
@@ -284,7 +285,7 @@ def test_the_screening_step_records_each_left_out_frame_and_keeps_the_rest() -> 
 
 def test_the_screening_step_changes_nothing_when_every_frame_has_a_group() -> None:
     """With every frame in a group, nothing is dropped or recorded."""
-    frames = [SimpleNamespace(path=f"/lights/frame_{index}.fits", exposure="60.0") for index in range(6)]
+    frames = [SimpleNamespace(path=f"/lights/frame_{index}.fits", exposure_s=60.0) for index in range(6)]
     screening = FrameScreening(frames=list(frames))
 
     _drop_unfoldable_exposures(SimpleNamespace(id="M 31"), screening)
@@ -522,7 +523,7 @@ def _write_raw_frames(folder, count: int, mean: float, noise: float, seed: int) 
         path = folder / f"raw_{seed}_{index}.fits"
         data = np.clip(generator.normal(mean, noise, (120, 120)), 0, None)
         fits.writeto(path, np.round(data).astype(np.uint16))
-        frames.append(SimpleNamespace(path=str(path), exposure="1.0"))
+        frames.append(SimpleNamespace(path=str(path), exposure_s=1.0))
     return frames
 
 
@@ -913,7 +914,7 @@ def _night_frame(day: int, exposure: str = "0.5", name: str = "f") -> SimpleName
         A frame with an exposure and a timestamp.
     """
     taken = datetime(2026, 1, day, 22, 0, 0)
-    return SimpleNamespace(exposure=exposure, timestamp=str(taken.timestamp()), name=name)
+    return SimpleNamespace(exposure_s=exposure, timestamp=str(taken.timestamp()), name=name)
 
 
 def test_a_group_from_two_nights_is_split_into_one_group_per_night() -> None:
@@ -924,7 +925,7 @@ def test_a_group_from_two_nights_is_split_into_one_group_per_night() -> None:
     groups = split_groups_by_night(split_frames_by_exposure(frames))
 
     assert [(group.night, len(group.frames)) for group in groups] == [("2026-01-10", 6), ("2026-01-20", 7)]
-    assert all(group.exposure_seconds == pytest.approx(0.5) for group in groups)
+    assert all(group.exposure_s == pytest.approx(0.5) for group in groups)
 
 
 def test_a_night_with_too_few_frames_joins_the_nearest_night() -> None:
@@ -957,7 +958,7 @@ def test_each_exposure_is_split_by_night_on_its_own() -> None:
     frames = [_night_frame(d, e) for e in ("0.5", "5.0") for d in (10, 20) for _ in range(5)]
     groups = split_groups_by_night(split_frames_by_exposure(frames))
 
-    assert [(round(group.exposure_seconds, 1), group.night) for group in groups] == [
+    assert [(round(group.exposure_s, 1), group.night) for group in groups] == [
         (0.5, "2026-01-10"),
         (0.5, "2026-01-20"),
         (5.0, "2026-01-10"),
@@ -1003,7 +1004,7 @@ def test_a_lone_longer_frame_does_not_rename_the_group() -> None:
     frames = _frames("5.0", *(["0.5"] * 59))
 
     assert len(split_frames_by_exposure(frames)) == 1
-    assert frame_exposure_seconds(frames[0]) == pytest.approx(5.0)  # what the old label read
+    assert frame_exposure_s(frames[0]) == pytest.approx(5.0)  # what the old label read
     assert representative_exposure_seconds(frames) == pytest.approx(0.5)
     assert len(representative_exposure_frames(frames)) == 59
 
@@ -1039,7 +1040,7 @@ def test_describe_group_clipping_lists_every_group_and_the_clipped_ones() -> Non
         0.712,
         CLIPPED_FRAME_ZERO_FRACTION.default,
     ]
-    assert clipped == [{"exposure_seconds": 0.5, "frame_zero_fraction": 0.712}]
+    assert clipped == [{"exposure_s": 0.5, "frame_zero_fraction": 0.712}]
 
 
 def test_group_weight_is_frames_times_exposure_squared_over_noise_squared() -> None:

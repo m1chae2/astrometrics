@@ -16,6 +16,6 @@
 - `zScore`. `worseBy` divided by its uncertainty, which is 1.2533 times the scatter of the night values around their own part's median, divided by the square root of the number of nights.
 - `isPoor`. True when `worseBy` is at least the blur tolerance (the same 10 percent policy number the performance envelope uses) and `zScore` is at least 3. A difference that is clear but small is not worth acting on, and a large one from a few lucky nights is not believed.
 
-`suggestedMinimumAltitudeDegrees` is the top of the highest altitude band where star width is poor.
+`suggestedMinimumAltitudeDeg` is the top of the highest altitude band where star width is poor.
 
 For exact behavior, read the code. The code is the source of truth.

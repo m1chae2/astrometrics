@@ -50,6 +50,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -564,3 +565,31 @@ def _choices_from_table(
     candidates.sort(key=lambda candidate: (candidate.distance, candidate.choice.simbad_id))
     short_side_arcmin = min(columns, rows) * pixel_scale_arcsec(wcs) / 60.0
     return clean_candidates(candidates, _best_common_names(simbad, candidates), short_side_arcmin)
+
+
+def list_target_bright_objects(
+    target: Any, simbad: SimbadDriver, *, force: bool = False
+) -> BrightObjectChoices:
+    """List the nebulae and galaxies in a target's imaging stack.
+
+    This is the owner of `processing.enhancement.get_bright_objects`. The
+    answer carries the choice saved on the target (``current``).
+
+    Parameters
+    ----------
+    target : `Target`
+        The target whose imaging stack to list.
+    simbad : `SimbadDriver`
+        The SIMBAD driver.
+    force : `bool`, optional
+        Ask SIMBAD again even when an answer is stored.
+
+    Returns
+    -------
+    choices : `BrightObjectChoices`
+        The objects, or no objects and the reason, with ``current``.
+    """
+    choices = list_bright_object_choices(
+        target.id, target.stacking.stacked_image, simbad, use_cache=not force
+    )
+    return choices.model_copy(update={"current": target.preview_bright_object})

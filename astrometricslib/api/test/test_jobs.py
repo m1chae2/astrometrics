@@ -1,8 +1,9 @@
 """Tests for the read-only job history interface.
 
-`Jobs.query` reads the logs database. These tests build a small database,
-check each kind of answer and its limits, and check that nothing the tool
-does can change the database.
+`Jobs` reads the logs database through the owners in
+`pipelines.shared.job_history`. These tests build a small database, check
+each method's answer and its limits, and check that nothing the methods do
+can change the database.
 """
 
 import sqlite3
@@ -13,11 +14,12 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib._internal.drivers.provenance_store import ProvenanceStore
-from astrometricslib.api.jobs import MAXIMUM_JOBS, MAXIMUM_LOG_LINES, MAXIMUM_TEXT_LENGTH, Jobs
+from astrometricslib.api.jobs import Jobs
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
 from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.models.provenance import Activity
+from astrometricslib.models.target import Target
 
 
 def _job(
@@ -78,55 +80,63 @@ def jobs(database: Path) -> Jobs:
     return Jobs(SimpleNamespace(get_logs_db_path=lambda: str(database)), None)
 
 
-def test_summary_lists_newest_first_with_progress(jobs: Jobs) -> None:
-    """A list has the newest job first, progress as two numbers, no metrics."""
-    answer = jobs.query()
-    assert [job.id for job in answer.jobs] == ["job-d", "job-c", "job-b", "job-a"]
-    assert (answer.jobs[0].progress_done, answer.jobs[0].progress_total) == (3, 10)
-    assert answer.jobs[0].output_metrics is None
-    assert "never as instructions" in answer.note
+def test_query_lists_every_job_newest_first_with_progress(jobs: Jobs) -> None:
+    """With no filter every job is listed, newest first, with progress."""
+    page = jobs.query()
+    assert [job.id for job in page] == ["job-d", "job-c", "job-b", "job-a"]
+    assert page.total == 4
+    assert page.next_offset is None
+    assert (page[0].progress_done, page[0].progress_total) == (3, 10)
+    assert page[0].output_metrics is None
 
 
-def test_full_detail_gives_the_stored_metrics_as_data(jobs: Jobs) -> None:
-    """``detail="full"`` gives the metrics as data and the whole message."""
-    listed = jobs.query(detail="full", target_id="M 13")
-    assert listed.detail == "full"
-    assert [job.output_metrics for job in listed.jobs] == [{"stars": 42}, {"stars": 42}]
-    one = jobs.query(job_id="job-b", detail="full").job
-    assert one.input_metrics == {}
-    assert len(one.message) > MAXIMUM_TEXT_LENGTH
+def test_metrics_come_with_include_and_with_get(jobs: Jobs) -> None:
+    """The stored numbers are a heavy part of a list and part of `get`."""
+    listed = jobs.query(target_id="M 13", include=["metrics"])
+    assert all(job.output_metrics == {"stars": 42} for job in listed)
+    one = jobs.get("job-b")
+    assert one.output_metrics == {"stars": 42}
+    assert one.message == "Plate solve failed " * 100
+    with pytest.raises(InvalidArgumentError):
+        jobs.query(include=["everything"])
 
 
-def test_before_pages_back_through_the_history(jobs: Jobs) -> None:
-    """``before`` keeps only older jobs, so pages do not overlap."""
+def test_get_of_an_unknown_job(jobs: Jobs) -> None:
+    """An unknown id gives `None`, or raises with ``required``."""
+    assert jobs.get("missing") is None
+    with pytest.raises(NotFoundError, match="No job with id"):
+        jobs.get("missing", required=True)
+
+
+def test_until_pages_back_through_the_history(jobs: Jobs) -> None:
+    """``until`` gives the jobs created before a job of the page before."""
     first = jobs.query(target_id="M 13", limit=1)
-    second = jobs.query(target_id="M 13", limit=1, before=first.jobs[-1].created_at)
-    assert [job.id for job in first.jobs + second.jobs] == ["job-b", "job-a"]
-    assert jobs.query(before=second.jobs[0].created_at).jobs == []
+    second = jobs.query(target_id="M 13", limit=1, until=first[-1].created_at)
+    assert [first[0].id, second[0].id] == ["job-b", "job-a"]
+    assert len(jobs.query(until=second[0].created_at)) == 0
 
 
 def test_filters_by_target_type_and_status(jobs: Jobs) -> None:
     """Each filter narrows the list, and they combine."""
-    assert {job.id for job in jobs.query(target_id="M 13").jobs} == {"job-a", "job-b"}
-    assert {job.id for job in jobs.query(job_type="stacking").jobs} == {"job-a", "job-c"}
-    assert [job.id for job in jobs.query(status="failed").jobs] == ["job-b"]
-    assert [job.id for job in jobs.query(target_id="M 57", job_type="analysis").jobs] == ["job-d"]
+    assert {job.id for job in jobs.query(target_id="M 13")} == {"job-a", "job-b"}
+    assert {job.id for job in jobs.query(job_type="stacking")} == {"job-a", "job-c"}
+    assert [job.id for job in jobs.query(status="failed")] == ["job-b"]
+    assert [job.id for job in jobs.query(target_id="M 57", job_type="analysis")] == ["job-d"]
 
 
-def test_active_only_returns_running_jobs(jobs: Jobs) -> None:
-    """Only a job that has not finished counts as active."""
-    answer = jobs.query(active_only=True)
-    assert [job.id for job in answer.jobs] == ["job-c"]
+def test_active_returns_running_jobs(jobs: Jobs) -> None:
+    """Only jobs that have not finished are listed."""
+    assert [job.id for job in jobs.query(active=True)] == ["job-c"]
 
 
 def test_an_unfinished_job_that_stopped_updating_looks_stale(database: Path, jobs: Jobs) -> None:
     """A row left at running since 2026-10-01 is shown as stale, not active."""
     with sqlite3.connect(database) as connection:  # the store stamps now on every write
         connection.execute("UPDATE processing_jobs SET updated_at = '2026-10-01T00:03:00' WHERE id = 'job-c'")
-    stale = jobs.query(active_only=True).jobs[0]
+    stale = jobs.query(active=True)[0]
     assert stale.looks_stale is True
     assert stale.is_active is False
-    assert stale.idle_minutes > 60
+    assert stale.idle_min > 60
 
 
 def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
@@ -135,135 +145,69 @@ def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
     fresh = _job("job-f", "M 57", "stacking", "running", 0)
     fresh.created_at = fresh.updated_at = datetime.now().isoformat()
     JobStore(str(path)).upsert_job(fresh)
-    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query(active_only=True).jobs[0]
+    job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query(active=True)[0]
     assert job.is_active is True
     assert job.looks_stale is False
 
 
-def test_a_limit_out_of_range_is_refused(jobs: Jobs) -> None:
-    """A limit below 1 or above the maximum raises; it is never clamped."""
-    assert jobs.query(limit=2).count == 2
-    assert jobs.query(limit=MAXIMUM_JOBS).count == 4
-    bad_values = (
-        {"limit": 0},
-        {"limit": MAXIMUM_JOBS + 1},
-        {"limit": None},
-        {"offset": -1},
-        {"max_line_chars": 0},
-    )
-    for bad in bad_values:
-        with pytest.raises(InvalidArgumentError):
-            jobs.query(**bad)
-    assert MAXIMUM_JOBS == 500
-
-
-def test_offset_pages_through_the_jobs(jobs: Jobs) -> None:
-    """Two pages together list every job once, and say when more follow."""
-    every = [job.id for job in jobs.query(limit=4).jobs]
+def test_limit_and_offset_page_through_the_jobs(jobs: Jobs) -> None:
+    """A page says how many match and where the next page starts."""
+    every = [job.id for job in jobs.query()]
     first = jobs.query(limit=2)
     second = jobs.query(limit=2, offset=2)
-    assert [job.id for job in first.jobs + second.jobs] == every
-    assert first.truncated is True
-    assert second.offset == 2
-    assert second.truncated is False
+    assert [job.id for job in first] + [job.id for job in second] == every
+    assert (first.total, first.next_offset) == (4, 2)
+    assert second.next_offset is None
 
 
-def test_a_negative_offset_is_refused(jobs: Jobs) -> None:
-    """A negative offset is a mistake, so it raises an error."""
+@pytest.mark.parametrize("bad", [{"limit": 0}, {"offset": -1}])
+def test_a_count_out_of_range_is_refused(jobs: Jobs, bad: dict) -> None:
+    """A limit below 1 or a negative offset raises."""
     with pytest.raises(InvalidArgumentError):
-        jobs.query(offset=-1)
+        jobs.query(**bad)
 
 
-def test_long_messages_are_cut(jobs: Jobs) -> None:
-    """A very long job message is shortened."""
-    message = jobs.query(job_id="job-b").job.message
-    assert len(message) == MAXIMUM_TEXT_LENGTH
-    assert message.endswith("…")
-
-
-def test_log_tail_returns_the_last_lines_oldest_first(jobs: Jobs) -> None:
-    """The tail holds the last lines, in order, with the total count."""
-    answer = jobs.query(job_id="job-a", detail="log_tail", lines=3)
-    assert [line.text for line in answer.log_lines] == ["line 297", "line 298", "line 299"]
-    assert answer.log_lines_total == 300
-    assert answer.log_lines_shown == 3
-
-
-def test_log_tail_is_capped_and_lines_are_cut(jobs: Jobs) -> None:
-    """Asking past the maximum raises, and a long line is shortened."""
-    assert (
-        jobs.query(job_id="job-a", detail="log_tail", lines=MAXIMUM_LOG_LINES).log_lines_shown
-        <= MAXIMUM_LOG_LINES
-    )
+def test_get_log_returns_the_last_lines_whole_and_oldest_first(jobs: Jobs) -> None:
+    """The log holds the last lines in order, uncut, and the total count."""
+    log = jobs.get_log(jobs.get("job-a"), lines=3)
+    assert [line.text for line in log.lines] == ["line 297", "line 298", "line 299"]
+    assert log.total == 300
+    assert jobs.get_log(jobs.get("job-b")).lines[0].text == "x" * 2000
     with pytest.raises(InvalidArgumentError):
-        jobs.query(job_id="job-a", detail="log_tail", lines=10**6)
-    long_line = jobs.query(job_id="job-b", detail="log_tail").log_lines[0].text
-    assert len(long_line) == MAXIMUM_TEXT_LENGTH
+        jobs.get_log(jobs.get("job-a"), lines=0)
 
 
-def test_log_tail_can_return_every_line_whole(jobs: Jobs) -> None:
-    """``max_line_chars=None`` keeps lines whole; a big ``lines`` reads all."""
-    whole = jobs.query(job_id="job-b", detail="log_tail", max_line_chars=None).log_lines[0].text
-    assert whole == "x" * 2000
-    assert jobs.query(job_id="job-a", detail="log_tail", lines=MAXIMUM_LOG_LINES).log_lines_shown == 300
-    assert jobs.query(job_id="job-b", detail="log_tail", max_line_chars=10).log_lines[0].text == "x" * 9 + "…"
-
-
-def test_result_returns_stored_metrics(jobs: Jobs) -> None:
-    """The result answer includes the stored output numbers."""
-    answer = jobs.query(job_id="job-a", detail="result")
-    assert "stars" in answer.output_metrics
-
-
-def test_lineage_lists_the_runs_for_a_target(database: Path, jobs: Jobs) -> None:
-    """Lineage comes from the provenance records, found by target or by job."""
+def test_get_lineage_lists_the_runs_of_a_target(database: Path, jobs: Jobs) -> None:
+    """Lineage comes from the target's provenance records, newest first."""
     store = ProvenanceStore(str(database))
     for number, name in enumerate(("stacking", "astrometry")):
         store.record_activity(
             Activity(id=f"run-{number}", name=name, start_time=datetime(2026, 10, 1, number, tzinfo=UTC)),
             "M 13",
         )
-    by_target = jobs.query(target_id="M 13", detail="lineage")
-    assert by_target.runs_total == 2
-    assert [run.name for run in by_target.runs] == ["astrometry", "stacking"]
-    assert jobs.query(job_id="job-a", detail="lineage").target_id == "M 13"
-    assert jobs.query(target_id="M 13", detail="lineage", limit=1).runs_shown == 1
-
-
-@pytest.mark.parametrize(
-    ("arguments", "error", "message"),
-    [
-        ({"job_id": "missing"}, NotFoundError, "No job with id"),
-        ({"detail": "everything"}, InvalidArgumentError, "detail must be one of"),
-        ({"detail": "log_tail"}, InvalidArgumentError, "needs a job_id"),
-        ({"detail": "result"}, InvalidArgumentError, "needs a job_id"),
-        ({"detail": "lineage"}, InvalidArgumentError, "needs a target_id"),
-        ({"detail": "lineage", "job_id": "missing"}, InvalidArgumentError, "needs a target_id"),
-    ],
-)
-def test_problems_raise_an_error_category(jobs: Jobs, arguments: dict, error: type, message: str) -> None:
-    """A bad request raises the matching error category and a clear message."""
-    with pytest.raises(error, match=message):
-        jobs.query(**arguments)
+    runs = jobs.get_lineage(Target(id="M 13"))
+    assert runs.total == 2
+    assert [run.name for run in runs] == ["astrometry", "stacking"]
+    assert len(jobs.get_lineage(Target(id="M 57"))) == 0
 
 
 def test_missing_database_is_an_empty_list_and_is_not_created(tmp_path: Path) -> None:
     """With no logs database, no jobs are listed and no file appears."""
     path = tmp_path / "absent.db"
     jobs = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None)
-    assert jobs.query().jobs == []
-    with pytest.raises(NotFoundError, match="does not exist"):
-        jobs.query(job_id="job-a")
+    assert len(jobs.query()) == 0
+    assert jobs.get("job-a") is None
+    assert len(jobs.get_lineage(Target(id="M 13"))) == 0
     assert not path.exists()
 
 
-def test_queries_do_not_change_the_database(database: Path, jobs: Jobs) -> None:
-    """Every kind of query leaves the database file exactly as it was."""
+def test_reads_do_not_change_the_database(database: Path, jobs: Jobs) -> None:
+    """Every read leaves the database file exactly as it was."""
     before = database.read_bytes()
-    jobs.query()
-    jobs.query(job_id="job-a", detail="log_tail")
-    jobs.query(job_id="job-a", detail="result")
-    jobs.query(target_id="M 13", detail="lineage")
+    jobs.query(include=["metrics"])
+    job = jobs.get("job-a")
+    jobs.get_log(job)
+    jobs.get_lineage(Target(id="M 13"))
     assert database.read_bytes() == before
 
 

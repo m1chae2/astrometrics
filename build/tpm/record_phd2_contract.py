@@ -210,12 +210,12 @@ def drive(session: PHD2Session, guide_seconds: float) -> list[str]:
     time.sleep(3)
     note(f"find_star: {session.find_star()}")
     mark = session.event_count
-    session.guide(settle_pixels=1.5, settle_seconds=6, settle_timeout_seconds=120)
+    session.guide(settle_pixels=1.5, settle_s=6, settle_timeout_s=120)
     note("guide")
     note(f"first settle: {session.wait_for_event('SettleDone', mark, 400)}")
     time.sleep(guide_seconds)
     mark = session.event_count
-    session.dither(3, False, settle_pixels=1.5, settle_seconds=6, settle_timeout_seconds=60)
+    session.dither(3, False, settle_pixels=1.5, settle_s=6, settle_timeout_s=60)
     note("dither")
     note(f"dither settle: {session.wait_for_event('SettleDone', mark, 90)}")
     time.sleep(15)

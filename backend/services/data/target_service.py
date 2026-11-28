@@ -7,7 +7,6 @@ Astrometrics library.
 import logging
 import os
 import sqlite3
-from collections.abc import Callable
 from typing import Any
 
 from astrometricslib import FilterType, Target
@@ -16,12 +15,48 @@ from astrometricslib.exceptions import AstrometricsError, InvalidArgumentError, 
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_paths import resolve_allowed_image
 from backend.services.data.image_service import ImageService
+from backend.services.error_logging import log_failure
 from backend.services.infrastructure.phone_share import send_file_to_phone
+from backend.services.processing.calibration_service import CalibrationService, light_frame_counts
+from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)
 
 PICTURE_SUFFIXES = (".jpg", ".jpeg")
 """File endings of a picture that can be sent as it is."""
+
+PROCESSED_PICTURE_SUFFIXES = (".jpg", ".jpeg", ".png", ".tiff", ".tif")
+"""File endings of a finished picture of a target, which the app may link to
+a target in place of a frame. The library keeps it as the target's processed
+image (`targets.update(target, processed_image=path)`)."""
+
+
+def _check_belongs(path: str, target: Target) -> None:
+    """Refuse a file that is not one of a target's frames or stacks.
+
+    The app may read the header of a target's own files only.
+
+    Parameters
+    ----------
+    path : `str`
+        The file.
+    target : `Target`
+        The target it must belong to.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the file is not one of the target's frames or stacks.
+    """
+    belongs = any(frame.path == path for frame in target.frames) or path in (
+        target.stacking.processed_image,
+        target.stacking.stacked_image,
+        target.spectral_stacking.stacked_image,
+    )
+    if not belongs:
+        raise InvalidArgumentError(
+            f"Path {path} does not belong to target {target.id}", details={"path": path}
+        )
 
 
 def _without_frames(target: Target) -> Target:
@@ -70,6 +105,7 @@ class TargetService:
             self.astrometrics = Astrometrics(config)
         else:
             self.astrometrics = astrometrics
+        self.subjects = SubjectResolver(self.astrometrics)
         self.image_service = ImageService(target_service=self)
 
     def get_all_targets_list(self) -> list[dict[str, Any]]:
@@ -93,9 +129,7 @@ class TargetService:
             for target in targets
         ]
 
-    def reindex_library(
-        self, prune_missing: bool = False, on_progress: Callable[[int, int, str], None] | None = None
-    ) -> Any:
+    def reindex_library(self, prune_missing: bool = False) -> Any:
         """Bring every target's frame list up to date with the frames folder.
 
         The library scans each target folder under the frames folder's
@@ -103,23 +137,20 @@ class TargetService:
         saves each target as it finishes. It also reads again the header of
         each known frame whose file changed, or whose record was made before
         a header field (such as the ISO) was added. An unchanged, up-to-date
-        frame is not opened.
+        frame is not opened. Run inside a job (``running_as_job``), the job's
+        progress counts the target folders.
 
         Parameters
         ----------
         prune_missing : `bool`, optional
             Also drop records of files that no longer exist.
-        on_progress : `Callable`, optional
-            Called as ``(index, total, target_id)`` before each target.
 
         Returns
         -------
         report : `ReindexReport`
             Each target's frame count before and after.
         """
-        return self.astrometrics.targets.reindex_frames(
-            prune_missing=prune_missing, refresh_headers=True, on_progress=on_progress
-        )
+        return self.astrometrics.targets.frames.scan(prune_missing=prune_missing)
 
     def get_targets(self, target_id: str | None = None, detail: str = "full") -> Any:
         """Unified targets getter.
@@ -153,7 +184,7 @@ class TargetService:
         if target_id:
             found = self.astrometrics.targets.get(target_id)
             return _without_frames(found) if detail == "summary" and found is not None else found
-        everything = self.astrometrics.targets.query(detail="objects", limit=None).objects
+        everything = list(self.astrometrics.targets.query(include_empty=True))
         return [_without_frames(target) for target in everything] if detail == "summary" else everything
 
     def get_camera_index(self) -> dict[str, Any]:
@@ -166,7 +197,7 @@ class TargetService:
             per target the newest light-frame time and per-camera frame
             counts. See `build_target_camera_index`.
         """
-        return self.astrometrics.targets.query(detail="camera_index").camera_index
+        return self.astrometrics.targets.count_by_camera().camera_index
 
     def create_target(
         self,
@@ -195,15 +226,9 @@ class TargetService:
             raise InvalidArgumentError("Required parameter 'target_or_id' or 'target_id' is missing")
         if isinstance(val, str):
             target = self.astrometrics.targets.create(val)
-            if ra is not None:
-                target.ra = ra
-            if dec is not None:
-                target.dec = dec
-            self.astrometrics.targets.save()
-            return target
-        else:
-            self.astrometrics.targets.add(target_or_id)
-            return target_or_id
+            position = {key: value for key, value in (("ra", ra), ("dec", dec)) if value is not None}
+            return self.astrometrics.targets.update(target, **position) if position else target
+        return self.astrometrics.targets.add(target_or_id)
 
     def add_target_data(self, target_id: str, image_file: Any, camera: str | None = None) -> dict[str, Any]:
         """Link a captured frame file or a finished picture to a target.
@@ -235,10 +260,13 @@ class TargetService:
         if not target:
             target = self.astrometrics.targets.create(target_id)
 
-        report = self.astrometrics.targets.reindex_frames(target, paths=[path], camera_id=camera or "Unknown")
-        if report.processed_image is not None:
+        if path.lower().endswith(PROCESSED_PICTURE_SUFFIXES):
+            self.astrometrics.targets.update(target, processed_image=path)
             return {"status": "success"}
+        added = self.astrometrics.targets.frames.add(target, [path], camera=camera or "Unknown")
         frame = next((frame for frame in target.frames if frame.path == path), None)
+        if frame is None and len(added):
+            frame = added[0]
         return {"status": "success", "frame": frame}
 
     def send_to_phone(self, target_id: str) -> dict[str, str]:
@@ -288,7 +316,7 @@ class TargetService:
         Refreshes the target's frame entries.
         """
         try:
-            self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
+            self.astrometrics.targets.frames.scan(target, prune_missing=prune_missing)
         except (AstrometricsError, sqlite3.Error, OSError) as e:
             logger.warning("Failed to refresh images for %s: %s", target.id, e)
 
@@ -303,15 +331,11 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return None
-        for k, v in updates.items():
-            if hasattr(target, k):
-                setattr(target, k, v)
-        # A position typed in by a person is trusted: it is no longer a
-        # guess taken from a frame center.
-        if ("ra" in updates or "dec" in updates) and "position_unverified" not in updates:
-            target.position_unverified = False
-        self.astrometrics.targets.save()
-        return target
+        # The app may send fields a target does not have; they were always
+        # left alone. The library trusts a typed position (it clears
+        # ``position_unverified``).
+        known = {key: value for key, value in updates.items() if hasattr(target, key)}
+        return self.astrometrics.targets.update(target, **known)
 
     def delete_target(self, target_id: str) -> bool:
         """Purges a target record completely.
@@ -324,11 +348,11 @@ class TargetService:
             `True` if the target was deleted, `False` otherwise.
         """
         target = self.astrometrics.targets.get(target_id)
-        if target is not None:
-            archive_record_before_delete(
-                self.config.get_library_path(), "target", target.id, target.serialize()
-            )
-        return self.astrometrics.targets.delete(target_id)
+        if target is None:
+            return False
+        archive_record_before_delete(self.config.get_library_path(), "target", target.id, target.serialize())
+        self.astrometrics.targets.delete(target)
+        return True
 
     def get_frame_stats(self, target_id: str) -> dict[str, list[dict[str, Any]]]:
         """Provide aggregated exposure statistics.
@@ -344,8 +368,7 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return {"lights": []}
-        lights = self.astrometrics.processing.calibration.query(detail="target_frames", target=target).lights
-        return {"lights": lights or []}
+        return {"lights": light_frame_counts(target)}
 
     def get_file_list(self, target_id: str) -> dict:
         """Return a formatted catalog file list with all frame details.
@@ -376,8 +399,8 @@ class TargetService:
                 "path": frame.path,
                 "name": os.path.basename(frame.path),
                 "camera": frame.camera,
-                "iso": frame.iso,
-                "exposure": frame.exposure,
+                "gain": frame.gain,
+                "exposureS": frame.exposure_s,
                 "filter": filter_str,
                 "date": frame.date,
                 "focalLengthMm": None if frame.focal_length_mm is None else float(frame.focal_length_mm),
@@ -387,7 +410,7 @@ class TargetService:
             "files": files,
             "stackedImage": self._existing_stack_path(target.stacking.stacked_image),
             "stackedSpectralTarget": self._existing_stack_path(target.spectral_stacking.stacked_image),
-            "totalExposure": target.exposure_sec,
+            "totalExposure": target.exposure_s,
             "stackConfiguration": self._current_stack_configuration(target),
             "stacks": self._stack_choices(target),
         }
@@ -465,9 +488,9 @@ class TargetService:
         """Say what state each frame of a target is in, for the File Browser.
 
         The library decides each state and finds the newest stack file
-        (`quality.frame_statuses`): ``included``, ``flagged`` (in the stack,
-        but its stars are stretched: at least the warning level and kept by
-        the quarantine, with a ``reason`` giving the numbers),
+        (`targets.frames.get_statuses`): ``included``, ``flagged`` (in the
+        stack, but its stars are stretched: at least the warning level and
+        kept by the quarantine, with a ``reason`` giving the numbers),
         ``not_stacked`` (taken after the latest stack file was written, or
         the target has no stack) or ``set_aside`` (moved into an `_excluded`
         folder).
@@ -481,7 +504,7 @@ class TargetService:
         -------
         report : `dict`
             ``frames`` (each with ``path``, ``name``, ``state``, ``kind``,
-            ``reason``, ``date``, ``exposure``, ``elongation``,
+            ``reason``, ``date``, ``exposure_s``, ``elongation``,
             ``originalPath``, ``restorable`` and ``restoreNote``) and
             ``stackedAt``, the time of the latest stack file in seconds since
             1970, or `None`.
@@ -491,7 +514,9 @@ class TargetService:
         A target that is not in the library raises the library's
         `NotFoundError`.
         """
-        return self.astrometrics.quality.frame_statuses(target_id).model_dump(by_alias=True)
+        return self.astrometrics.targets.frames.get_statuses(self.subjects.target(target_id)).model_dump(
+            by_alias=True
+        )
 
     def put_back_frames(self, target_id: str, paths: list[str]) -> dict:
         """Move set-aside frames back into a target.
@@ -511,8 +536,23 @@ class TargetService:
             A frame that could not be moved is not in the list.
 
         """
-        restored = self.astrometrics.quality.put_back_set_aside_frames(target_id, paths)
-        return {"restored": restored}
+        restored = self.astrometrics.targets.frames.restore(self.subjects.target(target_id), paths)
+        return {"restored": [frame.path for frame in restored]}
+
+    def get_set_aside_frames(self, target: str) -> list[Any]:
+        """List the frames the stacker set aside for a target, with reasons.
+
+        Parameters
+        ----------
+        target : `str`
+            The target's id.
+
+        Returns
+        -------
+        frames : `list` [`SetAsideFrameRecord`]
+            One entry per frame in the target's `_excluded` folders.
+        """
+        return list(self.astrometrics.targets.frames.get_set_aside(self.subjects.target(target)))
 
     def _existing_stack_path(self, recorded_path: str | None) -> str | None:
         """Return a recorded stack path only if the file is on disk.
@@ -546,15 +586,13 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if not target:
             return []
-        answer = self.astrometrics.processing.calibration.query(
-            detail="target_match", target=target, camera_id=camera
-        )
-        return answer.groups or []
+        return CalibrationService(self.astrometrics).frame_groups(target, camera)
 
     def save_target(self, target: Target) -> None:
-        """Save target database states.
+        """Save the changes a pipeline made to a target.
 
-        Uses the library's storage controllers.
+        `targets.update` with no changes writes the target only when it
+        differs from what was read or last saved.
 
         Raises
         ------
@@ -566,9 +604,9 @@ class TargetService:
             Re-raised after logging if a file cannot be written.
         """
         try:
-            self.astrometrics.targets.save()
-        except AstrometricsError, sqlite3.Error, OSError:
-            logger.exception("Failed to save target %s", target.id)
+            self.astrometrics.targets.update(target)
+        except (AstrometricsError, sqlite3.Error, OSError) as error:
+            log_failure(logger, error, "Failed to save target %s", target.id)
             raise
 
     def read_saved_target(self, target_id: str) -> Target | None:
@@ -582,33 +620,21 @@ class TargetService:
         target : `Target` or `None`
             The stored target, or `None` if nothing is stored under that id.
         """
-        return self.astrometrics.targets.get(target_id, refresh="storage")
+        return self.astrometrics.targets.get(target_id)
 
     def save_targets(self) -> None:
-        """Commit all active targets catalog arrays.
+        """Answer the app's "save" request; there is nothing left to save.
 
-        Writes them to library storage files.
-
-        Raises
-        ------
-        AstrometricsError
-            Re-raised after logging if the library refuses the save.
-        sqlite3.Error
-            Re-raised after logging if the database write fails.
-        OSError
-            Re-raised after logging if a file cannot be written.
+        The library saves a target whenever it changes it (a create, an
+        update, a frame scan, a pipeline run), so no change waits for this.
         """
-        try:
-            self.astrometrics.targets.save()
-        except AstrometricsError, sqlite3.Error, OSError:
-            logger.exception("Failed to save targets")
-            raise
+        logger.debug("Targets are saved as they change; nothing to save.")
 
     def get_frame_header(self, frame_path: str, target_id: str | None = None) -> dict[str, Any]:
         """Read a frame's FITS header and the turn that shows it as the stack.
 
-        The header is the library's (`targets.read_frame_header` with
-        ``as_cards``).
+        The header is the library's (`targets.frames.get_header`), written
+        here as text cards.
 
         Parameters
         ----------
@@ -626,7 +652,8 @@ class TargetService:
             ``key``, ``value`` and ``comment``), and ``displayTurn``, the
             quarter turn (0, 90, 180 or 270 degrees, clockwise) the viewer
             shows the frame with so it looks the same way round as the
-            target's stack (the library decides it, `targets.display_turn`;
+            target's stack (the library decides it,
+            `targets.frames.get_rotation`;
             0 without a target). Empty entries and no turn when the file is
             no longer on disk: a stack that was moved or deleted is a normal
             state for a target record, not a server error (a server error
@@ -644,12 +671,18 @@ class TargetService:
             frame_path = resolve_allowed_image(frame_path, self.config)
         else:
             target = self.astrometrics.targets.get(target_id, required=True)
+            _check_belongs(frame_path, target)
         try:
-            entries = self.astrometrics.targets.read_frame_header(frame_path, target=target, as_cards=True)
+            header = self.astrometrics.targets.frames.get_header(frame_path)
         except NotFoundError:
             logger.debug("Frame file %s is missing, returning an empty header", frame_path)
             return {"entries": [], "displayTurn": 0}
-        turn = 0 if target is None else self.astrometrics.targets.display_turn(frame_path, target)
+        entries = [
+            {"key": key, "value": str(header[key]), "comment": str(header.comments[key] or "")}
+            for key in header.keys()
+            if key
+        ]
+        turn = 0 if target is None else self.astrometrics.targets.frames.get_rotation(target, frame_path)
         return {"entries": entries, "displayTurn": turn}
 
     def refresh_target_images_by_id(self, target_id: str, prune_missing: bool = False) -> None:
@@ -663,7 +696,7 @@ class TargetService:
         target = self.astrometrics.targets.get(target_id)
         if target:
             old_count = len(target.frames)
-            self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
+            self.astrometrics.targets.frames.scan(target, prune_missing=prune_missing)
             new_count = len(target.frames)
             logger.info(
                 "Reindex complete for target '%s'. Frames before: %s, after: %s",

@@ -212,7 +212,7 @@ def _targets_within_radius(astrometrics: Astrometrics, center: SkyCoord, radius_
             positions = cached[1]
 
     if positions is None:
-        loaded_targets = astrometrics.targets.query(detail="objects", limit=None).objects
+        loaded_targets = astrometrics.targets.query(include_empty=True).items
         positions = _parse_target_positions(loaded_targets)
         if version is not None:
             with _target_position_cache_lock:
@@ -292,12 +292,7 @@ def astrometrics_catalog(
     # Targets above.
     # Only the stars near the search circle are read from the library, using
     # its sky-position index, not every star it holds.
-    stars = (
-        sky._astrometrics.stars.query(
-            ra_deg=ra_deg, dec_deg=dec_deg, radius_deg=radius_deg, detail="objects", limit=None
-        ).objects
-        or []
-    )
+    stars = list(sky._astrometrics.stars.query(ra_deg=ra_deg, dec_deg=dec_deg, radius_deg=radius_deg))
     candidate_stars: list[StellarObject] = []
     candidate_star_ra: list[Any] = []
     candidate_star_dec: list[Any] = []
@@ -437,13 +432,13 @@ def list_catalog_driver_metadata(sky: SkyEngine) -> list[dict[str, Any]]:
     -------
     List[Dict[str, Any]]
         One entry per driver with keys: driver_name, display_name,
-        maximum_query_radius_degrees.
+        maximum_query_radius_deg.
     """
     return [
         {
             "driver_name": driver.driver_name,
             "display_name": driver.display_name,
-            "maximum_query_radius_degrees": driver.maximum_query_radius_degrees,
+            "maximum_query_radius_deg": driver.maximum_query_radius_deg,
         }
         for driver in sky._catalog_driver_registry.values()
     ]
@@ -473,7 +468,7 @@ def query_online_catalogs(
         Center Declination in degrees (ICRS).
     radius_degrees : float
         Search radius in degrees. Clamped per-driver to each driver's
-        maximum_query_radius_degrees before dispatch.
+        maximum_query_radius_deg before dispatch.
     enabled_driver_names : List[str]
         Registry keys of drivers to query (e.g. ['simbad', 'gaia']).
     magnitude_limit : float, optional
@@ -508,7 +503,7 @@ def query_online_catalogs(
     failed_driver_names: set[str] = set()
 
     def _query_driver(driver: CatalogDriver) -> tuple[list[tuple[str, StellarObject]], bool, bool]:
-        effective_radius = min(radius_degrees, driver.maximum_query_radius_degrees)
+        effective_radius = min(radius_degrees, driver.maximum_query_radius_deg)
         try:
             objects, truncated = driver.query_region_with_status(
                 ra_degrees, dec_degrees, effective_radius, magnitude_limit=magnitude_limit

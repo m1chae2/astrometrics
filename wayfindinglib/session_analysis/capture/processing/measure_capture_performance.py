@@ -148,12 +148,12 @@ def measure_clipping(
     """
     groups: dict[tuple[str, bool, float], list[CaptureFrame]] = defaultdict(list)
     for frame in frames:
-        key = (frame.target_id, frame.is_spectral, round(frame.exposure_seconds, _EXPOSURE_DECIMALS))
+        key = (frame.target_id, frame.is_spectral, round(frame.exposure_s, _EXPOSURE_DECIMALS))
         groups[key].append(frame)
 
     results = []
     for key, group in sorted(groups.items()):
-        target_id, is_spectral, exposure_seconds = key
+        target_id, is_spectral, exposure_s = key
         measured = [frame for frame in group if frame.saturated_pixel_fraction is not None]
         counts = (
             [
@@ -171,7 +171,7 @@ def measure_clipping(
             ExposureClipping(
                 target_id=target_id,
                 is_spectral=is_spectral,
-                exposure_seconds=exposure_seconds,
+                exposure_s=exposure_s,
                 frames=len(counts),
                 clipped_frames=clipped_frames,
                 clipped_fraction=clipped_fraction,
@@ -207,15 +207,15 @@ def measure_star_quality(
         The medians and the limits they are judged against. The medians are
         `None` when fewer than `MINIMUM_FRAMES_PER_NIGHT` frames qualify.
     """
-    minimum_exposure_seconds = _limit(envelope, "minimum_star_measurement_exposure", limits_equipment_match)
+    minimum_exposure_s = _limit(envelope, "minimum_star_measurement_exposure", limits_equipment_match)
     quality = StarQuality(
-        minimum_exposure_seconds=minimum_exposure_seconds,
+        minimum_exposure_s=minimum_exposure_s,
         star_width_limit_arcsec=_limit(envelope, "night_star_width_high_limit", limits_equipment_match),
         roundness_limit=_limit(envelope, "night_star_roundness_low_limit", limits_equipment_match),
     )
-    if minimum_exposure_seconds is None:
+    if minimum_exposure_s is None:
         return quality
-    usable = usable_star_frames(frames, minimum_exposure_seconds)
+    usable = usable_star_frames(frames, minimum_exposure_s)
     quality.frames = len(usable)
     if len(usable) < resolve_parameter(MINIMUM_FRAMES_PER_NIGHT).value:
         return quality
@@ -249,13 +249,13 @@ def measure_efficiency(frames: Sequence[CaptureFrame]) -> CaptureEfficiency:
     """
     if not frames:
         return CaptureEfficiency()
-    light_seconds = sum(frame.exposure_seconds for frame in frames)
-    span = max(frame.timestamp + frame.exposure_seconds for frame in frames) - min(
+    light_seconds = sum(frame.exposure_s for frame in frames)
+    span = max(frame.timestamp + frame.exposure_s for frame in frames) - min(
         frame.timestamp for frame in frames
     )
     return CaptureEfficiency(
-        light_exposure_seconds=light_seconds,
-        span_seconds=span,
+        light_exposure_s=light_seconds,
+        span_s=span,
         duty_cycle=light_seconds / span if len(frames) > 1 and span > 0 else None,
     )
 

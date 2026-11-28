@@ -26,7 +26,7 @@ def frames(exposure: str, levels: list[float]) -> list[SimpleNamespace]:
     """
     return [
         SimpleNamespace(
-            exposure=exposure,
+            exposure_s=exposure,
             measurements=SimpleNamespace(background_level=level),
             name=f"{exposure}_{index}",
         )
@@ -66,7 +66,7 @@ def test_a_cloud_inside_one_exposure_length_is_still_found() -> None:
 
     assert {frame.name for frame in excluded} == {"300.0_17", "300.0_18", "300.0_19"}
     assert len(kept) == 31
-    assert [split["exposure_seconds"] for split in splits] == [300.0]
+    assert [split["exposure_s"] for split in splits] == [300.0]
 
 
 def test_the_kept_frames_keep_their_original_order() -> None:

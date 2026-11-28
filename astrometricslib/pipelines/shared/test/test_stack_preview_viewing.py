@@ -1,11 +1,10 @@
 """Tests for showing a stack's saved JPEG in place of a drawn PNG.
 
-A stretched view of a stack uses the picture that stacking saved beside it
-when that picture is current. The tests use tiny stand-in files, so no Siril
-is run.
+A stretched view of a stack (`render_image`) uses the picture that the
+enhancement stage saved beside it when that picture is current. The tests use
+tiny stand-in files, so no Siril is run.
 """
 
-import base64
 import os
 from io import BytesIO
 from pathlib import Path
@@ -15,11 +14,11 @@ import pytest
 from astropy.io import fits
 from PIL import Image
 
-from astrometricslib.pipelines.shared.image_conversions import render_data_url
+from astrometricslib.pipelines.shared.image_conversions import render_image
 from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
 
-_JPEG_PREFIX = "data:image/jpeg;base64,"
-_PNG_PREFIX = "data:image/png;base64,"
+_JPEG = "image/jpeg"
+_PNG = "image/png"
 
 
 @pytest.fixture
@@ -52,67 +51,66 @@ def _save_preview(stack: Path, size: tuple[int, int], age_seconds: float) -> Pat
     return preview
 
 
-def _decoded_size(image_data: str) -> tuple[int, int]:
-    """Read the pixel size of a picture sent as a data URL.
+def _decoded_size(picture_bytes: bytes) -> tuple[int, int]:
+    """Read the pixel size of a picture file.
 
     Returns
     -------
     size : `tuple` [`int`, `int`]
         Width and height in pixels.
     """
-    payload = image_data.split(",", 1)[1]
-    with Image.open(BytesIO(base64.b64decode(payload))) as picture:
+    with Image.open(BytesIO(picture_bytes)) as picture:
         return picture.size
 
 
 def test_a_stretched_view_uses_the_saved_jpeg(stack: Path) -> None:
-    """Verify the viewer gets the JPEG and its 8-bit range."""
+    """Verify the picture is the JPEG, with its 8-bit range and size."""
     _save_preview(stack, (40, 30), age_seconds=5)
 
-    result = render_data_url(str(stack), stretch=True)
+    result = render_image(str(stack), stretch=True)
 
     assert result is not None
-    assert result.image_data.startswith(_JPEG_PREFIX)
-    assert (result.min, result.max) == (0.0, 255.0)
-    assert result.headers
+    assert result.media_type == _JPEG
+    assert (result.black, result.white) == (0.0, 255.0)
+    assert (result.width_px, result.height_px) == (40, 30)
 
 
 def test_a_linear_view_ignores_the_jpeg(stack: Path) -> None:
     """Verify an unstretched view is still drawn from the FITS data."""
     _save_preview(stack, (40, 30), age_seconds=5)
 
-    result = render_data_url(str(stack), stretch=False)
+    result = render_image(str(stack), stretch=False)
 
     assert result is not None
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
 
 
 def test_a_stack_without_a_jpeg_is_drawn_as_before(stack: Path) -> None:
     """Verify a missing preview falls back to the PNG."""
-    result = render_data_url(str(stack), stretch=True)
+    result = render_image(str(stack), stretch=True)
 
     assert result is not None
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
 
 
 def test_a_jpeg_older_than_the_stack_is_not_shown(stack: Path) -> None:
     """Verify a picture of an older stack is never shown."""
     _save_preview(stack, (40, 30), age_seconds=-60)
 
-    result = render_data_url(str(stack), stretch=True)
+    result = render_image(str(stack), stretch=True)
 
     assert result is not None
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
 
 
 def test_a_large_jpeg_is_shrunk_to_the_size_limit(stack: Path) -> None:
     """Verify the picture fits the requested size, as the PNG does."""
     _save_preview(stack, (400, 300), age_seconds=5)
 
-    result = render_data_url(str(stack), max_dimensions=100, stretch=True)
+    result = render_image(str(stack), max_dimensions=100, stretch=True)
 
     assert result is not None
-    assert _decoded_size(result.image_data) == (100, 75)
+    assert _decoded_size(result.picture) == (100, 75)
 
 
 def test_an_unreadable_jpeg_falls_back_to_the_png(stack: Path) -> None:
@@ -121,10 +119,10 @@ def test_an_unreadable_jpeg_falls_back_to_the_png(stack: Path) -> None:
     preview.write_bytes(b"not a jpeg")
     os.utime(preview, (stack.stat().st_mtime + 5, stack.stat().st_mtime + 5))
 
-    result = render_data_url(str(stack), stretch=True)
+    result = render_image(str(stack), stretch=True)
 
     assert result is not None
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
 
 
 def test_a_picture_rewritten_at_the_same_path_is_drawn_again(tmp_path: Path) -> None:
@@ -134,21 +132,21 @@ def test_a_picture_rewritten_at_the_same_path_is_drawn_again(tmp_path: Path) -> 
     path = tmp_path / "M_13_L_Stacked_processed.fits"
     ramp = np.tile(np.linspace(0.0, 1.0, 40, dtype=np.float32), (30, 1))
     fits.writeto(path, ramp)
-    first = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False)
+    first = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False).png_bytes
 
     fits.writeto(path, ramp[:, ::-1].copy(), overwrite=True)
     os.utime(path, ns=(1, 1))
-    second = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False)
+    second = ImageConverter.convert_fits_to_png_with_stats(str(path), stretch=False).png_bytes
 
-    assert first[0] != second[0]
+    assert first != second
 
 
 def test_a_frame_with_no_saved_jpeg_draws_quietly(stack: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Verify a missing preview picture is a quiet status, not a warning."""
     with caplog.at_level("WARNING"):
-        result = render_data_url(str(stack), stretch=True)
+        result = render_image(str(stack), stretch=True)
 
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
     assert not [record for record in caplog.records if "preview picture" in record.getMessage()]
 
 
@@ -158,9 +156,9 @@ def test_a_processed_fits_never_looks_for_a_jpeg(tmp_path: Path, caplog: pytest.
     fits.writeto(processed, np.random.default_rng(2).random((30, 40)).astype(np.float32))
 
     with caplog.at_level("WARNING"):
-        result = render_data_url(str(processed), stretch=True)
+        result = render_image(str(processed), stretch=True)
 
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
     assert not caplog.records
 
 
@@ -171,10 +169,10 @@ def test_a_frame_set_aside_is_drawn_from_its_quarantine_folder(tmp_path: Path) -
     moved = excluded / "M_13_Light_001.fits"
     fits.writeto(moved, np.random.default_rng(3).random((30, 40)).astype(np.float32))
 
-    result = render_data_url(str(tmp_path / "M_13_Light_001.fits"), stretch=True)
+    result = render_image(str(tmp_path / "M_13_Light_001.fits"), stretch=True)
 
     assert result.path == str(moved)
-    assert result.image_data.startswith(_PNG_PREFIX)
+    assert result.media_type == _PNG
 
 
 def test_an_unreadable_preview_warns_once_per_path(stack: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -183,7 +181,7 @@ def test_an_unreadable_preview_warns_once_per_path(stack: Path, caplog: pytest.L
     preview.write_bytes(b"not a jpeg")
 
     with caplog.at_level("WARNING"):
-        render_data_url(str(stack), stretch=True)
-        render_data_url(str(stack), stretch=True)
+        render_image(str(stack), stretch=True)
+        render_image(str(stack), stretch=True)
 
     assert len([record for record in caplog.records if "preview picture" in record.getMessage()]) == 1

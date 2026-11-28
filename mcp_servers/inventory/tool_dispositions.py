@@ -15,6 +15,11 @@ offer every public library method as a tool, so a new public method has no
 row until someone adds one. Until then the inventory marks it
 ``undecided``, no client gets it, and a test fails. Adding a library
 method is therefore also a choice about the AI tool list.
+
+When a public method is renamed, its tool is renamed too. ``TOOL_RENAMES``
+maps the old tool name to the new one, so the reviewed decision recorded
+under the old name holds for the new name (`decision_for`) until someone
+moves the row.
 """
 
 import re
@@ -57,23 +62,19 @@ DEVICE_COMMAND_NOTE = (
 """Note for a tool that commands a device."""
 
 INTERIM_BLOCKS = {
-    "observatory_mount_status": (
+    "observatory_mount_get_status": (
         "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. "
         "Blocked until it uses the connect-only path. app_status reports the mount through the backend."
     ),
-    "observatory_safety_status": (
+    "observatory_safety_get_status": (
         "The assessment section connects through connect_to_telescope, which sends CONNECTION=ON to every "
         "INDI device that is off, and enclosure_state returns unknown in the MCP process. Blocked until "
         "those sections use the connect-only path."
     ),
-    "observatory_imaging_status": (
+    "observatory_imaging_get_status": (
         "The filters and focuser sections return [] and 0 because the MCP process has no hardware "
         "connection. Use app_status with the telescope section (focuser position, filter, pier side, "
         "tracking)."
-    ),
-    "visualization_get_last_captured_image": (
-        "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use "
-        "visualization_render_fits with a path, which returns a real image."
     ),
 }
 """Read-only tools that stay hidden from the AI until a known hazard is fixed.
@@ -127,28 +128,36 @@ DECISIONS = {
         "drop",
         "Opens the INDI session. Not a device command, but the status tools already open it on demand.",
     ),
-    "observatory_equipment_disconnect": ToolDecision(
-        "drop",
-        "Closes the INDI session. Not a device command, but it would cut off monitoring and has "
-        "no monitoring use.",
-    ),
     # ---- Withheld: the user decided an AI may not change configuration ----
-    "observatory_equipment_set_active_camera": ToolDecision(
-        "withhold", "Writes the active camera into the configuration file."
+    "observatory_equipment_set_active": ToolDecision(
+        "withhold", "Writes the active telescope and camera into the configuration file."
     ),
-    "observatory_equipment_set_active_telescope": ToolDecision(
-        "withhold", "Writes the active telescope into the configuration file."
+    "observatory_equipment_set_pointing_limits": ToolDecision(
+        "withhold", "Writes the telescope's safety limits into the configuration file."
+    ),
+    "observatory_configuration_create": ToolDecision("withhold", "Writes the database. The AI is read-only."),
+    "observatory_configuration_update": ToolDecision("withhold", "Writes the database. The AI is read-only."),
+    "observatory_configuration_scan": ToolDecision(
+        "withhold", "Writes the database and the frame records. The AI is read-only."
     ),
     "observatory_safety_apply_promotion_decision": ToolDecision(
         "withhold", "Applies an operator's decision. Needs the operator."
     ),
     # ---- Fix first ----
-    "target_save": ToolDecision("withhold", "Writes the database. The AI is read-only."),
     "star_get_spectrum": ToolDecision(
         "withhold", "A script convenience. The AI reads a star's spectrum through star_get and star_query."
     ),
-    "star_analyze_periodicity": ToolDecision(
-        "fix", "Writes the result into the live star catalog. Needs a save=false option.", "change-data"
+    "star_measure_periodicity": ToolDecision(
+        "keep",
+        "Since #206 the period and transit searches of star_record_periodicity without the save. Runs the "
+        "searches on one star's light curve and writes nothing.",
+        tool_class="compute",
+    ),
+    "star_record_periodicity": ToolDecision(
+        "withhold",
+        "Writes the period and transit results into the live star catalog. The AI is read-only, so it runs "
+        "the same searches with star_measure_periodicity instead.",
+        "change-data",
     ),
     "processing_plate_solve": ToolDecision(
         "keep",
@@ -161,6 +170,7 @@ DECISIONS = {
         "Built 2026-11-22 for the Image Processing screen's bright-object menu. It asks SIMBAD and saves "
         "the list beside the stack. The AI reads it, and sets the choice, through processing_enhance, "
         "which the astrometrics-backend server serves; this library tool stays withheld.",
+        tool_class="observe",
     ),
     "processing_find_stack_configuration": ToolDecision(
         "keep",
@@ -168,30 +178,10 @@ DECISIONS = {
         "none or several match and lists the target's configurations. Reads the target record only.",
         tool_class="observe",
     ),
-    "processing_set_preview_bright_object": ToolDecision(
-        "withhold",
-        "Built 2026-11-22 for the same menu. It saves which object the preview protects on the target. "
-        "The AI reaches it through processing_enhance, which the astrometrics-backend server serves; "
-        "this library tool stays withheld.",
-    ),
     # ---- Drop ----
-    "processing_acquire_job_slot": ToolDecision("drop", "Internal concurrency lock exposed by reflection."),
-    "star_dataset_version": ToolDecision(
-        "drop",
-        "A change counter for the backend's answer cache. It tells an AI client nothing about the sky.",
-    ),
-    "processing_stop_stacking_programs": ToolDecision(
-        "drop", "Stops every Siril the library started. The backend calls it when it stops."
-    ),
-    "processing_open_in_siril": ToolDecision(
-        "drop", "Opens a window on the person's screen. An AI client cannot see it. The app's button uses it."
-    ),
     "planning_get_constellation_lines": ToolDecision(
         "drop",
-        "Draws the Planetarium. Returns an empty list because of a wrong file path, and is 89 KB when fixed.",
-    ),
-    "execution_build_divergence_record": ToolDecision(
-        "drop", "Builds a record and writes nothing. The only arguments MCP can send are useless.", "compute"
+        "Draws the Planetarium: about 750 line segments (89 KB) of fixed stick figures, no use to an AI.",
     ),
     "execution_advance_session": ToolDecision(
         "drop", "Needs callables that MCP cannot send. No MCP use today."
@@ -223,76 +213,64 @@ DECISIONS = {
         "replaces quality_check_spectral_frames. Since 2026-11-26 it takes a target only: a folder goes "
         "to quality_measure_folder, and the set-aside preview to processing_predict_stack.",
     ),
-    "quality_measure_folder": ToolDecision(
-        "keep",
-        "Built 2026-11-07. Measures a folder of FITS files with the stored frame metric set (star width, "
-        "sky rate, background, saturation) and returns the numbers. Nothing is stored or moved. About "
-        "12 seconds a frame, so the limit defaults to 20. It is the one tool for a folder of frames "
-        "(quality_measure_frames takes a target only); it reads any folder path it is given and only "
-        "reads.",
-    ),
     "review_get_live_session_status": ToolDecision(
         "keep",
-        "Served 2026-10-03. refresh=true copies the newest Ekos and KStars logs into a local folder, "
-        "which is reading from the telescope computer and adds files only. A folder argument is now "
-        "checked against the allowed roots. Reports pier side, camera temperature, exposure counts and "
+        "Served 2026-10-03. force=true copies the newest Ekos and KStars logs into the wayfinding "
+        "library's log folder, which is reading from the telescope computer and adds files only. Since "
+        "#206 it is review_nights_get_live_status and takes no folder. Reports pier side, camera "
+        "temperature, exposure counts and "
         "dither settings; the guide algorithm is not in the logs and the reply says so.",
         "ingest",
     ),
     "visualization_render_fits": ToolDecision(
         "keep",
-        "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and the "
-        "optional detections and named-stars overlays. kind='figure' (a Matplotlib figure for scripts "
-        "and notebooks) and the pixels and figsize arguments are not offered to a client. Saves nothing.",
+        "Built 2026-10-03. Returns a real image of a frame, with a stretch, an optional zoom and a "
+        "manual brightness range; 1200 pixels on its longest side unless asked. Since #206 it is "
+        "visualization_render; the overlays moved to visualization_plot_image. Saves nothing.",
     ),
     "visualization_stack_sky_picture_files": ToolDecision(
         "drop",
-        "Built 2026-11-26 for the Planetarium's Images layer: names the picture and stretched stack that "
-        "place a target's picture on the sky. Of no use to an AI client.",
+        "Built 2026-11-26 for the Planetarium's Images layer: places a target's picture on the sky as a "
+        "grid of sky positions. Since #206 it is visualization_get_sky_picture. Of no use to an AI client.",
     ),
-    "visualization_place_stack_picture_on_sky": ToolDecision(
+    "visualization_render_newest": ToolDecision(
+        "keep",
+        "Since #206 the newest FITS file in the frames folder, drawn as a real image (the old "
+        "visualization_get_last_captured_image sent base64 text the reply limit cut). Saves nothing.",
+    ),
+    "visualization_plot_image": ToolDecision(
+        "keep",
+        "Since #206 the figure kind of visualization_render_fits: one frame or stack at full resolution "
+        "with the optional detections and named-stars overlays; the registry sends it as a PNG image. "
+        "Saves nothing.",
+    ),
+    "review_alignment_get_polar_alignment": ToolDecision(
         "drop",
-        "Built 2026-11-26 for the Planetarium's Images layer: a grid of sky positions for drawing a "
-        "picture on a sky chart. Of no use to an AI client.",
+        "Since #206 the home of observatory_mount_get_polar_alignment. The backend shows it; an AI reads "
+        "the stored runs through review_alignment_query.",
     ),
-    "visualization_get_last_captured_image": ToolDecision(
-        "fix",
-        "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it "
-        "into visualization_render_fits with a latest option.",
-    ),
-    "target_get_frame": ToolDecision(
-        "keep", "Returns the path of one frame, found by ISO, exposure and index."
-    ),
-    "observatory_mount_poll_external_alignment": ToolDecision(
+    "review_alignment_record_external": ToolDecision(
         "drop",
-        "The backend calls it to store the syncs other programs queued. It writes records, and the AI "
-        "is read-only.",
+        "Since #206 the home of observatory_mount_poll_external_alignment. The backend calls it to store "
+        "the syncs other programs queued. It writes records, and the AI is read-only.",
         "ingest",
     ),
-    "observatory_mount_get_polar_alignment": ToolDecision(
-        "drop",
-        'The backend shows it. An AI reads the stored runs through review_query(kind="alignment").',
-    ),
-    "observatory_equipment_apply_configuration": ToolDecision(
-        "drop",
-        "The backend calls it after the settings page saves. It points the INDI session at a host, so "
-        "it is not offered to the AI.",
-        "change-data",
-    ),
-    "review_query_alignment_sessions": ToolDecision(
-        "drop",
-        "The backend calls it with plate-solve attempts it has already read. The AI reads nights through "
-        'review_query(kind="alignment"), which groups them already.',
-    ),
     "review_query_alignment_records": ToolDecision(
-        "drop",
-        "The backend reads the stored attempts for its alignment views and passes in library targets. "
-        'The AI reads nights through review_query(kind="alignment").',
+        "keep",
+        "Since #206 review_alignment_query: the stored plate-solve attempts of a night or a time range, "
+        "grouped by target, with the latest polar alignment run. Reads only.",
+    ),
+    "review_alignment_query_nights": ToolDecision(
+        "keep", "Since #206: one alignment summary per recorded night, newest first. Reads only."
+    ),
+    "review_alignment_get_pointing_model": ToolDecision(
+        "keep",
+        "Since #206 (was review_query kind pointing_model): fits one night's pointing model. Saves nothing.",
     ),
     "review_frame_guiding": ToolDecision(
         "keep",
         "Built 2026-10-03. Cuts the stored guide-log samples to each light frame's exposure window. "
-        "Reads only.",
+        "Since #206 it is review_targets_get_frame_guiding and takes a frame filter. Reads only.",
     ),
     "app_status": ToolDecision("keep", "Built 2026-10-03. Reads health, connections, resources and jobs."),
     "app_controls": ToolDecision(
@@ -303,17 +281,25 @@ DECISIONS = {
         "Built 2026-10-04. Counts a target's frames at the telescope, on the drive and in the library, and "
         "names the frames that are in one place but not the next. Reads only.",
     ),
-    "processing_analyze": ToolDecision(
-        "keep",
-        "Built 2026-11-22 from gap report #5. Starts the Analyze Target button's own analysis job through "
-        "analysis:analyze_image, so it shows in the job list and the app's Cancel reaches it. With no "
-        "stages it sends photometry and spectroscopy when the target has both stacks, or the one stack's "
-        "stage, as the button does; with stages it sends the stage's stack (spectral_variation gets the "
-        "raw spectrum frames). Writes the analysis results; raw frames are never written. Since 2026-11-25 "
-        "camera_id and focal_length_mm analyze the target's stack of that camera and optic "
-        "(stacks_by_configuration) instead of the main stack; an unknown or ambiguous one is refused with "
-        "the target's configurations, and another configuration gets only astrometry and photometry.",
-        "process",
+    **dict.fromkeys(
+        (
+            "processing_astrometry_run",
+            "processing_photometry_run",
+            "processing_spectroscopy_run",
+            "processing_spectroscopy_record_variation",
+        ),
+        ToolDecision(
+            "keep",
+            "Since #206 one tool per analysis pipeline, replacing processing_analyze (built 2026-11-22 from "
+            "gap report #5) and its stages argument. Each starts the Analyze Target button's own analysis "
+            "job through analysis:analyze_image with its one stage, so it shows in the job list and the "
+            "app's Cancel reaches it; the library runs astrometry (or spectroscopy, before the spectral "
+            "variation) first when its result is missing or out of date. Writes the analysis results; raw "
+            "frames are never written. camera_id and focal_length_mm analyze the target's stack of that "
+            "camera and optic instead of the main stack; an unknown or ambiguous one is refused with the "
+            "target's configurations, and another configuration gets only astrometry and photometry.",
+            "process",
+        ),
     ),
     "processing_cancel": ToolDecision(
         "keep",
@@ -355,13 +341,35 @@ DECISIONS = {
         "sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the "
         "target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to "
         "stack. Since 2026-11-21 the astrometrics-backend server serves it through processing:stack, the "
-        "Stack button's own job, so it shows in the job list and the app's Cancel reaches it.",
+        "Stack button's own job, so it shows in the job list and the app's Cancel reaches it. Since #206 "
+        "it is processing_stacking_run, and the job stacks, then makes the picture "
+        "(processing.enhancement.run).",
         "process",
     ),
     "target_imaged_field_centers": ToolDecision(
         "keep",
         "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this "
         "library), so it runs as a background job.",
+    ),
+    "target_resolve": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). Turns a name into a sky position: the library's targets, then its "
+        "stars, then SIMBAD. Reads only; a name the library does not know uses the network.",
+        tool_class="observe",
+    ),
+    "target_count_by_camera": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). The light frames each camera took, and each target's frames per "
+        "configured camera. Reads only.",
+        tool_class="observe",
+    ),
+    "target_count_by_night": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). How many targets have frames from each observing night. Reads only.",
+        tool_class="observe",
+    ),
+    "target_frames_get_newest": ToolDecision(
+        "keep", "Built 2026-11-27 (#206). A target's newest light frame. Reads only.", tool_class="observe"
     ),
     "target_query": ToolDecision(
         "keep",
@@ -374,13 +382,11 @@ DECISIONS = {
         "first, cut at a limit with the total reported. Replaces planning_find_sources, "
         "planning_get_sources, planning_get_library_star_summaries and planning_get_online_catalog_sources.",
     ),
-    "planning_lookup_coordinates": ToolDecision(
-        "keep", "Built 2026-10-04. The position of a named object, from the library or SIMBAD. Reads only."
-    ),
     "processing_get_stack_identification": ToolDecision(
         "keep",
         "Built 2026-11-20. Reads a stack's saved identification: the named stars and the plate solution "
         "it came from. Writes nothing.",
+        tool_class="observe",
     ),
     "processing_identify_stack": ToolDecision(
         "keep",
@@ -395,20 +401,61 @@ DECISIONS = {
         "keep",
         "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected "
         "fraction, star width against the inputs and each exposure group. Reads the saved summary.",
+        tool_class="observe",
     ),
     "star_query": ToolDecision(
-        "keep", "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
+        "keep",
+        "Built 2026-10-03. Library star lookup. Since #206 it returns a page of star records without their "
+        "light curves; the tool's reply is cut to 50 stars and the tool asks for at most 200.",
     ),
     "star_get": ToolDecision("keep", "Reads one star's full record by id. Writes nothing."),
+    "visualization_get_star_overlay": ToolDecision(
+        "keep",
+        "Since #206 the overlay that star_query's detail='overlay' gave. Places a target's catalog stars "
+        "in pixels on its stack or a named image and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_count_by_class": ToolDecision(
+        "keep",
+        "Since #206 the class counts that star_query's detail='class_counts' gave. Counts the stars of each "
+        "spectral class from the indexed columns and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_count_by_target": ToolDecision(
+        "keep",
+        "Since #206 the per-target counts that star_query's detail='target_counts' gave. Counts each "
+        "target's stars from the indexed columns and writes nothing.",
+        tool_class="observe",
+    ),
+    "star_get_statistics": ToolDecision(
+        "keep",
+        "Since #206 the library statistics that star_query's detail='stats' gave. Counts the star records "
+        "and writes nothing.",
+        tool_class="observe",
+    ),
     "calibration_query": ToolDecision(
         "keep",
-        "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
-        "reloads the index into memory and writes nothing.",
+        "Built 2026-10-05. Calibration counts per kind and setting, narrowed by a capture setting (also "
+        "for a plan with no frames yet). Writes nothing.",
+    ),
+    "calibration_match": ToolDecision(
+        "keep",
+        "Built 2026-11-27 from calibration_query's target match (#206): groups a target's light frames by "
+        "setting with the darks, biases and flats the stacker would use. Writes nothing.",
+        tool_class="observe",
+    ),
+    "calibration_measure_sensor_noise": ToolDecision(
+        "keep",
+        "Since 2026-11-27 (#206) it only reads: it measures a setting's gain and read noise from the "
+        "library's flats and biases and writes nothing, like the other measure_ tools. "
+        "calibration_record_sensor_noise is the writer and stays withheld.",
+        tool_class="compute",
     ),
     "quality_measure_star_profile": ToolDecision(
         "keep",
         "Built 2026-11-16. Measures one star at a pixel position of a FITS file: profile, Moffat and "
         "Gaussian fits, a cut and the ring around it. Reads the file only; nothing is stored.",
+        tool_class="compute",
     ),
     "quality_blocks_measure_sky": ToolDecision(
         "keep",
@@ -455,10 +502,6 @@ DECISIONS = {
         "records only; nothing is stored.",
         tool_class="compute",
     ),
-    "quality_blocks_solved_stars": ToolDecision(
-        "withhold",
-        "A Command Console building block, uncapped. The AI reads a target's named stars through star_query.",
-    ),
     "quality_blocks_robust_sigma": ToolDecision(
         "drop",
         "A Command Console building block: a spread of numbers the caller already has. Of no use to an AI "
@@ -472,6 +515,7 @@ DECISIONS = {
         "keep",
         "Built 2026-11-16. Lists the star finder's detections in a FITS file. Reads the file only; "
         "nothing is stored.",
+        tool_class="compute",
     ),
     "quality_choose_blink_pair": ToolDecision(
         "keep",
@@ -480,17 +524,6 @@ DECISIONS = {
         "stored.",
         tool_class="compute",
     ),
-    "quality_match_frame_positions": ToolDecision(
-        "keep",
-        "Built 2026-11-20. Says where positions of one frame lie in another frame of the same field, "
-        "allowing for drift and a meridian flip. Reads the files only; nothing is stored.",
-        tool_class="compute",
-    ),
-    "quality_measure_tuned_parameters": ToolDecision(
-        "withhold",
-        "Built 2026-11-16 (#175). Works out the image-processing tuned values; with save=True it backs "
-        "up and writes the configuration file. The AI does not change settings.",
-    ),
     "quality_measure_stack": ToolDecision(
         "keep",
         "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
@@ -498,8 +531,26 @@ DECISIONS = {
     ),
     "visualization_plot": ToolDecision(
         "keep",
-        "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. "
-        "Saves nothing.",
+        "Built 2026-10-05. Draws the combined chart of a target; the registry sends it as a PNG image. "
+        "Since #206 it is visualization_plot_target, and each other chart has its own tool. Saves nothing.",
+    ),
+    "visualization_plot_star": ToolDecision(
+        "keep", "Since #206 the star chart of visualization_plot: light curve over spectrum. Saves nothing."
+    ),
+    "visualization_plot_astrometry": ToolDecision(
+        "keep", "Since #206 the astrometry chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_photometry": ToolDecision(
+        "keep", "Since #206 the photometry chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_spectroscopy": ToolDecision(
+        "keep", "Since #206 the spectroscopy chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_focus": ToolDecision(
+        "keep", "Since #206 the focus against temperature chart of visualization_plot. Saves nothing."
+    ),
+    "visualization_plot_asteroids": ToolDecision(
+        "keep", "Since #206 the asteroid track chart of visualization_plot. Saves nothing."
     ),
     "planning_query_catalogs": ToolDecision("keep", "Lists the catalog drivers. Reads only."),
     "planning_get_visibility": ToolDecision(
@@ -509,21 +560,31 @@ DECISIONS = {
     ),
     "review_get_advisory": ToolDecision(
         "keep",
-        "Built 2026-10-06; split 2026-10-31. The target dataset report (quality) or the trust in one star "
-        "result, worked out on demand. Saves nothing.",
+        "Built 2026-10-06; split 2026-10-31. Since #206 review_targets_get_report: the target dataset "
+        "report, worked out on demand. Saves nothing.",
+    ),
+    "review_targets_get_result": ToolDecision(
+        "keep",
+        "Since #206 (was review_get_advisory kind result): how far one star's results can be trusted. "
+        "Saves nothing.",
     ),
     "planning_get_tonight_advice": ToolDecision(
         "keep", "Tonight's ranking of targets, worked out on demand. Saves nothing."
     ),
-    "planning_get_calibration_advice": ToolDecision(
+    "planning_get_plan": ToolDecision("keep", "Built 2026-10-06. Reads the recorded session of one night."),
+    "planning_query_plans": ToolDecision("keep", "Lists the recorded sessions. Reads only."),
+    "planning_packages_get": ToolDecision(
+        "keep", "Since #206 (step 5a). Reads one observation package by id. Reads only.", tool_class="observe"
+    ),
+    "planning_packages_query": ToolDecision(
         "keep",
-        "How many calibration frames of one kind the library holds, worked out on demand. Saves nothing.",
+        "Since #206 (step 5a) the package list of planning_query_plans. Reads only.",
+        tool_class="observe",
     ),
-    "planning_get_plan": ToolDecision(
-        "keep", "Built 2026-10-06. Reads one recorded session, by id or by night."
-    ),
-    "planning_query_plans": ToolDecision(
-        "keep", "Lists the recorded sessions, the observation packages or the suggestion log. Reads only."
+    "planning_packages_query_suggestion_log": ToolDecision(
+        "keep",
+        "Since #206 (step 5a) the suggestion log of planning_query_plans. Reads only.",
+        tool_class="observe",
     ),
     "planning_get_package_for_target": ToolDecision(
         "keep", "Reads the one package that stands for a target. Reads only."
@@ -540,9 +601,13 @@ DECISIONS = {
         "change-data",
     ),
     "planning_get_deep_catalog_status": ToolDecision(
+        "keep", "Built 2026-10-06. Reads how much of the deep-star catalog file is installed."
+    ),
+    "planning_catalogs_predict_deep_catalog": ToolDecision(
         "keep",
-        "Built 2026-10-06. Reads the catalog file; the optional estimate queries the Gaia archive and "
-        "saves nothing.",
+        "Since #206 (step 5a) the size estimate of planning_get_deep_catalog_status: queries the Gaia "
+        "archive for a sample of chunks and saves nothing.",
+        tool_class="compute",
     ),
     "planning_calculate_panels": ToolDecision("keep", "Works out mosaic panel centers. Saves nothing."),
     "planning_build_deep_star_catalog": ToolDecision(
@@ -555,16 +620,47 @@ DECISIONS = {
     # ---- Keep ----
     "review_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads the recorded nights and calculates the analyses, in replies under 40,000 "
-        "characters. The recorded-data tables are read through the butler, which creates a missing table. "
-        "Kind night_quality needs session_id (the night) and returns a typed review.",
+        "Built 2026-10-03. Since #206 review_nights_query: the recorded nights and what data each has. "
+        "The other kinds became the review_nights, review_guiding and review_alignment reads. Reads only.",
+    ),
+    **dict.fromkeys(
+        (
+            "review_nights_get",
+            "review_nights_get_target_changes",
+            "review_nights_get_capture",
+            "review_nights_get_sky_coverage",
+            "review_nights_get_recurring_issues",
+            "review_nights_query_ekos_sessions",
+            "review_nights_get_ekos_session",
+            "review_guiding_get_night",
+            "review_guiding_query_runs",
+        ),
+        ToolDecision(
+            "keep",
+            "Since #206 (was a kind of review_query): reads the recorded nights and calculates one analysis. "
+            "Saves nothing; the server keeps the reply under its size limit.",
+        ),
     ),
     "jobs_query": ToolDecision(
         "keep",
-        "Built 2026-10-03. Reads jobs, log tails, stored results, data lineage and (detail=warnings) the "
-        "warnings one job detected, from the logs and quality databases, opened read-only. A job stuck at "
-        "'started' after the app stopped still shows as active. The AI gets at most 50 jobs and 200 log "
-        "lines, and not detail=full.",
+        "Built 2026-10-03. Lists jobs from the logs database, opened read-only. A job stuck at 'started' "
+        "after the app stopped shows as stale. Since #206 the AI gets 20 jobs unless it asks, at most 50, "
+        "without their stored numbers; one job, its log, its warnings and a target's lineage have their "
+        "own tools.",
+    ),
+    "jobs_get": ToolDecision(
+        "keep", "Since #206 one job's whole record, with its stored result. Reads the logs database only."
+    ),
+    "jobs_get_log": ToolDecision(
+        "keep", "Since #206 the last lines of one job's log, at most 200. Reads the logs database only."
+    ),
+    "jobs_get_warnings": ToolDecision(
+        "keep",
+        "Since #206 the warnings one job detected: its failed quality checks, with value, limit and "
+        "register entry. Reads the quality database only.",
+    ),
+    "jobs_get_lineage": ToolDecision(
+        "keep", "Since #206 the pipeline runs that produced a target's data. Reads the logs database only."
     ),
     "quality_query": ToolDecision(
         "keep",
@@ -591,11 +687,42 @@ DECISIONS = {
         "a plain reason when a picture cannot be found, and lists the ids no row has. Reads only.",
         tool_class="observe",
     ),
+    "quality_blocks_solved_stars": ToolDecision(
+        "withhold",
+        "A Command Console building block, uncapped. The AI reads a target's named stars through star_query.",
+    ),
+    "quality_records_get": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). Reads one stored quality row by its id, even when a newer row replaced "
+        "it, so a cited row can be read back. Writes nothing and creates no table.",
+        tool_class="observe",
+    ),
+    "quality_records_get_metric": ToolDecision(
+        "keep",
+        "Built 2026-11-27 (#206). Reads the whole declaration of one quality metric by name. Fixed text, "
+        "nothing is read from disk.",
+    ),
+    "quality_stacks_record_night_contributions": ToolDecision(
+        "withhold",
+        "Built 2026-11-27 (#206) from processing_measure_noise kind=night_contributions. Stacks the library "
+        "stack's frames without each night into the target's _subsets folder and writes the noise into the "
+        "quality database. It takes minutes. The AI is read-only, so it reads the stored numbers with "
+        "quality_records_query instead.",
+        "change-data",
+    ),
+    "quality_stacks_record_odd_even_noise": ToolDecision(
+        "withhold",
+        "Built 2026-11-27 (#206) from processing_measure_noise kind=odd_even_difference. Stacks two halves "
+        "of the library stack's frames into the target's _subsets folder and writes the noise of their "
+        "difference into the quality database, about one library stack's time. The AI is read-only, so it "
+        "reads the stored numbers with quality_records_query instead.",
+        "change-data",
+    ),
     "quality_frame_statuses": ToolDecision(
         "drop",
         "Built 2026-11-26 for the File Browser's Status column. It takes a target and works out the newest "
         "stack file's time itself; the reply is one row per frame, sized for a table on screen. "
-        "quality_set_aside_frames and review_get_star_shape_review serve an AI client.",
+        "quality_set_aside_frames and review_targets_get_star_shapes serve an AI client.",
     ),
     "quality_set_aside_frames": ToolDecision(
         "keep",
@@ -614,14 +741,9 @@ DECISIONS = {
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
     ),
-    "observatory_mount_cancel_centering": ToolDecision(
+    "observatory_guiding_stop": ToolDecision(
         "drop",
-        "Stops a centering run by aborting the mount, so it is dropped with the other hardware tools.",
-        "safe-stop",
-    ),
-    "observatory_guiding_stop_loop": ToolDecision(
-        "drop",
-        "Ends the guide loop through a stop event MCP cannot send. Dropped with the other hardware tools.",
+        "Ends this app's guide loop. Dropped with the other hardware tools.",
         "safe-stop",
     ),
     "review_get_performance_envelope": ToolDecision(
@@ -633,15 +755,10 @@ DECISIONS = {
         "error (periodic error, drift, jitter). Nothing is stored or sent. Slow on a long history.",
         "observe",
     ),
-    "review_measure_tuned_parameters": ToolDecision(
-        "withhold",
-        "Built 2026-11-16 (#175). Works out the wayfinding tuned values; with save=True it backs up and "
-        "writes the configuration file. The AI does not change settings.",
-    ),
     "review_measure_guiding_spectrum": ToolDecision(
         "keep",
         "Built 2026-11-07. The guiding spectrum worked out from the recorded samples, with nights "
-        "optionally left out. Unlike observatory_guiding_refit_spectrum it stores nothing.",
+        "optionally left out. Unlike review_guiding_record_spectrum it stores nothing.",
         "observe",
     ),
     "review_measure_focus_temperature_coefficient": ToolDecision(
@@ -705,6 +822,17 @@ DECISIONS = {
         "test; clean it before relying on it.",
         "observe",
     ),
+    "observatory_equipment_get_active": ToolDecision(
+        "keep",
+        "Reads the active observatory configuration: the telescope, cameras and other equipment in use.",
+        "observe",
+    ),
+    "observatory_configuration_get": ToolDecision(
+        "keep", "Reads one stored observatory configuration. Reads only.", "observe"
+    ),
+    "observatory_configuration_query": ToolDecision(
+        "keep", "Lists the stored observatory configurations, past and present. Reads only.", "observe"
+    ),
     "observatory_equipment_status": ToolDecision(
         "keep",
         "Reads the active equipment, camera profiles, site, commissioning records and the INDI device "
@@ -712,14 +840,23 @@ DECISIONS = {
         "observe",
     ),
     "observatory_remote_list": ToolDecision(
-        "keep", "Lists folders or files on the telescope computer. Reads only.", "observe"
+        "keep", "Lists folders on the telescope computer. Reads only.", "observe"
+    ),
+    "observatory_remote_query_files": ToolDecision(
+        "keep",
+        "Lists the FITS files in one folder on the telescope computer, with sizes. Reads only.",
+        "observe",
+    ),
+    "observatory_imaging_check_capture": ToolDecision(
+        "keep",
+        "Checks the arguments and the delegation policy for a capture. Sends nothing to a device.",
+        "observe",
     ),
     "observatory_equipment_set_device_property": ToolDecision(
         "drop",
         "Sets a raw INDI property, which commands a device. Belongs to the dropped control side.",
         "actuate",
     ),
-    "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess": ToolDecision(
         "keep",
         "Judges the dark, bias or flat sets of the library from the stored numbers. "
@@ -729,11 +866,13 @@ DECISIONS = {
         "withhold",
         "Writes the measured numbers of dark and bias frames to the quality store and their "
         "stamps to the calibration index. The AI is read-only.",
+        tool_class="compute",
     ),
-    "calibration_measure_sensor_noise": ToolDecision(
+    "calibration_record_sensor_noise": ToolDecision(
         "withhold",
-        "With save on, it writes a measured gain and read noise into the camera profile in the "
-        "configuration file. The AI is read-only.",
+        "It writes a measured gain and read noise into the camera profile in the configuration file. "
+        "The AI is read-only.",
+        tool_class="compute",
     ),
     "target_display_turn": ToolDecision(
         "drop",
@@ -749,7 +888,7 @@ DECISIONS = {
     "target_select_frames": ToolDecision(
         "drop",
         "Returns whole frame records, which can overflow the reply. Scripts and wayfindinglib use it. "
-        "review_frame_guiding already serves an AI client.",
+        "review_targets_get_frame_guiding already serves an AI client.",
     ),
     "calibration_camera_profile": ToolDecision(
         "keep",
@@ -794,12 +933,6 @@ DECISIONS = {
         "the user decided an AI may not change configuration.",
         "change-data",
     ),
-    "observatory_safety_enter_monitoring_mode": ToolDecision(
-        "withhold",
-        "Writes the delegation state (the Safe Mode toggle) to the database. Not a hardware command, but "
-        "the user decided an AI may not change configuration.",
-        "change-data",
-    ),
     "observatory_guiding_record_calibration": ToolDecision(
         "withhold",
         "Saves a guider calibration record to the database. It sends nothing to a device, but the delegation "
@@ -820,52 +953,44 @@ DECISIONS = {
         "Browser. The AI lists them with quality_set_aside_frames.",
         "change-data",
     ),
-    "quality_forget": ToolDecision(
-        "withhold",
-        "Deletes the stored quality measurements of the given frames from the quality database. The AI is "
-        "read-only, so it reads the stored numbers with quality_query instead.",
-        "change-data",
-    ),
     # ---- Records: dropped ----
     # ---- No use, empty, or cannot be called through MCP ----
     # ---- Not wanted by the user ----
     "observatory_guiding_run_loop": ToolDecision(
         "drop",
-        "Runs the guide loop until a stop event MCP cannot send is set; the backend runs it on a thread. "
-        "Sends guide pulses, which belongs to the dropped control side.",
+        "Starts this app's guide loop, which sends guide pulses: the dropped control side.",
         "actuate",
     ),
-    "observatory_guiding_refit_spectrum": ToolDecision(
-        "drop", "Recomputes and stores a result. The user does not want an AI to trigger it."
+    "review_guiding_record_spectrum": ToolDecision(
+        "drop",
+        "Since #206 the home of observatory_guiding_refit_spectrum: recomputes and stores the mount's "
+        "model. The user does not want an AI to trigger it.",
     ),
     # ---- Writers with no read-only form ----
     **dict.fromkeys(
         (
             "calibration_reindex_frames",
-            "processing_process_target",
             "star_create",
-            "star_find_or_create_by_position",
             "star_update",
             "target_add",
             "target_create",
+            "target_update",
             "planning_create_mosaic",
-            "planning_create_sequence",
             "planning_create_package",
             "planning_create_session",
             "planning_add_to_queue",
             "planning_reorder_queue",
             "planning_remove_from_queue",
-            "planning_set_entry_exposures",
-            "planning_add_checklist_items",
-            "planning_set_framing",
             "planning_update_package",
-            "planning_reopen_package",
-            "planning_dismiss_package",
             "planning_undismiss_package",
             "planning_refresh_suggestions",
-            "planning_tick_checklist_item",
         ),
         ToolDecision("withhold", READ_ONLY_NOTE),
+    ),
+    "processing_asteroids_run": ToolDecision(
+        "withhold",
+        "Since #206 the asteroid search of processing_process_target, which was withheld: " + READ_ONLY_NOTE,
+        "change-data",
     ),
     "quality_record_frame_measurements": ToolDecision(
         "withhold",
@@ -915,6 +1040,149 @@ DECISIONS = {
 }
 """Tool name -> the decision about it. Every served tool has one."""
 
+TOOL_RENAMES: dict[str, str] = {
+    # Step 4a of #206: targets and their frames.
+    "target_select_frames": "target_frames_query",
+    "target_read_frame_header": "target_frames_get_header",
+    "target_display_turn": "target_frames_get_rotation",
+    "target_sessions": "target_frames_get_nights",
+    "target_imaged_field_centers": "target_measure_field_centers",
+    "target_add_frames": "target_frames_add",
+    "target_reindex_frames": "target_frames_scan",
+    "quality_frame_statuses": "target_frames_get_statuses",
+    "quality_set_aside_frames": "target_frames_get_set_aside",
+    "quality_put_back_set_aside_frames": "target_frames_restore",
+    # Step 4c of #206: calibration is a sub-API with a `frames` child.
+    "calibration_add_frames": "calibration_frames_add",
+    "calibration_reindex_frames": "calibration_frames_scan",
+    "calibration_measure_frames": "calibration_frames_record",
+    "calibration_camera_profile": "calibration_get_profile",
+    # Step 4e of #206: quality has the objects records, frames, stacks,
+    # detections and blocks.
+    "quality_query": "quality_records_query",
+    "quality_capture_settings": "quality_records_get_capture_settings",
+    "quality_calibration_identities": "quality_records_get_calibration_identities",
+    "quality_resolve_rows": "quality_records_get_paths",
+    "quality_metrics": "quality_records_get_metrics",
+    "quality_measure_frames": "quality_frames_measure",
+    "quality_record_frame_measurements": "quality_frames_record",
+    "quality_choose_blink_pair": "quality_frames_get_blink_partner",
+    "quality_map_position": "quality_frames_map_positions",
+    "quality_measure_stack": "quality_stacks_measure",
+    "quality_get_aperture_record": "quality_stacks_get_aperture_record",
+    "processing_measure_noise": "quality_stacks_record_noise_growth",
+    "quality_measure_star_profile": "quality_detections_measure_profile",
+    "quality_measure_detections": "quality_detections_measure_detections",
+    "quality_blocks_star_widths": "quality_detections_measure_widths",
+    "quality_blocks_find_stars": "quality_blocks_measure_stars",
+    "quality_blocks_sky_corners": "quality_blocks_measure_sky_corners",
+    "quality_blocks_robust_sigma": "quality_blocks_measure_robust_sigma",
+    "quality_blocks_sigma_clip": "quality_blocks_measure_clipped_values",
+    # Step 4d of #206: one object per pipeline under `processing`.
+    "processing_stack": "processing_stacking_run",
+    "processing_predict_stack": "processing_stacking_predict",
+    "processing_predict_stack_weights": "processing_stacking_predict_weights",
+    "processing_stack_summary": "processing_stacking_get_summary",
+    "processing_find_stack_configuration": "processing_stacking_get_stack",
+    "processing_remake_preview": "processing_enhancement_run",
+    "processing_list_preview_bright_objects": "processing_enhancement_get_bright_objects",
+    "processing_plate_solve": "processing_astrometry_solve",
+    "processing_identify_stack": "processing_astrometry_identify",
+    "processing_get_stack_identification": "processing_astrometry_get_identification",
+    "quality_blocks_solved_stars": "processing_astrometry_get_named_stars",
+    # Step 5b of #206: review has the objects nights, targets, guiding,
+    # performance and alignment.
+    "review_query": "review_nights_query",
+    "review_get_live_session_status": "review_nights_get_live_status",
+    "review_get_advisory": "review_targets_get_report",
+    "review_get_star_shape_review": "review_targets_get_star_shapes",
+    "review_frame_guiding": "review_targets_get_frame_guiding",
+    "review_measure_guiding_spectrum": "review_guiding_measure_spectrum",
+    "review_measure_unguided_mount_error": "review_guiding_measure_unguided_error",
+    "review_get_performance_envelope": "review_performance_get_envelope",
+    "review_get_sky_rate_prediction": "review_performance_predict_sky_rate",
+    "review_measure_focus_temperature_coefficient": "review_performance_measure_focus_temperature",
+    "review_query_alignment_records": "review_alignment_query",
+    # Step 4f of #206: visualization.
+    "visualization_render_fits": "visualization_render",
+    "visualization_plot": "visualization_plot_target",
+    "visualization_stack_sky_picture_files": "visualization_get_sky_picture",
+    # Step 5a of #206: planning has the objects sessions, packages, sky and
+    # catalogs. The queue edits merge into sessions_update and the package
+    # edits into packages_update; lookup_coordinates and
+    # get_calibration_advice went to the core (targets.resolve and
+    # calibration.query).
+    "planning_get_plan": "planning_sessions_get",
+    "planning_query_plans": "planning_sessions_query",
+    "planning_create_session": "planning_sessions_create",
+    "planning_add_to_queue": "planning_sessions_add",
+    "planning_remove_from_queue": "planning_sessions_remove",
+    "planning_reorder_queue": "planning_sessions_update",
+    "planning_get_package_for_target": "planning_packages_get_for_target",
+    "planning_create_package": "planning_packages_create",
+    "planning_update_package": "planning_packages_update",
+    "planning_undismiss_package": "planning_packages_restore",
+    "planning_refresh_suggestions": "planning_packages_record_suggestions",
+    "planning_get_depth_goal": "planning_packages_get_depth_goal",
+    "planning_set_depth_goal": "planning_packages_set_depth_goal",
+    "planning_create_mosaic": "planning_packages_create_mosaic",
+    "planning_get_visibility": "planning_sky_get_visibility",
+    "planning_get_tonight_advice": "planning_sky_get_tonight_advice",
+    "planning_get_constellation_lines": "planning_sky_get_constellation_lines",
+    "planning_calculate_panels": "planning_sky_get_panels",
+    "planning_query_catalogs": "planning_catalogs_query",
+    "planning_query_sources": "planning_catalogs_query_sources",
+    "planning_get_deep_catalog_status": "planning_catalogs_get_deep_status",
+    "planning_build_deep_star_catalog": "planning_catalogs_record_deep_catalog",
+    # Step 5c of #206: control and execution.
+    "observatory_equipment_status": "observatory_equipment_get_status",
+    "observatory_mount_status": "observatory_mount_get_status",
+    "observatory_mount_abort_motion": "observatory_mount_stop",
+    "observatory_mount_manual_move": "observatory_mount_move",
+    "observatory_imaging_status": "observatory_imaging_get_status",
+    "observatory_imaging_capture_image": "observatory_imaging_capture",
+    "observatory_imaging_stop_capture": "observatory_imaging_stop",
+    "observatory_imaging_focus_move": "observatory_imaging_move_focuser",
+    "observatory_imaging_record_focus_model": "observatory_imaging_create_focus_model",
+    "observatory_guiding_status": "observatory_guiding_get_status",
+    "observatory_guiding_run_loop": "observatory_guiding_start",
+    "observatory_guiding_expose": "observatory_guiding_capture",
+    "observatory_guiding_query_calibrations": "observatory_guiding_query_guider_calibrations",
+    "observatory_guiding_record_calibration": "observatory_guiding_create_guider_calibration",
+    "observatory_remote_list": "observatory_remote_query_folders",
+    "observatory_remote_frame_locations": "observatory_remote_get_frame_locations",
+    "observatory_safety_status": "observatory_safety_get_status",
+    "observatory_safety_apply_promotion_decision": "observatory_safety_update",
+    "observatory_safety_enter_controller_mode": "observatory_safety_set_mode",
+    "execution_advance_session": "execution_run",
+    "execution_abort_session": "execution_abort",
+    "execution_reconcile_session": "execution_reconcile",
+}
+"""Old tool name -> new tool name, for a tool whose public method was
+renamed. The decision recorded under the old name in ``DECISIONS`` applies
+to the new name. Empty when every row uses the current name."""
+
+
+def decision_for(name: str) -> ToolDecision | None:
+    """Find the decision about a tool, following ``TOOL_RENAMES``.
+
+    Parameters
+    ----------
+    name : `str`
+        The tool's current name.
+
+    Returns
+    -------
+    decision : `ToolDecision` or `None`
+        The row under the name itself, else the row under the old name a
+        rename maps to it, else `None`.
+    """
+    if name in DECISIONS:
+        return DECISIONS[name]
+    old_name = next((old for old, new in TOOL_RENAMES.items() if new == name), None)
+    return DECISIONS.get(old_name) if old_name is not None else None
+
+
 CATEGORY_RULES = (
     (
         re.compile(
@@ -939,10 +1207,7 @@ CATEGORY_RULES = (
     (re.compile(r"^review_save_"), "observatory-config"),
     (re.compile(r"^review_"), "observatory-status"),
     (
-        re.compile(
-            r"^observatory_[a-z]+_(save_|set_active_|apply_promotion_decision"
-            r"|enter_(controller|monitoring)_mode)"
-        ),
+        re.compile(r"^observatory_([a-z]+_(save_|set_active_)|safety_(set_mode|update)$)"),
         "observatory-config",
     ),
 )
@@ -995,16 +1260,24 @@ def find_problems(served_names: set[str], valid_classes: set[str]) -> list[str]:
     problems : `list` [`str`]
         One message per problem: a served tool with no decision, a decision
         or interim block for a tool no server serves, an unknown
-        disposition or class, or a tool that is not offered with no note.
+        disposition or class, or a tool that is not offered with no note. A
+        decision under an old name of a served tool (``TOOL_RENAMES``) is
+        not a problem; a rename to a tool no server serves, or a rename
+        whose new name has its own row, is.
     """
-    problems = [f"{name!r} has no decision" for name in sorted(served_names - DECISIONS.keys())]
+    problems = [f"{name!r} has no decision" for name in sorted(served_names) if decision_for(name) is None]
+    for old_name, new_name in TOOL_RENAMES.items():
+        if new_name not in served_names:
+            problems.append(f"rename {old_name!r} -> {new_name!r}, which no server serves")
+        if old_name in DECISIONS and new_name in DECISIONS:
+            problems.append(f"rename {old_name!r} -> {new_name!r}, but both names have a decision")
     problems += [
         f"interim block for {name!r}, which no server serves"
         for name in INTERIM_BLOCKS
         if name not in served_names
     ]
     for name, decision in DECISIONS.items():
-        if name not in served_names:
+        if name not in served_names and TOOL_RENAMES.get(name) not in served_names:
             problems.append(f"decision for {name!r}, which no server serves")
         if decision.disposition not in DISPOSITIONS or decision.disposition == "undecided":
             problems.append(f"{name}: unknown disposition {decision.disposition!r}")

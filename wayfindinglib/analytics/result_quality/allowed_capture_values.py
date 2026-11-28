@@ -31,11 +31,11 @@ from collections.abc import Collection, Iterable, Sequence
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from astrometricslib import FilterType
+from astrometricslib import CaptureSetting, FilterType
 from astrometricslib.exceptions import ConfigurationError
-from astrometricslib.reports import CaptureSetting
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.capture_history import normalize_name
 
 NOT_MEASURED_NOTE = "setting not measured"
@@ -46,7 +46,7 @@ class CameraProfileLike(Protocol):
     """The parts of a camera profile this module reads.
 
     `astrometricslib` returns the profile from
-    `processing.calibration.camera_profile` but does not export its class
+    `calibration.get_profile` but does not export its class
     from the package root, and this library imports only from the public
     modules. A `Protocol` names what is needed.
     """
@@ -61,7 +61,7 @@ class MeasuredCaptureSetting(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    gain_setting: int = Field(alias="gainSetting")
+    gain: int = Field(alias="gain", validation_alias=AliasChoices("gain", "gainSetting", "gain_setting"))
     offset: int = Field(alias="offset")
     binning: int = Field(alias="binning")
 
@@ -120,7 +120,7 @@ class AllowedCaptureValues(BaseModel):
 
     def check(
         self,
-        gain_setting: int | None = None,
+        gain: int | None = None,
         offset: int | None = None,
         binning: int | None = None,
         filter_name: str | FilterType | None = None,
@@ -133,7 +133,7 @@ class AllowedCaptureValues(BaseModel):
 
         Parameters
         ----------
-        gain_setting : `int`, optional
+        gain : `int`, optional
             The requested gain setting.
         offset : `int`, optional
             The requested offset.
@@ -150,7 +150,7 @@ class AllowedCaptureValues(BaseModel):
         reasons: list[str] = []
         notes: list[str] = []
         setting_measured: bool | None = None
-        named = {"gain setting": gain_setting, "offset": offset, "binning": binning}
+        named = {"gain setting": gain, "offset": offset, "binning": binning}
         if any(value is not None for value in named.values()):
             if not self.settings_measured:
                 setting_measured = False
@@ -159,7 +159,7 @@ class AllowedCaptureValues(BaseModel):
                 matches = [
                     measured
                     for measured in self.measured_settings
-                    if gain_setting in (None, measured.gain_setting)
+                    if gain in (None, measured.gain)
                     and offset in (None, measured.offset)
                     and binning in (None, measured.binning)
                 ]
@@ -169,8 +169,7 @@ class AllowedCaptureValues(BaseModel):
                         f"{name} {value}" for name, value in named.items() if value is not None
                     )
                     measured_text = "; ".join(
-                        f"gain setting {measured.gain_setting}, "
-                        f"offset {measured.offset}, binning {measured.binning}"
+                        f"gain setting {measured.gain}, offset {measured.offset}, binning {measured.binning}"
                         for measured in self.measured_settings
                     )
                     reasons.append(
@@ -313,7 +312,7 @@ def allowed_capture_values(
     Parameters
     ----------
     camera_profile : `CameraProfileLike`
-        The camera's profile, from `processing.calibration.camera_profile`.
+        The camera's profile, from `calibration.get_profile`.
         Its measured settings are the allowed ones. The generic fallback
         profile counts as having none.
     configured_filter_names : `Iterable` [`str`], optional
@@ -330,12 +329,12 @@ def allowed_capture_values(
     measured: list[MeasuredCaptureSetting] = []
     if not camera_profile.is_generic_fallback:
         for entry in camera_profile.sensor_noise:
-            gain_setting = _as_whole_number(entry.gain_setting)
+            gain = _as_whole_number(entry.gain)
             offset = _as_whole_number(entry.offset)
             binning = _as_whole_number(entry.binning)
-            if gain_setting is None or offset is None or binning is None:
+            if gain is None or offset is None or binning is None:
                 continue
-            candidate = MeasuredCaptureSetting(gain_setting=gain_setting, offset=offset, binning=binning)
+            candidate = MeasuredCaptureSetting(gain=gain, offset=offset, binning=binning)
             if candidate not in measured:
                 measured.append(candidate)
     configured = sorted({name for name in configured_filter_names if name})
@@ -381,7 +380,7 @@ def camera_names_match(astrometrics: Any, first: str, second: str) -> bool:
     for name in (first, second):
         spellings_of_name = {normalize_name(name)}
         try:
-            profile = astrometrics.processing.calibration.camera_profile(name)
+            profile = profile_for_name(astrometrics, name)
             spellings_of_name.update(
                 normalize_name(alias)
                 for alias in (profile.camera_name, profile.record_name, *profile.name_aliases)
@@ -422,7 +421,7 @@ def allowed_capture_values_for_camera(
         The allowed values, with a `check` method for a request.
     """
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except ConfigurationError:
         # A configuration with no camera profiles cannot say what was
         # measured. Treat the camera as unprofiled: requests are accepted and

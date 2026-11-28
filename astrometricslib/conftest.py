@@ -75,7 +75,7 @@ def _seed_synthetic_test_library(directories: SimpleNamespace) -> None:
                 camera="ZWO ASI 533MM Pro",
                 date=f"2026-05-01 00:0{i}:00",
                 timestamp=1777507200.0 + i * 60,
-                exposure="30.0",
+                exposure_s=30.0,
             )
         )
 

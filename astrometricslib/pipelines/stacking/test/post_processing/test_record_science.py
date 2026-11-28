@@ -155,7 +155,7 @@ def _group(**fields: Any) -> ExposureGroupSummary:
         The entry.
     """
     base: dict[str, Any] = {
-        "exposure_seconds": 60.0,
+        "exposure_s": 60.0,
         "frames_submitted": 10,
         "frames_stacked": 10,
         "dark_applied": True,
@@ -330,7 +330,7 @@ def test_a_group_left_out_of_the_stack_still_gets_its_own_peak_rows() -> None:
     summary = fixture_summary()
     summary.stacking_metrics.exposure_groups.append(
         ExposureGroupSummary(
-            exposureSeconds=30.0,
+            exposureS=30.0,
             framesSubmitted=4,
             framesStacked=0,
             darkApplied=False,
@@ -434,7 +434,9 @@ def _membership(membership_reason: str = "") -> StackMembership:
     membership : `StackMembership`
         The members.
     """
-    frames = [SimpleNamespace(path=f"/frames/{name}.fits", exposure="60", camera="Fake Cam") for name in "ab"]
+    frames = [
+        SimpleNamespace(path=f"/frames/{name}.fits", exposure_s=60.0, camera="Fake Cam") for name in "ab"
+    ]
     return StackMembership(
         tuple(StackMember(frame, 1.0) for frame in frames), membership_reason=membership_reason
     )
@@ -539,7 +541,7 @@ def _group_entry(paths: list[str], **overrides: Any) -> dict[str, Any]:
         "paths": paths,
         "weight": 4.0,
         "frame_count": len(paths),
-        "exposure_seconds": 60.0,
+        "exposure_s": 60.0,
         "frame_noise_counts": 3.0,
         "gain": 1.0,
         "gain_measured": True,
@@ -628,7 +630,7 @@ def test_missing_members_and_missing_sky_rows_give_a_reason(fake_profiles: list[
     store = _FakeStore(_sky_rows(["/frames/a.fits"]))
     outcome = compute_expected_noise(_membership(), "", "M 99", store=store)
     assert outcome.result is None
-    assert "record_frame_measurements" in outcome.reason
+    assert "quality.frames.record" in outcome.reason
 
 
 def test_a_store_that_fails_gives_a_reason_and_does_not_raise(fake_profiles: list[object]) -> None:

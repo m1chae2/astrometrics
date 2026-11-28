@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import os
 import statistics
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib.exceptions import NotFoundError
+from astrometricslib import Target
+from astrometricslib.arguments import FrameChoice, Page, check_include
+from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.parameters import (
     EquipmentKind,
     ParameterRole,
@@ -27,50 +28,19 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from wayfindinglib._internal.arguments import TimeInput
 from wayfindinglib.analytics.result_quality.guiding_join import (
     FrameWindow,
     guiding_read_range,
     join_frames_to_guiding,
 )
+from wayfindinglib.models.session.control_results import FrameGuidingReport
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
 
-@dataclass(frozen=True)
-class FrameRange:
-    """Which of a target's light frames a guiding report covers.
-
-    Parameters
-    ----------
-    filter_name : `str` or `None`
-        Keep frames whose filter matches this text, ignoring case.
-    first_file, last_file : `str` or `None`
-        Keep frames from this file name to that one. A short bound such as
-        ``"013"`` means the frame numbered 013.
-    since, until : `str`, `datetime`, `astropy.time.Time` or `None`
-        Keep frames that began from this time to that one. A string is ISO
-        8601; no time zone means UTC.
-    """
-
-    filter_name: str | None = None
-    first_file: str | None = None
-    last_file: str | None = None
-    since: TimeInput = None
-    until: TimeInput = None
-
-    @property
-    def has_bounds(self) -> bool:
-        """Whether a file range or time range was given.
-
-        Returns
-        -------
-        has_bounds : `bool`
-            `True` when the first frames of the range, not the newest, are
-            the ones to keep.
-        """
-        return any(value is not None for value in (self.first_file, self.last_file, self.since, self.until))
+FRAME_GUIDING_PARTS = ("quality",)
+"""The heavy parts `link_frames_to_guiding` can add."""
 
 
 GUIDE_LOG_SOURCE = "ekos_guide_log"
@@ -95,7 +65,7 @@ Checked on the 2026-10-02 session, where ordinary frames stayed within
 about 1.5 times the median and frames hit by a dither or drift were above 3."""
 
 MAXIMUM_FRAMES = 200
-"""Most frames one answer covers."""
+"""Most frames one answer covers: the newest of the chosen frames."""
 
 MAXIMUM_QUALITY_FRAMES = 60
 """Most frames whose image quality is measured in one answer. A frame takes
@@ -128,9 +98,7 @@ def _iso(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _add_image_quality(
-    astrometrics: Any, target: Any, selection: FrameRange, frames: list[dict[str, Any]]
-) -> str:
+def _add_image_quality(astrometrics: Any, target: Any, frames: list[dict[str, Any]]) -> str:
     """Measure the frames' images and put the numbers on the guiding rows.
 
     Parameters
@@ -139,8 +107,6 @@ def _add_image_quality(
         The library, for the frame quality check.
     target : `Target`
         The target the frames belong to.
-    selection : `FrameRange`
-        The same selection used for the guiding rows.
     frames : `list` [`dict`]
         The guiding rows, changed in place.
 
@@ -152,19 +118,21 @@ def _add_image_quality(
     wanted = [row["file"] for row in frames][:MAXIMUM_QUALITY_FRAMES]
     from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 
+    wanted_files = set(wanted)
+    chosen = [
+        frame
+        for frame in target.frames
+        if os.path.basename(frame.path) in wanted_files
+        and str(frame.role).upper() == "LIGHT"
+        and not frame.is_spectral
+    ]
+    if not chosen:
+        return "Image quality could not be measured: none of the frames is an imaging light frame."
     try:
-        report = astrometrics.quality.measure_frames(
-            target=target,
-            kind="raw_check",
-            filter_name=selection.filter_name,
-            first_file=wanted[0],
-            last_file=wanted[-1],
-            limit=len(wanted),
-            register_job=False,
-        )
+        checks = astrometrics.quality.frames.measure(chosen).checks
     except (InvalidArgumentError, NotFoundError) as error:
         return f"Image quality could not be measured: {error}"
-    by_file = {os.path.basename(row["path"]): row for row in report.frames}
+    by_file = {os.path.basename(row["path"]): row for row in (checks.frames if checks is not None else [])}
     for row in frames:
         measured = by_file.get(row["file"])
         if measured is None:
@@ -179,75 +147,102 @@ def _add_image_quality(
     return note
 
 
+def _chosen_frames(target: Target, frames: FrameChoice | None) -> list[Any]:
+    """Turn a frame choice into the target's frame records, oldest first.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target the frames belong to.
+    frames : `FrameChoice` or `None`
+        A page or list of frame records, a list of paths, or `None` for
+        every light frame of the target.
+
+    Returns
+    -------
+    records : `list` [`FrameRecord`]
+        The chosen imaging and spectral light frames, by start time.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `frames` is a page cut short by its ``limit``.
+    NotFoundError
+        If a path is not one of the target's frames.
+    """
+    if isinstance(frames, Page) and not frames.is_complete:
+        raise InvalidArgumentError("frames is a page cut short by limit; ask for every matching frame.")
+    lights = [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"]
+    if frames is None:
+        chosen = lights
+    else:
+        by_path = {os.path.normpath(frame.path): frame for frame in target.frames}
+        chosen = []
+        for item in frames:
+            path = os.path.normpath(str(getattr(item, "path", item)))
+            if path not in by_path:
+                raise NotFoundError(f"{path} is not a frame of target {target.id!r}.", details={"path": path})
+            chosen.append(by_path[path])
+    return sorted(chosen, key=lambda frame: frame.timestamp)
+
+
 def link_frames_to_guiding(
     context: ControlContext,
-    target_id: str,
-    selection: FrameRange,
-    limit: int,
-    include_quality: bool = False,
-) -> dict[str, Any]:
-    """Report the guide error during each selected frame's exposure.
+    target: Target,
+    frames: FrameChoice | None = None,
+    include: list[str] | None = None,
+) -> FrameGuidingReport:
+    """Report the guide error during each chosen frame's exposure.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the science library and the guiding records.
-    target_id : `str`
+    target : `Target`
         The library target whose light frames to match.
-    selection : `FrameRange`
-        Which frames: filter, file range, time range.
-    limit : `int`
-        How many frames to cover, from 1 to `MAXIMUM_FRAMES`. With a range
-        or time bound these are the first frames in it, otherwise the newest.
-    include_quality : `bool`, optional
-        Also measure each frame's image (star count, star width, roundness,
-        longest trail, sky level, saturated pixels, and the quality flags)
-        and put it on the same row. Slow: about a second a frame, so at
-        most `MAXIMUM_QUALITY_FRAMES` of the chosen frames.
+    frames : `FrameChoice`, optional
+        The frames, from ``astrometrics.targets.frames.query``, or a list of
+        paths. Every light frame of the target when omitted. At most the
+        newest `MAXIMUM_FRAMES` of them are reported.
+    include : `list` [`str`], optional
+        ``["quality"]`` also measures each frame's image (star count, star
+        width, roundness, longest trail, sky level, saturated pixels, and
+        the quality flags) and puts it on the same row. Slow: about a
+        second a frame, so at most `MAXIMUM_QUALITY_FRAMES` frames.
 
     Returns
     -------
-    report : `dict` [`str`, `Any`]
+    report : `FrameGuidingReport`
         ``frames`` (one row per frame) and ``group`` (the median error and
         the frames well above it).
 
-    Raises
-    ------
-    NotFoundError
-        If no target has the id `target_id`.
+    Notes
+    -----
+    Raises `InvalidArgumentError` if `include` names an unknown part or
+    `frames` is a page cut short, and `NotFoundError` if a path is not one
+    of the target's frames.
     """
-    target = context.astrometrics.targets.get(target_id, refresh=True)
-    if target is None:
-        raise NotFoundError(
-            f"No target with id {target_id!r} in the library.", details={"target_id": target_id}
-        )
-    chosen = context.astrometrics.targets.select_frames(
-        target,
-        filter_name=selection.filter_name,
-        first_file=selection.first_file,
-        last_file=selection.last_file,
-        since=selection.since,
-        until=selection.until,
-    )
-    matching = len(chosen)
-    chosen = chosen[:limit] if selection.has_bounds else chosen[-limit:]
+    include_quality = "quality" in check_include(include, FRAME_GUIDING_PARTS)
+    every = _chosen_frames(target, frames)
+    matching = len(every)
+    chosen = every[-MAXIMUM_FRAMES:]
     if not chosen:
-        return {"target_id": target.id, "frames_matching": matching, "frames": []}
+        return FrameGuidingReport(target_id=target.id, frames_matching=matching, frames=[])
 
     windows = []
     for frame in chosen:
         try:
-            exposure_seconds = float(frame.exposure)
+            exposure_s = float(frame.exposure_s)
         except ValueError:
-            exposure_seconds = 0.0
-        windows.append((frame, frame.timestamp, frame.timestamp + exposure_seconds, exposure_seconds))
+            exposure_s = 0.0
+        windows.append((frame, frame.timestamp, frame.timestamp + exposure_s, exposure_s))
     frame_windows = [
         FrameWindow(
             frame_id=os.path.basename(frame.path),
             start_epoch_seconds=start,
-            exposure_seconds=exposure_seconds,
+            exposure_s=exposure_s,
         )
-        for frame, start, _end, exposure_seconds in windows
+        for frame, start, _end, exposure_s in windows
     ]
     read_start, read_end = guiding_read_range(frame_windows) or (0.0, 0.0)
     rows = context.records.get_guiding_samples(
@@ -257,11 +252,11 @@ def link_frames_to_guiding(
     joined = join_frames_to_guiding(frame_windows, rows)
 
     frames = []
-    for (frame, start, end, exposure_seconds), statistics_for_frame in zip(windows, joined, strict=True):
+    for (frame, start, end, exposure_s), statistics_for_frame in zip(windows, joined, strict=True):
         frames.append({
             "file": os.path.basename(frame.path),
             "filter": str(getattr(frame.filter, "value", frame.filter)),
-            "exposure_seconds": exposure_seconds,
+            "exposure_s": exposure_s,
             "starts_at": _iso(start),
             "ends_at": _iso(end),
             "pier_side": frame.pier_side,
@@ -270,7 +265,7 @@ def link_frames_to_guiding(
 
     quality_note = None
     if include_quality:
-        quality_note = _add_image_quality(context.astrometrics, target, selection, frames)
+        quality_note = _add_image_quality(context.astrometrics, target, frames)
 
     measured = [row["rms_total_arcsec"] for row in frames if row.get("rms_total_arcsec") is not None]
     median_error = statistics.median(measured) if measured else None
@@ -282,7 +277,7 @@ def link_frames_to_guiding(
             if value is not None and value > slow_frame_ratio * median_error:
                 row["rms_vs_group_median"] = round(value / median_error, 1)
                 worse.append(row["file"])
-    return {
+    return FrameGuidingReport.model_validate({
         "target_id": target.id,
         "frames_matching": matching,
         "frames_reported": len(frames),
@@ -294,4 +289,4 @@ def link_frames_to_guiding(
         ),
         "image_quality": quality_note,
         "frames": frames,
-    }
+    })

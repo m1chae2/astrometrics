@@ -90,19 +90,30 @@ def _deps() -> SessionRunnerDependencies:
     )
 
 
-def test_advance_session_delegates_to_task_function() -> None:
-    """Verify advance_session runs the queue-advancement cycle."""
-    execution = ObservationExecution()
-    result = execution.advance_session(_session(), _deps())
+def test_run_advances_one_cycle_with_the_imaging_steps(
+    butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify run builds the steps from control's context and runs a cycle."""
+    from wayfindinglib.tasks.execution_tasks import session_execution
+
+    control = ObservatoryControl(config=butler.config, butler=butler, driver=object())
+    seen = []
+    monkeypatch.setattr(
+        session_execution, "imaging_dependencies", lambda context, store: seen.append(context) or _deps()
+    )
+    result = ObservationExecution(butler=butler, control=control).run(_session())
     assert result.queue[0].status == QueueEntryStatus.COMPLETED
+    assert seen == [control._context]
 
 
-def test_abort_session_delegates_to_task_function() -> None:
-    """Verify abort_session skips remaining pending entries."""
-    execution = ObservationExecution()
-    result = execution.abort_session(_session(), "operator abort", _NOW)
+def test_abort_skips_pending_entries_and_saves(butler: DiskButler) -> None:
+    """Verify abort skips remaining pending entries and saves the session."""
+    execution = ObservationExecution(butler=butler)
+    result = execution.abort(_session(), "operator abort")
     assert result.status == SessionStatus.ABORTED
     assert result.queue[0].status == QueueEntryStatus.SKIPPED
+    saved = butler.get("observation_session", {"session_id": "session-1"})
+    assert saved is not None and saved.status == SessionStatus.ABORTED
 
 
 def test_execute_meridian_flip_delegates_to_task_function() -> None:
@@ -153,35 +164,16 @@ def test_recover_guide_star_loss_delegates_to_task_function() -> None:
     assert event.reacquire_attempts == 1
 
 
-def test_record_divergence_delegates_to_task_function() -> None:
-    """Verify build_divergence_record builds a DivergenceRecord."""
-    from wayfindinglib.models.policy.delegation import ObservatoryCapability
-
-    execution = ObservationExecution()
-    record = execution.build_divergence_record(
-        "div-1",
-        "session-1",
-        "entry-1",
-        ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
-        "frame-1",
-        10.0,
-        9.5,
-        1.0,
-        "arcsec",
-    )
-    assert record.within_tolerance is True
-
-
 def test_create_recorder_binds_the_astrometrics_own_butler(butler: DiskButler) -> None:
     """Verify create_recorder binds the recorder to this interface's butler."""
     control = ObservatoryControl(config=butler.config, butler=butler, driver=object())
     execution = ObservationExecution(butler=butler, control=control)
-    recorder = execution.create_recorder(guiding_service=object())
+    recorder = execution.create_recorder(phd2_host="guider.local")
     assert recorder._butler is butler
 
 
 def test_create_recorder_builds_its_own_phd2_connection(butler: DiskButler) -> None:
-    """Without a guiding service, a PHD2 connection is built."""
+    """The recorder opens its own PHD2 connection to the given host."""
     control = ObservatoryControl(config=butler.config, butler=butler, driver=object())
     execution = ObservationExecution(butler=butler, control=control)
     recorder = execution.create_recorder(phd2_host="guider.local", phd2_port=4401)
@@ -192,11 +184,11 @@ def test_create_recorder_builds_its_own_phd2_connection(butler: DiskButler) -> N
 def test_create_recorder_needs_the_control(butler: DiskButler) -> None:
     """Verify create_recorder refuses when no control is given."""
     with pytest.raises(ConfigurationError):
-        ObservationExecution(butler=butler).create_recorder(guiding_service=object())
+        ObservationExecution(butler=butler).create_recorder()
 
 
-def test_reconcile_session_delegates_and_persists(butler: DiskButler) -> None:
-    """Verify reconcile_session runs both reconciliations and records."""
+def test_reconcile_delegates_and_persists(butler: DiskButler) -> None:
+    """Verify reconcile runs both reconciliations and records."""
 
     class _FakeTargetRegistry:
         def get(self, target_id: str) -> None:
@@ -212,7 +204,7 @@ def test_reconcile_session_delegates_and_persists(butler: DiskButler) -> None:
     session.queue[0].status = QueueEntryStatus.COMPLETED
     butler.put(session, "observation_session", {"session_id": session.id})
 
-    result = execution.reconcile_session(session)
+    result = execution.reconcile(session)
 
     reloaded = butler.get("observation_session", {"session_id": session.id})
     assert reloaded is not None

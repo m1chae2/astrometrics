@@ -246,10 +246,10 @@ def _calibration_files(frames: list[Any], library: Any) -> dict[str, list[list[A
         (
             getattr(frame, "telescope", "Unknown"),
             getattr(frame, "camera", "Unknown"),
-            str(getattr(frame, "iso", "800")),
-            str(getattr(frame, "offset", "0")),
+            getattr(frame, "gain", 800),
+            getattr(frame, "offset", 0),
             getattr(frame, "filter", None),
-            str(getattr(frame, "exposure", "1.0")),
+            getattr(frame, "exposure_s", 1.0),
         )
         for frame in frames
     }

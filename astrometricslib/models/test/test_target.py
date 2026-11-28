@@ -181,3 +181,56 @@ def test_a_target_already_in_the_new_shape_is_left_alone() -> None:
     new_shaped = {"id": "M13", "stacking": {"stackedImage": "/library/M13/stack.fits"}}
     target = Target.model_validate(new_shaped)
     assert target.stacking.stacked_image == "/library/M13/stack.fits"
+
+
+def test_a_frame_stored_before_the_unit_name_rename_loads_with_numbers() -> None:
+    """Check an old frame's text settings read as numbers."""
+    old_frame = {
+        "path": "/library/M13/light_001.fits",
+        "iso": "800.0",
+        "offset": "10",
+        "exposure": "300",
+        "altitudeDegrees": 61.5,
+        "azimuthDegrees": 180.25,
+    }
+    frame = FrameRecord.model_validate(old_frame)
+    assert frame.gain == 800
+    assert frame.offset == 10
+    assert frame.exposure_s == pytest.approx(300.0)
+    assert frame.altitude_deg == pytest.approx(61.5)
+    assert frame.azimuth_deg == pytest.approx(180.25)
+
+
+def test_a_frame_whose_old_text_holds_no_number_keeps_a_stand_in() -> None:
+    """Check text such as "Auto" gives an unknown gain and the stand-ins."""
+    frame = FrameRecord.model_validate({"path": "a.fits", "iso": "Auto", "offset": "", "exposure": ""})
+    assert frame.gain is None
+    assert frame.offset == 0
+    assert frame.exposure_s == pytest.approx(1.0)
+
+
+def test_a_target_stored_before_the_rename_saves_under_the_new_names() -> None:
+    """Check an old target loads, saves the new keys and loads again."""
+    old_target = {
+        "id": "M13",
+        "exposureTime": 600.0,
+        "frames": [
+            {"path": "a.fits", "iso": "100", "offset": "50", "exposure": "300.0"},
+            {"path": "b.fits", "iso": "100", "offset": "50", "exposure": "300.0"},
+        ],
+    }
+    target = Target.model_validate(old_target)
+    assert target.exposure_s == pytest.approx(600.0)
+
+    saved = target.serialize()
+    assert saved["exposureS"] == pytest.approx(600.0)
+    assert "exposureTime" not in saved
+    frame_keys = saved["frames"][0]
+    assert frame_keys["gain"] == 100
+    assert frame_keys["offset"] == 50
+    assert frame_keys["exposureS"] == pytest.approx(300.0)
+    assert not {"iso", "exposure", "altitudeDegrees", "azimuthDegrees"} & set(frame_keys)
+
+    reloaded = Target.model_validate(saved)
+    assert reloaded == target
+    assert reloaded.recalculate_total_exposure() == pytest.approx(600.0)

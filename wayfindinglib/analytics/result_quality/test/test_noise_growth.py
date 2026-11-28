@@ -37,7 +37,7 @@ def _frame(
     """
     return StackFrame(
         frame_id=f"f{index}",
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         sky_rate_e_per_s_per_px=sky,
         read_noise_e=read,
         star_width=width,
@@ -258,7 +258,7 @@ def test_group_forecast_agrees_with_the_stack_unit_noise_model() -> None:
         inputs = [
             FrameNoiseInput(
                 weight=raw,
-                sky_electrons=frame.sky_rate_e_per_s_per_px * frame.exposure_seconds,
+                sky_electrons=frame.sky_rate_e_per_s_per_px * frame.exposure_s,
                 read_noise_electrons=frame.read_noise_e,
                 gain_electrons_per_adu=CAMERA_GAIN,
             )
@@ -268,7 +268,7 @@ def test_group_forecast_agrees_with_the_stack_unit_noise_model() -> None:
         facts = [
             ExposureGroupNoiseFacts(
                 combine_weight=weight,
-                exposure_seconds=group.mean_exposure_seconds,
+                exposure_s=group.mean_exposure_seconds,
                 frame_count=len(group.frames),
                 gain=group.gain,
                 gain_measured=True,
@@ -471,7 +471,7 @@ def _new_copies(template: list[StackFrame], count: int, exposure: float) -> list
         The new frames.
     """
     return [
-        template[i % len(template)].model_copy(update={"frame_id": f"new_{i}", "exposure_seconds": exposure})
+        template[i % len(template)].model_copy(update={"frame_id": f"new_{i}", "exposure_s": exposure})
         for i in range(count)
     ]
 
@@ -753,8 +753,7 @@ def test_an_unfolded_group_gives_the_same_numbers_with_or_without_a_reference() 
     """A group of one length ignores a reference exposure (to 1e-12)."""
     plain = [_group(30.0, 8, 20.0, gain=0.9), _group(60.0, 10, 30.0, gain=1.1)]
     referenced = [
-        group.model_copy(update={"reference_exposure_seconds": group.frames[0].exposure_seconds})
-        for group in plain
+        group.model_copy(update={"reference_exposure_seconds": group.frames[0].exposure_s}) for group in plain
     ]
     assert ng.forecast_group_noise(referenced).variance == pytest.approx(
         ng.forecast_group_noise(plain).variance, rel=1e-12
@@ -777,7 +776,7 @@ def test_the_folded_group_enters_the_model_agreement_with_the_library_formula() 
     assert coefficients.raw_weights is not None and coefficients.total_group_weight is not None
     frames = [frame for group in groups for frame in group.frames]
     scales = [
-        (group.reference_exposure_seconds or frame.exposure_seconds) / frame.exposure_seconds
+        (group.reference_exposure_seconds or frame.exposure_s) / frame.exposure_s
         for group in groups
         for frame in group.frames
     ]
@@ -788,9 +787,9 @@ def test_the_folded_group_enters_the_model_agreement_with_the_library_formula() 
     ):
         coefficient = raw / (coefficients.total_group_weight * gain)
         variance += (coefficient * scale / group_exposure) ** 2 * (
-            frame.sky_rate_e_per_s_per_px * frame.exposure_seconds + frame.read_noise_e**2
+            frame.sky_rate_e_per_s_per_px * frame.exposure_s + frame.read_noise_e**2
         )
-    t_bar = sum(frame.exposure_seconds for frame in frames) / len(frames)
+    t_bar = sum(frame.exposure_s for frame in frames) / len(frames)
     assert ng.forecast_group_noise(groups).variance == pytest.approx(variance * t_bar**2, rel=1e-12)
 
 
@@ -876,14 +875,14 @@ def test_a_folded_group_agrees_with_the_library_noise_model() -> None:
         frames = [frame for group in groups for frame in group.frames]
         model = ng.forecast_group_noise(groups)
         scales = [
-            (group.reference_exposure_seconds or frame.exposure_seconds) / frame.exposure_seconds
+            (group.reference_exposure_seconds or frame.exposure_s) / frame.exposure_s
             for group in groups
             for frame in group.frames
         ]
         inputs = [
             FrameNoiseInput(
                 weight=raw,
-                sky_electrons=frame.sky_rate_e_per_s_per_px * frame.exposure_seconds,
+                sky_electrons=frame.sky_rate_e_per_s_per_px * frame.exposure_s,
                 read_noise_electrons=frame.read_noise_e,
                 gain_electrons_per_adu=CAMERA_GAIN,
                 exposure_scale=scale,
@@ -894,7 +893,7 @@ def test_a_folded_group_agrees_with_the_library_noise_model() -> None:
         facts = [
             ExposureGroupNoiseFacts(
                 combine_weight=len(group.frames) * group.mean_exposure_seconds**2 / group.frame_noise_adu**2,
-                exposure_seconds=group.mean_exposure_seconds,
+                exposure_s=group.mean_exposure_seconds,
                 frame_count=len(group.frames),
                 gain=group.gain,
                 gain_measured=True,
@@ -934,10 +933,10 @@ def test_a_single_group_of_mixed_lengths_needs_no_per_frame_factor() -> None:
     plain = ng.forecast_stack_noise(frames, WeightingMode.WFWHM)
     assert plain.variance is not None
     for reference in (30.0, 300.0):
-        scales = [reference / frame.exposure_seconds for frame in frames]
+        scales = [reference / frame.exposure_s for frame in frames]
         counts_variance = (
             sum(
-                (w * k) ** 2 * frame.rate_variance * frame.exposure_seconds**2
+                (w * k) ** 2 * frame.rate_variance * frame.exposure_s**2
                 for w, k, frame in zip(weights, scales, frames, strict=True)
             )
             / sum(weights) ** 2
@@ -1228,7 +1227,7 @@ def _graded(fixed_pattern: ng.StackFixedPatternNoise | None, fraction: float) ->
         minimum_count=1,
         maximum_count=ng.MAXIMUM_NEW_FRAMES.default,
         target_noise_ratio=ng.TARGET_NOISE_RATIO,
-        exposure_seconds=30.0,
+        exposure_s=30.0,
         held_exposure_seconds=44 * 30.0,
     )
 
@@ -1313,14 +1312,14 @@ def test_the_ranking_uses_the_midpoint_of_the_log_gains() -> None:
 
 
 def test_the_group_weight_copy_agrees_with_the_librarys_prediction() -> None:
-    """`combine_group_weights` gives what `predict_stack_weights` gives."""
-    from astrometricslib import ProcessingPipelines
+    """`combine_group_weights` gives what `stacking.predict_weights` gives."""
+    from astrometricslib import StackingPipeline
     from wayfindinglib.analytics.result_quality.noise_growth import combine_group_weights, star_width_weights
 
     exposures = [10.0] * 8 + [60.0] * 6
     widths = [2.0 + 0.1 * index for index in range(14)]
     noises = {10.0: 12.0, 60.0: 30.0}
-    prediction = ProcessingPipelines.predict_stack_weights(
+    prediction = StackingPipeline.predict_weights(
         exposures, star_width_px=widths, group_frame_noise_adu=noises
     )
     assert prediction.mode == "group"

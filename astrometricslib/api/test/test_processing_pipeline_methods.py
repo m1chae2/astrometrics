@@ -1,15 +1,17 @@
-"""Purpose: Unit tests for `ProcessingPipelines.process_target`'s stages.
+"""Purpose: Unit tests for the analysis pipelines' ``run`` methods.
 
-Description: Each stage takes its options in its own dictionary, so an
-option meant for one stage never reaches another. These tests verify each
-stage's options reach the underlying pipeline dispatch correctly, that an
-unknown option is refused, and that `process_target` runs the stages in the
-right fixed order, respects a `stages` subset, and skips spectroscopy
-gracefully when a target has no spectral data. Prerequisite rules are tested
-in `pipelines/test/test_stage_prerequisites.py`; these tests pass
-`run_prerequisites=False` where they run a stage alone.
+Description: Each analysis pipeline has its own object under
+``Astrometrics.processing`` (``astrometry``, ``photometry``, ``spectroscopy``,
+``asteroids``), and each ``run`` takes its own options. These tests verify the
+options reach the underlying pipeline dispatch, that photometry measures the
+frames of the analyzed stack's camera and optic (or the frames given, refused
+when they mix cameras), that spectroscopy is skipped gracefully when a target
+has no spectral data, and that ``astrometry.solve`` describes a solution.
+Prerequisite rules are tested in `pipelines/test/test_stage_prerequisites.py`;
+these tests mark every result current, so a run adds no prerequisite.
 """
 
+from contextlib import nullcontext
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +21,7 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 from astrometricslib.models.target import FrameRecord, StackConfigurationResult, Target
-from astrometricslib.pipelines import tasks
+from astrometricslib.pipelines import pipeline_runs, tasks
 
 
 class _RecordingPipelineMatch:
@@ -61,6 +63,21 @@ class _RecordingPipelineMatch:
         return {"status": "finished", "pipeline_type": pipeline_type}
 
 
+def _quiet_runs(monkeypatch: pytest.MonkeyPatch, recorder: _RecordingPipelineMatch) -> None:
+    """Record the dispatch, take no real job slot, and add no prerequisite.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The test's patcher.
+    recorder : `_RecordingPipelineMatch`
+        The stub that records every dispatched call.
+    """
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", recorder)
+    monkeypatch.setattr(tasks, "stage_staleness_reason", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline_runs, "acquire_resource_slot", lambda *_args, **_kwargs: nullcontext())
+
+
 @pytest.fixture
 def recording_pipelines(
     monkeypatch: pytest.MonkeyPatch,
@@ -75,65 +92,50 @@ def recording_pipelines(
         The stub recording every dispatched call.
     """
     recorder = _RecordingPipelineMatch()
-    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", recorder)
+    _quiet_runs(monkeypatch, recorder)
     return ProcessingPipelines(AppConfiguration(), MagicMock()), recorder
 
 
-def test_the_astrometry_stage_forwards_its_options(
+def test_astrometry_solves_the_main_stack_or_the_image_given(
     recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
-    """Verify the astrometry options reach the dispatch call."""
+    """Verify the stack to solve reaches the dispatch call."""
     pipelines, recorder = recording_pipelines
     target = Target(id="AstrometryParamsTarget", stacked_image="/fake/stack.fits")
 
-    pipelines.process_target(
-        target, stages=["astrometry"], astrometry={"path": "/override.fits"}, register_job=False
-    )
+    pipelines.astrometry.run(target)
+    pipelines.astrometry.run(target, stack="/override.fits")
 
-    assert len(recorder.calls) == 1
-    assert recorder.calls[0]["pipeline_type"] == "astrometry"
-    assert recorder.calls[0]["path"] == "/override.fits"
+    assert [call["pipeline_type"] for call in recorder.calls] == ["astrometry", "astrometry"]
+    assert recorder.calls[0]["path"] == "/fake/stack.fits"
+    assert recorder.calls[1]["path"] == "/override.fits"
 
 
-def test_the_photometry_stage_forwards_its_options(
+def test_photometry_measures_the_frames_given(
     recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
-    """Verify the photometry options reach the dispatch call."""
+    """Verify the frames given reach the photometry dispatch."""
     pipelines, recorder = recording_pipelines
-    target = Target(id="PhotometryParamsTarget")
-    frame = FrameRecord(path="/frame1.fits", filter="Luminance")
+    frame = FrameRecord(path="/frame1.fits", filter="Luminance", camera="Cam")
+    target = Target(id="PhotometryParamsTarget", frames=[frame])
 
-    pipelines.process_target(
-        target,
-        stages=["photometry"],
-        run_prerequisites=False,
-        photometry={"frames": [frame], "filter_name": "L", "use_astrometry_seed": False, "max_workers": 3},
-        register_job=False,
-    )
+    result = pipelines.photometry.run(target, frames=[frame])
 
     assert len(recorder.calls) == 1
     call = recorder.calls[0]
     assert call["pipeline_type"] == "photometry"
     assert call["frames"] == [frame]
-    assert call["filter_type"] == "L"
-    assert call["use_astrometry_seed"] is False
-    assert call["max_workers"] == 3
+    assert result.stages_run == ["photometry"]
 
 
-def test_the_spectroscopy_stage_forwards_its_options(
+def test_spectroscopy_takes_a_star_limit(
     recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
-    """Verify the spectroscopy options reach the dispatch call."""
+    """Verify ``max_stars`` reaches the spectroscopy dispatch as its limit."""
     pipelines, recorder = recording_pipelines
     target = Target(id="SpectroscopyParamsTarget", stacked_spectral_target="/fake/spec.fits")
 
-    pipelines.process_target(
-        target,
-        stages=["spectroscopy"],
-        spectroscopy={"limit": 5},
-        run_prerequisites=False,
-        register_job=False,
-    )
+    pipelines.spectroscopy.run(target, max_stars=5)
 
     assert len(recorder.calls) == 1
     call = recorder.calls[0]
@@ -141,78 +143,52 @@ def test_the_spectroscopy_stage_forwards_its_options(
     assert call["limit"] == 5
 
 
-def test_an_option_a_stage_does_not_know_is_refused(
+def test_a_star_limit_below_one_is_refused(
     recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
-    """Verify a misspelt or misplaced option raises, not being dropped."""
+    """Verify a bad limit raises before any work."""
     pipelines, recorder = recording_pipelines
-    target = Target(id="UnknownOptionTarget", stacked_image="/fake/stack.fits")
-
-    with pytest.raises(InvalidArgumentError, match="Unknown astrometry option"):
-        pipelines.process_target(target, stages=["astrometry"], astrometry={"limit": 5}, register_job=False)
-    with pytest.raises(InvalidArgumentError, match="does not use: on_item_complete"):
-        pipelines.process_target(target, on_item_complete=lambda *_: None, register_job=False)
+    with pytest.raises(InvalidArgumentError, match="max_stars"):
+        pipelines.spectroscopy.run(Target(id="T"), max_stars=0)
     assert recorder.calls == []
 
 
-def test_process_target_runs_all_three_stages_in_order(
-    recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
-) -> None:
-    """Verify the default run order is astrometry, photometry, spectroscopy."""
-    pipelines, recorder = recording_pipelines
-    target = Target(
-        id="ProcessTargetOrderTarget",
-        stacked_image="/fake/stack.fits",
-        stacked_spectral_target="/fake/spec.fits",
-    )
-
-    results = pipelines.process_target(target, register_job=False)
-
-    assert [call["pipeline_type"] for call in recorder.calls] == [
-        "astrometry",
-        "photometry",
-        "spectroscopy",
-    ]
-    assert results.stages_run == ["astrometry", "photometry", "spectroscopy"]
-
-
-def test_process_target_stages_subset_runs_only_the_requested_stages(
-    recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
-) -> None:
-    """Verify a `stages` subset skips whatever stage isn't listed."""
-    pipelines, recorder = recording_pipelines
-    target = Target(
-        id="ProcessTargetSubsetTarget",
-        stacked_image="/fake/stack.fits",
-        stacked_spectral_target="/fake/spec.fits",
-    )
-
-    results = pipelines.process_target(
-        target, stages=["spectroscopy", "photometry"], run_prerequisites=False, register_job=False
-    )
-
-    assert [call["pipeline_type"] for call in recorder.calls] == ["photometry", "spectroscopy"]
-    assert set(results.results) == {"photometry", "spectroscopy"}
-
-
-def test_process_target_skips_spectroscopy_without_spectral_data(
+def test_spectroscopy_is_skipped_without_spectral_data(
     recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
     """Verify spectroscopy is skipped on a target with no spectral input."""
     pipelines, recorder = recording_pipelines
-    target = Target(id="ProcessTargetNoSpectraTarget", stacked_image="/fake/stack.fits")
+    target = Target(id="NoSpectraTarget", stacked_image="/fake/stack.fits")
 
-    results = pipelines.process_target(target, register_job=False)
+    results = pipelines.spectroscopy.run(target)
 
-    assert "spectroscopy" not in [call["pipeline_type"] for call in recorder.calls]
+    assert recorder.calls == []
     assert results.results["spectroscopy"] == {"status": "skipped", "reason": "target has no spectral data"}
+
+
+def test_the_asteroid_search_dispatches_its_pipeline(
+    recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify ``asteroids.run`` runs the asteroid detection pipeline."""
+    pipelines, recorder = recording_pipelines
+    pipelines.asteroids.run(Target(id="AsteroidTarget", stacked_image="/fake/stack.fits"))
+    assert [call["pipeline_type"] for call in recorder.calls] == ["asteroid_detection"]
+
+
+def test_a_pipeline_refuses_a_target_name(
+    recording_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify the subject is a `Target`, not its id."""
+    pipelines, _ = recording_pipelines
+    with pytest.raises(InvalidArgumentError, match="Target itself"):
+        pipelines.photometry.run("M 13")
 
 
 def test_stack_summary_reports_a_target_with_no_stack() -> None:
     """A target without a saved stack summary raises NotFoundError."""
     target = Target(id="Nothing_Yet", name="Nothing Yet")
     with pytest.raises(NotFoundError, match="has no saved summary"):
-        ProcessingPipelines(AppConfiguration(), MagicMock()).stack_summary(target)
+        ProcessingPipelines(AppConfiguration(), MagicMock()).stacking.get_summary(target)
 
 
 _ASI = "ZWO ASI 533MM Pro"
@@ -290,7 +266,7 @@ def setups_pipelines(
         The stub recording every dispatched call.
     """
     recorder = _RecordingPipelineMatch()
-    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", recorder)
+    _quiet_runs(monkeypatch, recorder)
     return ProcessingPipelines(_SetupsConfig(), MagicMock()), recorder
 
 
@@ -306,47 +282,25 @@ def _photometry_paths(recorder: _RecordingPipelineMatch) -> list[str]:
     return [frame.path for frame in call["frames"]]
 
 
-def test_one_target_photometry_defaults_to_the_batch_camera_and_primary_optic(
+def test_photometry_defaults_to_the_batch_camera_and_primary_optic(
     setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
     """Verify photometry gets the batch's camera and the primary optic."""
     pipelines, recorder = setups_pipelines
 
-    pipelines.process_target(
-        _mixed_target(), stages=["photometry"], run_prerequisites=False, register_job=False
-    )
+    pipelines.photometry.run(_mixed_target())
 
     assert _photometry_paths(recorder) == ["/asi405.fits", "/asi_spec.fits"]
 
 
-def test_one_target_photometry_uses_the_camera_and_optic_asked_for(
-    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
-) -> None:
-    """Verify ``camera_id`` and ``focal_length_mm`` replace the defaults."""
-    pipelines, recorder = setups_pipelines
+def _two_stack_target() -> Target:
+    """Build the mixed target with an ASI533 stack and a Nikon 300 mm stack.
 
-    pipelines.process_target(
-        _mixed_target(),
-        stages=["photometry"],
-        camera_id="Nikon",
-        focal_length_mm=300.0,
-        run_prerequisites=False,
-        register_job=False,
-    )
-
-    assert _photometry_paths(recorder) == ["/nikon300.fits"]
-
-
-def test_one_target_analyzes_the_stack_of_the_configuration_asked_for(
-    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
-) -> None:
-    """Verify a camera and optic with their own stack analyze that stack.
-
-    The target's recorded stack is the ASI533 one. Asking for the Nikon at
-    300 mm solves the Nikon 300 mm stack and measures only its frames; the
-    recorded stack does not put them aside as another camera's frames.
+    Returns
+    -------
+    target : `Target`
+        The target. Its recorded (main) stack is the ASI533 one.
     """
-    pipelines, recorder = setups_pipelines
     target = _mixed_target()
     target.stacking.stacked_image = "/no/such/asi405_Stacked.fits"
     target.stacking.stacks_by_configuration = {
@@ -364,72 +318,57 @@ def test_one_target_analyzes_the_stack_of_the_configuration_asked_for(
             stacked_image="/no/such/nikon300_Stacked.fits",
         ),
     }
+    return target
 
-    pipelines.process_target(
-        target,
-        stages=["astrometry", "photometry"],
-        camera_id=_NIKON,
-        focal_length_mm=300.0,
-        run_prerequisites=False,
-        register_job=False,
-    )
+
+def test_a_run_analyzes_the_stack_of_the_configuration_given(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify another configuration's stack is solved and its frames measured.
+
+    The target's recorded stack is the ASI533 one. Passing the Nikon 300 mm
+    stack solves it and measures only its frames; the recorded stack does
+    not put them aside as another camera's frames.
+    """
+    pipelines, recorder = setups_pipelines
+    target = _two_stack_target()
+    nikon_stack = target.stacking.stacks_by_configuration["nikon@300mm"]
+
+    pipelines.astrometry.run(target, nikon_stack)
+    pipelines.photometry.run(target, stack=nikon_stack)
 
     astrometry_call = next(call for call in recorder.calls if call["pipeline_type"] == "astrometry")
     assert astrometry_call["path"] == "/no/such/nikon300_Stacked.fits"
     assert [path for path in _photometry_paths(recorder) if "spec" not in path] == ["/nikon300.fits"]
 
 
-def test_one_target_photometry_option_frames_still_win(
+def test_photometry_refuses_frames_of_two_cameras_with_their_counts(
     setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
-    """Verify frames in the photometry options beat the selection."""
-    pipelines, recorder = setups_pipelines
-    own_frame = FrameRecord(path="/own.fits", filter="Luminance")
-
-    pipelines.process_target(
-        _mixed_target(),
-        stages=["photometry"],
-        photometry={"frames": [own_frame]},
-        run_prerequisites=False,
-        register_job=False,
-    )
-
-    assert _photometry_paths(recorder) == ["/own.fits"]
-
-
-def test_one_target_spectroscopy_needs_spectral_frames_in_the_selection(
-    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
-) -> None:
-    """Verify spectroscopy runs for ASI533 spectra, not for the D5300."""
+    """Verify a frame list from two cameras is refused before any work."""
     pipelines, recorder = setups_pipelines
     target = _mixed_target()
 
-    ran = pipelines.process_target(
-        target, stages=["spectroscopy"], run_prerequisites=False, register_job=False
-    )
-    assert ran.results["spectroscopy"]["pipeline_type"] == "spectroscopy"
-
-    skipped = pipelines.process_target(
-        target, stages=["spectroscopy"], camera_id="Nikon", run_prerequisites=False, register_job=False
-    )
-    assert skipped.results["spectroscopy"]["status"] == "skipped"
-    assert len(recorder.calls) == 1
+    with pytest.raises(InvalidArgumentError, match="more than one camera") as raised:
+        pipelines.photometry.run(target, frames=target.frames[:3])
+    assert _NIKON in str(raised.value)
+    assert _ASI in str(raised.value)
+    assert recorder.calls == []
 
 
-def test_one_target_still_refuses_the_batch_only_callback(
+def test_spectroscopy_runs_on_the_spectra_of_the_analyzed_camera(
     setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
 ) -> None:
-    """Verify ``on_item_complete`` is refused for one target."""
-    pipelines, recorder = setups_pipelines
+    """Verify spectroscopy runs for the ASI533 spectra."""
+    pipelines, _ = setups_pipelines
 
-    with pytest.raises(InvalidArgumentError, match="does not use: on_item_complete"):
-        pipelines.process_target(_mixed_target(), on_item_complete=lambda *_: None, register_job=False)
-    pipelines.process_target(_mixed_target(), stages=["astrometry"], camera_id="ZWO", register_job=False)
-    assert len(recorder.calls) == 1
+    ran = pipelines.spectroscopy.run(_mixed_target())
+
+    assert ran.results["spectroscopy"]["pipeline_type"] == "spectroscopy"
 
 
-def test_plate_solve_returns_the_center_scale_and_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`plate_solve` asks the star identifier to solve and describes it."""
+def test_solve_returns_the_center_scale_and_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`astrometry.solve` asks the star identifier to solve and describes."""
     from astropy.wcs import WCS
 
     from astrometricslib.pipelines.astrometry.processing import star_identifier
@@ -461,7 +400,7 @@ def test_plate_solve_returns_the_center_scale_and_rotation(monkeypatch: pytest.M
 
     monkeypatch.setattr(star_identifier, "StarIdentifier", FakeIdentifier)
 
-    solution = ProcessingPipelines(AppConfiguration(), MagicMock()).plate_solve("/frames/one.fits")
+    solution = ProcessingPipelines(AppConfiguration(), MagicMock()).astrometry.solve("/frames/one.fits")
 
     assert (solution.ra_deg, solution.dec_deg) == pytest.approx((150.0, 30.0))
     assert solution.pixel_scale_arcsec == pytest.approx(2.0)

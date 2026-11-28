@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import StellarObject
+from astrometricslib import StellarObject, Target
 from astrometricslib._internal.results import PhotometryResult, SpectroscopyResult
 from astrometricslib.exceptions import NotFoundError
 from wayfindinglib.models.quality.statements import StatementKind
@@ -26,7 +26,11 @@ def _library(*stars: StellarObject) -> SimpleNamespace:
         Has a ``stars`` catalog with ``get``.
     """
     by_id = {star.id: star for star in stars}
-    return SimpleNamespace(stars=SimpleNamespace(get=lambda object_id: by_id.get(object_id)))
+    return SimpleNamespace(stars=SimpleNamespace(get=lambda object_id, **_: by_id.get(object_id)))
+
+
+TARGET = Target(id="T", name="T")
+"""The target the test stars belong to."""
 
 
 def _poor_spectrum_star() -> StellarObject:
@@ -55,7 +59,9 @@ def _poor_spectrum_star() -> StellarObject:
 
 def test_statements_come_back_in_priority_order() -> None:
     """Warnings come before recommendations and missing-data notes."""
-    statements = judge_star_result("T", "s1", astrometrics=_library(_poor_spectrum_star()))
+    statements = judge_star_result(
+        _poor_spectrum_star(), astrometrics=_library(_poor_spectrum_star()), target=TARGET
+    )
 
     kinds = [statement.kind for statement in statements]
     assert kinds[0] == StatementKind.WARNING
@@ -70,7 +76,7 @@ def test_a_star_with_no_results_says_what_is_missing() -> None:
     """A star with no spectrum and no search gets one missing-data note."""
     star = StellarObject(id="s2", target_ids=["T"], spectroscopy=None, photometry=None)
 
-    (statement,) = judge_star_result("T", "s2", astrometrics=_library(star))
+    (statement,) = judge_star_result(star, astrometrics=_library(star), target=TARGET)
 
     assert statement.kind == StatementKind.INSUFFICIENT_DATA
     assert "Missing" in statement.reason
@@ -79,13 +85,14 @@ def test_a_star_with_no_results_says_what_is_missing() -> None:
 def test_an_unknown_star_is_not_found() -> None:
     """A star that is not in the catalog raises `NotFoundError`."""
     with pytest.raises(NotFoundError):
-        judge_star_result("T", "nope", astrometrics=_library())
+        judge_star_result(StellarObject(id="nope"), astrometrics=_library(), target=TARGET)
 
 
 def test_a_star_of_other_targets_is_not_found() -> None:
     """A star recorded only for other targets is refused for this one."""
     with pytest.raises(NotFoundError) as caught:
-        judge_star_result("T", "s1", astrometrics=_library(StellarObject(id="s1", target_ids=["Other"])))
+        other = StellarObject(id="s1", target_ids=["Other"])
+        judge_star_result(other, astrometrics=_library(other), target=TARGET)
 
     assert caught.value.details["target_id"] == "T"
 
@@ -94,6 +101,6 @@ def test_a_star_with_no_recorded_targets_is_judged() -> None:
     """A star that lists no targets is not refused."""
     star = StellarObject(id="s3")
 
-    (statement,) = judge_star_result("T", "s3", astrometrics=_library(star))
+    (statement,) = judge_star_result(star, astrometrics=_library(star))
 
     assert statement.rule == "no_star_result"

@@ -38,13 +38,13 @@ def test_a_normal_or_spectral_stack_is_not_blank() -> None:
 
 def test_only_sessions_with_two_large_exposure_groups_count_as_mixed() -> None:
     """Two lengths of five or more frames are mixed; a stray frame is not."""
-    frames = [SimpleNamespace(exposure="60.0")] * 14 + [SimpleNamespace(exposure="300.0")] * 20
-    stray = [*frames, SimpleNamespace(exposure="30.0")]
+    frames = [SimpleNamespace(exposure_s=60.0)] * 14 + [SimpleNamespace(exposure_s=300.0)] * 20
+    stray = [*frames, SimpleNamespace(exposure_s=30.0)]
 
     assert mixed_exposure_counts(frames) == {60.0: 14, 300.0: 20}
     assert mixed_exposure_counts(stray) == {60.0: 14, 300.0: 20}
-    assert mixed_exposure_counts([SimpleNamespace(exposure="30.0")] * 40) == {}
-    assert mixed_exposure_counts([SimpleNamespace(exposure="60.0")] * 3 + frames[14:]) == {}
+    assert mixed_exposure_counts([SimpleNamespace(exposure_s=30.0)] * 40) == {}
+    assert mixed_exposure_counts([SimpleNamespace(exposure_s=60.0)] * 3 + frames[14:]) == {}
 
 
 def test_the_zero_share_of_a_stack_file_is_measured(tmp_path: Path) -> None:

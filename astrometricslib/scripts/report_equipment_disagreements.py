@@ -116,8 +116,8 @@ def find_iso_disagreements(targets: list[Any]) -> collections.Counter[tuple[str,
             header_value = iso_or_gain_text(header)
             if header_value is None:
                 continue
-            if not iso_or_gain_values_match(header_value, frame.iso):
-                disagreements[str(frame.camera), str(frame.iso), header_value] += 1
+            if not iso_or_gain_values_match(header_value, frame.gain):
+                disagreements[str(frame.camera), str(frame.gain), header_value] += 1
     return disagreements
 
 
@@ -160,7 +160,7 @@ def run_report(argv: list[str] | None = None) -> int:
     configure_logging("report_equipment_disagreements", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
-    targets = astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = astrometrics.targets.query(include_empty=True).items
     if arguments.target_ids:
         wanted = {target_id.strip().casefold() for target_id in arguments.target_ids}
         targets = [target for target in targets if target.id.strip().casefold() in wanted]

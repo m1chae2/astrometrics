@@ -222,7 +222,7 @@ class ExposureSharpness(BaseModel):
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The window length.
     windows_judged : `int`
         How many windows had enough guide samples to be judged.
@@ -235,7 +235,7 @@ class ExposureSharpness(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    exposure_seconds: float = Field(gt=0.0, alias="exposureSeconds")
+    exposure_s: float = Field(gt=0.0, alias="exposureS")
     windows_judged: int = Field(ge=0, alias="windowsJudged")
     windows_sharp: int = Field(ge=0, alias="windowsSharp")
     sharp_fraction: float | None = Field(default=None, ge=0.0, le=1.0, alias="sharpFraction")
@@ -347,7 +347,7 @@ def _is_sharp(statistics_of_window: Mapping[str, Any], allowed_rms_arcsec: float
 def sharpness_at_exposure(
     spans: Sequence[tuple[float, float]],
     samples: Sequence[Mapping[str, Any]],
-    exposure_seconds: float,
+    exposure_s: float,
     allowed_rms_arcsec: float,
 ) -> ExposureSharpness:
     """Find the share of sharp windows of one length.
@@ -360,7 +360,7 @@ def sharpness_at_exposure(
         than one window is dropped.
     samples : `Sequence` [`Mapping`]
         Guide samples with ``timestamp``, ``dra`` and ``ddec`` (arcseconds).
-    exposure_seconds : `float`
+    exposure_s : `float`
         The window length.
     allowed_rms_arcsec : `float`
         The largest sharp error on one axis.
@@ -372,12 +372,12 @@ def sharpness_at_exposure(
     """
     windows: list[FrameWindow] = []
     for start, end in spans:
-        count = int((end - start) // exposure_seconds)
+        count = int((end - start) // exposure_s)
         windows.extend(
             FrameWindow(
                 frame_id=f"{start:.0f}-{index}",
-                start_epoch_seconds=start + index * exposure_seconds,
-                exposure_seconds=exposure_seconds,
+                start_epoch_seconds=start + index * exposure_s,
+                exposure_s=exposure_s,
             )
             for index in range(count)
         )
@@ -394,7 +394,7 @@ def sharpness_at_exposure(
         else None
     )
     return ExposureSharpness(
-        exposureSeconds=exposure_seconds,
+        exposureS=exposure_s,
         windowsJudged=len(judgments),
         windowsSharp=sharp,
         sharpFraction=fraction,
@@ -443,7 +443,7 @@ def assess_guiding_exposure(
             reason=(
                 f"Only {len(star_widths_arcsec)} frames have a star width; the rule needs "
                 f"{resolve_parameter(MINIMUM_WINDOWS_PER_EXPOSURE).value} to set the allowed guide error. "
-                "Measure the target's frames (QualityRecords.measure_frames)."
+                "Measure the target's frames (quality.frames.record)."
             )
         )
     ranked_widths = sorted(star_widths_arcsec)
@@ -463,7 +463,7 @@ def assess_guiding_exposure(
     samples = [sample for night in nights for sample in samples_by_night[night]]
     exposures = sorted({*resolve_parameter(EXPOSURE_LADDER_SECONDS).value, used_exposure_seconds})
     ladder = [sharpness_at_exposure(spans, samples, exposure, allowed) for exposure in exposures]
-    used = next(item for item in ladder if item.exposure_seconds == used_exposure_seconds)
+    used = next(item for item in ladder if item.exposure_s == used_exposure_seconds)
     if used.sharp_fraction is None:
         return GuidingExposureOutcome(
             reason=(
@@ -475,7 +475,7 @@ def assess_guiding_exposure(
             )
         )
     supported = [
-        item.exposure_seconds
+        item.exposure_s
         for item in ladder
         if item.sharp_fraction is not None
         and item.sharp_fraction >= resolve_parameter(TARGET_SHARP_FRACTION).value

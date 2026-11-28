@@ -57,6 +57,7 @@ from astrometricslib._internal.drivers.fits_access import read_header
 from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError
 from astrometricslib.foundation.offline import network_is_offline
 from astrometricslib.foundation.parameters import resolve
+from astrometricslib.foundation.run_abandonment import RunAbandonedError
 from astrometricslib.models.stack_identification import IdentifiedStar, StackIdentification
 from astrometricslib.pipelines.astrometry.processing.catalog_matching import (
     nearest_catalog_entries,
@@ -95,7 +96,7 @@ from astrometricslib.utilities.gaia_record_ids import GAIA_DR3_PREFIX, gaia_reco
 __all__ = [
     "IDENTIFICATION_SIDECAR_SUFFIX",
     "UNNAMED_STAR",
-    "StackIdentificationStoppedError",
+    "identify_stack",
     "identify_stack_stars",
     "read_stack_identification",
 ]
@@ -139,10 +140,6 @@ _PROGRESS_SIMBAD_DONE = 0.9
 
 ProgressReport = Callable[[float, str], None]
 StopCheck = Callable[[], bool]
-
-
-class StackIdentificationStoppedError(AstrometricsError):
-    """The person stopped the identification before it finished."""
 
 
 def read_stack_identification(stack_path: str) -> StackIdentification | None:
@@ -240,11 +237,12 @@ def _check(should_stop: StopCheck | None) -> None:
 
     Raises
     ------
-    StackIdentificationStoppedError
-        When `should_stop` says so.
+    RunAbandonedError
+        When `should_stop` says so: the person stopped the identification
+        before it finished.
     """
     if should_stop is not None and should_stop():
-        raise StackIdentificationStoppedError("The star identification was stopped.")
+        raise RunAbandonedError("The star identification was stopped.")
 
 
 def _report(progress: ProgressReport | None, fraction: float, message: str) -> None:
@@ -650,7 +648,7 @@ def identify_stack_stars(
 
     Notes
     -----
-    A `StackIdentificationStoppedError` passes through when `should_stop`
+    A `RunAbandonedError` passes through when `should_stop`
     asked to stop.
     """
     if config is None:
@@ -908,3 +906,58 @@ def _catalog_only(
             )
         )
     return found
+
+
+def identify_stack(stack_path: str, *, config: Any = None, drivers: Any = None) -> StackIdentification:
+    """Name the detected stars of a stack, reporting to the current job.
+
+    This is the owner of `processing.astrometry.identify`. It runs
+    `identify_stack_stars` with the job context: the share done and a
+    sentence go to the current job (see `get_current_job`), and a run given
+    up on (see `bind_abandonment`) stops before the next step or Gaia tile.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The imaging stack. A raw frame is refused.
+    config : `AppConfiguration`, optional
+        The settings.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver.
+
+    Returns
+    -------
+    identification : `StackIdentification`
+        The named stars. It is also saved next to the stack.
+    """
+    from astrometricslib.foundation.jobs.runner import get_current_job
+    from astrometricslib.foundation.run_abandonment import raise_if_abandoned
+
+    def report(share: float, message: str) -> None:
+        """Pass one progress step to the current job, if there is one.
+
+        Parameters
+        ----------
+        share : `float`
+            The share done, 0 to 1.
+        message : `str`
+            What is being done.
+        """
+        job = get_current_job()
+        if job is not None:
+            job.mark("running", round(share * 100), message=message)
+
+    def stopped() -> bool:
+        """Raise when the run was given up on; otherwise say to go on.
+
+        Returns
+        -------
+        stop : `bool`
+            Always `False`: a run given up on raises `RunAbandonedError`.
+        """
+        raise_if_abandoned()
+        return False
+
+    return identify_stack_stars(
+        stack_path, config=config, drivers=drivers, progress=report, should_stop=stopped
+    )

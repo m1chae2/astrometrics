@@ -90,7 +90,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
           filterName = 'Light';
         }
 
-        const exp = typeof frame.exposure === 'number' ? frame.exposure : parseFloat(String(frame.exposure));
+        const exp = typeof frame.exposureS === 'number' ? frame.exposureS : parseFloat(String(frame.exposureS));
         if (!isNaN(exp) && exp > 0) {
           const roundedExp = Math.round(exp);
           if (!groupsMap[filterName]) {
@@ -151,7 +151,7 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
     }
 
     if (exptimeSec === null || exptimeSec === 0) {
-      const exp = obj.exposureTime ?? obj.exposure_sec ?? obj.exposureSec ?? obj.exposure ?? obj.totalExposure ?? 0;
+      const exp = obj.exposureS ?? obj.totalExposure ?? 0;
       exptimeSec = typeof exp === 'number' ? exp : parseFloat(String(exp)) || 0;
     }
 

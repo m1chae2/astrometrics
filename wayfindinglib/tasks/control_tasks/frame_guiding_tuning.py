@@ -139,8 +139,8 @@ def tune_slow_frame_ratio(inputs: TuningInputs) -> TuningResult:
             by_target.setdefault(_target_name_from_path(capture.file_path), []).append(
                 FrameWindow(
                     frame_id=capture.file_path,
-                    start_epoch_seconds=capture.completed_at - capture.exposure_seconds,
-                    exposure_seconds=capture.exposure_seconds,
+                    start_epoch_seconds=capture.completed_at - capture.exposure_s,
+                    exposure_s=capture.exposure_s,
                 )
             )
         for windows in by_target.values():

@@ -63,7 +63,7 @@ class FrameWindow(BaseModel):
         A label for the frame (a file name or a frame id).
     start_epoch_seconds : `float`
         When the exposure began, in seconds since the Unix epoch.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length, in seconds. 0 gives an empty window.
     """
 
@@ -71,7 +71,7 @@ class FrameWindow(BaseModel):
 
     frame_id: str
     start_epoch_seconds: float
-    exposure_seconds: float = Field(ge=0.0)
+    exposure_s: float = Field(ge=0.0)
 
     @property
     def end_epoch_seconds(self) -> float:
@@ -82,10 +82,10 @@ class FrameWindow(BaseModel):
         end_epoch_seconds : `float`
             Start plus exposure, in seconds since the Unix epoch.
         """
-        return self.start_epoch_seconds + self.exposure_seconds
+        return self.start_epoch_seconds + self.exposure_s
 
 
-def window_statistics(samples: Sequence[Mapping[str, Any]], exposure_seconds: float) -> dict[str, Any]:
+def window_statistics(samples: Sequence[Mapping[str, Any]], exposure_s: float) -> dict[str, Any]:
     """Summarize the guide error of the samples inside one window.
 
     Parameters
@@ -94,7 +94,7 @@ def window_statistics(samples: Sequence[Mapping[str, Any]], exposure_seconds: fl
         The guiding rows inside the window, in time order. Each needs
         ``timestamp`` (seconds since the Unix epoch), ``dra`` and ``ddec``
         (the error in right ascension and declination, in arcseconds).
-    exposure_seconds : `float`
+    exposure_s : `float`
         The window length, used to say how much of it the samples cover.
 
     Returns
@@ -114,7 +114,7 @@ def window_statistics(samples: Sequence[Mapping[str, Any]], exposure_seconds: fl
     total_errors = [(ra**2 + dec**2) ** 0.5 for ra, dec in zip(ra_errors, dec_errors, strict=True)]
     gaps = [later["timestamp"] - earlier["timestamp"] for earlier, later in pairwise(samples)]
     cadence = statistics.median(gaps) if gaps else None
-    coverage = min(1.0, len(samples) * cadence / exposure_seconds) if cadence and exposure_seconds else None
+    coverage = min(1.0, len(samples) * cadence / exposure_s) if cadence and exposure_s else None
     return {
         "guide_samples": len(samples),
         "coverage_fraction": round(coverage, 2) if coverage is not None else None,
@@ -176,7 +176,7 @@ def join_frames_to_guiding(
     ordered = sorted(samples, key=lambda row: row["timestamp"])
     timestamps = [row["timestamp"] for row in ordered]
     return [
-        window_statistics(samples_inside_window(ordered, timestamps, window), window.exposure_seconds)
+        window_statistics(samples_inside_window(ordered, timestamps, window), window.exposure_s)
         for window in windows
     ]
 

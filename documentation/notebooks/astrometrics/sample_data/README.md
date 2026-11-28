@@ -40,17 +40,13 @@ To register a frame by hand instead, the ingestion script from
 
 ```bash
 .venv/bin/python documentation/notebooks/astrometrics/scripts/local_image_ingestion.py \
-  "M 13" "documentation/notebooks/astrometrics/sample_data/M 13/M_13_Light_Luminance_019.fits" \
-  --role LIGHT
+  "M 13" "/tmp/M 13 copy/M_13_Light_Luminance_019.fits"
 ```
 
 :::{warning}
-Point that at a copy, not the file under this directory. Astrometrics
-caches a solved WCS by writing it back into whichever FITS file it
-solved — the right behavior for your own capture library, where it
-saves re-solving the same frame on a later run, but not for this
-directory's checked-in reference data: running astrometry or photometry
-against a frame registered this way rewrites that file in place.
+Point that at a copy, not the file under this directory. The script
+moves a file from outside the library into the library's frames folder
+(`targets.frames.add`), so the file leaves the folder you name.
 :::
 
 ## Provenance

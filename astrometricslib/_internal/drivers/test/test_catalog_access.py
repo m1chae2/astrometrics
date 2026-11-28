@@ -110,13 +110,13 @@ def test_mock_catalog_access_injection() -> None:
     astrometrics = astrometrics_with_drivers(catalog_access=mock_catalog_access)
 
     # Verify hydration used the mock catalog_access
-    targets = astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = astrometrics.targets.query(include_empty=True).items
     assert len(targets) == 2
     assert targets[0].id == "M 31"
     assert targets[1].id == "Orion"
 
     # Verify saving routes back to mock catalog_access
-    astrometrics.targets.save()
+    astrometrics.targets._save()
     assert len(mock_catalog_access.targets) == 2
 
 

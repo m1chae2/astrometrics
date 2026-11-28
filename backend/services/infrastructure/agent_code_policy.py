@@ -43,6 +43,7 @@ LIBRARY_ROOTS = frozenset({"astrometricslib", "wayfindinglib"})
 
 PUBLIC_MODULES = frozenset({
     "astrometricslib",
+    "astrometricslib.arguments",
     "astrometricslib.exceptions",
     "astrometricslib.reports",
     "astrometricslib.jobs",

@@ -57,8 +57,8 @@ export const ImageList: React.FC<Props> = ({ items, onRemove, onEdit }) => {
                                 </div>
                             </td>
                             <td className="image-list__number">{item.count}</td>
-                            <td className="image-list__number">{item.exposure} s</td>
-                            <td className="image-list__number">{item.delay || 0} s</td>
+                            <td className="image-list__number">{item.exposure_s} s</td>
+                            <td className="image-list__number">{item.delay_s || 0} s</td>
                             <td>{filterLabel(String(item.filter ?? ''))}</td>
                             <td className="image-list__actions">
                                 {onEdit && (

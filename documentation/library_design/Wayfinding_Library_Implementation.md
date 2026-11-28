@@ -12,14 +12,14 @@ Terms are in the [glossary](../Glossary.md).
 
 This paper indexes the code; theory stays in [Wayfinding_Library_Architecture.md](Wayfinding_Library_Architecture.md). Module paths are relative to `wayfindinglib/` unless a path starts with another folder.
 
-The package root is the one supported entry point. It loads names on first use, so importing it loads no hardware code. Its 8 names are `Wayfinder` (sub-APIs `control`, `planning`, `execution`, `review`), the four sub-API classes, `ObservationSession`, `ObservationPackage` and `FrameEndDetector`. `exceptions.py` and `reports.py` are public. The rest is private.
+The package root is the one supported entry point. It loads names on first use, so importing it loads no hardware code. Its names are `Wayfinder`, the four sub-API classes, `ObservationSession`, `ObservationPackage` and the input models. `exceptions.py`, `reports.py` and `logs.py` (with `FrameEndDetector`) are public. The rest is private.
 
 <!-- impl: wayfindinglib.Wayfinder -->
 <!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
 <!-- impl: wayfindinglib.api.planning.ObservationPlanning -->
 <!-- impl: wayfindinglib.api.execution.ObservationExecution -->
 <!-- impl: wayfindinglib.api.review.ObservationReview -->
-<!-- impl: wayfindinglib.api.review.ObservationReview.query_alignment_sessions -->
+<!-- impl: wayfindinglib.api.review.nights.ReviewNights -->
 
 ## 2. System architecture
 
@@ -31,7 +31,7 @@ The package root is the one supported entry point. It loads names on first use, 
 | --- | --- |
 | Foundation | `models/`, `astronomy/`, `data_access/`, `analytics/`, `drivers/butler.py`, `drivers/control_record_store.py`, `drivers/catalog/` |
 | Control | `tasks/control_tasks/`, `session_analysis/`, `watchdog/`, `api/control/`, and the hardware drivers (`drivers/`, except those above) |
-| Planning | `tasks/planning_tasks/`, `api/planning.py` |
+| Planning | `tasks/planning_tasks/`, `api/planning/` |
 | Execution | `tasks/execution_tasks/`, `api/execution.py` |
 | Composition root | `wayfindinglib/__init__.py`, `api/__init__.py` |
 
@@ -54,17 +54,17 @@ Shared definitions in the foundation: protocol names (`models/equipment_and_site
 
 `validate_delegation_policy` raises `DelegationPolicyValidationError` for a shadowed safety capability, early capture orchestration or missing calibration. `promote_capability` forces shadowing first.
 
-Each command in `tasks/control_tasks/hardware_operations.py` starts with `_require_authoritative`, which raises `PermissionDeniedError` unless its capability is `AUTHORITATIVE`. Table 2 lists them.
+Each command in `tasks/control_tasks/hardware_operations.py` starts with `require_authoritative`, which raises `PermissionDeniedError` unless its capability is `AUTHORITATIVE`. Table 2 lists them.
 
 **Table 2.** Capability required by each hardware command.
 
 | Capability | Commands |
 | --- | --- |
-| `MOUNT_CONTROL` | `slew`, `park`, `unpark`, `set_tracking`, `manual_move`, `abort_motion`, `set_slew_rate` |
+| `MOUNT_CONTROL` | `slew`, `park`, `unpark`, `set_tracking`, `manual_move`, `stop_mount`, `set_slew_rate` |
 | `PLATE_SOLVE_ALIGNMENT` | `sync_mount` |
-| `AUTOGUIDING` | `pulse`, `guide_expose` |
-| `AUTOFOCUS` | `focus_move` |
-| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image`, `stop_capture` |
+| `AUTOGUIDING` | `pulse`, `guide_expose`, `start_loop`, `stop_loop` |
+| `AUTOFOCUS` | `move_focuser` |
+| `CAPTURE_ORCHESTRATION` | `set_filter`, `capture_image`, `stop_capture`, `check_capture` |
 | `OBSERVATORY_SAFETY` | `open_enclosure`, `close_enclosure` |
 
 `tasks/control_tasks/capability_promotion.py` holds `apply_promotion_decision`, `summarize_divergence_evidence` (Architecture Equation (2)) and `set_all_capabilities`.
@@ -89,7 +89,7 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 | Architecture record | Classes | Module (under `models/`) |
 | --- | --- | --- |
-| Telescope, camera, guide optics, catalog | `Telescope`, `Camera`, `GuideScope`, `EquipmentCatalog` | `equipment_and_site/equipment.py` |
+| Telescope, camera, guide optics, catalog | `EquipmentCatalog` (of the core's `Telescope`, `Camera`, `GuideScope`) | `equipment_and_site/equipment.py` |
 | Site profile | `SiteProfile`, `AvoidanceZone` | `equipment_and_site/site_profile.py` |
 | Enclosure specification | `Enclosure`, `EnclosureState` | `equipment_and_site/enclosure.py` |
 | Guider calibration; focus model | `GuiderCalibration`; `FocusModel` | `equipment_and_site/guider_calibration.py`, `focus_model.py` |
@@ -110,19 +110,19 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 `ObservatoryControl` (Section 6.1), `ObservationPlanning` (Section 4) and `ObservationExecution` (Section 5) expose the operations of the architecture's Table 3.
 
-<!-- impl: wayfindinglib.models.equipment_and_site.equipment.Camera -->
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment.EquipmentCatalog -->
 <!-- impl: wayfindinglib.models.session.divergence.DivergenceRecord -->
 <!-- impl: wayfindinglib.models.session.ekos_session.EkosSessionContext -->
 <!-- impl: wayfindinglib.models.policy.device_state.DeviceState -->
 
 ## 3. Foundation (Architecture Section 3)
 
-- **Equipment catalog.** `equipment_catalog_reader.py` builds the `EquipmentCatalog` from the setups: one `Telescope` per optic. `EquipmentConfiguration` uses `PLATE_SCALE_CONSTANT` (206.265, Equation (1)).
+- **Equipment catalog.** `equipment_catalog_reader.py` builds the `EquipmentCatalog` from `AppConfiguration.get_telescopes`: one `Telescope` per optic. `control.equipment.get_active` and `set_active` read and choose the `ObservatoryConfiguration`.
 - **Site.** `data_access/site_profile_reader.py` reads `[Observatory.Location]`, falls back to `FALLBACK_SITE` (Denver: 39.7392, -104.9903, 1600 m) with a warning, and seeds the default `SiteProfile`. Control uses `hardware_operations.observer_location` (mount first), so the rule holds for planning only.
-- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt from a frame names it in `source_frame`, so the same frame brought in or solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
+- **Storage.** `drivers/butler.py` holds `DiskButler`, the one storage path: `AbstractButler` from `astrometricslib`, one table per dataset type in `wayfinding.db`. `ControlRecordStore` keeps `alignment_attempts`, `guiding_samples` and `polar_alignments`. An alignment attempt names its frame in `source_frame`, so a frame solved again updates one row; `remove_repeated_alignment_attempts` reports, and with `apply=True` deletes, rows stored twice.
 
 <!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_equipment_catalog -->
-<!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_telescope -->
+<!-- impl: wayfindinglib.tasks.control_tasks.equipment_activation.set_active_configuration -->
 <!-- impl: wayfindinglib.data_access.site_profile_reader.get_or_seed_default_site_profile -->
 <!-- impl: wayfindinglib.data_access.safety_policy_reader.get_safety_rule_set -->
 <!-- impl: wayfindinglib.drivers.butler.DiskButler -->
@@ -130,18 +130,18 @@ The phase is the combination of states `DelegationPolicy` holds, not a type. `Co
 
 ## 4. Observation planning (Architecture Section 4)
 
-Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` (`api/planning.py`), which loads no hardware driver.
+Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` (`api/planning/`: `sessions`, `packages`, `sky`, `catalogs`), which loads no hardware driver.
 
 - **Night window and visibility.** `night_window.py` (`resolve_night_window`), `astronomy/solar_position.py`, `visibility_tasks.py` (`visibility_state_at`, `find_earliest_visible_window`, `ever_visible`), `visibility_report.py`, `visibility_operations.py`.
 - **Placement.** `scheduling.py` (`PlacementRequest`, `place`, `schedule_session`, `_apply_advisory_boost`). Reasons: `InfeasibilityReasonCode`. The boost needs `quality_weighting_enabled`.
-- **Mosaics and advice.** `mosaic_tasks.py` (`calculate_panels`), `calibration_advisory_tasks.py` (`get_calibration_advice`, `get_tonight_advice`). The quality judgments are in Section 6.10.
-- **Plans.** `planning_operations.py` (`create_sequence`, `create_package`, `create_session`; `get_plan`, `add_to_queue`, `tick_checklist_item`).
+- **Sky answers and mosaics.** `sky_answers.py`, `mosaic_tasks.py` (`calculate_panels`). The quality judgments are in Section 6.10.
+- **Plans.** `session_records.py` (`edit_session`), `package_records.py`, `suggestion_refresh.py` (`record_suggestions`).
 - **Sky.** `sky_engine.py` (`SkyEngine`), `sky_sources.py`, `drivers/catalog/`, and the `*_operations.py` calculation modules.
 
 <!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.PlacementRequest -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.visibility_tasks.find_earliest_visible_window -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.sky_engine.SkyEngine -->
-<!-- impl: wayfindinglib.tasks.planning_tasks.planning_operations -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.session_records.edit_session -->
 <!-- impl: wayfindinglib.models.planning.sequence_plan.SequencePlan -->
 
 **Table 4.** Planning settings. `PlanningConfig` is in `models/planning/planning_config.py`.
@@ -153,7 +153,7 @@ Folder: `tasks/planning_tasks/`. Facade: `ObservationPlanning` (`api/planning.py
 | Boost for a flagged target | 2 | `PlanningConfig.flagged_quality_priority_boost` |
 | Boost for an asteroid or variable-star candidate | 1 | `PlanningConfig.science_outcome_priority_boost` |
 | Default dither | every 3 frames, 3 pixels | `PlanningConfig.dither_every_n_frames_default`, `DitherConfig` |
-| Mosaic overlap | 10% | `PlanningConfig.mosaic_panel_overlap_percent` |
+| Mosaic overlap | 10% | `PlanningConfig.mosaic_panel_overlap_pct` |
 | Default mosaic field of view | 23.5 by 15.6 mm, 400 mm | `DEFAULT_SENSOR_WIDTH_MM`, `DEFAULT_SENSOR_HEIGHT_MM`, `DEFAULT_FOCAL_LENGTH_MM` |
 | Telescope altitude range | 0° to 90°, on by default | `Telescope.min_altitude_deg`, `max_altitude_deg`, `altitude_limits_enabled` |
 | Hour-angle bound | 2 h, off by default; checked at slew time | `Telescope.max_hour_angle_hours`, `hour_angle_limits_enabled` |
@@ -183,7 +183,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 | Setting | Value | Where |
 | --- | --- | --- |
 | Recovery attempts | 3 | `RecoveryPolicy.max_attempts` |
-| First wait before a retry | 30 s | `RecoveryPolicy.initial_interval_sec` |
+| First wait before a retry | 30 s | `RecoveryPolicy.initial_interval_s` |
 | Growth factor of the wait | 2.0 (waits 0, 30, 60 s; Architecture Equation (4)) | `RecoveryPolicy.backoff_multiplier` |
 | Alignment rounds after a flip and in centering | 3 | `CorrectionConfig.alignment_iteration_limit` |
 | Guide-star re-acquisition attempts | 3 | `CorrectionConfig.guide_reacquire_attempts` |
@@ -195,22 +195,20 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` (`api/execution
 
 ### 6.1 Facade and children
 
-`ObservatoryControl` (`api/control/control.py`) holds the drivers and six children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`.
+`ObservatoryControl` (`api/control/control.py`) holds the drivers and six children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py`; `get_status` reads are in `tasks/control_tasks/control_status.py`.
 
 **Table 6.** The six children of `ObservatoryControl`.
 
 | Child | Main calls |
 | --- | --- |
-| `control.mount` | `slew`, `park`, `unpark`, `set_tracking` |
-| `control.imaging` | `capture_image`, `set_filter`, `focus_move` |
-| `control.guiding` | `run_loop`, `stop_loop`, `refit_spectrum` |
-| `control.remote` | `list`, `sync_frames`, `sync_logs` |
-| `control.safety` | `apply_promotion_decision`, `enter_monitoring_mode` |
-| `control.equipment` | `connect`, `set_active_telescope` |
+| `control.mount` | `slew`, `stop`, `park`, `set_tracking` |
+| `control.imaging` | `check_capture`, `capture`, `stop`, `move_focuser` |
+| `control.guiding` | `start`, `stop`, `capture`, `create_guider_calibration` |
+| `control.remote` | `query_folders`, `sync_frames`, `sync_logs` |
+| `control.safety` | `set_mode`, `update` |
+| `control.equipment` | `connect`, `get_active`, `set_active` |
 
-`Wayfinder.review` (`api/review.py`) holds the night reads.
-
-The `kind` values of `review.query` are `capture`, `guiding`, `sky_coverage`, `recurring_issues`, `ekos_sessions`, `guiding_runs`, `pointing_model`, `alignment`. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
+`Wayfinder.review` (`api/review/`) holds the night reads in five objects: `nights`, `targets`, `guiding`, `performance` and `alignment`. `hardware_operations.mount_position_to_icrs` converts the mount's JNow positions to ICRS.
 
 <!-- impl: wayfindinglib.api.control.context.ControlContext -->
 <!-- impl: wayfindinglib.api.control.context.ControlChild -->
@@ -277,16 +275,16 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.5 Safety
 
-`safety_monitor.py` holds `SafetyMonitor`: `_evaluate_rule` gives `UNKNOWN` for a stale reading, `_evaluate_rules` takes the most severe result, and `evaluate` publishes a safe result only after `settling_period_sec`. `hardware_operations.refresh_safety_assessment` reads the weather driver.
+`safety_monitor.py` holds `SafetyMonitor`: `_evaluate_rule` gives `UNKNOWN` for a stale reading, `_evaluate_rules` takes the most severe result, and `evaluate` publishes a safe result only after `settling_period_s`. `hardware_operations.refresh_safety_assessment` reads the weather driver.
 
 **Table 8.** Safety and enclosure settings.
 
 | Setting | Value | Where |
 | --- | --- | --- |
-| Age bound of a reading | 120 s | `SafetyRule.staleness_bound_sec` |
-| Settling period before reopening | 900 s | `SafetyRuleSet.settling_period_sec` |
+| Age bound of a reading | 120 s | `SafetyRule.staleness_bound_s` |
+| Settling period before reopening | 900 s | `SafetyRuleSet.settling_period_s` |
 | Mount clearance about the park position | 2° per axis | `Enclosure.clearance_tolerance_deg` |
-| Enclosure motion timeout | 180 s | `Enclosure.motion_timeout_sec` |
+| Enclosure motion timeout | 180 s | `Enclosure.motion_timeout_s` |
 
 <!-- impl: wayfindinglib.tasks.control_tasks.safety_monitor.SafetyMonitor.evaluate -->
 <!-- impl: wayfindinglib.drivers.indi.weather_controller.WeatherController -->
@@ -304,7 +302,7 @@ All in `tasks/control_tasks/` unless noted.
 | --- | --- | --- |
 | Target temperature | -10 °C | `CoolingPolicy.target_temp_c` |
 | Ramp rate | 2 °C/min (the camera's limit applies if lower) | `CoolingPolicy.ramp_c_per_min` |
-| Settled tolerance; timeout | 0.5 °C; 900 s | `CoolingPolicy.settle_tolerance_c`, `settle_timeout_sec` |
+| Settled tolerance; timeout | 0.5 °C; 900 s | `CoolingPolicy.settle_tolerance_c`, `settle_timeout_s` |
 | Camera cooling floor and ramp limit | -30 °C; 2 °C/min | `Camera.min_cooling_temp_c`, `max_cooling_ramp_c_per_min` |
 
 <!-- impl: wayfindinglib.tasks.control_tasks.enclosure_control.mount_within_clearance -->
@@ -343,7 +341,7 @@ All in `tasks/control_tasks/` unless noted.
 
 `ekos_log_ingestion.py` downloads guide and analyze logs (`control.remote.sync_logs`) and ties each session to its equipment (`attribute_session_equipment`). Parsers: `drivers/phd2/guide_log_parser.py`, `drivers/ekos/analyze_log_parser.py`. `frame_pointing.py` records each solved frame's pointing error, one record per frame file name.
 
-`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `review.get_performance_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
+`derive_performance_envelope` (`analytics/performance_envelope.py`) is the pure derivation (Architecture Equations (10) to (12)); `performance_envelope_tasks.py` gathers its inputs; the entry is `review.performance.get_envelope`. Constants: `SIGMA_TO_FWHM` (2.3548), `SIDEREAL_RATE_ARCSEC_PER_SECOND` (15.041), `MAD_TO_SIGMA` (1.4826). `analytics/tracking_risk.py` (`build_tracking_risk_map`) builds `tracking_risk`.
 
 <!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion.attribute_session_equipment -->
 <!-- impl: wayfindinglib.models.session.telemetry.MEASURED_GUIDING_SAMPLE_SOURCES -->
@@ -360,8 +358,8 @@ All in `tasks/control_tasks/` unless noted.
 | Guiding (exposure length in `processing/measure_exposure_feasibility.py`) | `session_analysis/guiding/` | `GuidingSessionAnalysis`, `GuidingPerformance` (`models/session/session_quality.py`); `kind="guiding"` |
 | Capture | `session_analysis/capture/`, `wayfindinglib/analytics/capture_history.py` | `CaptureSessionAnalysis`, `CapturePerformance` (`models/session/capture_quality.py`); `kind="capture"` |
 | Guide exposure test | `analytics/guide_exposure_ladder.py`, `guide_exposure_ladder_tasks.py` | `GuideExposureLadder`; `control.guiding._run_exposure_test`. Tested only against a simulated camera. |
-| Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `kind="sky_coverage"` |
-| Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `get_live_session_status`; `frame_guiding`; `kind="alignment"` |
+| Sky position | `session_analysis/sky/` | `SkyAnalysis`, `SkySample`; `nights.get_sky_coverage` |
+| Recurring issues; live status; frame and guide error; alignment history | `recurring_issues.py`, `live_status.py`, `frame_guiding.py`, `alignment_history.py` | `RecurringIssue`; `nights.get_live_status`; `targets.get_frame_guiding`; `alignment.query` |
 
 <!-- impl: wayfindinglib.session_analysis.pipeline_base.SessionAnalysisRequest -->
 <!-- impl: wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibility.LOST_STAR_CYCLES -->
@@ -413,7 +411,7 @@ All in `tasks/control_tasks/` unless noted.
 
 ### 6.10 Quality judgment and advice (Quality Judgment paper)
 
-The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.get_advisory` (kinds `quality`, `result`), `planning.get_tonight_advice`, `planning.get_calibration_advice` and `review.query` (kinds `night_quality`, `nights`, `target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
+The theory is in [Wayfinding quality judgment](Wayfinding_Quality_Judgment.md) (Architecture Section 6.11). Planning and Control share the vocabulary in `models/quality/`; the judging code is in `analytics/result_quality/` (see its README). Entry points: `review.targets.get_report` and `get_result`, `planning.sky.get_tonight_advice` and `review.nights` (`get`, `query`, `get_target_changes`). A rule's confidence is its register entry's status label (see [WAY-01](validation/wayfinding.md#way-01)).
 
 Roles (decided 2026-11-01, issue #97): all gates and measurements stay in `astrometricslib`; every reading of good or bad is a suggestion in `wayfindinglib`. These rules compare a stored number with a copy of the library's limit, and a test pins each copy: `stack_rejected_fraction_high` ([STK-24](validation/stacking.md#stk-24)) and `stack_sharpness_poor` ([STK-25](validation/stacking.md#stk-25)) in `rules.py` and `judge_results.py`; `spectral_type_poor_match`, `spectral_class_ambiguous` and `spectral_subtype_ambiguous` ([SPE-16, SPE-18](validation/spectroscopy.md#spe-18)) in `star_result_rules.py`. `scripts/shadow_compare_verdicts.py` lists where the rules and the stored flags disagree.
 
@@ -436,7 +434,7 @@ Roles (decided 2026-11-01, issue #97): all gates and measurements stay in `astro
 | One star's result | `judge_star_result` (`result_judgment_tasks.py`), `star_result_rules.py` | [WAY-73](validation/wayfinding.md#way-73); WAY-D73 |
 | Sky model, overheads, tonight's ranking | `fit_sky_model` (`sky_model.py`), `estimate_capture_overheads` (`capture_overheads.py`), `rank_tonight`, `score_candidate`, `recommended_additional_frames_status_of_target` (`tonight_ranking_tasks.py`, `target_report_inputs.py`) | [WAY-71](validation/wayfinding.md#way-71), [WAY-72](validation/wayfinding.md#way-72); WAY-D29, D33, D71, D72 |
 | Night plan | `ObservationSession` fields `checklist`, `framing`, `revision`; `PlanChange`, `PlanRevisionConflictError`; `night_plan_tasks.py`; `AllowedCaptureValues`; `SequenceSummary` | [WAY-50](validation/wayfinding.md#way-50), [WAY-51](validation/wayfinding.md#way-51), [WAY-52](validation/wayfinding.md#way-52), [WAY-53](validation/wayfinding.md#way-53), [WAY-54](validation/wayfinding.md#way-54); WAY-D50 to D54 |
-| Night list and target changes | `build_night_list`, `build_night_history` (`night_history.py`); `find_target_changes` | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55 to D57 |
+| Night list and target changes | `build_night_list`, `query_nights` (`night_history.py`); `find_target_changes` | [WAY-55](validation/wayfinding.md#way-55), [WAY-57](validation/wayfinding.md#way-57); WAY-D55 to D57 |
 | Monitor mode | `ALLOWED_IN_MONITOR_MODE`, the `test_monitor_mode_*` tests, guards in `hardware_operations.py` | [WAY-56](validation/wayfinding.md#way-56) |
 | Reply size | `mcp_servers/common/reply_budget.py`; `fit_status_to_budget` | WAY-D58, D77 |
 
@@ -553,11 +551,11 @@ No module applies the gates of the architecture's Table 8; `DivergenceEvidenceSu
 | Mount | `control.mount.slew`, `park`, `set_tracking` |
 | Align | `control.mount._compute_pointing_correction`, `slew(center=True)` |
 | Focus | `focus_correction.compute_focus_correction` (no autofocus sweep call) |
-| Guide | `control.guiding._compute_correction`, `status(include=["live"])` |
-| Scheduler | `planning.create_session(..., requests=)` |
-| Capture | `planning.create_package` |
+| Guide | `control.guiding._compute_correction`, `get_status(include=["live"])` |
+| Scheduler | `planning.sessions.create(night, packages=...)` |
+| Capture | `planning.packages.create` |
 | Dome and weather interlock | `control.safety._execute_safe_state`, `_assess` |
-| Session recording | `execution.advance_session`, `create_recorder`, `review.query` |
+| Session recording | `execution.run`, `create_recorder`, `review.nights` |
 
 ## References
 

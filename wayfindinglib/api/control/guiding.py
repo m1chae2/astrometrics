@@ -1,27 +1,27 @@
 """Purpose: `control.guiding`, the guide camera, pulses and guider models.
 
-Description: Sends guide pulses, takes guide exposures, computes the
-pulse that corrects a measured drift, follows the guiding going on now
-(its root-mean-square (RMS) error, through the guiding driver the
-``guiding_protocol`` setting picks) and runs this app's own guide loop.
-It runs the guider calibrations (the pulse-to-pixel calibration, the
-declination backlash probe and the guide exposure test) and refits the
-mount's periodic error model from recorded guiding samples. `status`
-reads the saved calibration, the saved periodic error model, the guide
-camera's plate scale and the live guiding. Pulses and guide exposures
-need `AUTOGUIDING` to be `AUTHORITATIVE`.
+Description: Starts and stops this app's own guide loop, takes guide
+exposures, computes the pulse that corrects a measured drift and follows
+the guiding going on now (its root-mean-square (RMS) error, through the
+guiding driver the ``guiding_protocol`` setting picks). It runs the
+guider calibrations (the pulse-to-pixel calibration, the declination
+backlash probe and the guide exposure test). `get_status` reads the saved
+calibration, the saved periodic error model, the guide camera's plate
+scale and the live guiding; guider calibrations are records, read with
+`query_guider_calibrations` and stored with `create_guider_calibration`.
+Pulses and guide exposures need `AUTOGUIDING` to be `AUTHORITATIVE`. The
+mount's periodic error model is fitted by
+``review.guiding.measure_spectrum``.
 """
 
-import threading
-from datetime import datetime
 from typing import Any
 
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import ConfigurationError, ExternalServiceError
 from astrometricslib.parameters import resolve_parameter
-from wayfindinglib.api.control.context import ControlChild, require_text
+from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import GuidingStatus
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
-from wayfindinglib.models.session.control_results import GuideExposureResult
 from wayfindinglib.models.session.correction_result import GuidingCorrection
 from wayfindinglib.models.session.guide_exposure_ladder import GuideExposureLadder
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -33,34 +33,15 @@ from wayfindinglib.tasks.control_tasks.calibration_routines import (
 
 __all__ = ["GuidingControl"]
 
-STATUS_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale", "live")
-"""Sections `GuidingControl.status` can read."""
-
-SAVED_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale")
-"""The sections `GuidingControl.status` reads when none are named. They
-need no device."""
-
-
-#: Longest id a recorded calibration or focus model may have.
-MAXIMUM_RECORD_ID_LENGTH = 100
-
-#: Longest source note a recorded calibration may have.
-MAXIMUM_SOURCE_NOTE_LENGTH = 500
-
-#: Largest plate scale a guide camera could have (arcsec per pixel). Real
-#: guide trains are about 1 to 10; 100 only catches a typing slip.
-MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL = 100.0
-
-#: Largest guide pulse speed accepted (arcsec per second). The sidereal rate
-#: is about 15; PHD2 reports a few times that at most.
-MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC = 1000.0
-
 
 class GuidingControl(ControlChild):
     """Operate the guide camera and the guider's saved models."""
 
-    def status(self, include: list[str] | None = None) -> GuidingStatus:
+    def get_status(self, include: list[str] | None = None) -> GuidingStatus:
         """Read the saved guider models, and the guiding going on now.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_status.read_guiding_status
 
         Parameters
         ----------
@@ -80,78 +61,143 @@ class GuidingControl(ControlChild):
         status : `GuidingStatus`
             The sections read. The others stay `None`.
         """
-        from wayfindinglib.tasks.control_tasks import hardware_operations, live_guiding
+        from wayfindinglib.tasks.control_tasks.control_status import read_guiding_status
 
-        sections = hardware_operations.check_sections(
-            include if include is not None else list(SAVED_SECTIONS), STATUS_SECTIONS
-        )
-        status = GuidingStatus(sections=sections)
-        if "calibration" in sections:
-            status.calibration = self._context.active_guider_calibration()
-        if "spectrum_analysis" in sections:
-            status.spectrum_analysis = self._context.active_guiding_spectrum_analysis()
-        if "plate_scale" in sections:
-            status.plate_scale_arcsec_per_px = self._context.guider_plate_scale_arcsec_per_px()
-        if "live" in sections:
-            live_guiding.poll(self._context)
-            status.live = self._context.live_guiding.status()
-        return status
+        return read_guiding_status(self._context, include)
 
-    def run_loop(
-        self,
-        stop: threading.Event,
-        exposure_seconds: float | None = None,
-        gain: float | None = None,
-    ) -> None:
-        """Run this app's guide loop until `stop` is set or tracking is lost.
+    def start(self, exposure_s: float | None = None, gain: float | None = None) -> None:
+        """Start this app's guide loop, which runs until `stop`.
 
-        Blocks, so run it on its own thread. Each cycle takes a guide
-        exposure, measures the guide error and sends the correction
-        pulses, through the guiding driver the active telescope's
+        The loop runs on a thread of its own. Each cycle takes a guide
+        exposure, measures the guide error and sends the correction pulses,
+        through the guiding driver the active telescope's
         ``guiding_protocol`` names. Only the ``simulator`` driver runs a
         loop today: PHD2 runs its own, and the ``internal`` driver cannot
-        measure the guide star yet. `status(include=["live"])` shows the
-        progress.
+        measure the guide star yet. ``get_status(include=["live"])`` shows
+        the progress. The loop ends by itself if the mount stops tracking.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.live_guiding.start_loop
 
         Parameters
         ----------
-        stop : `threading.Event`
-            Set it to end the loop after the current cycle.
-        exposure_seconds : `float`, optional
-            Guide exposure length. The last one used when omitted (1 s
-            at first).
+        exposure_s : `float`, optional
+            Guide exposure length in seconds. The last one used when
+            omitted (1 s at first).
         gain : `float`, optional
             Guide camera gain. The last one used when omitted.
 
         Notes
         -----
-        Raises `ConflictError` if the mount does not track when the loop
-        starts or the guider runs its own loop, and `ConfigurationError`
-        if the guiding driver cannot run this loop. Pulses and guide
-        exposures need `AUTOGUIDING` to be `AUTHORITATIVE`.
+        Raises `PermissionDeniedError` unless `AUTOGUIDING` is
+        `AUTHORITATIVE`, and `ConflictError` if the loop already runs or
+        the mount does not track.
         """
         from wayfindinglib.tasks.control_tasks import live_guiding
 
-        live_guiding.run_loop(self._context, stop, exposure_seconds=exposure_seconds, gain=gain)
+        live_guiding.start_loop(self._context, exposure_s, gain)
 
-    def stop_loop(self, stop: threading.Event) -> None:
-        """End the guide loop that `run_loop` runs, by setting its event.
+    def stop(self) -> None:
+        """Stop this app's guide loop and wait for it to end.
 
-        Monitor mode refuses this too: the event stays unset.
+        Stopping when no loop runs does nothing. Monitor mode refuses this
+        too.
 
-        Parameters
-        ----------
-        stop : `threading.Event`
-            The event the running loop watches.
+        Owner:
+            wayfindinglib.tasks.control_tasks.live_guiding.stop_loop
 
         Notes
         -----
         Raises `PermissionDeniedError` unless `AUTOGUIDING` is
         `AUTHORITATIVE`.
         """
+        from wayfindinglib.tasks.control_tasks import live_guiding
+
+        live_guiding.stop_loop(self._context)
+
+    def capture(self, exposure_s: float, gain: float | None = None) -> None:
+        """Take one exposure with the guide camera.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.hardware_operations.capture_guide_frame
+
+        Parameters
+        ----------
+        exposure_s : `float`
+            Exposure length in seconds.
+        gain : `float`, optional
+            Camera gain to set first. `None` leaves it alone.
+
+        Notes
+        -----
+        Raises `PermissionDeniedError` unless `AUTOGUIDING` is
+        `AUTHORITATIVE`, and `HardwareError` if the camera does not start.
+        """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        hardware_operations.stop_guide_loop(self._context, stop)
+        hardware_operations.capture_guide_frame(self._context, exposure_s, gain=gain)
+
+    def query_guider_calibrations(self, limit: int | None = None, offset: int = 0) -> Page[GuiderCalibration]:
+        """List every saved guider calibration, oldest first.
+
+        `get_status` reads only the calibration of the active equipment.
+        This reads them all, for every telescope and camera pairing.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_records.query_guider_calibrations
+
+        Parameters
+        ----------
+        limit : `int`, optional
+            The most records to return. Every one when omitted.
+        offset : `int`, optional
+            How many records to skip.
+
+        Returns
+        -------
+        calibrations : `Page` [`GuiderCalibration`]
+            The saved records in order of ``calibrated_at``.
+        """
+        from wayfindinglib.tasks.control_tasks.control_records import query_guider_calibrations
+
+        return query_guider_calibrations(self._context, limit=limit, offset=offset)
+
+    def create_guider_calibration(
+        self, calibration: GuiderCalibration, force: bool = False
+    ) -> GuiderCalibration:
+        """Save a guider calibration that was measured elsewhere.
+
+        Use this when the numbers come from a tool outside this library,
+        such as PHD2's own calibration, or from a copy of an earlier record.
+        The delegation rules treat the record like one measured here.
+        Nothing is sent to a device.
+
+        Owner:
+            wayfindinglib.tasks.control_tasks.control_records.create_guider_calibration
+
+        Parameters
+        ----------
+        calibration : `GuiderCalibration`
+            The record. Its ``source_note`` says where the numbers came
+            from; its id has at most 100 characters.
+        force : `bool`, optional
+            Replace a saved record that has the same id. `False` refuses
+            instead.
+
+        Returns
+        -------
+        calibration : `GuiderCalibration`
+            The saved record.
+
+        Notes
+        -----
+        Raises `InvalidArgumentError` if a number is out of range, the id
+        or source note is empty or too long, or the id is already saved
+        and `force` is false.
+        """
+        from wayfindinglib.tasks.control_tasks.control_records import create_guider_calibration
+
+        return create_guider_calibration(self._context, calibration, force=force)
 
     def _pulse(self, direction: str, duration_ms: float) -> bool:
         """Send one guide pulse to the mount.
@@ -171,26 +217,6 @@ class GuidingControl(ControlChild):
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
         return hardware_operations.pulse(self._context, direction, duration_ms)
-
-    def expose(self, exposure_seconds: float, gain: float | None = None) -> GuideExposureResult:
-        """Take one exposure with the guide camera.
-
-        Parameters
-        ----------
-        exposure_seconds : `float`
-            Exposure length in seconds.
-        gain : `float`, optional
-            Camera gain to set first. `None` leaves it alone.
-
-        Returns
-        -------
-        result : `GuideExposureResult`
-            ``started`` is whether the guide camera accepted the command.
-        """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
-
-        started = hardware_operations.guide_expose(self._context, exposure_seconds, gain=gain)
-        return GuideExposureResult(started=bool(started), exposure_seconds=exposure_seconds, gain=gain)
 
     def _get_image(self) -> Any:
         """Return the guide camera's last image.
@@ -293,7 +319,8 @@ class GuidingControl(ControlChild):
         camera_id, telescope_id : `str`
             The equipment pairing the calibration belongs to.
         arcsec_per_pixel : `float`
-            Guide camera plate scale (see `status(include=["plate_scale"])`).
+            Guide camera plate scale (the ``plate_scale`` section of
+            `get_status`).
         ra_pulse_duration_sec, dec_pulse_duration_sec : `float`, optional
             Length of the test pulse on each axis. `None` works it out from
             the plate scale and the mount's guide rate.
@@ -330,7 +357,7 @@ class GuidingControl(ControlChild):
         """Measure declination backlash by reversing direction gently.
 
         Not saved here: fold the result into the mount's periodic error
-        model with `save_spectrum_analysis`.
+        model with `_save_spectrum_analysis`.
 
         Parameters
         ----------
@@ -369,7 +396,7 @@ class GuidingControl(ControlChild):
 
     def _run_exposure_test(
         self,
-        exposure_seconds: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
+        exposure_s: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0),
         frames_per_exposure: int | None = None,
         gain: float | None = None,
     ) -> GuideExposureLadder:
@@ -385,7 +412,7 @@ class GuidingControl(ControlChild):
 
         Parameters
         ----------
-        exposure_seconds : `tuple` [`float`, ...], optional
+        exposure_s : `tuple` [`float`, ...], optional
             The exposure lengths to try.
         frames_per_exposure : `int`, optional
             Frames at each length. At least 5 are needed. `None` uses
@@ -436,7 +463,7 @@ class GuidingControl(ControlChild):
         frames = guide_exposure_ladder_tasks.capture_guide_ladder(
             lambda seconds, camera_gain: hardware_operations.guide_expose(context, seconds, camera_gain),
             lambda: hardware_operations.guide_image(context),
-            exposure_seconds,
+            exposure_s,
             frames_per_exposure,
             gain,
         )
@@ -447,200 +474,6 @@ class GuidingControl(ControlChild):
             envelope.value("guiding_rms_limit") if envelope else None,
             envelope.blur_tolerance_fraction if envelope else 0.10,
         )
-
-    def refit_spectrum(
-        self,
-        session_id: str | None = None,
-        limit: int = 2000,
-        file_path: str | None = None,
-        download: bool = False,
-        destination_dir: str | None = None,
-        target_name: str | None = None,
-    ) -> GuidingSpectrumAnalysis | None:
-        """Refit and save the mount's periodic error model.
-
-        The arguments choose where the guiding samples come from:
-
-        - `file_path`: one PHD2-format guide log. Its samples are stored,
-          then its night is refit. Uses `target_name`.
-        - ``download=True``: every guide log on the observatory computer,
-          copied into `destination_dir`. Their samples are stored, then the
-          latest night is refit. Uses `destination_dir` and `target_name`.
-        - Otherwise: the samples already recorded. Uses `session_id` and
-          `limit`.
-
-        Parameters
-        ----------
-        session_id : `str`, optional
-            Use only this observing night's recorded samples.
-        limit : `int`, optional
-            Most recorded samples to read.
-        file_path : `str`, optional
-            One local guide log to read first.
-        download : `bool`, optional
-            Download every guide log from the observatory computer first.
-        destination_dir : `str`, optional
-            Local folder for downloaded logs. ``ekos_logs`` in the
-            wayfinding library's data folder when omitted.
-        target_name : `str`, optional
-            Target name to store with new samples.
-
-        Returns
-        -------
-        analysis : `GuidingSpectrumAnalysis` or `None`
-            The refit and saved model, or `None` if a log held no samples
-            (or the remote driver cannot fetch guide logs).
-
-        Raises
-        ------
-        InvalidArgumentError
-            If an argument is given that the chosen source does not use.
-        """
-        from astrometricslib.exceptions import InvalidArgumentError
-        from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
-
-        context = self._context
-        reading_logs = file_path is not None or download
-        unused = [
-            name
-            for name, given in (
-                ("session_id", reading_logs and session_id is not None),
-                ("limit", reading_logs and limit != 2000),
-                ("download", file_path is not None and download),
-                ("destination_dir", not download and destination_dir is not None),
-                ("target_name", not reading_logs and target_name is not None),
-            )
-            if given
-        ]
-        if unused:
-            raise InvalidArgumentError(f"This source of samples does not use {', '.join(unused)}.")
-        if file_path is not None:
-            return guiding_log_ingestion.ingest_guide_log_file(
-                context, context.records, file_path, target_name
-            )
-        if download:
-            return guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-                context,
-                context.records,
-                destination_dir or context.ekos_log_directory(),
-                target_name,
-            )
-        return guiding_log_ingestion.refit_and_persist_guiding_spectrum(
-            context, context.records, session_id, limit
-        )
-
-    def query_calibrations(self) -> list[GuiderCalibration]:
-        """List every saved guider calibration, oldest first.
-
-        `status` reads only the calibration of the active equipment. This
-        reads them all, for every telescope and camera pairing, so a script
-        can compare calibrations or pick the latest one. It only reads.
-
-        Returns
-        -------
-        calibrations : `list` [`GuiderCalibration`]
-            The saved records in order of ``calibrated_at``. Empty when none
-            is saved.
-        """
-        records = self._context.butler.get_all("guider_calibration")
-        return sorted(records, key=lambda record: record.calibrated_at)
-
-    def record_calibration(
-        self,
-        *,
-        calibration_id: str,
-        camera_id: str,
-        telescope_id: str,
-        arcsec_per_pixel: float,
-        camera_angle_deg: float,
-        ra_rate_arcsec_per_sec: float,
-        dec_rate_arcsec_per_sec: float,
-        source_note: str,
-        calibrated_at: datetime | None = None,
-        replace: bool = False,
-    ) -> GuiderCalibration:
-        """Save a guider calibration that was measured elsewhere.
-
-        Use this when the numbers come from a tool outside this library, such
-        as PHD2's own calibration, or from a copy of an earlier record. A
-        record with an id that is already saved is refused unless `replace`
-        is true. The delegation rules treat the record like one measured
-        here. Nothing is sent to a device.
-
-        Parameters
-        ----------
-        calibration_id : `str`
-            Id of the record, at most 100 characters.
-        camera_id, telescope_id : `str`
-            The equipment pairing the calibration belongs to.
-        arcsec_per_pixel : `float`
-            Guide camera plate scale. Above zero, at most 100.
-        camera_angle_deg : `float`
-            Angle of the camera against the mount axes, from -180 to 180.
-        ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec : `float`
-            Speed of the mount along each axis for a guide pulse. Each must
-            be above zero and at most 1000.
-        source_note : `str`
-            Where the numbers came from. Required, so a record never has an
-            unknown origin. At most 500 characters.
-        calibrated_at : `~datetime.datetime`, optional
-            When the calibration was made. Now when omitted.
-        replace : `bool`, optional
-            Replace a saved record that has the same id. Defaults to
-            `False`, which refuses instead.
-
-        Returns
-        -------
-        calibration : `GuiderCalibration`
-            The saved record.
-
-        Raises
-        ------
-        InvalidArgumentError
-            If a number is out of range, an id or `source_note` is empty or
-            too long, or the id is already saved and `replace` is false.
-        """
-        from pydantic import ValidationError
-
-        from astrometricslib.exceptions import InvalidArgumentError
-
-        require_text(source_note=source_note, calibration_id=calibration_id)
-        if len(calibration_id) > MAXIMUM_RECORD_ID_LENGTH or len(source_note) > MAXIMUM_SOURCE_NOTE_LENGTH:
-            raise InvalidArgumentError(
-                f"calibration_id may have at most {MAXIMUM_RECORD_ID_LENGTH} characters and source_note "
-                f"at most {MAXIMUM_SOURCE_NOTE_LENGTH}."
-            )
-        if arcsec_per_pixel > MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL:
-            raise InvalidArgumentError(
-                f"arcsec_per_pixel must be at most {MAXIMUM_PLATE_SCALE_ARCSEC_PER_PIXEL}."
-            )
-        if max(ra_rate_arcsec_per_sec, dec_rate_arcsec_per_sec) > MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC:
-            raise InvalidArgumentError(
-                f"The guide rates must be at most {MAXIMUM_GUIDE_RATE_ARCSEC_PER_SEC} arcsec/s."
-            )
-        if not replace and self._context.butler.get("guider_calibration", {"id": calibration_id}) is not None:
-            raise InvalidArgumentError(
-                f"A guider calibration with id {calibration_id!r} is already saved. "
-                "Pass replace=True to replace it."
-            )
-        fields = {
-            "id": calibration_id,
-            "camera_id": camera_id,
-            "telescope_id": telescope_id,
-            "arcsec_per_pixel": arcsec_per_pixel,
-            "camera_angle_deg": camera_angle_deg,
-            "ra_rate_arcsec_per_sec": ra_rate_arcsec_per_sec,
-            "dec_rate_arcsec_per_sec": dec_rate_arcsec_per_sec,
-            "source_note": source_note,
-        }
-        if calibrated_at is not None:
-            fields["calibrated_at"] = calibrated_at
-        try:
-            calibration = GuiderCalibration(**fields)
-        except ValidationError as error:
-            raise InvalidArgumentError(f"The guider calibration is not valid: {error}") from error
-        self._save_calibration(calibration)
-        return calibration
 
     def _save_calibration(self, calibration: GuiderCalibration) -> None:
         """Save a measured guider calibration.

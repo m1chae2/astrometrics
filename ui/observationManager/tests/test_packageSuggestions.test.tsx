@@ -38,7 +38,7 @@ vi.mock('../../common/utils/appBootReadiness', () => ({ useReportModeReady: vi.f
 
 const suggestedPackage: ObservationPackage = {
     id: 's1', name: 'M 13', target_id: 'M 13', revision: 2, status: PackageStatus.SUGGESTED,
-    exposure_requests: [{ frameType: FrameType.LIGHT, filter: FilterType.L, count: 10, exposureSec: 60 }],
+    exposure_requests: [{ frameType: FrameType.LIGHT, filter: FilterType.L, count: 10, exposureS: 60 }],
     suggestion: { sourceKind: 'rule', reason: 'Needs more frames.', confidence: 'design_estimate' },
 };
 const completePackage: ObservationPackage = {

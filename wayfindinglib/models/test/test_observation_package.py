@@ -17,22 +17,22 @@ from wayfindinglib.models.planning.observation_package import (
 
 def test_exposure_request_total_time_with_no_delay() -> None:
     """Verify total_exposure_sec is exposure x count with zero pacing delay."""
-    request = ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)
+    request = ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=300.0, count=10)
     assert request.total_exposure_sec() == pytest.approx(3000.0)
 
 
 def test_exposure_request_total_time_includes_pacing_delay() -> None:
-    """Verify delay_sec is applied between frames, not after the last one.
+    """Verify delay_s is applied between frames, not after the last one.
 
     10 frames have only 9 gaps between them.
     """
-    request = ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10, delay_sec=5.0)
+    request = ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=300.0, count=10, delay_s=5.0)
     assert request.total_exposure_sec() == pytest.approx(3000.0 + 9 * 5.0)
 
 
 def test_exposure_request_single_frame_has_no_delay_applied() -> None:
     """Verify a single-frame request applies no pacing delay."""
-    request = ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=1, delay_sec=5.0)
+    request = ExposureRequest(frame_type=FrameType.DARK, exposure_s=300.0, count=1, delay_s=5.0)
     assert request.total_exposure_sec() == pytest.approx(300.0)
 
 
@@ -43,8 +43,8 @@ def test_observation_package_sums_mixed_frame_types() -> None:
         name="M 81 LRGB",
         target_id="M 81",
         exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10),
-            ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=5),
+            ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=300.0, count=10),
+            ExposureRequest(frame_type=FrameType.DARK, exposure_s=300.0, count=5),
         ],
     )
     assert package.total_duration_sec() == pytest.approx(3000.0 + 1500.0)

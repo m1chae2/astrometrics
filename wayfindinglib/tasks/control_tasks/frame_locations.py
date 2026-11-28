@@ -93,7 +93,7 @@ def build_frame_locations(context: ControlContext, target_id: str) -> dict[str, 
     config = context.config
     lights_root = os.path.join(str(config.get_frames_path()), "lights")
     astrometrics = context.astrometrics
-    astrometrics.targets.query(detail="objects", limit=None)  # reread the database so a recent sync shows
+    astrometrics.targets.query(include_empty=True)  # reread the database so a recent sync shows
 
     remote_files: dict[str, int] | None = None
     remote_folder = None

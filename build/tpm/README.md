@@ -269,7 +269,7 @@ The backend does not log how long each RPC call takes, so the per-method times a
 | `tpm_baseline.json` | The baseline: what one setup measured once. Used for the watch and breach check. |
 | `<results>/tpm.json` | The result of one run: the value, the baseline status and the limit report. |
 
-Each catalog entry has an `id`, a `title`, a `why` (the user need in one sentence), a `unit`, `better` (lower or higher), a `scope` (per run, per display, per RPC method, or only for the simulated observatory), the `method` and the `statistic`, a `threshold`, an `objective`, a `threshold_status`, the `source` of the limit and the `reference_setup` the limit was judged on. The `name` is the flat name that `tpm.json` and the baseline use, with `{display}`, `{rpc}` or `{process}` where the TPM comes once per display, method or process. A limit that depends on the run is written as `{"factor": 0.25, "of": "exposure_seconds"}`.
+Each catalog entry has an `id`, a `title`, a `why` (the user need in one sentence), a `unit`, `better` (lower or higher), a `scope` (per run, per display, per RPC method, or only for the simulated observatory), the `method` and the `statistic`, a `threshold`, an `objective`, a `threshold_status`, the `source` of the limit and the `reference_setup` the limit was judged on. The `name` is the flat name that `tpm.json` and the baseline use, with `{display}`, `{rpc}` or `{process}` where the TPM comes once per display, method or process. A limit that depends on the run is written as `{"factor": 0.25, "of": "exposure_s"}`.
 
 The threshold is the worst value you accept. The objective is the value you aim for.
 

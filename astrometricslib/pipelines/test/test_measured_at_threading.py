@@ -120,7 +120,7 @@ def test_the_rebuild_script_path_stores_frame_quality(
     received, store = _stack_that_records_quality(tmp_path, monkeypatch)
     target = _target(tmp_path)
     astrometrics = SimpleNamespace(
-        targets=SimpleNamespace(get=lambda name: target, save=MagicMock()),
+        targets=SimpleNamespace(get=lambda name: target, _save=MagicMock()),
         config=SimpleNamespace(get_frames_path=lambda: tmp_path, get_library_path=lambda: tmp_path),
     )
     library = _recording(tmp_path).calibration_library
@@ -170,19 +170,3 @@ def test_the_batch_entry_sends_the_time_to_every_worker(monkeypatch: pytest.Monk
     target_batch.process_targets_in_parallel(config, ["M 99"], camera_id="Cam", measured_at=MEASURED_AT)
 
     assert run.call_args.kwargs["worker_arguments"][-1] == MEASURED_AT
-
-
-def test_the_api_supplies_the_time_for_a_batch_of_targets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`process_target` for several targets passes a time-zone-aware time."""
-    from astrometricslib.api.processing import ProcessingPipelines
-
-    batch = MagicMock()
-    monkeypatch.setattr(target_batch, "process_targets_in_parallel", batch)
-    pipelines = ProcessingPipelines(
-        MagicMock(), MagicMock(), targets=SimpleNamespace(get=lambda name, refresh=False: Target(id=name))
-    )
-
-    pipelines.process_target(["M 99"], camera_id="Cam", register_job=False)
-
-    measured_at = batch.call_args.kwargs["measured_at"]
-    assert measured_at.tzinfo is not None

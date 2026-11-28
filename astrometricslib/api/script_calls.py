@@ -45,7 +45,7 @@ def restore_excluded_frames(
     saves it. The next stack may set the same frames aside again. To
     keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
     the configuration first. To only read the list, use
-    ``Astrometrics.quality.set_aside_frames``.
+    ``Astrometrics.targets.frames.get_set_aside``.
 
     Parameters
     ----------
@@ -75,7 +75,9 @@ def restore_excluded_frames(
         for folder in find_quarantine_folders(frames_path, resolved.id):
             restored_count += len(restore_quarantined_frames(folder))
         if restored_count:
-            pipelines._targets.reindex_frames(resolved)
+            from astrometricslib.pipelines.shared.target_frames import scan_frames
+
+            scan_frames(pipelines._targets, resolved)
     return RestoreReport(target_id=resolved.id, applied=apply, frames=frames, restored_count=restored_count)
 
 
@@ -87,7 +89,6 @@ def stack_subset(
     label: str,
     output_folder: str | None = None,
     record_forecast_rows: bool = False,
-    register_job: bool = True,
 ) -> SubsetStackResult:
     """Stack exactly the given frames into a scratch folder.
 
@@ -140,8 +141,6 @@ def stack_subset(
         the rows every subset stores. The restack script uses
         ``label=EARLIER_NIGHTS_VARIANT`` with the frames of all nights
         but the last.
-    register_job : `bool`, optional
-        Record the run in the job list. Defaults to `True`.
 
     Returns
     -------
@@ -153,7 +152,7 @@ def stack_subset(
     from astrometricslib.pipelines.stacking.subset_noise_run import stack_chosen_subset
 
     resolved = pipelines._resolve(target)
-    with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+    with registered_job(job_type="stacking", target_id=resolved.id) as job:
         context = pipelines._subset_context(resolved, job.job_id)
         return stack_chosen_subset(
             resolved,
@@ -167,7 +166,7 @@ def stack_subset(
             context=context,
             configuration=pipelines._config,
             drivers=pipelines._drivers,
-            stacking_slot=pipelines.acquire_job_slot,
+            stacking_slot=pipelines._job_slot,
             output_folder=output_folder,
             record_forecast_rows=record_forecast_rows,
         )
@@ -181,8 +180,8 @@ def detect_point_sources(
 ) -> FoundStars:
     """Find stars (point sources) in an image's pixel data.
 
-    This is `QualityBlocks.find_stars` with the astrometry run's finder, the
-    library's one star search; this function only keeps the script call.
+    This is `quality.blocks.measure_stars` with the astrometry run's finder,
+    the library's one star search; this function only keeps the script call.
 
     Parameters
     ----------
@@ -204,9 +203,9 @@ def detect_point_sources(
         The stars found, brightest first, with ``x`` and ``y`` in 1-based
         pixels (as in FITS and DS9) and the finder's ``flux``.
     """
-    from astrometricslib.api._quality_building_blocks import QualityBlocks
+    from astrometricslib.pipelines.stacking.building_blocks import find_image_stars
 
-    found = QualityBlocks(pipelines._config).find_stars(
+    found = find_image_stars(
         np.asarray(image_data), finder="astrometry", fwhm_px=fwhm, threshold_sigma=threshold_sigma
     )
     # Only the "daofind" finder can come back empty-handed (no measurable
@@ -255,7 +254,7 @@ def tune_spectroscopy_calibration(
         fitted_grating_distance_mm=float(summary["fitted_grating_distance_mm"]),
         fitted_dispersion_start_px=float(summary["fitted_dispersion_start_px"]),
         rms_error_nm=float(summary["rms_error_nm"]),
-        detected_angle_degrees=float(summary["detected_angle_degrees"]),
+        detected_angle_deg=float(summary["detected_angle_deg"]),
         detailed_calibration=[
             CalibrationLineFit(
                 feature=str(line["feature"]),

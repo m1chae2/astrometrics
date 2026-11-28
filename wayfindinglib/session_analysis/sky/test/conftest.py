@@ -55,8 +55,8 @@ def make_night() -> Any:
                         night=night,
                         metric=metric,
                         value=float(value),
-                        altitude_degrees=altitude,
-                        azimuth_degrees=azimuth,
+                        altitude_deg=altitude,
+                        azimuth_deg=azimuth,
                         pier_side=pier_side,
                     )
                 )

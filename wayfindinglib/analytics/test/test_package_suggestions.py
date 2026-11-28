@@ -11,8 +11,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.package_suggestions import (
     DEFAULT_NOISE_GOAL,
     RANKING_SUGGESTIONS_PER_USE,
@@ -84,13 +85,13 @@ def test_the_fingerprint_ignores_row_ids_and_small_count_changes_but_not_real_on
     """Evidence is the same for 118 and 121 frames and different for 200."""
     rule = rule_by_name("more_frames")
     base = evidence_fingerprint(
-        rule, "more_frames", "recommendation", ProposedAction(exposure_seconds=60.0, frame_count=118)
+        rule, "more_frames", "recommendation", ProposedAction(exposure_s=60.0, frame_count=118)
     )
     same = evidence_fingerprint(
-        rule, "more_frames", "recommendation", ProposedAction(exposure_seconds=60.2, frame_count=121)
+        rule, "more_frames", "recommendation", ProposedAction(exposure_s=60.2, frame_count=121)
     )
     different = evidence_fingerprint(
-        rule, "more_frames", "recommendation", ProposedAction(exposure_seconds=60.0, frame_count=200)
+        rule, "more_frames", "recommendation", ProposedAction(exposure_s=60.0, frame_count=200)
     )
     assert base == same != different
     assert len(base) == 16
@@ -98,7 +99,7 @@ def test_the_fingerprint_ignores_row_ids_and_small_count_changes_but_not_real_on
 
 def test_the_fingerprint_depends_on_the_rule_and_the_kind() -> None:
     """The same action under another rule or kind is other evidence."""
-    action = ProposedAction(exposure_seconds=60.0, frame_count=40)
+    action = ProposedAction(exposure_s=60.0, frame_count=40)
     first = evidence_fingerprint(rule_by_name("more_frames"), "more_frames", "recommendation", action)
     assert first != evidence_fingerprint(rule_by_name("more_frames"), "more_frames", "warning", action)
     assert first != evidence_fingerprint(None, "other_rule", "recommendation", action)
@@ -112,9 +113,7 @@ def test_a_package_fingerprint_does_not_depend_on_row_order() -> None:
 
 def test_source_keys_name_rule_target_and_setting() -> None:
     """A row key names rule, target and setting; ranking: use, night."""
-    setting = CaptureSetting(
-        camera="ASI533", telescope="RedCat", filter_name="L", exposure_seconds=60.0, gain_setting=120
-    )
+    setting = CaptureSetting(camera="ASI533", telescope="RedCat", filter_name="L", exposure_s=60.0, gain=120)
     assert capture_setting_key(setting) == "ASI533/RedCat/L/60/120/-/-"
     assert capture_setting_key(None) == "-"
     assert row_source_key("more_frames", "M 81", setting) == "more_frames|M 81|ASI533/RedCat/L/60/120/-/-"

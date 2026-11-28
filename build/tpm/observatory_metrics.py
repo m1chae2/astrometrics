@@ -127,7 +127,7 @@ def summarize(sandbox: Path, sim_stats: Path, phd2_stats: Path) -> dict:
         count = len(log.read_text(encoding="utf-8", errors="replace").splitlines())
         analyze_lines = max(analyze_lines or 0, count)
     return {
-        "exposure_seconds": simulation.get("exposure_seconds"),
+        "exposure_s": simulation.get("exposure_s"),
         "frames_exposed": len(frames),
         "frames_auto_downloaded": len(copies),
         "frame_to_library_seconds": statistics.median(latencies) if latencies else None,

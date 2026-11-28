@@ -31,7 +31,7 @@ def run_batch_processing() -> None:
     print("Initializing Astrometrics...")
     astrometrics = Astrometrics()
 
-    targets = astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = astrometrics.targets.query(include_empty=True).items
     if not targets:
         print("No targets found in the database catalog.")
         return
@@ -46,9 +46,8 @@ def run_batch_processing() -> None:
             print("\n==========================================")
             print(f"REINDEXING TARGET: {target.id}")
             print("==========================================")
-            astrometrics.targets.reindex_frames(target, prune_missing=True)
+            astrometrics.targets.frames.scan(target, prune_missing=True)
             success_count += 1
-            astrometrics.targets.save()
         except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as err:
             print(f"\n[ERROR] Failed to process target '{target.id}': {err}")
             failed_targets.append((target.id, str(err)))

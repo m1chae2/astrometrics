@@ -31,12 +31,8 @@ _HOT_PIXEL = 1 / SENSOR_PIXELS
 
 def test_a_group_clips_when_half_its_frames_hold_a_saturated_star(make_frame: Any) -> None:
     """Verify the frame-count fallback follows the science library's rule."""
-    frames = [
-        make_frame(index, exposure_seconds=1.0, saturated_pixel_fraction=_CLIPPED) for index in range(3)
-    ]
-    frames += [
-        make_frame(index + 3, exposure_seconds=1.0, saturated_pixel_fraction=0.0) for index in range(3)
-    ]
+    frames = [make_frame(index, exposure_s=1.0, saturated_pixel_fraction=_CLIPPED) for index in range(3)]
+    frames += [make_frame(index + 3, exposure_s=1.0, saturated_pixel_fraction=0.0) for index in range(3)]
 
     (group,) = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
@@ -78,8 +74,8 @@ def test_a_stacking_summary_verdict_is_not_an_input(make_frame: Any) -> None:
 def test_exposure_lengths_that_differ_by_rounding_form_one_group(make_frame: Any) -> None:
     """Verify exposure lengths that differ by rounding share a group."""
     frames = [
-        make_frame(0, exposure_seconds=0.01),
-        make_frame(1, exposure_seconds=0.010000000000000002),
+        make_frame(0, exposure_s=0.01),
+        make_frame(1, exposure_s=0.010000000000000002),
     ]
 
     groups = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
@@ -108,21 +104,21 @@ def test_without_a_sensor_size_nothing_is_judged(make_frame: Any) -> None:
 def test_groups_are_kept_per_target_and_exposure(make_frame: Any) -> None:
     """Verify each target and exposure length is its own group."""
     frames = [
-        make_frame(0, target_id="A", exposure_seconds=1.0),
-        make_frame(1, target_id="A", exposure_seconds=2.0),
-        make_frame(2, target_id="B", exposure_seconds=1.0),
+        make_frame(0, target_id="A", exposure_s=1.0),
+        make_frame(1, target_id="A", exposure_s=2.0),
+        make_frame(2, target_id="B", exposure_s=1.0),
     ]
 
     groups = measure_clipping(frames, SENSOR_PIXELS, CAPTURE_LIMITS)
 
-    assert [(g.target_id, g.exposure_seconds) for g in groups] == [("A", 1.0), ("A", 2.0), ("B", 1.0)]
+    assert [(g.target_id, g.exposure_s) for g in groups] == [("A", 1.0), ("A", 2.0), ("B", 1.0)]
 
 
 def test_star_quality_uses_long_imaging_frames_only(make_frame: Any, make_envelope: Any) -> None:
     """Verify spectral, short and unmeasured frames do not set the width."""
     good = [make_frame(index, star_width_arcsec=5.0, roundness=0.9) for index in range(12)]
     spectral = [make_frame(20 + index, is_spectral=True, star_width_arcsec=30.0) for index in range(12)]
-    short = [make_frame(40 + index, exposure_seconds=1.0, star_width_arcsec=30.0) for index in range(12)]
+    short = [make_frame(40 + index, exposure_s=1.0, star_width_arcsec=30.0) for index in range(12)]
     unmeasured = [make_frame(60 + index, star_width_arcsec=None) for index in range(12)]
 
     quality = measure_star_quality(good + spectral + short + unmeasured, make_envelope(), "exact")
@@ -130,7 +126,7 @@ def test_star_quality_uses_long_imaging_frames_only(make_frame: Any, make_envelo
     assert quality.frames == 12
     assert quality.median_star_width_arcsec == pytest.approx(5.0)
     assert quality.median_roundness == pytest.approx(0.9)
-    assert quality.minimum_exposure_seconds == pytest.approx(9.6)
+    assert quality.minimum_exposure_s == pytest.approx(9.6)
 
 
 def test_star_quality_needs_enough_frames(make_frame: Any, make_envelope: Any) -> None:
@@ -147,7 +143,7 @@ def test_star_quality_needs_the_guide_cycle_of_the_equipment(make_frame: Any, ma
 
     quality = measure_star_quality(frames, make_envelope(cadence=None), "exact")
 
-    assert quality.minimum_exposure_seconds is None
+    assert quality.minimum_exposure_s is None
     assert quality.frames == 0
     assert quality.median_star_width_arcsec is None
 
@@ -193,7 +189,7 @@ def test_no_limits_apply_to_other_equipment(make_frame: Any, make_envelope: Any)
 
     quality = measure_star_quality(frames, make_envelope(), "none")
 
-    assert quality.minimum_exposure_seconds is None
+    assert quality.minimum_exposure_s is None
     assert quality.star_width_limit_arcsec is None
 
 
@@ -203,8 +199,8 @@ def test_efficiency_is_exposure_time_over_the_span(make_frame: Any) -> None:
 
     efficiency = measure_efficiency(frames)
 
-    assert efficiency.light_exposure_seconds == pytest.approx(90.0)
-    assert efficiency.span_seconds == pytest.approx(150.0)
+    assert efficiency.light_exposure_s == pytest.approx(90.0)
+    assert efficiency.span_s == pytest.approx(150.0)
     assert efficiency.duty_cycle == pytest.approx(0.6)
 
 
@@ -217,7 +213,7 @@ def test_efficiency_of_no_frames_is_empty() -> None:
     """Verify an empty night reports zeros."""
     efficiency = measure_efficiency([])
 
-    assert efficiency.light_exposure_seconds == pytest.approx(0.0)
+    assert efficiency.light_exposure_s == pytest.approx(0.0)
     assert efficiency.duty_cycle is None
 
 

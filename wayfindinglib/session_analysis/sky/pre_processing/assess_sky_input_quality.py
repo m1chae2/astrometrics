@@ -77,14 +77,14 @@ def assess_sky_input_quality(
     by_metric: dict[str, int] = defaultdict(int)
     for sample in samples:
         by_metric[sample.metric] += 1
-    altitudes = [sample.altitude_degrees for sample in samples if sample.altitude_degrees is not None]
+    altitudes = [sample.altitude_deg for sample in samples if sample.altitude_deg is not None]
 
     sample_counts: dict[tuple[str, str], int] = defaultdict(int)
     night_sets: dict[tuple[str, str], set[str]] = defaultdict(set)
     for sample in samples:
         if sample.metric not in _COVERAGE_METRICS:
             continue
-        for bin_key in bins_of(sample.altitude_degrees, sample.azimuth_degrees, sample.pier_side):
+        for bin_key in bins_of(sample.altitude_deg, sample.azimuth_deg, sample.pier_side):
             sample_counts[bin_key] += 1
             night_sets[bin_key].add(sample.night)
 
@@ -104,7 +104,7 @@ def assess_sky_input_quality(
         samples_by_metric=dict(by_metric),
         samples_without_position=samples_without_position,
         guiding_nights_excluded=guiding_nights_excluded,
-        altitude_range_degrees=[min(altitudes), max(altitudes)] if altitudes else [],
+        altitude_range_deg=[min(altitudes), max(altitudes)] if altitudes else [],
         coverage=coverage,
         gaps=[
             f"{bin_.dimension} {bin_.label}"
@@ -112,6 +112,6 @@ def assess_sky_input_quality(
             if bin_.nights < resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value
         ],
         minimum_nights_per_bin=resolve_parameter(MINIMUM_NIGHTS_PER_BIN).value,
-        configured_minimum_altitude_degrees=minimum_altitude_degrees,
+        configured_minimum_altitude_deg=minimum_altitude_degrees,
         has_enough_data=len(nights) >= resolve_parameter(MINIMUM_BASELINE_SESSIONS).value,
     )

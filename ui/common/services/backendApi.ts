@@ -44,7 +44,6 @@ import {
 
 
 
-/** Summary of one persisted observation session, from execution:list_sessions. */
 /** Answer to a request to stop a stacking job. */
 /** The answer of `target:get_frame_header`: the header and the turn that shows the frame like the stack. */
 export interface FrameHeaderAnswer {
@@ -67,13 +66,6 @@ export interface CancelAnalysisResult {
     cancelled: boolean;
     /** Why the job was not stopped; null when it was. */
     reason?: string | null;
-}
-
-export interface ObservationSessionSummary {
-    id: string;
-    status: string;
-    nightDate: string;
-    entryCount: number;
 }
 
 /** How much of the downloaded deep-star (Gaia DR3) catalog is installed, from planetarium:get_deep_catalog_status. */
@@ -219,7 +211,7 @@ export interface ActionRegistry {
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
     "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: CatalogSourcesResult };
     "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
-    "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
+    "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_deg: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
     "planetarium:get_class_stars": { payload: Record<string, never>; response: ClassStarColorRow[] };
     "planetarium:get_stack_pictures": { payload: Record<string, never>; response: StackSkyPicture[] };
@@ -255,8 +247,8 @@ export interface ActionRegistry {
             telescope_id: string;
             arcsec_per_pixel: number;
             camera_angle_deg: number;
-            ra_rate_arcsec_per_sec: number;
-            dec_rate_arcsec_per_sec: number;
+            ra_rate_arcsec_per_s: number;
+            dec_rate_arcsec_per_s: number;
             source_note: string;
             calibrated_at?: string;
         };
@@ -326,11 +318,6 @@ export interface ActionRegistry {
     // Observation Execution (wayfindinglib). Covers the operations whose
     // inputs are plain data; session advancement, meridian flips, and fault
     // recovery take injected callables and are driven in-process, not here.
-    "execution:list_sessions": { payload: Record<string, never>; response: ObservationSessionSummary[] };
-    "execution:get_session": { payload: { session_id: string }; response: Record<string, any> };
-    "execution:abort_session": { payload: { session_id: string; reason: string }; response: Record<string, any> };
-    "execution:reconcile_session": { payload: { session_id: string }; response: Record<string, any> };
-    "execution:build_divergence_record": { payload: { record_id: string; observation_session_id: string; capability: string; comparison_input_id: string; intended_value: number; observed_value: number; tolerance: number; divergence_unit: string; queued_observation_package_id?: string | null; converged?: boolean | null; detail?: string }; response: Record<string, any> };
 
     // Night plan (#95). `plan:list_packages` lists the package library;
     // `plan:current_session` is tonight's session or null (never created by a
@@ -338,7 +325,7 @@ export interface ActionRegistry {
     // (`plan:edit_package`, `plan:create_package`) send `packages:changed`.
     // A write answers with the `conflict` error (current revision in its details) when
     // `expected_revision` is out of date.
-    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSessionWithProgress | null };
+    "plan:current_session": { payload: Record<string, never>; response: import('../types/backendTypes').ObservationSession | null };
     "plan:list_packages": { payload: { status?: string; target?: string; include_dismissed?: boolean }; response: import('../types/backendTypes').ObservationPackage[] };
     "plan:package_for_target": { payload: { target: string }; response: import('../types/backendTypes').ObservationPackage | null };
     "plan:create_package": { payload: { target: string; exposure_requests?: Array<Record<string, any>>; plan_items?: Array<Record<string, any>>; dither_config?: Record<string, any>; minimum_altitude_deg?: number; priority?: number; notes?: string }; response: import('../types/backendTypes').ObservationPackage };
@@ -409,21 +396,21 @@ export interface ActionRegistry {
     // Matches ImagingService.capture_sequence. An earlier declaration listed
     // exposure/iso/filter/camera/delay/prefix, none of which the handler accepts;
     // a call typed against it failed on a missing target_id.
-    "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
+    "imaging:capture": { payload: { target_id: string; exposure_s: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
     "imaging:stop_capture": { payload: Record<string, never>; response: boolean };
 
     // Images
-    "images:get_target_frame": { payload: { target_id: string; iso: string; exposure: string; index?: number }; response: string };
-    "images:get_light_frame_data": { payload: { target_id: string; iso: string; exposure: string; index?: number; stretch?: boolean }; response: RenderedImage };
+    "images:get_target_frame": { payload: { target_id: string; gain: number | null; exposure_s: number; index?: number }; response: string };
+    "images:get_light_frame_data": { payload: { target_id: string; gain: number | null; exposure_s: number; index?: number; stretch?: boolean }; response: RenderedImage };
     "images:convert_fits": { payload: { path: string; stretch?: boolean }; response: RenderedImage };
-    "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_degrees?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
+    "images:measure_star_profile": { payload: { path: string; x: number; y: number; radius_px?: number; cut_angle_deg?: number; cut_half_length_px?: number; search_radius_px?: number }; response: import('../types/backendTypes').StarProfileMeasurement };
     "images:map_position": { payload: { from_path: string; x: number; y: number; to_path: string }; response: { x: number | null; y: number | null; method: string; note: string } };
     "images:measure_detections": { payload: { path: string }; response: import('../types/backendTypes').DetectionsMeasurement };
     "images:delete": { payload: { paths: string[]; target_id?: string }; response: { deleted: string[]; failed: { path: string; reason: string }[] } };
     "images:last": { payload: { stretch?: boolean }; response: { id: string; min: number; max: number; image_data: string; path: string } | null };
 
     // Calibration
-    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
+    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: number; offset: number; binning?: string; temperature_c?: number; exposure_s?: number; telescope?: string; filter_name?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
 
@@ -465,7 +452,7 @@ export interface ActionRegistry {
     "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
     "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
     "ui:inspect_variable": { payload: { variable_name: string }; response: void };
-    /** Image Processing tells the backend what is picked now, for the Command Console's `selection` object. Pixels count from 0. */
+    /** Image Processing tells the backend what is picked now, for the Command Console's `selection` object. The star's `x` and `y` count pixels from 1, on the picture shown. */
     "ui:set_selection": {
         payload: {
             target?: string | null;
@@ -494,9 +481,9 @@ export interface ActionRegistry {
     "history:target_changes": { payload: { session_id?: string; limit?: number }; response: import('../types/backendTypes').TargetChange[] };
     "history:live_session_status": { payload: { window_minutes?: number; include?: string[]; limit?: number }; response: import('../types/backendTypes').LiveSessionStatus };
     "observatory:safety_status": { payload: Record<string, never>; response: import('../types/backendTypes').SafetyStatus };
-    "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_seconds?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
+    "calibration:assess": { payload: { kind: 'dark' | 'bias' | 'flat'; camera_id?: string; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number; exposure_s?: number; telescope?: string; filter_name?: string }; response: import('../types/backendTypes').CalibrationSetHealth[] };
     "calibration:measure_frames": { payload: { kind?: 'dark' | 'bias'; camera_id?: string; force?: boolean }; response: CalibrationMeasurementStart };
-    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; refresh?: boolean; gain?: string | number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
+    "calibration:query": { payload: { kind?: 'dark' | 'bias' | 'flat'; detail?: 'counts' | 'target_match' | 'target_frames' | 'match'; target?: string; camera_id?: string; gain?: number; offset?: number; binning?: string | number; temperature_c?: number }; response: import('../types/backendTypes').CalibrationQueryResult };
 
     // Hand-off of the workspace to a paired phone
     "handoff:get_state": { payload: Record<string, never>; response: HandoffState };
@@ -655,7 +642,6 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
  */
 const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
-    'execution:list_sessions',
     'plan:current_session',
     'plan:list_packages',
     'plan:package_for_target',
@@ -798,6 +784,7 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
                 details: data?.details,
                 retryable: data?.retryable,
                 requestId: data?.requestId,
+                report: data?.report,
             });
         }
 
@@ -956,8 +943,10 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
             if (error instanceof BackendError) {
                 // A background read that fails because a device or remote computer is
                 // unreachable is a status (the status chips show it), not an error.
+                // So is any error the backend marks as a status (`report: 'status'`).
                 const isUnavailableRead = isIdempotent && error.code === 'external_service';
-                if (!quiet && !isUnavailableRead) {
+                const isStatus = error.report === 'status';
+                if (!quiet && !isUnavailableRead && !isStatus) {
                     const presentation = presentBackendError(error);
                     emitToast(presentation.text, presentation.kind, `API:${action}`);
                 }

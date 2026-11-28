@@ -21,8 +21,10 @@ export interface FileItem {
     path: string;
     name: string;
     camera: string;
-    iso: string;
-    exposure: string;
+    /** The gain setting (or ISO), or null when it is not known. */
+    gain: number | null;
+    /** The exposure in seconds, or null when it is not known. */
+    exposureS: number | null;
     filter: string;
     date: string;
     /** Focal length in mm, when the frame header has one. */
@@ -62,7 +64,7 @@ const DEFAULT_STATUS: FrameStatusInfo = {
     restoreNote: '',
 };
 
-type SortField = 'name' | 'camera' | 'exposure' | 'iso' | 'date' | 'filter';
+type SortField = 'name' | 'camera' | 'exposureS' | 'gain' | 'date' | 'filter';
 type SortDirection = 'asc' | 'desc';
 
 /**
@@ -300,13 +302,14 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
         // Sort
         if (sortField) {
             result.sort((a, b) => {
+                if (sortField === 'exposureS' || sortField === 'gain') {
+                    const numberA = a[sortField];
+                    const numberB = b[sortField];
+                    if (numberA !== null && numberB !== null) return sortDirection === 'asc' ? numberA - numberB : numberB - numberA;
+                    return 0;
+                }
                 const valueA = a[sortField];
                 const valueB = b[sortField];
-                if ((sortField === 'exposure' || sortField === 'iso')) {
-                    const numberA = parseFloat(valueA);
-                    const numberB = parseFloat(valueB);
-                    if (!isNaN(numberA) && !isNaN(numberB)) return sortDirection === 'asc' ? numberA - numberB : numberB - numberA;
-                }
                 return sortDirection === 'asc' ? valueA.localeCompare(valueB) : valueB.localeCompare(valueA);
             });
         }
@@ -383,8 +386,8 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                             <th onClick={() => handleSort('filter')} className="file-browser__sortable-header">
                                 Filter {getSortIndicator('filter')}
                             </th>
-                            <th onClick={() => handleSort('exposure')} className="file-browser__sortable-header">
-                                Exp (s) {getSortIndicator('exposure')}
+                            <th onClick={() => handleSort('exposureS')} className="file-browser__sortable-header">
+                                Exp (s) {getSortIndicator('exposureS')}
                             </th>
                             <th>Status</th>
                         </tr>
@@ -452,7 +455,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                                     <td>{file.date}</td>
                                     <td>{file.camera}</td>
                                     <td>{file.filter}</td>
-                                    <td>{file.exposure}</td>
+                                    <td>{file.exposureS ?? ''}</td>
                                     {/* The chip says where the frame stands in the stack; its hover text is the
                                         reason. The variable-star search can also leave a frame out. That says
                                         nothing about stacking, so it is a second chip that names what was unusual. */}

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
     HardcodedKind,
@@ -204,7 +205,7 @@ def reference_ring_width_px() -> float:
     return resolve(RING_OUTER_PX).value - resolve(RING_INNER_PX).value
 
 
-class ApertureSetMismatchError(ValueError):
+class ApertureSetMismatchError(ProcessingError):
     """Two noise measurements were made in different sets of apertures."""
 
 

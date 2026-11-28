@@ -23,19 +23,19 @@ from simulator.exposure_driver import CAPTURE_APP, ExposureDriver
 from simulator.observatory import SimulatedObservatory, SimulationKind, SimulationUnavailableError
 
 
-def _write_frame(path: Path, exposure_seconds: float = 12.0) -> None:
+def _write_frame(path: Path, exposure_s: float = 12.0) -> None:
     """Write a small camera frame with an exposure time.
 
     Parameters
     ----------
     path : `pathlib.Path`
         The file; its folder is made.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         The ``EXPTIME`` header value.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     hdu = fits.PrimaryHDU(np.zeros((4, 4), dtype=np.uint16))
-    hdu.header["EXPTIME"] = exposure_seconds
+    hdu.header["EXPTIME"] = exposure_s
     hdu.writeto(path)
 
 
@@ -88,7 +88,7 @@ class _FakeDriver(ExposureDriver):
         self.sent.extend(settings)
         if any("CCD_EXPOSURE" in setting for setting in settings):
             count = len(self.frames) + len(list(self.staging_directory.glob("*.fits"))) + 1
-            _write_frame(self.staging_directory / f"M_13_Light_{count:03d}.fits", self.exposure_seconds)
+            _write_frame(self.staging_directory / f"M_13_Light_{count:03d}.fits", self.exposure_s)
 
     def write_stats(self) -> None:
         """Stop the loop once enough frames are filed (no file is written)."""

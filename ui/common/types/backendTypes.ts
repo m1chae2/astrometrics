@@ -66,6 +66,10 @@ export enum TargetObjectType {
  * Facts about the error.
  * retryable : `bool`
  * Whether the same call may succeed if tried again later.
+ * report : `str`
+ * How to show the error: ``"status"``, ``"error"`` or ``"notify"``.
+ * log_level : `str`
+ * The `logging` level name to log the error at.
  * request_id : `str` or `None`
  * The id of the call that failed. It also appears on every log line of
  * that call.
@@ -75,6 +79,8 @@ export interface ErrorInfo {
   message: string;
   details?: Record<string, any>;
   retryable?: boolean;
+  report?: string;
+  logLevel?: string;
   requestId?: string | null;
 }
 
@@ -107,25 +113,26 @@ export interface FrameMeasurements {
 }
 
 /**
- * A single raw photograph and its settings (like ISO, exposure).
+ * A single raw photograph and its settings (like gain and exposure).
  */
 export interface FrameRecord {
   path: string;
   filter?: FilterType;
   role?: string;
-  iso?: string;
-  offset?: string;
-  exposure?: string;
+  gain?: number | null;
+  offset?: number;
+  exposureS?: number;
   timestamp?: number | null;
   camera?: string;
   telescope?: string;
   date?: string;
   pierSide?: string | null;
   airmass?: number | null;
-  altitudeDegrees?: number | null;
-  azimuthDegrees?: number | null;
+  altitudeDeg?: number | null;
+  azimuthDeg?: number | null;
   pixelScaleArcsec?: number | null;
   focalLengthMm?: number | null;
+  configurationId?: string | null;
   binning?: number | null;
   sensorTemperatureC?: number | null;
   focuserPosition?: number | null;
@@ -202,6 +209,7 @@ export interface StackChoice {
  */
 export interface StackConfigurationResult {
   configurationKey: string;
+  configurationId?: string | null;
   camera?: string;
   focalLengthMm?: number | null;
   framesStacked?: number;
@@ -300,7 +308,7 @@ export interface TargetObject {
   spectralStacking?: TargetStackingResult;
   asteroidDetection?: AsteroidDetectionResult;
   quality?: TargetQualitySummaries;
-  exposureTime?: number;
+  exposureS?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
   /** The kind of sky object this is, read from the target's id. */
@@ -316,8 +324,8 @@ export interface FileItem {
   path: string;
   name: string;
   camera?: string;
-  iso?: string;
-  exposure?: string;
+  gain?: number | null;
+  exposureS?: number;
   filter?: string;
   date?: string;
   focalLengthMm?: number | null;
@@ -355,13 +363,13 @@ export interface CalibrationGroupMatch {
  */
 export interface GroupedFrameStat {
   filter: string;
-  iso: string;
-  exposure: string;
+  gain: number | null;
+  exposureS: number;
   count: number;
   darks?: string | null;
   camera?: string | null;
   focalLengthMm?: number | null;
-  offset?: string | null;
+  offset?: number | null;
   binning?: string | null;
   darkMatch?: CalibrationGroupMatch | null;
   flatMatch?: CalibrationGroupMatch | null;
@@ -474,6 +482,7 @@ export interface OverlayStar {
  * How many stars belong to one target, and what data they have.
  */
 export interface TargetStarCount {
+  targetId?: string;
   starCount?: number;
   hasSpectra?: boolean;
   hasPhotometry?: boolean;
@@ -570,15 +579,15 @@ export interface DifferentialRefractionRecord {
   isApplied: boolean;
   reason?: string | null;
   midExposureUtc?: string | null;
-  altitudeDegrees?: number | null;
-  parallacticAngleDegrees?: number | null;
-  dispersionPositionAngleDegrees?: number | null;
-  parallacticToDispersionAngleDegrees?: number | null;
+  altitudeDeg?: number | null;
+  parallacticAngleDeg?: number | null;
+  dispersionPositionAngleDeg?: number | null;
+  parallacticToDispersionAngleDeg?: number | null;
   pixelScaleArcsec?: number | null;
   effectiveWavelengthAngstrom?: number | null;
   pressureHpa?: number | null;
   temperatureC?: number | null;
-  relativeHumidityPercent?: number | null;
+  relativeHumidityPct?: number | null;
   atmosphereSource?: string | null;
   alongDispersionArcsecAt4200?: number | null;
   alongDispersionArcsecAt8000?: number | null;
@@ -687,8 +696,8 @@ export interface GaiaXpComparison {
   gaiaSourceId?: number | null;
   sampleCount?: number;
   residualRmsFraction?: number | null;
-  slopePercentPer1000Angstrom?: number | null;
-  slopeErrorPercentPer1000Angstrom?: number | null;
+  slopePctPer1000Angstrom?: number | null;
+  slopeErrorPctPer1000Angstrom?: number | null;
   wavelengthShiftAngstrom?: number | null;
   wavelengthShiftCorrelation?: number | null;
   bands?: GaiaXpBandResidual[];
@@ -724,8 +733,8 @@ export interface GaiaXpBandSummary {
 export interface GaiaXpRunSummary {
   comparedStarCount?: number;
   bands?: GaiaXpBandSummary[];
-  medianSlopePercentPer1000Angstrom?: number | null;
-  medianAbsoluteSlopePercentPer1000Angstrom?: number | null;
+  medianSlopePctPer1000Angstrom?: number | null;
+  medianAbsoluteSlopePctPer1000Angstrom?: number | null;
 }
 
 /**
@@ -1102,8 +1111,8 @@ export interface FrameCopyPulse {
  * The camera name from the frame's header (set-aside frames only).
  * filter : `str`
  * The filter name from the frame's header (set-aside frames only).
- * exposure : `str`
- * The exposure in seconds, for a set-aside frame; empty otherwise.
+ * exposure_s : `float` or `None`
+ * The exposure in seconds, for a set-aside frame; `None` otherwise.
  * elongation : `float` or `None`
  * For a flagged frame, the elongation of its stars (long axis over
  * short axis); `None` otherwise.
@@ -1123,7 +1132,7 @@ export interface FrameStatus {
   date?: string;
   camera?: string;
   filter?: string;
-  exposure?: string;
+  exposureS?: number | null;
   elongation?: number | null;
   originalPath?: string | null;
   restorable?: boolean;
@@ -1258,7 +1267,7 @@ export interface AlignmentSessionSummary {
  * One plate solve in a target's run, timed from the run's first solve.
  */
 export interface AlignmentTrackPoint {
-  elapsedSeconds: number;
+  elapsedS: number;
   deltaRaArcsec: number;
   deltaDecArcsec: number;
   totalErrorArcsec: number;
@@ -1277,7 +1286,7 @@ export interface AlignmentTrackPoint {
  * as tracking error. Drift is the slope of a straight-line fit of the
  * offsets against time.
  *
- * `ObservationReview.query_alignment_sessions` builds these from a list of
+ * `review.alignment.query` builds these from a list of
  * `AlignmentAttempt` records.
  */
 export interface AlignmentTargetSession {
@@ -1298,7 +1307,7 @@ export interface AlignmentTargetSession {
   startTime?: number | null;
   endTime?: number | null;
   /** Time spent tracking, summed over runs (gaps excluded). */
-  elapsedSeconds: number;
+  elapsedS: number;
   timeSeries?: AlignmentTrackPoint[];
   attempts?: AlignmentAttempt[];
 }
@@ -1310,7 +1319,7 @@ export interface MountPointingModel {
   sampleCount: number;
   rawRmsArcsec: number;
   residualRmsArcsec: number;
-  improvementPercent?: number;
+  improvementPct?: number;
   ihArcsec?: number;
   idArcsec?: number;
   meArcsec?: number;
@@ -1391,7 +1400,7 @@ export interface TrackingRiskMap {
  * anyone can redo it. `QualityLimit` has no place for them.
  * tracking_risk : `TrackingRiskMap` or `None`
  * How risky each part of the sky is for tracking with this
- * equipment. Filled in by `review.get_performance_envelope`;
+ * equipment. Filled in by `review.performance.get_envelope`;
  * `None` in the envelopes the night analyses use internally.
  */
 export interface PerformanceEnvelope {
@@ -1406,7 +1415,7 @@ export interface PerformanceEnvelope {
  * A dominant harmonic frequency identified in guiding telemetry.
  */
 export interface GuidingSpectrumPeak {
-  periodSeconds: number;
+  periodS: number;
   amplitudeArcsec: number;
   power: number;
   probableSource?: string;
@@ -1431,9 +1440,9 @@ export interface GuidingSpectrumAnalysis {
   telescopeId?: string;
   schemaVersion?: number;
   sampleCount: number;
-  durationSeconds: number;
+  durationS: number;
   periodicErrorPeakToPeakArcsec?: number;
-  dominantPeriodSeconds?: number | null;
+  dominantPeriodS?: number | null;
   decBacklashEstimateMs?: number | null;
   peaks?: GuidingSpectrumPeak[];
   psdCurve?: Record<string, number>[];
@@ -1632,7 +1641,7 @@ export interface LiveGuidingStatus {
   is_guiding?: boolean;
   stats?: GuidingStats;
   history?: GuidingSample[];
-  exposure?: number;
+  exposure_s?: number;
   gain?: number;
 }
 
@@ -1663,9 +1672,25 @@ export interface StretchParameters {
 }
 
 /**
- * A finished picture ready to display in the app, plus brightness stats.
+ * A picture the way the app's viewer reads it.
  *
- * `Visualization.render_fits(kind="data_url")` returns it.
+ * Attributes
+ * ----------
+ * id : `str`
+ * What the picture shows, such as the target id or the frame's folder.
+ * min, max : `float`
+ * The brightness range shown, in pixel values (0 and 255 for a JPEG).
+ * image_data : `str`
+ * The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
+ * headers : `list` [`dict` [`str`, `str`]]
+ * The FITS header of the file that was drawn: ``key``, ``value`` and
+ * ``comment`` of each card.
+ * path : `str` or `None`
+ * The file that was drawn.
+ * stretch_parameters : `dict` [`str`, `float`] or `None`
+ * The automatic stretch the picture was drawn with (``blackPoint``,
+ * ``whitePoint``, ``midtones``), or `None` when it was drawn without
+ * one.
  */
 export interface RenderedImage {
   id?: string;
@@ -1682,7 +1707,7 @@ export interface RenderedImage {
  */
 export interface SequenceItem {
   count: number;
-  exposure: number;
+  exposure_s: number;
   filter: string;
   duration: number;
 }
@@ -1704,11 +1729,11 @@ export interface SequencePlan {
  */
 export interface CalibrationEntry {
   camera: string;
-  iso: string;
+  gain: number | null;
   offset?: number | null;
   binning?: string | null;
   temperatureC?: number | null;
-  exposure?: number | null;
+  exposureS?: number | null;
   filter?: string | null;
   count: number;
 }
@@ -1779,7 +1804,7 @@ export interface MeridianStatus {
   /** True once the object is past the meridian by more than the flip delay. */
   flip_required: boolean;
   /** Seconds until the object crosses the meridian. Negative once it has crossed. */
-  time_to_flip_seconds: number;
+  time_to_flip_s: number;
 }
 
 /**
@@ -1977,7 +2002,7 @@ export interface TargetSessionContribution {
  * the combined image says why in `left_out_reason`.
  */
 export interface ExposureGroupSummary {
-  exposureSeconds: number;
+  exposureS: number;
   framesSubmitted: number;
   framesStacked: number;
   darkApplied: boolean;
@@ -2058,13 +2083,13 @@ export interface StackingPipelineQualityMetrics {
   saturatedPixelFraction?: number | null;
   exposureGroups?: ExposureGroupSummary[];
   zeroPixelFraction?: number | null;
-  negativePixelMaxPercent?: number | null;
+  negativePixelMaxPct?: number | null;
   stackedFwhmPx?: number | null;
   medianInputFwhmPx?: number | null;
   expectedStackFwhmPx?: number | null;
   spectralRegistrationFlags?: ExcludedFrame[];
   spectralRegistrationChecked?: boolean;
-  stackingDurationSeconds?: number | null;
+  stackingDurationS?: number | null;
   debayerApplied?: boolean | null;
   stackingEngine?: string | null;
   stackingEngineVersion?: string | null;
@@ -2332,7 +2357,7 @@ export interface FrameDetection {
   astrometricErrorRaArcsec?: number | null;
   astrometricErrorDecArcsec?: number | null;
   astrometricErrorCorrelation?: number | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
 }
 
 /**
@@ -2454,7 +2479,7 @@ export interface AsteroidDetectionQualitySummary {
 export interface WeatherSample {
   time: number;
   ambientTemperatureC?: number | null;
-  humidityPercent?: number | null;
+  humidityPct?: number | null;
   dewPointC?: number | null;
 }
 
@@ -2622,15 +2647,19 @@ export interface QualityLimit {
  * `PIXEL_SCALE_SIGNIFICANT_FIGURES` significant figures.
  * filter_name : `str` or `None`
  * The filter in the light path, such as ``"L"`` or ``"Ha"``.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * The exposure time of one frame, in seconds.
- * gain_setting : `int` or `None`
+ * gain : `int` or `None`
  * The camera's gain setting (a unitless number in the FITS ``GAIN``
  * card, not electrons per ADU).
  * offset : `int` or `None`
  * The constant the camera adds to every pixel.
  * binning : `int` or `None`
  * The binning factor (1 means no binning).
+ * temperature_c : `float` or `None`
+ * The sensor temperature, in degrees Celsius. It says which darks a
+ * calibration call means. The quality store does not keep it, because
+ * a measurement's setting is the same at any temperature.
  */
 export interface CaptureSetting {
   camera: string;
@@ -2638,10 +2667,11 @@ export interface CaptureSetting {
   focalLengthMm?: number | null;
   pixelScaleArcsec?: number | null;
   filterName?: string | null;
-  exposureSeconds?: number | null;
-  gainSetting?: number | null;
+  exposureS?: number | null;
+  gain?: number | null;
   offset?: number | null;
   binning?: number | null;
+  temperatureC?: number | null;
 }
 
 /**
@@ -2721,7 +2751,7 @@ export interface MeasurementReference {
  * The store's row id. Filled only when the measurement is read back.
  * unit : `str` or `None`
  * The metric's unit from its declaration. Not stored:
- * `QualityRecords.query` fills it on a read.
+ * `quality.records.query` fills it on a read.
  */
 export interface QualityMeasurement {
   metric: string;
@@ -2913,15 +2943,16 @@ export interface MetricSummary {
  * Why nothing was measured. `None` when ``status`` is ``measured``.
  * camera_id : `str`
  * The camera the frames came from.
- * gain_setting : `str`
- * The camera's gain setting (or the ISO of a DSLR), in standard form.
- * offset : `str`
- * The camera offset, in standard form.
+ * gain : `int` or `None`
+ * The camera's gain setting (or the ISO of a DSLR), or `None` when it
+ * is not a number.
+ * offset : `int` or `None`
+ * The camera offset, or `None` when it is not a number.
  * binning : `str`
  * The binning, such as ``"1x1"``.
  * temperature_c : `float` or `None`
  * The mean sensor temperature of the frames, in degrees C.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * The exposure of the flat frames, in seconds.
  * gain_e_per_adu : `float` or `None`
  * The conversion gain: the median over the flat pairs.
@@ -2970,11 +3001,11 @@ export interface SensorNoiseMeasurement {
   status: MeasurementStatus;
   reason?: string | null;
   cameraId: string;
-  gainSetting: string;
-  offset: string;
+  gain: number | null;
+  offset: number | null;
   binning: string;
   temperatureC?: number | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   gainEPerAdu?: number | null;
   gainSpreadEPerAdu?: number | null;
   readNoiseAdu?: number | null;
@@ -3073,7 +3104,7 @@ export interface ProfileFit {
  * ``amplitude`` divided by ``amplitude_error``.
  * significant : `bool`
  * `True` when ``significance`` reaches the declared threshold.
- * direction_degrees : `float`
+ * direction_deg : `float`
  * The direction of the pattern's brightest lobe, from +y toward +x,
  * from 0 up to ``360 / order``. The other lobes follow at steps of
  * ``360 / order``.
@@ -3085,7 +3116,7 @@ export interface RingHarmonic {
   amplitude_debiased: number;
   significance: number;
   significant: boolean;
-  direction_degrees: number;
+  direction_deg: number;
 }
 
 /**
@@ -3252,7 +3283,7 @@ export interface DetectionsMeasurement {
  * A plain sentence about the clipped check.
  * moffat, gaussian : `ProfileFit`
  * The two fits.
- * cut_angle_degrees : `float`
+ * cut_angle_deg : `float`
  * The angle of the cut, measured from +y toward +x.
  * cut_half_length_px : `float`
  * How far the cut reaches each way from the center.
@@ -3290,7 +3321,7 @@ export interface DetectionsMeasurement {
  * measured above. It comes from a tilted plane fitted far outside the
  * star's glow, so it can be lower than ``sky``, and a smooth gradient
  * of the sky is removed from the ring.
- * ring_bin_angle_degrees, ring_bin_values, ring_bin_counts : `list`
+ * ring_bin_angle_deg, ring_bin_values, ring_bin_counts : `list`
  * The ring's brightness by direction: for each 5 degree bin that holds
  * a pixel, the middle angle (from +y toward +x), the mean value above
  * the sky of its unmasked pixels, and how many pixels that is.
@@ -3318,7 +3349,7 @@ export interface DetectionsMeasurement {
  * The brightest pixel above the sky divided by the sky noise (one
  * standard deviation of a sky pixel). It is the peak's height in noise
  * levels, not the signal-to-noise ratio of the star's total light,
- * which `QualityBlocks.measure_aperture` gives.
+ * which `quality.blocks.measure_aperture` gives.
  * edge_distance_px : `float`
  * How far the star's center is from the nearest image edge, in pixels.
  * coverage_fraction : `float`
@@ -3380,7 +3411,7 @@ export interface StarProfileMeasurement {
   clipped_reason: string;
   moffat: ProfileFit;
   gaussian: ProfileFit;
-  cut_angle_degrees: number;
+  cut_angle_deg: number;
   cut_half_length_px: number;
   cut_distance_px: number[];
   cut_values: number[];
@@ -3395,7 +3426,7 @@ export interface StarProfileMeasurement {
   ring_inner_px: number;
   ring_outer_px: number;
   ring_sky: number;
-  ring_bin_angle_degrees: number[];
+  ring_bin_angle_deg: number[];
   ring_bin_values: number[];
   ring_bin_counts: number[];
   ring_harmonics: RingHarmonic[];
@@ -3447,36 +3478,7 @@ export interface ObservationSession {
   framing?: Framing | null;
   /** Counts the plan writes. Starts at 0. */
   revision?: number;
-}
-
-/**
- * A stored session plus its progress, as `get_plan` returns it.
- *
- * The progress is worked out on each read and is not part of the stored
- * session. Do not write this object back.
- */
-export interface ObservationSessionWithProgress {
-  id: string;
-  nightDate: string;
-  status?: SessionStatus;
-  statusDetail?: string;
-  siteProfileId: string;
-  telescopeId: string;
-  cameraId: string;
-  queue?: QueuedObservationPackage[];
-  unplacedPackageDiagnostics?: InfeasibilityReason[];
-  divergenceRecords?: DivergenceRecord[];
-  faultRecords?: FaultRecord[];
-  meridianFlips?: MeridianFlipOutcome[];
-  targetSessionIds?: string[];
-  guidingSamples?: GuidingSample[];
-  weatherSamples?: WeatherSample[];
-  createdAt?: string;
-  closedAt?: string | null;
-  checklist?: ChecklistItem[];
-  framing?: Framing | null;
-  /** Counts the plan writes. Starts at 0. */
-  revision?: number;
+  /** The frames captured so far. Worked out on a read with include=["progress"], never stored; left out of the dump when not asked for. */
   progress?: SessionProgress | null;
 }
 
@@ -3587,12 +3589,14 @@ export interface SuggestionLogEntry {
 }
 
 /**
- * A physical imaging rig's optics and safe pointing envelope.
+ * A telescope or camera lens, with the safe pointing limits of its mount.
  *
- * More than one may be configured in an `EquipmentCatalog`; exactly
- * one is active. `flip_hour_angle_deg` is the single stored
- * meridian-flip threshold; `meridian_flip_delay_min` is derived from
- * it (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
+ * The focal length and focal ratio describe the optic. The altitude and
+ * hour angle limits, the meridian-flip point and the device protocols
+ * describe the mount that carries it and the devices on it.
+ * `flip_hour_angle_deg` is the one stored meridian-flip threshold;
+ * `meridian_flip_delay_min` is worked out from it
+ * (`Wayfinding_Library_Architecture.md` Section 5.5, Equation (3)).
  */
 export interface Telescope {
   id: string;
@@ -3688,11 +3692,11 @@ export interface Framing {
 export interface ExposureRequest {
   frameType: FrameType;
   filter?: FilterType;
-  exposureSec: number;
+  exposureS: number;
   count: number;
-  delaySec?: number;
+  delayS?: number;
   /** The camera's gain setting (a unitless index, not electrons per ADU). None: not set. */
-  gainSetting?: number | null;
+  gain?: number | null;
   /** The constant the camera adds to every pixel. None: not set. */
   offset?: number | null;
   /** The binning factor (1 means no binning). None: not set. */
@@ -3899,12 +3903,12 @@ export interface TonightRanking {
  * none.
  * reached_level_label : `str` or `None`
  * That level in words.
- * seconds_to_goal : `float` or `None`
+ * time_to_goal_s : `float` or `None`
  * Clock time to reach the chosen level, with downloads, when below it
  * and a forecast could be made.
  * frames_to_goal : `int` or `None`
  * The frames behind that time.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * The exposure of each of those frames.
  * forecast_status : `RecommendedAdditionalFramesStatus`
  * Whether the forecast behind the time was checked. ``not_checked``
@@ -3928,9 +3932,9 @@ export interface DepthGoalStatus {
   goalDepth?: number | null;
   reachedLevel?: DepthLevel | null;
   reachedLevelLabel?: string | null;
-  secondsToGoal?: number | null;
+  timeToGoalS?: number | null;
   framesToGoal?: number | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   forecastStatus?: RecommendedAdditionalFramesStatus;
   provisional?: boolean;
   message: string;
@@ -4128,14 +4132,14 @@ export interface TargetChange {
  * The files the status was read from.
  * as_of : `float`
  * Time of the latest record in the analyze file.
- * seconds_since_last_record : `float` or `None`
+ * time_since_last_record_s : `float` or `None`
  * How long ago that was by the wall clock. A large value means Ekos
  * has stopped writing (or the file was not refreshed).
  * guider_state : `str` or `None`
  * The guider's latest state, such as ``"Guiding"``.
  * guider_state_since : `float` or `None`
  * When it entered that state.
- * declination_degrees : `float` or `None`
+ * declination_deg : `float` or `None`
  * The mount's latest declination.
  * temperature_c : `float` or `None`
  * The latest camera sensor temperature Ekos logged, in degrees C.
@@ -4179,10 +4183,10 @@ export interface LiveSessionStatus {
   analyze_file: string;
   kstars_log_file?: string | null;
   as_of: number;
-  seconds_since_last_record?: number | null;
+  time_since_last_record_s?: number | null;
   guider_state?: string | null;
   guider_state_since?: number | null;
-  declination_degrees?: number | null;
+  declination_deg?: number | null;
   temperature_c?: number | null;
   pier_side?: string | null;
   captures_completed?: number;
@@ -4227,16 +4231,16 @@ export interface SafetyStatus {
 export interface CameraNoiseSetting {
   /** The camera's name in the configuration. */
   cameraName: string;
-  /** The camera's gain setting (an index, not electrons per ADU) or a DSLR's ISO. */
-  gainSetting: string;
-  /** The camera offset. */
-  offset: string;
+  /** The camera's gain setting (an index, not electrons per ADU) or a DSLR's ISO, or None when it is not a number. */
+  gain: number | null;
+  /** The camera offset, or None when it is not a number. */
+  offset: number | null;
   /** The binning, such as "1x1". */
   binning: string;
   /** Sensor temperature of the measurement, in degrees C. */
   temperatureC?: number | null;
   /** The conversion gain in electrons per ADU, or None when only read noise is recorded. */
-  gain?: CameraNoiseValue | null;
+  gainEPerAdu?: CameraNoiseValue | null;
   /** The read noise in electrons (RMS), or None when only the gain is recorded. */
   readNoise?: CameraNoiseValue | null;
   /** Measured when every number recorded here is measured. Partly measured when some are. Design estimate when none is. */
@@ -4244,7 +4248,32 @@ export interface CameraNoiseSetting {
 }
 
 /**
- * The answer of `CalibrationCatalog.query`.
+ * The reply of ``calibration:query``.
+ *
+ * Attributes
+ * ----------
+ * detail : `str`
+ * The detail asked for.
+ * dark_temperature_tolerance_c : `float` or `None`
+ * How far, in degrees Celsius, a dark's sensor temperature may differ
+ * from a light frame's and still match.
+ * kind : `str` or `None`
+ * The kind asked for, or `None` for all.
+ * target_id : `str` or `None`
+ * The target, for the target details.
+ * darks, biases, flats : `list` [`dict`] or `None`
+ * ``counts``: one row per camera, setting and exposure (or filter).
+ * groups : `list` [`dict`] or `None`
+ * ``target_match``: the target's light frames grouped by filter, gain
+ * and exposure, each with the darks, biases and flats that match.
+ * lights : `list` [`dict`] or `None`
+ * ``target_frames``: the target's light frames counted by telescope,
+ * camera, gain, exposure and filter.
+ * camera_totals : `list` [`dict`] or `None`
+ * ``counts`` and ``match``: the frame totals of each camera.
+ * matched_row_keys : `list` [`str`] or `None`
+ * ``match``: the ``row_key`` of every counts row with the asked
+ * settings.
  */
 export interface CalibrationQueryResult {
   detail: string;
@@ -4281,7 +4310,7 @@ export interface CalibrationQueryResult {
  * The set's camera and settings.
  * temperature_slot_c : `float` or `None`
  * A dark's temperature slot.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * A dark's exposure.
  * telescope, filter : `str` or `None`
  * A flat's telescope and filter.
@@ -4313,11 +4342,11 @@ export interface CalibrationSetHealth {
   kind: string;
   rowKey: string;
   camera: string;
-  gain: string;
+  gain: number | null;
   offset: number;
   binning?: string | null;
   temperatureSlotC?: number | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   telescope?: string | null;
   filter?: string | null;
   frameCount: number;
@@ -4363,9 +4392,14 @@ export interface CalibrationMeasurementReport {
 }
 
 /**
- * The answer of `Jobs.query`.
+ * The answer of ``jobs:query``.
  *
- * Parameters
+ * Only the fields that belong to the chosen ``detail`` are filled; the
+ * rest stay `None`. The job, log line, run and warning entries have the
+ * fields of the library's `JobSummary`, `JobLogLine`, `LineageRun` and
+ * `JobWarning`.
+ *
+ * Attributes
  * ----------
  * detail : `str`
  * ``"summary"``, ``"full"``, ``"log_tail"``, ``"result"``,
@@ -4373,46 +4407,39 @@ export interface CalibrationMeasurementReport {
  * note : `str`
  * A reminder that the text in the answer is data, not instructions.
  * count : `int` or `None`
- * A job list (``"summary"`` or ``"full"``): how many jobs are listed.
+ * A job list: how many jobs are listed.
  * offset : `int` or `None`
  * A job list: how many newer jobs were skipped.
  * truncated : `bool` or `None`
- * A job list: whether more jobs follow this page.
- * ``detail="warnings"``: whether more warnings exist than are listed.
- * jobs : `list` [`JobSummary`] or `None`
+ * A job list, or the warnings: whether more follow than are listed.
+ * jobs : `list` [`dict`] or `None`
  * A job list: the jobs, newest first.
- * job : `JobSummary` or `None`
+ * job : `dict` or `None`
  * The one job asked for with ``job_id``.
- * log_lines : `list` [`JobLogLine`] or `None`
+ * log_lines : `list` [`dict`] or `None`
  * ``detail="log_tail"``: the last log lines of the job.
  * log_lines_total, log_lines_shown : `int` or `None`
  * ``detail="log_tail"``: how many lines the job wrote, and how many
  * are listed.
  * input_metrics, output_metrics : `str` or `None`
  * ``detail="result"``: the stored input and output numbers as text,
- * cut to a limit. ``detail="full"`` gives them as data in `job`.
+ * cut to a limit.
  * target_id : `str` or `None`
  * ``detail="lineage"``: the target whose runs are listed.
  * runs_total, runs_shown : `int` or `None`
  * ``detail="lineage"``: how many runs the target has, and how many
  * are listed.
- * runs : `list` [`LineageRun`] or `None`
+ * runs : `list` [`dict`] or `None`
  * ``detail="lineage"``: the runs, newest first.
- * warnings : `list` [`JobWarning`] or `None`
- * ``detail="warnings"``: the warnings the job detected. An empty list
- * means the job was checked and nothing failed; `measurement_count`
- * says how much was checked.
+ * warnings : `list` [`dict`] or `None`
+ * ``detail="warnings"``: the warnings the job detected.
  * measurement_count : `int` or `None`
  * ``detail="warnings"``: how many quality measurements the job stored.
- * Zero means the job stored none, so there was nothing to check.
  * checks_not_run_count : `int` or `None`
- * ``detail="warnings"``: how many of the job's checks could not run
- * (outcome ``not_checked``). These are not warnings.
+ * ``detail="warnings"``: how many of the job's checks could not run.
  * parameter_defaults : `list` [`str`] or `None`
  * ``detail="result"`` and ``detail="warnings"``: one line for each
- * parameter that used its default because no tuned or equipment value
- * was set. An empty list means none did, or the job was run before
- * this was recorded.
+ * parameter that used its default.
  */
 export interface JobQueryResult {
   detail: string;
@@ -4454,7 +4481,7 @@ export interface JobQueryResult {
  * How many steps are done, out of how many. Both are zero when the
  * job did not count its steps.
  * message : `str`
- * The latest status message. Cut to a limit unless ``detail="full"``.
+ * The latest status message, whole.
  * created_at, updated_at, completed_at : `str` or `None`
  * Local times without a time zone, as the app wrote them.
  * is_active : `bool`
@@ -4463,13 +4490,14 @@ export interface JobQueryResult {
  * The job is unfinished but has not been updated for an hour, so its
  * process most likely died and left the row at ``started`` or
  * ``running``.
- * idle_minutes : `int` or `None`
+ * idle_min : `int` or `None`
  * Whole minutes since the last update, for an unfinished job.
  * input_metrics, output_metrics : `dict` [`str`, `Any`] or `None`
- * ``detail="full"`` only: what the job was asked to do and what it
- * stored as its result, as JSON data. `None` in a short summary.
+ * What the job was asked to do and what it stored as its result, as
+ * JSON data. `None` in a job list read without ``include=["metrics"]``.
  * log_file_path : `str` or `None`
- * ``detail="full"`` only: the job's log file, when it wrote one.
+ * The job's log file, when it wrote one. `None` in a job list read
+ * without ``include=["metrics"]``.
  */
 export interface JobSummary {
   id: string;
@@ -4484,7 +4512,7 @@ export interface JobSummary {
   completed_at?: string | null;
   is_active?: boolean;
   looks_stale?: boolean;
-  idle_minutes?: number | null;
+  idle_min?: number | null;
   input_metrics?: Record<string, any> | null;
   output_metrics?: Record<string, any> | null;
   log_file_path?: string | null;
@@ -4500,7 +4528,7 @@ export interface JobSummary {
  * level : `str`
  * The log level, such as ``"INFO"``.
  * text : `str`
- * The message, cut to the asked length (500 characters by default).
+ * The message, whole.
  */
 export interface JobLogLine {
   time: string;
@@ -4520,7 +4548,7 @@ export interface JobLogLine {
  * start_time, end_time : `str` or `None`
  * ISO 8601 times.
  * comment : `str`
- * A note about the run, cut to a limit.
+ * A note about the run.
  * informed_by : `list` [`str`]
  * The ids of the runs this one followed from.
  * inputs_used : `int`
@@ -4628,7 +4656,7 @@ export interface StackSummary {
 }
 
 /**
- * What one call of `ProcessingPipelines.remake_preview` made.
+ * What one enhancement run (`processing.enhancement.run`) made.
  */
 export interface PreviewRemakeResult {
   target_id: string;
@@ -4642,6 +4670,7 @@ export interface PreviewRemakeResult {
   preview_settings?: PreviewSettingsRecord | null;
   color_preview_path?: string | null;
   color_preview_note?: string | null;
+  kept_unchanged?: boolean;
 }
 
 /**
@@ -4704,7 +4733,7 @@ export interface StackPrediction {
  * One exposure group of a stack and the calibration it would get.
  */
 export interface PredictedGroup {
-  exposure_seconds: number;
+  exposure_s: number;
   night?: string | null;
   frames_kept: number;
   first_file: string;
@@ -4759,7 +4788,7 @@ export interface SetAsideFrameRecord {
   reason?: string;
   reasonSource: any;
   actionTaken?: string | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   captureSettingId?: number | null;
   movedAt?: string | null;
   camera?: string;
@@ -5131,11 +5160,11 @@ export enum ActionClass {
  *
  * Parameters
  * ----------
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * Exposure time of one frame, in seconds.
  * frame_count : `int` or `None`
  * How many frames to take.
- * gain_setting : `int` or `None`
+ * gain : `int` or `None`
  * The camera's gain setting.
  * offset : `int` or `None`
  * The camera's offset.
@@ -5158,9 +5187,9 @@ export enum ActionClass {
  * A short plain-language detail that fits no other field.
  */
 export interface ProposedAction {
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   frameCount?: number | null;
-  gainSetting?: number | null;
+  gain?: number | null;
   offset?: number | null;
   binning?: number | null;
   filterName?: string | null;
@@ -5181,9 +5210,9 @@ export interface ProposedAction {
  * Expected change in stack noise as a fraction. A fall of 29% is -0.29.
  * efficiency_change : `float` or `None`
  * Expected change in efficiency (a number from 0 to 1).
- * effective_time_added_seconds : `float` or `None`
+ * effective_time_added_s : `float` or `None`
  * Effective exposure time the action adds, in seconds.
- * wall_clock_seconds : `float` or `None`
+ * wall_clock_s : `float` or `None`
  * Time on the clock the action takes, with downloads, dithers and
  * autofocus, in seconds.
  * description : `str`
@@ -5192,8 +5221,8 @@ export interface ProposedAction {
 export interface ExpectedEffect {
   noiseChangeFraction?: number | null;
   efficiencyChange?: number | null;
-  effectiveTimeAddedSeconds?: number | null;
-  wallClockSeconds?: number | null;
+  effectiveTimeAddedS?: number | null;
+  wallClockS?: number | null;
   description: string;
 }
 
@@ -5239,12 +5268,12 @@ export interface ChecklistReturn {
  * On how many nights.
  * frames_set_aside : `int`
  * How many frames were set aside (for example, clouded or trailed).
- * captured_seconds : `float`
+ * captured_s : `float`
  * Exposure time captured, in seconds.
- * weight_effective_seconds : `float` or `None`
+ * weight_effective_s : `float` or `None`
  * The weighted effective time the stacker reports, in seconds.
  * ``None`` when no stack has been made.
- * efficiency_effective_seconds : `float` or `None`
+ * efficiency_effective_s : `float` or `None`
  * Efficiency times the captured time, in seconds. ``None`` when
  * efficiency cannot be found.
  * loss_account : `LossAccount` or `None`
@@ -5260,9 +5289,9 @@ export interface CaptureSettingSummary {
   framesTaken: number;
   nights: number;
   framesSetAside: number;
-  capturedSeconds: number;
-  weightEffectiveSeconds?: number | null;
-  efficiencyEffectiveSeconds?: number | null;
+  capturedS: number;
+  weightEffectiveS?: number | null;
+  efficiencyEffectiveS?: number | null;
   lossAccount?: LossAccount | null;
   scienceGoal?: ScienceGoal | null;
 }
@@ -5276,12 +5305,12 @@ export interface CaptureSettingSummary {
  * ----------
  * capture_setting : `CaptureSetting` or `None`
  * The setting the numbers are for, when it is known.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * Exposure long enough that sky noise dominates read noise, in
  * seconds. ``None`` when it cannot be computed.
  * exposure_reason : `str`
  * How it was found, or why it was not computed.
- * clipping_cap_seconds : `float` or `None`
+ * clipping_cap_s : `float` or `None`
  * The longest exposure that keeps the target and bright stars from
  * clipping, in seconds. ``None`` is "not computed".
  * clipping_cap_reason : `str`
@@ -5291,9 +5320,9 @@ export interface CaptureSettingSummary {
  */
 export interface StartingPoint {
   captureSetting?: CaptureSetting | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   exposureReason: string;
-  clippingCapSeconds?: number | null;
+  clippingCapS?: number | null;
   clippingCapReason: string;
   confidence: Confidence;
 }
@@ -5473,7 +5502,7 @@ export enum DepthLevel {
  * ``not_stacked`` means the target has no library stack.
  * ``depth_not_measured`` means the stack has no usable depth. ``reached``
  * means the depth meets the chosen
- * level. ``below_goal`` means it does not, and ``seconds_to_goal`` may say
+ * level. ``below_goal`` means it does not, and ``time_to_goal_s`` may say
  * how long it would take. ``will_not_help`` means more frames will not
  * reach the level.
  */
@@ -5523,9 +5552,9 @@ export enum RecommendedAdditionalFramesStatus {
  * Frames of the night, kept and set aside.
  * frames_set_aside : `int`
  * Frames the stacker set aside.
- * captured_seconds : `float`
+ * captured_s : `float`
  * Exposure time of all frames taken, in seconds.
- * efficiency_effective_seconds : `float` or `None`
+ * efficiency_effective_s : `float` or `None`
  * The effective time of the kept frames, in seconds. ``None`` when no
  * frame could be assessed.
  * capture_settings : `list` [`CaptureSettingSummary`]
@@ -5546,8 +5575,8 @@ export interface NightTargetQuality {
   goal: ScienceGoal;
   framesTaken: number;
   framesSetAside: number;
-  capturedSeconds: number;
-  efficiencyEffectiveSeconds?: number | null;
+  capturedS: number;
+  efficiencyEffectiveS?: number | null;
   captureSettings?: CaptureSettingSummary[];
   lossAccount?: LossAccount | null;
   statements?: TargetStatement[];
@@ -5729,7 +5758,7 @@ export interface StandoutFrame {
  * for a stack.
  * elongation : `float` or `None`
  * Long axis divided by short axis (1 is round).
- * angle_degrees : `float` or `None`
+ * angle_deg : `float` or `None`
  * Direction of the long axis, from 0 up to but not including 180
  * degrees.
  * direction_coherence : `float` or `None`
@@ -5748,7 +5777,7 @@ export interface FrameStarShape {
   path: string;
   timestamp?: number | null;
   elongation?: number | null;
-  angleDegrees?: number | null;
+  angleDeg?: number | null;
   directionCoherence?: number | null;
   centerWidthPx?: number | null;
   cornerWidthsPx?: Record<string, number>;
@@ -5782,7 +5811,7 @@ export interface DitherSettings {
  *
  * Attributes
  * ----------
- * window_seconds : `float`
+ * window_s : `float`
  * The length of the stretch, ending at the latest record.
  * sample_count : `int`
  * Guiding measurements inside it.
@@ -5791,7 +5820,7 @@ export interface DitherSettings {
  * `None` when there are no samples.
  */
 export interface GuidingWindowSummary {
-  window_seconds: number;
+  window_s: number;
   sample_count: number;
   ra_rms_arcsec?: number | null;
   dec_rms_arcsec?: number | null;
@@ -5807,7 +5836,7 @@ export interface GuidingWindowSummary {
  * The saved file's name.
  * completed_at : `float`
  * When the exposure finished.
- * exposure_seconds : `float`
+ * exposure_s : `float`
  * Its length.
  * star_count : `int`
  * Stars Ekos found in the frame.
@@ -5831,7 +5860,7 @@ export interface GuidingWindowSummary {
 export interface ExposureSummary {
   frame_name: string;
   completed_at: number;
-  exposure_seconds: number;
+  exposure_s: number;
   star_count: number;
   half_flux_radius_px?: number | null;
   eccentricity?: number | null;
@@ -5856,7 +5885,7 @@ export interface ExposureSummary {
  * kind : `str`
  * ``"jump"`` if the error arrived at full size in one step (the
  * field moved suddenly), ``"drift"`` if it built up over time.
- * drift_rate_arcsec_per_second : `float` or `None`
+ * drift_rate_arcsec_per_s : `float` or `None`
  * How fast the error grew along that axis, from a straight-line fit.
  * `None` with fewer than three measurements.
  * matches_stopped_ra_axis : `bool` or `None`
@@ -5873,7 +5902,7 @@ export interface GuidingExcursion {
   peak_error_arcsec: number;
   axis: string;
   kind?: string;
-  drift_rate_arcsec_per_second?: number | null;
+  drift_rate_arcsec_per_s?: number | null;
   matches_stopped_ra_axis?: boolean | null;
   reacquire_count?: number;
 }
@@ -5891,18 +5920,18 @@ export interface GuidingExcursion {
  * `True` if the guide star reached its new position, `False` if the
  * guider gave up after its allowed tries, `None` if the log ends
  * before the dither does.
- * settle_seconds : `float` or `None`
+ * settle_s : `float` or `None`
  * The wait the guider applied after the move, before the next
  * exposure could start.
- * duration_seconds : `float` or `None`
+ * duration_s : `float` or `None`
  * Time from the start of the dither to its completion message.
  */
 export interface DitherEvent {
   timestamp: number;
   amplitude_px: number;
   succeeded?: boolean | null;
-  settle_seconds?: number | null;
-  duration_seconds?: number | null;
+  settle_s?: number | null;
+  duration_s?: number | null;
 }
 
 /**
@@ -5912,7 +5941,7 @@ export interface SafetyRuleSet {
   id: string;
   rules?: SafetyRule[];
   /** Duration conditions must remain continuously safe before the enclosure may reopen. */
-  settling_period_sec?: number;
+  settling_period_s?: number;
 }
 
 /**
@@ -5940,7 +5969,7 @@ export interface Enclosure {
   park_azimuth_deg: number;
   park_altitude_deg: number;
   clearance_tolerance_deg?: number;
-  motion_timeout_sec?: number;
+  motion_timeout_s?: number;
   /** Hardware-control protocol driving this enclosure. */
   protocol?: string;
 }
@@ -6256,13 +6285,13 @@ export interface SequenceField {
  * The science goal the account is stated for.
  * reference_name : `str`
  * The name of the reference efficiency is measured against.
- * set_aside_seconds : `float`
+ * set_aside_s : `float`
  * Total exposure time of the frames set aside, in seconds.
  * set_aside : `list` [`LossShare`]
  * The same time split by the reason frames were set aside.
  * kept_frame_deficit : `list` [`LossShare`]
  * Captured minus effective time of the kept frames, split by cause.
- * cause_unknown_seconds : `float` or `None`
+ * cause_unknown_s : `float` or `None`
  * The part of the deficit that no listed cause explains. ``None``
  * means "not measured": it exists only where efficiency is measured
  * independently of the causes.
@@ -6276,10 +6305,10 @@ export interface SequenceField {
 export interface LossAccount {
   goal: ScienceGoal;
   referenceName: string;
-  setAsideSeconds: number;
+  setAsideS: number;
   setAside?: LossShare[];
   keptFrameDeficit?: LossShare[];
-  causeUnknownSeconds?: number | null;
+  causeUnknownS?: number | null;
   causeUnknownReason: string;
   transparencyIncluded: boolean;
   transparencyReason: string;
@@ -6370,7 +6399,7 @@ export enum RankedUse {
  * The setting the forecast assumes (the one most used so far).
  * frames_in_hour : `int` or `None`
  * How many frames of that setting fit in one clock hour.
- * exposure_seconds : `float` or `None`
+ * exposure_s : `float` or `None`
  * The exposure of one of those frames, in seconds.
  * overhead_fraction : `float` or `None`
  * Downloads, dithers and autofocus over exposure time (0.2 means the
@@ -6409,7 +6438,7 @@ export interface RankedCandidate {
   altitudeDeg?: number | null;
   captureSetting?: CaptureSetting | null;
   framesInHour?: number | null;
-  exposureSeconds?: number | null;
+  exposureS?: number | null;
   overheadFraction?: number | null;
   effectiveHoursSoFar?: number | null;
   skyRateEPerSPerPx?: number | null;
@@ -6456,7 +6485,7 @@ export interface SkySettingSummary {
  * The run's identifier.
  * started_at : `float`
  * When the run began, in seconds since the Unix epoch.
- * duration_seconds : `float` or `None`
+ * duration_s : `float` or `None`
  * Length of the run.
  * samples : `int`
  * Samples in the run that were not excursions.
@@ -6464,13 +6493,13 @@ export interface SkySettingSummary {
  * Robust guiding error per axis, in arcseconds.
  * lost_fraction : `float` or `None`
  * Share of the run's frames that were lost.
- * net_dec_correction_arcsec_per_minute : `float` or `None`
+ * net_dec_correction_arcsec_per_min : `float` or `None`
  * The run's net Dec correction rate (see `GuidingPerformance`).
- * altitude_degrees : `float` or `None`
+ * altitude_deg : `float` or `None`
  * Altitude when the run began.
- * azimuth_degrees : `float` or `None`
+ * azimuth_deg : `float` or `None`
  * Azimuth when the run began.
- * declination_degrees : `float` or `None`
+ * declination_deg : `float` or `None`
  * Declination when the run began.
  * pier_side : `str` or `None`
  * Side of the pier the telescope was on.
@@ -6478,14 +6507,14 @@ export interface SkySettingSummary {
 export interface GuidingRunPerformance {
   runId: string;
   startedAt: number;
-  durationSeconds?: number | null;
+  durationS?: number | null;
   samples?: number;
   rmsPerAxisArcsec?: number | null;
   lostFraction?: number | null;
-  netDecCorrectionArcsecPerMinute?: number | null;
-  altitudeDegrees?: number | null;
-  azimuthDegrees?: number | null;
-  declinationDegrees?: number | null;
+  netDecCorrectionArcsecPerMin?: number | null;
+  altitudeDeg?: number | null;
+  azimuthDeg?: number | null;
+  declinationDeg?: number | null;
   pierSide?: string | null;
 }
 
@@ -6504,7 +6533,7 @@ export interface SafetyRule {
   comparison: string;
   unsafe_threshold: number;
   marginal_threshold?: number | null;
-  staleness_bound_sec?: number;
+  staleness_bound_s?: number;
 }
 
 /**
@@ -6581,7 +6610,7 @@ export interface StackMeasurements {
  * The row's source key, when the library suggested it.
  * filter_name : `str`
  * The row's filter.
- * exposure_sec : `float`
+ * exposure_s : `float`
  * The row's frame length in seconds.
  * requested : `int`
  * How many frames the row asks for.
@@ -6599,7 +6628,7 @@ export interface StackMeasurements {
 export interface RowProgress {
   sourceKey?: string;
   filterName?: string;
-  exposureSec: number;
+  exposureS: number;
   requested: number;
   captured: number;
   judged: number;
@@ -6821,11 +6850,6 @@ export const RPC_METHODS = [
   "calibration:measure_frames",
   "mosaic:preview",
   "mosaic:create",
-  "execution:list_sessions",
-  "execution:get_session",
-  "execution:abort_session",
-  "execution:reconcile_session",
-  "execution:build_divergence_record",
   "plan:current_session",
   "plan:list_packages",
   "plan:package_for_target",

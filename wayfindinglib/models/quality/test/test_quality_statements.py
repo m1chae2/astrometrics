@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from astrometricslib.reports import CaptureSetting, LimitTier, MeasurementReference, QualityLimit
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import LimitTier, MeasurementReference, QualityLimit
 from wayfindinglib.models.quality.rule import MetricRequirement, QualityRule
 from wayfindinglib.models.quality.statements import (
     ActionClass,
@@ -60,9 +61,9 @@ def test_a_full_statement_round_trips_through_json() -> None:
     """Every nested model survives a dump with aliases and a reload."""
     statement = _statement(
         severity=Severity.ADVICE,
-        capture_setting=CaptureSetting(camera="ASI533MM", exposure_seconds=60.0, gain_setting=100),
+        capture_setting=CaptureSetting(camera="ASI533MM", exposure_s=60.0, gain=100),
         reason="Noise falls as the square root of the time.",
-        proposed_action=ProposedAction(exposure_seconds=90.0, frame_count=20, refocus_every_degc=1.4),
+        proposed_action=ProposedAction(exposure_s=90.0, frame_count=20, refocus_every_degc=1.4),
         expected_effect=ExpectedEffect(noise_change_fraction=-0.29, description="Noise falls by about 29%."),
         evidence=[MeasurementReference(row_id=7)],
         limits=[QualityLimit(value=1.0, unit="arcsec", tier=LimitTier.DESIGN_ESTIMATE, derivation="x")],
@@ -115,7 +116,7 @@ def test_a_proposed_action_must_set_something_and_order_its_window() -> None:
     with pytest.raises(ValidationError, match="window_end"):
         ProposedAction(window_start=start, window_end=start)
     with pytest.raises(ValidationError):
-        ProposedAction(exposure_seconds=0.0)
+        ProposedAction(exposure_s=0.0)
     assert (
         ProposedAction(windowStart=start, windowEnd=datetime(2026, 10, 25, 2, tzinfo=UTC)).window_start
         == start

@@ -122,6 +122,9 @@ class FakeConfig:
 class FakeAstrometrics:
     """A stand-in for `Astrometrics` that records the passes asked for."""
 
+    current: FakeAstrometrics | None = None
+    """The stand-in built last, which records the full passes."""
+
     def __init__(self, targets: list[SimpleNamespace], setups: ObservatorySetups) -> None:
         """Set up the fake.
 
@@ -133,7 +136,7 @@ class FakeAstrometrics:
             The setups the config describes.
         """
         self.targets = SimpleNamespace(
-            query=lambda **_k: SimpleNamespace(objects=targets),
+            query=lambda **_k: SimpleNamespace(items=tuple(targets)),
             reindex_frames=lambda *args, **kwargs: None,
             save=lambda: None,
         )
@@ -149,14 +152,19 @@ class FakeAstrometrics:
         self.earlier_nights_failures: set[str] = set()
         self.odd_even_difference_calls: list[str] = []
         self.odd_even_difference_failures: set[str] = set()
+        self.picture_calls: list[str] = []
         self.processing = SimpleNamespace(
-            measure_noise=self.measure_noise,
-            process_target=self.process_target,
-            stack=self.stack,
+            stacking=SimpleNamespace(run=self.stack),
+            enhancement=SimpleNamespace(run=self.make_picture),
             stack_subset=self.stack_subset,
         )
+        # The script runs a pass through `process_targets_in_parallel`; the
+        # `script` fixture sends those calls to the fake built last.
+        FakeAstrometrics.current = self
         self.quality = SimpleNamespace(
-            query=self.query_quality, record_frame_measurements=self.record_frame_measurements
+            records=SimpleNamespace(query=self.query_quality),
+            frames=SimpleNamespace(record=self.record_frame_measurements),
+            stacks=SimpleNamespace(record_odd_even_noise=self.measure_noise),
         )
 
     def record_frame_measurements(self, target: Any, **keywords: Any) -> SimpleNamespace:
@@ -196,6 +204,17 @@ class FakeAstrometrics:
             raise RuntimeError(f"stacking {target.id} broke")
         return SimpleNamespace()
 
+    def make_picture(self, target: Any, *arguments: Any, **keywords: Any) -> SimpleNamespace:
+        """Record one picture request.
+
+        Returns
+        -------
+        result : `types.SimpleNamespace`
+            An empty picture result.
+        """
+        self.picture_calls.append(target.id)
+        return SimpleNamespace()
+
     def stack_subset(self, target: Any, frames: list[Any], **keywords: Any) -> SimpleNamespace:
         """Record one subset request, or fail it when the test says so.
 
@@ -233,8 +252,8 @@ class FakeAstrometrics:
         return SimpleNamespace()
 
     def query_quality(
-        self, metric: str, target_id: str, variant: str | None = None, **keywords: Any
-    ) -> SimpleNamespace:
+        self, metric: str, target: Any, variant: str | None = None, **keywords: Any
+    ) -> list[Any]:
         """Return the fake quality rows of one metric for one target.
 
         Rows asked for by a subset variant are kept under the key with the
@@ -242,11 +261,11 @@ class FakeAstrometrics:
 
         Returns
         -------
-        answer : `types.SimpleNamespace`
-            With ``rows``, the rows the test set up, or none.
+        rows : `list`
+            The rows the test set up, or none.
         """
-        key = f"{target_id}|{metric}" + (f"|{variant}" if variant else "")
-        return SimpleNamespace(rows=self.quality_rows.get(key, []))
+        key = f"{target.id}|{metric}" + (f"|{variant}" if variant else "")
+        return list(self.quality_rows.get(key, []))
 
     def process_target(self, target: list[str] | None, **keywords: Any) -> SimpleNamespace:
         """Record one pass and pretend it succeeded.
@@ -290,6 +309,14 @@ def script(monkeypatch: pytest.MonkeyPatch) -> Any:
         run_all_target_processing,
         "stack_subset",
         lambda pipelines, target, frames, **keywords: pipelines.stack_subset(target, frames, **keywords),
+    )
+    # A full pass goes to the stand-in library built last, which records it.
+    monkeypatch.setattr(
+        run_all_target_processing,
+        "process_targets_in_parallel",
+        lambda config, target_ids, **keywords: FakeAstrometrics.current.process_target(
+            target_ids, **keywords
+        ),
     )
     return run_all_target_processing
 
@@ -760,9 +787,9 @@ def give_many_frames(fake: FakeAstrometrics, *target_ids: str, count: int = 9) -
             if target.id in target_ids
             else target.frames,
         )
-        for target in fake.targets.query(detail="objects", limit=None).objects
+        for target in fake.targets.query(include_empty=True).items
     ]
-    fake.targets.query = lambda **_k: SimpleNamespace(objects=copies)
+    fake.targets.query = lambda **_k: SimpleNamespace(items=tuple(copies))
 
 
 def run_stack_only(script: Any, tmp_path: Path, *extra: str) -> list[dict]:
@@ -1140,7 +1167,7 @@ def test_a_target_with_two_imaging_frames_is_stacked(
     """Check the smallest allowed number of frames still makes a stack."""
     monkeypatch.setattr(script, "MINIMUM_IMAGING_FRAMES_TO_STACK", 2)
     target = make_target("TwoFrames", ASI, ASI)
-    fake.targets.query = lambda **_k: SimpleNamespace(objects=[target])
+    fake.targets.query = lambda **_k: SimpleNamespace(items=(target,))
     progress_path = tmp_path / "progress.jsonl"
 
     script.run_full_processing([

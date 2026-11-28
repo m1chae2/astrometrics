@@ -93,12 +93,12 @@ class ReplayDriver:
 
     def write_stats(self) -> None:
         """Write the statistics file (the simulated profile's shape)."""
-        exposures = [frame["exposure_seconds"] for frame in self.plan["window_frames"]]
+        exposures = [frame["exposure_s"] for frame in self.plan["window_frames"]]
         with self._lock:
             stats = {
                 "started_at": self.start_time,
                 "target": self.plan["window_frames"][0]["target_id"],
-                "exposure_seconds": statistics.median(exposures),
+                "exposure_s": statistics.median(exposures),
                 "frames": list(self.frames),
                 "frames_planned": len(self.plan["window_frames"]),
                 "guide_log_lines_written": self.guide_lines,
@@ -191,7 +191,7 @@ class ReplayDriver:
             self.frames.append({
                 "name": frame["name"],
                 "appeared_at": destination.stat().st_mtime,
-                "exposure_started_at": destination.stat().st_mtime - frame["exposure_seconds"],
+                "exposure_started_at": destination.stat().st_mtime - frame["exposure_s"],
                 "size_bytes": destination.stat().st_size,
             })
         self.write_stats()

@@ -1,7 +1,7 @@
 """Purpose: Unit tests for observatory_session_recorder's _ensure_session.
 
 Description: Verifies an existing session is returned unchanged, and that a
-missing session is created through `wayfinder.planning.create_session`. The
+missing session is created through `wayfinder.planning.sessions.create`. The
 recorder holds no logic of its own for equipment or sites: the library
 creates the session for the active telescope and camera, and raises when it
 cannot.
@@ -19,8 +19,8 @@ from documentation.notebooks.wayfinding.execution.scripts.observatory_session_re
 from wayfindinglib.models.session.observation_session import ObservationSession, SessionStatus
 
 
-class _FakePlanning:
-    """A stand-in `ObservationPlanning` with one stored session."""
+class _FakeSessions:
+    """A stand-in for ``wayfinder.planning.sessions`` with one session."""
 
     def __init__(self, stored: ObservationSession | None = None, refuse: bool = False) -> None:
         """Hold the stored session and whether creating is refused."""
@@ -28,17 +28,17 @@ class _FakePlanning:
         self._refuse = refuse
         self.created: list[str] = []
 
-    def get_plan(self, session_id: str) -> ObservationSession | None:
-        """Read the stored session.
+    def query(self) -> list[ObservationSession]:
+        """List the stored sessions.
 
         Returns
         -------
-        session : `ObservationSession` or `None`
-            The stored session when its id matches.
+        sessions : `list` [`ObservationSession`]
+            The one stored session, or none.
         """
-        return self._stored if self._stored is not None and self._stored.id == session_id else None
+        return [] if self._stored is None else [self._stored]
 
-    def create_session(self, observing_night_id: str) -> ObservationSession:
+    def create(self, observing_night_id: str) -> ObservationSession:
         """Create an empty session for a night, or refuse.
 
         Returns
@@ -65,6 +65,24 @@ class _FakePlanning:
         )
 
 
+def _planning(stored: ObservationSession | None = None, refuse: bool = False) -> SimpleNamespace:
+    """Build a stand-in planning area holding the sessions stand-in.
+
+    Parameters
+    ----------
+    stored : `ObservationSession`, optional
+        The stored session.
+    refuse : `bool`, optional
+        Whether creating is refused.
+
+    Returns
+    -------
+    planning : `SimpleNamespace`
+        An object with a ``sessions`` attribute.
+    """
+    return SimpleNamespace(sessions=_FakeSessions(stored, refuse))
+
+
 def test_returns_existing_session_unchanged() -> None:
     """Verify an already-recorded session is returned as-is."""
     existing = ObservationSession(
@@ -75,27 +93,27 @@ def test_returns_existing_session_unchanged() -> None:
         telescope_id="scope-1",
         camera_id="cam-1",
     )
-    planning = _FakePlanning(existing)
+    planning = _planning(existing)
 
     result = _ensure_session(SimpleNamespace(planning=planning), "session-1")
 
     assert result is existing
-    assert planning.created == []
+    assert planning.sessions.created == []
 
 
 def test_creates_a_session_for_a_night_that_has_none() -> None:
     """Verify a missing session is created through the planning API."""
-    planning = _FakePlanning()
+    planning = _planning()
 
     result = _ensure_session(SimpleNamespace(planning=planning), "2026-08-05")
 
-    assert planning.created == ["2026-08-05"]
+    assert planning.sessions.created == ["2026-08-05"]
     assert result.id == "created-2026-08-05"
 
 
 def test_the_librarys_refusal_reaches_the_caller() -> None:
     """Verify an error from the library is not hidden by the recorder."""
-    wayfinder = SimpleNamespace(planning=_FakePlanning(refuse=True))
+    wayfinder = SimpleNamespace(planning=_planning(refuse=True))
 
     with pytest.raises(InvalidArgumentError):
         _ensure_session(wayfinder, "2026-08-05")

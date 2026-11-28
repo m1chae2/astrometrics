@@ -104,7 +104,7 @@ def test_capture_weather_snapshot_parses_available_indi_properties(butler: DiskB
     recorder = ObservationSessionRecorder(FakeGuidingService([]), FakeIndiDriver(), butler=butler)
     snapshot = recorder.capture_weather_snapshot()
     assert snapshot.ambient_temperature_c == pytest.approx(12.3)
-    assert snapshot.humidity_percent == pytest.approx(45.0)
+    assert snapshot.humidity_pct == pytest.approx(45.0)
 
 
 def test_capture_weather_snapshot_tolerates_unavailable_readings(butler: DiskButler) -> None:
@@ -114,7 +114,7 @@ def test_capture_weather_snapshot_tolerates_unavailable_readings(butler: DiskBut
     )
     snapshot = recorder.capture_weather_snapshot()
     assert snapshot.ambient_temperature_c is None
-    assert snapshot.humidity_percent is None
+    assert snapshot.humidity_pct is None
 
 
 def test_save_checkpoint_persists_session_via_butler(butler: DiskButler) -> None:

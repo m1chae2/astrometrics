@@ -11,7 +11,7 @@ moment.
 `record_frame_pointing_errors` runs after `control.remote.sync_frames`
 brings new frames into the library. It records one alignment attempt per
 new frame that has both positions, so
-`review.query(kind="alignment")` shows them. Each attempt names
+`review.alignment.query` shows them. Each attempt names
 its frame (``source_frame``, the file name), so a frame that comes into
 the library again, for example after a re-download, or that has been
 solved again, updates its one record instead of adding another.
@@ -166,7 +166,7 @@ def record_frame_pointing_errors(context: ControlContext, paths: list[str]) -> i
         if not path.lower().endswith((".fits", ".fit")):
             continue
         try:
-            header = context.astrometrics.targets.read_frame_header(path)
+            header = context.astrometrics.targets.frames.get_header(path)
             attempt = pointing_error_from_header(header, path)
         except (NotFoundError, *FITS_READ_ERRORS) as error:
             logger.debug("Skipping %s: %s", path, error)

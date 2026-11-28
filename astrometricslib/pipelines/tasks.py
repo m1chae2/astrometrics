@@ -173,7 +173,6 @@ def _stack_with_job_tracking(
         The path to the final combined image file, or None if it failed.
     """
     with registered_job(
-        enabled=True,
         job_type="stacking",
         target_id=target.id,
         completed_message=f"[{target.id}] Stacking completed",
@@ -372,8 +371,8 @@ def stack_frames_with_timeout(
         stacking_thread.join(_STACKING_TIMEOUT_POLL_SECONDS)
         if not stacking_thread.is_alive():
             break
-        elapsed_seconds = time.monotonic() - started_at
-        if elapsed_seconds >= timeout_seconds + lock_wait.total:
+        elapsed_s = time.monotonic() - started_at
+        if elapsed_s >= timeout_seconds + lock_wait.total:
             break
 
     if stacking_thread.is_alive():
@@ -425,7 +424,6 @@ def analyze_target(
     pipeline_type: str = "astrometry",
     filter_type: str | None = None,
     catalog_access=None,  # ruff: ignore[missing-type-function-argument]
-    register_job: bool = True,
     path: str | None = None,
     measured_at: datetime | None = None,
     analyzed_stack: str | None = None,
@@ -439,11 +437,6 @@ def analyze_target(
 
     Parameters
     ----------
-    register_job : bool, optional
-        Set to True (default) if you want this run to automatically
-        show up in the user interface's job tracker. Set to False if
-        you are calling this from a tool that already tracks its own jobs
-        (to prevent double-counting).
     measured_at : datetime, optional
         The time stamped on the quality measurements the pipeline stores,
         with a time zone. Pipeline code never reads the clock, so the caller
@@ -472,10 +465,9 @@ def analyze_target(
 
     # Record this run in the job list so work started from a script,
     # notebook, or the command line shows up in the user interface the
-    # same way a run started from the interface does. Skipped when
-    # register_job=False -- see that parameter's docstring.
+    # same way a run started from the interface does. A run inside a job
+    # that is already current (a caller's batch or backend job) joins it.
     with registered_job(
-        enabled=register_job,
         job_type="analysis",
         target_id=target.id,
         completed_message=f"[{target.id}] Analysis completed successfully.",
@@ -503,9 +495,8 @@ def analyze_target(
                 )
 
         # The rows this run stores carry the id of the job that made them,
-        # so `Jobs.query(detail="warnings")` can list them. With no job of its
-        # own (register_job=False), the run uses the job it is running inside,
-        # such as a caller's batch job. With neither, the rows have no job.
+        # so `Jobs.query(detail="warnings")` can list them. A run that joined
+        # a caller's job uses that job's id; with no job the rows have none.
         kwargs["job_id"] = job.job_id or kwargs.get("job_id") or current_job_id()
         kwargs["measured_at"] = measured_at
         # Parameters are read for the camera and optic of the image analyzed:
@@ -937,7 +928,6 @@ def run_target_stages(
     stages: tuple[str, ...],
     stage_options: dict[str, dict[str, Any]],
     catalog_access: Any,
-    register_job: bool,
     drivers: Drivers | None = None,
     frame_selection: ProcessingFrameSelection | None = None,
     measured_at: datetime | None = None,
@@ -970,8 +960,6 @@ def run_target_stages(
         Each stage's own options (see `STAGE_OPTIONS`), keyed by stage.
     catalog_access : `AbstractCatalogAccess`
         The star catalog the stages read and write.
-    register_job : `bool`
-        Whether each stage's run shows up in the job list.
     drivers : `Drivers`, optional
         The plate solver and SIMBAD driver for the stages that identify
         stars (astrometry and spectroscopy). Any left out is the built-in
@@ -1085,7 +1073,6 @@ def run_target_stages(
                     target,
                     pipeline_type=_PIPELINE_TYPES[stage],
                     catalog_access=catalog_access,
-                    register_job=register_job,
                     measured_at=measured_at,
                     **options,
                 )
@@ -1109,7 +1096,6 @@ def run_target_stages(
             target,
             pipeline_type=_PIPELINE_TYPES[stage],
             catalog_access=catalog_access,
-            register_job=register_job,
             measured_at=measured_at,
             **options,
         )

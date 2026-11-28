@@ -257,13 +257,13 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `saturated_pixel_fraction` | `float \| None` | Share of saturated pixels (clipped at the sensor's maximum) in the final stack. |
 | `exposure_groups` | `list[astrometricslib.models.quality.quality_summary.ExposureGroupSummary]` | One sub-stack per exposure length, with its details. |
 | `zero_pixel_fraction` | `float \| None` | Share of stack pixels that are exactly zero. |
-| `negative_pixel_max_percent` | `int \| None` | Largest percentage of negative pixels the stacking engine reported. |
+| `negative_pixel_max_pct` | `int \| None` | Largest percentage of negative pixels the stacking engine reported. |
 | `stacked_fwhm_px` | `float \| None` | Measured FWHM of the stacked image. |
 | `median_input_fwhm_px` | `float \| None` | Median FWHM of all frames in the stack. |
 | `expected_stack_fwhm_px` | `float \| None` | Expected stack FWHM: the weighted RMS of all input-frame FWHMs. |
 | `spectral_registration_flags` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames about which the spectral registration (alignment) test raised a concern. |
 | `spectral_registration_checked` | `bool` | Whether the spectral registration (alignment) test ran. |
-| `stacking_duration_seconds` | `float \| None` | How long the stacking run took, in seconds. |
+| `stacking_duration_s` | `float \| None` | How long the stacking run took, in seconds. |
 | `debayer_applied` | `bool \| None` | Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-color pixels). |
 | `stacking_engine` | `str \| None` | Program that did the pixel processing (for example Siril). |
 | `stacking_engine_version` | `str \| None` | Version of the stacking program. |

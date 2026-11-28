@@ -317,13 +317,13 @@ def describe_group_clipping(
     Returns
     -------
     measured : `list` [`dict`]
-        One ``{"exposure_seconds", "frame_zero_fraction"}`` entry per group.
+        One ``{"exposure_s", "frame_zero_fraction"}`` entry per group.
     clipped : `list` [`dict`]
         The entries above `CLIPPED_FRAME_ZERO_FRACTION`.
     """
     clipped_frame_zero_fraction = resolve(CLIPPED_FRAME_ZERO_FRACTION).value
     measured = [
-        {"exposure_seconds": float(exposure), "frame_zero_fraction": round(float(zero_fraction), 3)}
+        {"exposure_s": float(exposure), "frame_zero_fraction": round(float(zero_fraction), 3)}
         for exposure, zero_fraction in zip(exposures, zero_fractions, strict=True)
     ]
     # Judged on the unrounded value, the same as the clipped flag of the

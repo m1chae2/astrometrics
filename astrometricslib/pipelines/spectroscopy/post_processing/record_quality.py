@@ -733,13 +733,13 @@ def _summary_values(
     ))
     rows.append((
         SPECTROSCOPY_GAIA_XP_MEDIAN_SLOPE,
-        None if gaia is None else _optional_float(gaia.median_slope_percent_per_1000_angstrom),
+        None if gaia is None else _optional_float(gaia.median_slope_pct_per_1000_angstrom),
         _NO_GAIA_XP_REASON if gaia is None else "No compared star had a measurable tilt.",
         None,
     ))
     rows.append((
         SPECTROSCOPY_GAIA_XP_MEDIAN_ABSOLUTE_SLOPE,
-        None if gaia is None else _optional_float(gaia.median_absolute_slope_percent_per_1000_angstrom),
+        None if gaia is None else _optional_float(gaia.median_absolute_slope_pct_per_1000_angstrom),
         _NO_GAIA_XP_REASON if gaia is None else "No compared star had a measurable tilt.",
         None,
     ))

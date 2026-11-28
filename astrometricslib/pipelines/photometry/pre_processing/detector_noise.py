@@ -159,7 +159,7 @@ def resolve_detector_noise(
         number the profile does not give.
     gain_setting, offset, binning : `Any`, optional
         The frame's setting, when it is known from somewhere other than a
-        header (for example a frame record's ``iso``, ``offset`` and
+        header (for example a frame record's ``gain``, ``offset`` and
         ``binning``). Each one given replaces what the header says.
     clipped_at_zero : `bool` or `None`, optional
         Whether the frame is cut off at zero. `False` lets the profile's

@@ -314,7 +314,7 @@ def measure_dark_defects_in_library(
         except (*FITS_READ_ERRORS, ValueError, OSError) as read_error:
             _note(
                 summary,
-                f"the reference of a {calibration_set.exposure_seconds} s dark set failed: {read_error}",
+                f"the reference of a {calibration_set.exposure_s} s dark set failed: {read_error}",
             )
             summary.unreadable_count += len(pending)
             continue

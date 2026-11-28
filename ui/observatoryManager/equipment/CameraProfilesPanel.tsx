@@ -91,7 +91,7 @@ function noiseCell(recorded: CameraNoiseValue | null | undefined, digits: number
  * @return The text.
  */
 function settingText(setting: CameraNoiseSetting): string {
-    const parts = [`Gain ${setting.gainSetting}`, `Offset ${setting.offset}`, String(setting.binning)];
+    const parts = [`Gain ${setting.gain}`, `Offset ${setting.offset}`, String(setting.binning)];
     if (typeof setting.temperatureC === 'number') parts.push(`${setting.temperatureC.toFixed(0)} °C`.replace('-', '−'));
     return parts.join(' · ');
 }
@@ -143,7 +143,8 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
     };
 
     const chosenCamera = cameraId || cameras[0]?.name || '';
-    const canMeasure = chosenCamera !== '' && gain.trim() !== '' && offset.trim() !== '' && !isMeasuring;
+    const canMeasure = chosenCamera !== '' && gain.trim() !== '' && offset.trim() !== ''
+        && Number.isFinite(Number(gain.trim())) && Number.isFinite(Number(offset.trim())) && !isMeasuring;
 
     /** Runs one measurement without saving it. */
     const measure = async () => {
@@ -155,8 +156,8 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
         try {
             setMeasurement(await callBackend('calibration:measure_sensor_noise', {
                 camera_id: chosenCamera,
-                gain: gain.trim(),
-                offset: offset.trim(),
+                gain: Number(gain.trim()),
+                offset: Number(offset.trim()),
                 save: false,
             }));
         } catch (caught) {
@@ -174,8 +175,8 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
         try {
             const saved = await callBackend('calibration:measure_sensor_noise', {
                 camera_id: chosenCamera,
-                gain: gain.trim(),
-                offset: offset.trim(),
+                gain: Number(gain.trim()),
+                offset: Number(offset.trim()),
                 save: true,
             });
             setMeasurement(saved);
@@ -236,12 +237,12 @@ export const CameraProfilesPanel: React.FC<CameraProfilesPanelProps> = ({ camera
                                 </thead>
                                 <tbody>
                                     {noiseRows.map(({ camera, setting }) => (
-                                        <tr key={`${camera.name}-${setting.gainSetting}-${setting.offset}-${setting.binning}`}>
+                                        <tr key={`${camera.name}-${setting.gain}-${setting.offset}-${setting.binning}`}>
                                             <td>
                                                 <span className="camera-profiles__camera">{camera.name}</span>
                                                 <span className="camera-profiles__setting">{settingText(setting)}</span>
                                             </td>
-                                            <td>{noiseCell(setting.gain, 3)}</td>
+                                            <td>{noiseCell(setting.gainEPerAdu, 3)}</td>
                                             <td>{noiseCell(setting.readNoise, 2)}</td>
                                         </tr>
                                     ))}

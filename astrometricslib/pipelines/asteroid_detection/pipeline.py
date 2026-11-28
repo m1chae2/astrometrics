@@ -422,17 +422,17 @@ def _read_exposure_seconds(frame_header: fits.Header) -> float | None:
 
     Returns
     -------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The ``EXPTIME`` value, or `None` if it is missing, is not a number,
         or is not positive.
     """
     try:
-        exposure_seconds = float(frame_header.get("EXPTIME"))
+        exposure_s = float(frame_header.get("EXPTIME"))
     except TypeError, ValueError:
         return None
-    if not math.isfinite(exposure_seconds) or exposure_seconds <= 0.0:
+    if not math.isfinite(exposure_s) or exposure_s <= 0.0:
         return None
-    return exposure_seconds
+    return exposure_s
 
 
 def _pixels_to_sky_positions(
@@ -501,7 +501,7 @@ def _detect_sources_in_one_frame(
     """
     try:
         frame_header, frame_data = read_header_and_data(frame_path, first_hdu_only=True)
-        exposure_seconds = _read_exposure_seconds(frame_header)
+        exposure_s = _read_exposure_seconds(frame_header)
     except FITS_READ_ERRORS as read_error:
         logger.warning("Failed to read frame '%s' for asteroid detection: %s", frame_path, read_error)
         return "read_failed", []
@@ -581,7 +581,7 @@ def _detect_sources_in_one_frame(
                 astrometric_error_ra_arcsec=error_ra_arcsec,
                 astrometric_error_dec_arcsec=error_dec_arcsec,
                 astrometric_error_correlation=error_correlation,
-                exposure_seconds=exposure_seconds,
+                exposure_s=exposure_s,
             )
         )
     return "ok", detections

@@ -99,7 +99,7 @@ def test_each_run_gets_its_own_error_and_sky_position(
 
     assert [run.samples for run in performance.runs] == [200, 200]
     assert performance.runs[0].rms_per_axis_arcsec < performance.runs[1].rms_per_axis_arcsec
-    assert performance.runs[0].altitude_degrees == pytest.approx(66.0)
+    assert performance.runs[0].altitude_deg == pytest.approx(66.0)
     assert performance.runs[0].pier_side == "West"
 
 
@@ -124,8 +124,8 @@ def test_the_net_dec_correction_is_the_pulse_total_times_speed_over_the_run(
     performance = _measure(samples, [run], make_envelope())
 
     net_arcsec = 300 * 0.040 * 7.5
-    assert performance.net_dec_correction_arcsec_per_minute == pytest.approx(net_arcsec / 20.0)
-    assert performance.runs[0].net_dec_correction_arcsec_per_minute == pytest.approx(net_arcsec / 20.0)
+    assert performance.net_dec_correction_arcsec_per_min == pytest.approx(net_arcsec / 20.0)
+    assert performance.runs[0].net_dec_correction_arcsec_per_min == pytest.approx(net_arcsec / 20.0)
 
 
 def test_a_run_shorter_than_the_periodic_error_gives_no_correction_rate(
@@ -136,7 +136,7 @@ def test_a_run_shorter_than_the_periodic_error_gives_no_correction_rate(
 
     performance = _measure(make_samples(count=90, pulse_dec_ms=40.0), [run], make_envelope())
 
-    assert performance.net_dec_correction_arcsec_per_minute is None
+    assert performance.net_dec_correction_arcsec_per_min is None
 
 
 def test_no_declination_corrections_means_no_rate(
@@ -147,7 +147,7 @@ def test_no_declination_corrections_means_no_rate(
 
     performance = _measure(make_samples(count=300, pulse_dec_ms=0.0), [run], make_envelope())
 
-    assert performance.net_dec_correction_arcsec_per_minute is None
+    assert performance.net_dec_correction_arcsec_per_min is None
 
 
 def test_an_unknown_calibrated_speed_means_no_rate(
@@ -158,7 +158,7 @@ def test_an_unknown_calibrated_speed_means_no_rate(
 
     performance = _measure(make_samples(count=300, pulse_dec_ms=40.0), [run], make_envelope())
 
-    assert performance.net_dec_correction_arcsec_per_minute is None
+    assert performance.net_dec_correction_arcsec_per_min is None
 
 
 @pytest.mark.parametrize("impossible_speed", [0.0, -3.0, 419.1, 2600.9])
@@ -175,7 +175,7 @@ def test_a_run_with_an_impossible_calibrated_speed_is_left_out(
 
     performance = _measure(make_samples(count=300, pulse_dec_ms=40.0), [run], make_envelope())
 
-    assert performance.net_dec_correction_arcsec_per_minute is None
+    assert performance.net_dec_correction_arcsec_per_min is None
 
 
 def test_only_the_valid_run_counts_when_another_has_a_garbage_calibration(
@@ -190,7 +190,7 @@ def test_only_the_valid_run_counts_when_another_has_a_garbage_calibration(
 
     performance = _measure(samples, [good, bad], make_envelope())
 
-    assert performance.net_dec_correction_arcsec_per_minute == pytest.approx(300 * 0.040 * 7.5 / 20.0)
+    assert performance.net_dec_correction_arcsec_per_min == pytest.approx(300 * 0.040 * 7.5 / 20.0)
 
 
 def test_runs_combine_as_a_duration_weighted_signed_mean(
@@ -208,7 +208,7 @@ def test_runs_combine_as_a_duration_weighted_signed_mean(
     first_rate = 300 * 0.040 * 7.5 / 20.0
     second_rate = -600 * 0.040 * 7.5 / 40.0
     expected = (first_rate * 1200.0 + second_rate * 2400.0) / 3600.0
-    assert performance.net_dec_correction_arcsec_per_minute == pytest.approx(expected)
+    assert performance.net_dec_correction_arcsec_per_min == pytest.approx(expected)
 
 
 def test_excursion_pulses_are_not_counted(make_samples: Any, make_run: Any, make_envelope: Any) -> None:
@@ -221,7 +221,7 @@ def test_excursion_pulses_are_not_counted(make_samples: Any, make_run: Any, make
 
     performance = _measure(samples, [make_run(duration=1200.0)], envelope)
 
-    assert performance.net_dec_correction_arcsec_per_minute == pytest.approx(295 * 0.010 * 7.5 / 20.0)
+    assert performance.net_dec_correction_arcsec_per_min == pytest.approx(295 * 0.010 * 7.5 / 20.0)
 
 
 def test_no_samples_gives_an_empty_measurement(make_run: Any, make_envelope: Any) -> None:

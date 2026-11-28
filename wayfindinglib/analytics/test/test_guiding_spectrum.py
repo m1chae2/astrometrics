@@ -60,7 +60,7 @@ def test_the_period_is_found_across_runs_separated_by_hours() -> None:
 
     analysis = analyze_guiding_telemetry(samples)
 
-    assert analysis.dominant_period_seconds == pytest.approx(_WORM_PERIOD, abs=15.0)
+    assert analysis.dominant_period_s == pytest.approx(_WORM_PERIOD, abs=15.0)
     assert analysis.peaks[0].amplitude_arcsec == pytest.approx(_AMPLITUDE, abs=0.5)
     assert analysis.peaks[0].probable_source == "Worm Fundamental Period"
 
@@ -72,7 +72,7 @@ def test_runs_on_different_nights_are_not_bridged() -> None:
         _run(_EPOCH, 1500.0, 3.2) + _run(_EPOCH + 30 * 86400.0, 1500.0, 3.2)
     )
 
-    assert two_nights.dominant_period_seconds == pytest.approx(one_night.dominant_period_seconds, abs=15.0)
+    assert two_nights.dominant_period_s == pytest.approx(one_night.dominant_period_s, abs=15.0)
     assert two_nights.periodic_error_peak_to_peak_arcsec == pytest.approx(
         one_night.periodic_error_peak_to_peak_arcsec, abs=1.0
     )
@@ -84,7 +84,7 @@ def test_the_duration_is_the_time_spent_guiding_not_the_span() -> None:
 
     analysis = analyze_guiding_telemetry(samples)
 
-    assert analysis.duration_seconds == pytest.approx(3000.0, abs=10.0)
+    assert analysis.duration_s == pytest.approx(3000.0, abs=10.0)
     assert analysis.sample_count == len(samples)
     assert "2 continuous stretch" in analysis.message
 
@@ -95,7 +95,7 @@ def test_a_change_of_guide_cadence_between_runs_does_not_move_the_period() -> No
 
     analysis = analyze_guiding_telemetry(samples)
 
-    assert analysis.dominant_period_seconds == pytest.approx(_WORM_PERIOD, abs=15.0)
+    assert analysis.dominant_period_s == pytest.approx(_WORM_PERIOD, abs=15.0)
 
 
 def test_runs_too_short_for_two_cycles_cannot_invent_a_long_period() -> None:
@@ -106,7 +106,7 @@ def test_runs_too_short_for_two_cycles_cannot_invent_a_long_period() -> None:
 
     analysis = analyze_guiding_telemetry(samples)
 
-    assert all(peak.period_seconds <= 150.0 for peak in analysis.peaks)
+    assert all(peak.period_s <= 150.0 for peak in analysis.peaks)
 
 
 def test_the_time_scale_comes_from_the_timestamps_not_the_sample_count() -> None:
@@ -115,7 +115,7 @@ def test_the_time_scale_comes_from_the_timestamps_not_the_sample_count() -> None
 
     analysis = analyze_guiding_telemetry(samples)
 
-    assert analysis.dominant_period_seconds == pytest.approx(_WORM_PERIOD, abs=15.0)
+    assert analysis.dominant_period_s == pytest.approx(_WORM_PERIOD, abs=15.0)
 
 
 def test_declination_reversals_are_not_counted_across_a_pause() -> None:
@@ -155,7 +155,7 @@ def test_no_stretch_long_enough_says_so() -> None:
 
     analysis = analyze_guiding_telemetry(samples)
 
-    assert analysis.duration_seconds == pytest.approx(0.0)
+    assert analysis.duration_s == pytest.approx(0.0)
     assert "No continuous stretch" in analysis.message
 
 
@@ -171,9 +171,9 @@ def test_a_slow_drift_is_listed_but_is_never_the_dominant_period() -> None:
         sample["dra"] += 8.0 * math.sin(2.0 * math.pi * (sample["timestamp"] - _EPOCH) / 3000.0)
 
     analysis = analyze_guiding_telemetry(samples)
-    slow = [peak for peak in analysis.peaks if peak.period_seconds > 650.0]
+    slow = [peak for peak in analysis.peaks if peak.period_s > 650.0]
 
     assert slow
     assert all(peak.probable_source == SLOW_DRIFT for peak in slow)
     assert analysis.peaks[0].probable_source == SLOW_DRIFT
-    assert analysis.dominant_period_seconds == pytest.approx(_WORM_PERIOD, abs=15.0)
+    assert analysis.dominant_period_s == pytest.approx(_WORM_PERIOD, abs=15.0)

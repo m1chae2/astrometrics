@@ -128,7 +128,7 @@ def choose_frames(astro: Any, targets: Sequence[str], per_setup: int, limit: int
     chosen_targets = (
         [astro.targets.get(name) for name in targets]
         if targets
-        else astro.targets.query(detail="objects", limit=None).objects
+        else astro.targets.query(include_empty=True).items
     )
     frames: list[Any] = []
     for target in chosen_targets:

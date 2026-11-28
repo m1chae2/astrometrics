@@ -63,7 +63,7 @@ def test_controller_settings_go_into_the_algorithm_sections() -> None:
     text, milliseconds = phd2_launch.profile_text(
         2,
         4567,
-        {"aggressiveness": 0.6, "minimum_move": 0.15, "hysteresis": 0.2, "exposure_seconds": 2.5},
+        {"aggressiveness": 0.6, "minimum_move": 0.15, "hysteresis": 0.2, "exposure_s": 2.5},
     )
     assert milliseconds == 2500
     assert "ExposureDurationMs=2500" in text
@@ -90,7 +90,7 @@ def test_a_setting_left_out_keeps_the_phd2_default() -> None:
 
 @pytest.mark.parametrize(
     "settings",
-    [{"speed": 1.0}, {"aggressiveness": 5.0}, {"hysteresis": 1.0}, {"exposure_seconds": 0.0}],
+    [{"speed": 1.0}, {"aggressiveness": 5.0}, {"hysteresis": 1.0}, {"exposure_s": 0.0}],
 )
 def test_bad_controller_settings_are_refused(settings: dict[str, float]) -> None:
     """An unknown key or a value out of range raises a ValueError."""

@@ -43,7 +43,8 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import VersionedCache
 from astrometricslib.exceptions import AstrometricsError
 from astrometricslib.parameters import (
@@ -53,12 +54,8 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import (
-    CaptureSetting,
-    MeasurementReference,
-    QualityMeasurement,
-    observing_night_id,
-)
+from astrometricslib.reports import MeasurementReference, QualityMeasurement
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.data_versions import report_data_version
 from wayfindinglib.analytics.result_quality.aggregates import (
     MeasuredNoiseCheck,
@@ -666,7 +663,7 @@ def _stack_frames(
         frames.append(
             StackFrame(
                 frame_id=observation.frame_id,
-                exposure_seconds=float(exposure),
+                exposure_s=float(exposure),
                 sky_rate_e_per_s_per_px=float(observation.sky_rate_e_per_s_per_px),
                 read_noise_e=float(observation.read_noise_e),
                 star_width=observation.star_width_effective_arcsec,
@@ -1014,14 +1011,14 @@ def _more_frames_for_setting(
         reason = (
             f"{len(frames)} frames have an exposure, a sky rate and a read noise; the forecast needs "
             f"{resolve_parameter(MINIMUM_FRAMES_FOR_FORECAST).value}. Measure the target's frames "
-            f"(QualityRecords.measure_frames)."
+            f"(quality.frames.record)."
         )
         if problems:
             reason += " First problem: " + problems[0]
         return [insufficient("more_frames", reason, setting)]
     mode = predict_weighting_mode(
         configured_weight,
-        [frame.exposure_seconds for frame in frames],
+        [frame.exposure_s for frame in frames],
         is_spectral=setting.is_spectral,
     )
     setting_runs, newest_run, run_groups, stack_frames = _stack_of_setting(
@@ -1054,7 +1051,7 @@ def _more_frames_for_setting(
                 setting,
             )
         ]
-    new_exposure = setting.exposure_seconds or statistics.median(frame.exposure_seconds for frame in frames)
+    new_exposure = setting.exposure_s or statistics.median(frame.exposure_s for frame in frames)
     note = ""
     sky_noise = median_or_none(
         math.sqrt(o.sky_rate_e_per_s_per_px * (o.effective_exposure_seconds or 0.0))
@@ -1084,7 +1081,7 @@ def _more_frames_for_setting(
     # A single-group stack becomes a group stack when the new frames have an
     # exposure length that is not the stack's: the stacker then makes a new
     # group of them, and the flat model no longer describes the stack.
-    stack_lengths = [frame.exposure_seconds for frame in stack_frames]
+    stack_lengths = [frame.exposure_s for frame in stack_frames]
     becomes_group_stack = not stack_is_groups and (
         len(
             set(
@@ -1199,7 +1196,7 @@ def _point_fixed_pattern_at_calibration(statements: Sequence[TargetStatement]) -
 
 
 def _with_full_wall_clock(
-    statement: TargetStatement, frame_count: int, exposure_seconds: float, overheads: Any
+    statement: TargetStatement, frame_count: int, exposure_s: float, overheads: Any
 ) -> TargetStatement:
     """Price the new frames with their dithers and autofocus runs as well.
 
@@ -1215,7 +1212,7 @@ def _with_full_wall_clock(
         The "take N more" recommendation.
     frame_count : `int`
         Frames to take.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure of each.
     overheads : `CaptureOverheads`
         Download, settle and autofocus times.
@@ -1225,10 +1222,10 @@ def _with_full_wall_clock(
     statement : `TargetStatement`
         A copy with the full wall-clock time in its message and effect.
     """
-    downloads_only = wall_clock_estimate(frame_count, exposure_seconds, overheads)
+    downloads_only = wall_clock_estimate(frame_count, exposure_s, overheads)
     without_focus = wall_clock_estimate(
         frame_count,
-        exposure_seconds,
+        exposure_s,
         overheads,
         dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
     )
@@ -1238,7 +1235,7 @@ def _with_full_wall_clock(
     )
     full = wall_clock_estimate(
         frame_count,
-        exposure_seconds,
+        exposure_s,
         overheads,
         dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
         autofocus_runs=focus_runs,
@@ -1248,7 +1245,7 @@ def _with_full_wall_clock(
     update: dict[str, Any] = {"message": statement.message.replace(old_text, new_text)}
     if statement.expected_effect is not None:
         update["expected_effect"] = statement.expected_effect.model_copy(
-            update={"wall_clock_seconds": full.total_seconds}
+            update={"wall_clock_s": full.total_seconds}
         )
     return statement.model_copy(update=update)
 
@@ -1360,7 +1357,7 @@ def _quality_statements_of_settings(
         setting_observations = by_setting.get(setting, [])
         if not stopped:
             overheads = estimate_capture_overheads(
-                contexts_for_overheads, setting.exposure_seconds, setting.filter_name
+                contexts_for_overheads, setting.exposure_s, setting.filter_name
             )
             if frames_status != RecommendedAdditionalFramesStatus.NOT_CHECKED:
                 more_frames = _more_frames_for_setting(
@@ -1414,7 +1411,7 @@ def _quality_statements_of_settings(
         if frames and all(width is not None for width in widths):
             mode = predict_weighting_mode(
                 configured_weight,
-                [frame.exposure_seconds for frame in frames],
+                [frame.exposure_s for frame in frames],
                 is_spectral=setting.is_spectral,
             )
             width_values = [float(w) for w in widths if w is not None]
@@ -1471,7 +1468,7 @@ def _quality_statements_of_settings(
             for result in efficiency.frame_results:
                 altitude = altitudes.get(result.frame_id)
                 if result.eta is not None and altitude is not None:
-                    samples.append(AltitudeSample(altitude, result.eta, result.exposure_seconds))
+                    samples.append(AltitudeSample(altitude, result.eta, result.exposure_s))
                     observation = by_frame_exposure.get(result.frame_id)
                     if observation is not None:
                         evidence_rows.extend(
@@ -1725,12 +1722,12 @@ def _guiding_exposure_statements(
             start = float(observation.start_epoch_seconds)
             windows_by_night[observation.night_id].append((
                 start,
-                start + float(setting.exposure_seconds),
+                start + float(setting.exposure_s),
             ))
-        if records is None or not setting.exposure_seconds:
+        if records is None or not setting.exposure_s:
             reason = (
                 "The setting has no exposure time."
-                if not setting.exposure_seconds
+                if not setting.exposure_s
                 else "No stored guide samples are available to this report."
             )
             statements.extend(guiding_limits_statements(setting, GuidingExposureOutcome(reason=reason)))
@@ -1742,7 +1739,7 @@ def _guiding_exposure_statements(
                     session_id=night, limit=GUIDE_SAMPLE_READ_LIMIT, sources=sources
                 )
         outcome = assess_guiding_exposure(
-            float(setting.exposure_seconds),
+            float(setting.exposure_s),
             [o.star_width_effective_arcsec for o in kept if o.star_width_effective_arcsec is not None],
             spans,
             {night: sample_cache[night] for night in spans},
@@ -1750,7 +1747,7 @@ def _guiding_exposure_statements(
                 FrameWindow(
                     frame_id=o.frame_id,
                     start_epoch_seconds=o.start_epoch_seconds,
-                    exposure_seconds=float(setting.exposure_seconds),
+                    exposure_s=float(setting.exposure_s),
                 )
                 for o in kept
             ],
@@ -1888,7 +1885,7 @@ def _camera_spellings(astrometrics: Any, camera_name: str) -> list[str]:
 
     names = [camera_name]
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except ConfigurationError:
         return names
     names.extend([profile.camera_name, profile.record_name, *profile.name_aliases])
@@ -1948,7 +1945,7 @@ def _clipping_note(astrometrics: Any, camera_name: str, goal: ScienceGoal) -> st
             "cannot be predicted."
         )
     try:
-        profile = astrometrics.processing.calibration.camera_profile(camera_name)
+        profile = profile_for_name(astrometrics, camera_name)
     except AstrometricsError:
         return note + " The camera's saturation limits are not known."
     clip, saturation = profile.clip_ceiling_adu, profile.pixel_saturation_level_adu
@@ -2375,9 +2372,9 @@ def _build_target_dataset_report(
     stack_rows: list[QualityMeasurement] = []
     for metric in PINNED_STACK_METRICS:
         stack_rows.extend(
-            astrometrics.quality.query(
-                metric=metric, target_id=target.id, library_only=True, latest_only=False
-            ).rows
+            astrometrics.quality.records.query(
+                metric=metric, target=target, library_only=True, latest_only=False
+            )
         )
     # The calibration of each run is not a measurement row; it is a record of
     # master file identities. A run with none counts as confounded.
@@ -2535,7 +2532,7 @@ def _build_target_dataset_report(
     if not observations:
         starting_point = _starting_point(target, target_goal, context, config, now)
 
-    metric_summaries = {summary.name: summary for summary in astrometrics.quality.metrics()}
+    metric_summaries = {spec.name: spec for spec in astrometrics.quality.records.get_metrics()}
     # Each statement lists its most extreme evidence first, so a shortened
     # reply (the MCP tools shorten it) keeps the references that matter most.
     statements = order_statements_evidence(

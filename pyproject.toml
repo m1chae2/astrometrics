@@ -430,10 +430,12 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "wayfindinglib.** -> astrometricslib.exceptions",
+    "wayfindinglib.** -> astrometricslib.arguments",
     "wayfindinglib.** -> astrometricslib.reports",
     "wayfindinglib.** -> astrometricslib.jobs",
     "wayfindinglib.** -> astrometricslib.drivers",
     "wayfindinglib.** -> astrometricslib.parameters",
+    "wayfindinglib -> astrometricslib.parameters",
     "wayfindinglib.test.** -> astrometricslib._internal.**",
     "wayfindinglib.**.test.** -> astrometricslib._internal.**",
     "wayfindinglib.test.** -> astrometricslib._internal",
@@ -453,6 +455,7 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "simulator.** -> astrometricslib.exceptions",
+    "simulator.** -> astrometricslib.arguments",
     "simulator.** -> astrometricslib.reports",
     "simulator.** -> astrometricslib.jobs",
     "simulator.** -> astrometricslib.drivers",
@@ -534,6 +537,7 @@ source_modules = ["mcp_servers"]
 forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
 ignore_imports = [
     "mcp_servers.** -> astrometricslib.exceptions",
+    "mcp_servers.** -> astrometricslib.arguments",
     "mcp_servers.** -> astrometricslib.reports",
     "mcp_servers.** -> astrometricslib.jobs",
     "mcp_servers.** -> astrometricslib.drivers",
@@ -569,6 +573,7 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
     "backend.** -> astrometricslib.exceptions",
+    "backend.** -> astrometricslib.arguments",
     "backend.** -> astrometricslib.reports",
     "backend.** -> astrometricslib.jobs",
     "backend.** -> astrometricslib.drivers",
@@ -768,11 +773,12 @@ forbidden_modules = [
     "wayfindinglib.tasks.planning_tasks",
     "wayfindinglib.api.planning",
 ]
-# `ObservationReview.get_advisory` judges the data and results that exist and
-# shares its report code with the suggestion refresh in planning. This one
-# edge is the only way review reaches planning.
+# `review.targets` judges the data and results that exist and shares its
+# report code with the suggestion refresh in planning. These two edges are
+# the only way review reaches planning.
 ignore_imports = [
-    "wayfindinglib.api.review -> wayfindinglib.tasks.planning_tasks.advisory_tasks",
+    "wayfindinglib.api.review.targets -> wayfindinglib.tasks.planning_tasks.target_report_tasks",
+    "wayfindinglib.api.review.targets -> wayfindinglib.tasks.planning_tasks.result_judgment_tasks",
 ]
 
 [[tool.importlinter.contracts]]

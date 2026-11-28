@@ -1050,7 +1050,7 @@ def exposure_group_subject_for(
         name = parts[-1]
         folder = parts[-2] if len(parts) > 1 else ""
         return planner.stack_subject(f"groups/{name}" if folder == "groups" else name)
-    exposure = as_number(group.get("exposureSeconds"))
+    exposure = as_number(_group_value(group, "exposureS"))
     if exposure is None or planner.stack_file_name is None:
         return None
     return planner.stack_subject(f"{planner.stack_file_name}#group-{group_index}-{exposure:g}s")
@@ -1058,7 +1058,7 @@ def exposure_group_subject_for(
 
 # Fields on a stored exposure group that are plain numbers.
 _GROUP_FIELDS: tuple[tuple[str, str], ...] = (
-    ("exposureSeconds", "stacking.group_exposure_s"),
+    ("exposureS", "stacking.group_exposure_s"),
     ("framesSubmitted", "stacking.group_frames_submitted_count"),
     ("framesStacked", "stacking.group_frames_stacked_count"),
     ("gainMidRange", "stacking.group_gain_mid_range"),
@@ -1066,6 +1066,32 @@ _GROUP_FIELDS: tuple[tuple[str, str], ...] = (
     ("gainDisagreement", "stacking.group_gain_disagreement_fraction"),
 )
 _GROUP_SHIFT_METRIC = "stacking.group_alignment_shift_px"
+
+# The name a group field had in a document saved before the unit-suffix
+# rename (issue #206), by its current name.
+_GROUP_FIELD_OLDER_NAMES = {"exposureS": "exposureSeconds"}
+
+
+def _group_value(group: dict[str, Any], field_name: str) -> Any:
+    """Read one field of a stored exposure group, under either name.
+
+    Parameters
+    ----------
+    group : `dict` [`str`, `Any`]
+        The stored exposure group.
+    field_name : `str`
+        The field's current name.
+
+    Returns
+    -------
+    value : `Any`
+        The value, or `None` when the group holds neither name.
+    """
+    value = group.get(field_name)
+    older_name = _GROUP_FIELD_OLDER_NAMES.get(field_name)
+    if value is None and older_name is not None:
+        value = group.get(older_name)
+    return value
 
 
 def _stacking_extras(planner: SummaryPlanner) -> None:
@@ -1085,7 +1111,7 @@ def _stacking_extras(planner: SummaryPlanner) -> None:
             planner.skip(SkipReason.BAD_VALUE, per_group)
             continue
         for field_name, metric in _GROUP_FIELDS:
-            planner.add_value(metric, group.get(field_name), subject)
+            planner.add_value(metric, _group_value(group, field_name), subject)
         shift = group.get("alignmentShiftPixels")
         shift_numbers = [as_number(part) for part in shift] if isinstance(shift, list) else []
         shift_value = None
@@ -1234,14 +1260,21 @@ _STACKING_VALUES: tuple[ValueMapping, ...] = (
     _value(
         "stacking.negative_pixel_max_fraction",
         "stackingMetrics",
-        "negativePixelMaxPercent",
+        "negativePixelMaxPct",
         subject=_STACK,
         divisor=100.0,
+        older_path=("stackingMetrics", "negativePixelMaxPercent"),
     ),
     _value("stacking.stacked_fwhm_px", "stackingMetrics", "stackedFwhmPx", subject=_STACK),
     _value("stacking.median_input_fwhm_px", "stackingMetrics", "medianInputFwhmPx", subject=_STACK),
     _value("stacking.expected_stack_fwhm_px", "stackingMetrics", "expectedStackFwhmPx", subject=_STACK),
-    _value("stacking.duration_s", "stackingMetrics", "stackingDurationSeconds", subject=_STACK),
+    _value(
+        "stacking.duration_s",
+        "stackingMetrics",
+        "stackingDurationS",
+        subject=_STACK,
+        older_path=("stackingMetrics", "stackingDurationSeconds"),
+    ),
     _value(
         "stacking.registration_reference_star_count",
         "stackingMetrics",
@@ -1639,13 +1672,15 @@ _SPECTROSCOPY_VALUES: tuple[ValueMapping, ...] = (
         "spectroscopy.gaia_xp_median_slope_percent_per_1000_angstrom",
         "spectroscopyMetrics",
         "gaiaXpSummary",
-        "medianSlopePercentPer1000Angstrom",
+        "medianSlopePctPer1000Angstrom",
+        older_path=("spectroscopyMetrics", "gaiaXpSummary", "medianSlopePercentPer1000Angstrom"),
     ),
     _value(
         "spectroscopy.gaia_xp_median_absolute_slope_percent_per_1000_angstrom",
         "spectroscopyMetrics",
         "gaiaXpSummary",
-        "medianAbsoluteSlopePercentPer1000Angstrom",
+        "medianAbsoluteSlopePctPer1000Angstrom",
+        older_path=("spectroscopyMetrics", "gaiaXpSummary", "medianAbsoluteSlopePercentPer1000Angstrom"),
     ),
 )
 

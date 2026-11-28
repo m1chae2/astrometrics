@@ -86,7 +86,7 @@ def _moffat(
     return peak * (1.0 + square / alpha**2) ** (-BETA)
 
 
-def _ray(columns: np.ndarray, rows: np.ndarray, angle_degrees: float, amplitude: float) -> np.ndarray:
+def _ray(columns: np.ndarray, rows: np.ndarray, angle_deg: float, amplitude: float) -> np.ndarray:
     """Draw a one-sided ray from the star toward an angle.
 
     The angle runs from +y toward +x. The ray is 3 px wide (sigma 1.5) and
@@ -97,7 +97,7 @@ def _ray(columns: np.ndarray, rows: np.ndarray, angle_degrees: float, amplitude:
     image : `numpy.ndarray`
         The ray.
     """
-    angle = math.radians(angle_degrees)
+    angle = math.radians(angle_deg)
     delta_x, delta_y = columns - CENTER, rows - CENTER
     along = delta_x * math.sin(angle) + delta_y * math.cos(angle)
     across = delta_x * math.cos(angle) - delta_y * math.sin(angle)
@@ -187,7 +187,7 @@ def test_ray_gives_a_significant_one_sided_term_at_its_angle() -> None:
     one_sided = _term(result, 1)
     assert one_sided.significant
     assert one_sided.significance > 5.0
-    difference = (one_sided.direction_degrees - 150.0 + 180.0) % 360.0 - 180.0
+    difference = (one_sided.direction_deg - 150.0 + 180.0) % 360.0 - 180.0
     assert abs(difference) < 15.0
     assert one_sided.amplitude_debiased <= one_sided.amplitude
 
@@ -195,7 +195,7 @@ def test_ray_gives_a_significant_one_sided_term_at_its_angle() -> None:
 def test_angle_runs_from_y_toward_x() -> None:
     """A ray along +x (to the right in the array) is at 90 degrees."""
     path = _write([((CENTER, CENTER), 1.0)], extra=lambda columns, rows: _ray(columns, rows, 90.0, 3e-4))
-    difference = (_term(_measure(path), 1).direction_degrees - 90.0 + 180.0) % 360.0 - 180.0
+    difference = (_term(_measure(path), 1).direction_deg - 90.0 + 180.0) % 360.0 - 180.0
     assert abs(difference) < 15.0
 
 
@@ -204,7 +204,7 @@ def test_elongated_star_gives_an_oval_term() -> None:
     result = _measure(_write([((CENTER, CENTER), 1.0)], squeeze_x=1.25))
     oval = _term(result, 2)
     assert oval.significant
-    assert min(oval.direction_degrees, 180.0 - oval.direction_degrees) < 10.0
+    assert min(oval.direction_deg, 180.0 - oval.direction_deg) < 10.0
     assert oval.amplitude > 0.03
 
 
@@ -254,9 +254,9 @@ def test_bins_use_the_unmasked_pixels() -> None:
     stars = [((CENTER, CENTER), 1.0), ((CENTER + 14.0, CENTER + 6.0), 0.03)]
     masked = _measure(_write(stars))
     unmasked = _measure(_write(stars), use_finder=False)
-    assert len(masked.ring_bin_angle_degrees) == len(masked.ring_bin_values) == len(masked.ring_bin_counts)
-    assert masked.ring_bin_angle_degrees[0] == pytest.approx(2.5)
-    assert all(0.0 < angle < 360.0 for angle in masked.ring_bin_angle_degrees)
+    assert len(masked.ring_bin_angle_deg) == len(masked.ring_bin_values) == len(masked.ring_bin_counts)
+    assert masked.ring_bin_angle_deg[0] == pytest.approx(2.5)
+    assert all(0.0 < angle < 360.0 for angle in masked.ring_bin_angle_deg)
     assert sum(masked.ring_bin_counts) < sum(unmasked.ring_bin_counts)
     removed = sum(neighbor.pixels_masked for neighbor in masked.ring_neighbors)
     assert sum(unmasked.ring_bin_counts) - sum(masked.ring_bin_counts) == removed

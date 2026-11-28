@@ -21,6 +21,7 @@ from pytest_mock import MockerFixture
 
 from astrometricslib import Astrometrics, Target
 from astrometricslib._internal.drivers import local_database
+from astrometricslib._internal.testing import read_saved_target
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.target import FrameRecord
 
@@ -64,7 +65,7 @@ def test_sequential_fetch_mutate_save_persists_both_targets(tmp_path: Path) -> N
     target_b = astrometrics.targets.get("Target Beta")
     target_b.common_name = "Beta Mutated"
 
-    astrometrics.targets.save()
+    astrometrics.targets._save()
 
     reloaded = Astrometrics(config=config)
     reloaded_a = reloaded.targets.get("Target Alpha")
@@ -146,7 +147,7 @@ def test_save_targets_does_not_clobber_untouched_targets_concurrent_edit(tmp_pat
         app_config=config, target=Target(id="Target Charlie", common_name="changed by other process")
     )
 
-    astrometrics.targets.save()
+    astrometrics.targets._save()
 
     reloaded = Astrometrics(config=config)
     assert reloaded.targets.get("Target Alpha").common_name == "Alpha Mutated"
@@ -173,7 +174,7 @@ _SUBPROCESS_WORKER = textwrap.dedent(
             if time.time() > deadline:
                 raise TimeoutError("timed out waiting for fast worker")
             time.sleep(0.05)
-        astrometrics.targets.save()
+        astrometrics.targets._save()
         open(sentinel_dir + "/slow_done", "w").close()
     else:
         deadline = time.time() + 60
@@ -181,7 +182,7 @@ _SUBPROCESS_WORKER = textwrap.dedent(
             if time.time() > deadline:
                 raise TimeoutError("timed out waiting for slow worker to load")
             time.sleep(0.05)
-        astrometrics.targets.save()
+        astrometrics.targets._save()
         open(sentinel_dir + "/fast_done", "w").close()
     """
 )
@@ -305,11 +306,11 @@ def test_a_listing_during_a_long_edit_does_not_orphan_the_edit(tmp_path: Path) -
     stage_target.stacking.stacked_image = new_stack
 
     # The viewer asks for the target list while the stack is still running.
-    astrometrics.targets.query(detail="objects", limit=None)
+    astrometrics.targets.query(include_empty=True)
 
     # The stage finishes: it records the picture, then the service saves.
     stage_target.stacking.processed_image = new_picture
-    astrometrics.targets.save()
+    astrometrics.targets._save()
 
     saved = Astrometrics(config=config).targets.get("Stacked Target")
     assert saved.stacking.stacked_image == new_stack
@@ -329,7 +330,7 @@ def test_a_listing_does_not_make_a_later_save_overwrite_other_targets(tmp_path: 
     local_database.save_target(app_config=config, target=Target(id="Target Charlie", common_name="original"))
 
     astrometrics = Astrometrics(config=config)
-    astrometrics.targets.query(detail="objects", limit=None)
+    astrometrics.targets.query(include_empty=True)
     astrometrics.targets.get("Target Alpha").common_name = "Alpha Mutated"
 
     # Another process updates Charlie on disk after the listing.
@@ -337,7 +338,7 @@ def test_a_listing_does_not_make_a_later_save_overwrite_other_targets(tmp_path: 
         app_config=config, target=Target(id="Target Charlie", common_name="changed by other process")
     )
 
-    astrometrics.targets.save()
+    astrometrics.targets._save()
 
     reloaded = Astrometrics(config=config)
     assert reloaded.targets.get("Target Alpha").common_name == "Alpha Mutated"
@@ -356,11 +357,11 @@ def test_a_target_fetched_before_a_listing_is_still_the_one_the_catalog_holds(tm
     astrometrics = Astrometrics(config=config)
     stage_target = astrometrics.targets.get("Stacked Target")
 
-    listed = astrometrics.targets.query(detail="objects", limit=None).objects
+    listed = astrometrics.targets.query(include_empty=True).items
 
     assert listed[0] is stage_target
     stage_target.stacking.stacked_image = "/stacks/Stacked_Target_L_Stacked.fits"
-    astrometrics.targets.save()
+    astrometrics.targets._save()
     saved = Astrometrics(config=config).targets.get("Stacked Target")
     assert saved.stacking.stacked_image == "/stacks/Stacked_Target_L_Stacked.fits"
 
@@ -375,7 +376,7 @@ def test_a_listing_refreshes_an_unedited_target_with_what_another_process_saved(
     local_database.save_target(
         app_config=config, target=Target(id="Target Alpha", common_name="changed by other process")
     )
-    listed = astrometrics.targets.query(detail="objects", limit=None).objects
+    listed = astrometrics.targets.query(include_empty=True).items
 
     assert listed[0] is held
     assert held.common_name == "changed by other process"
@@ -408,11 +409,11 @@ def test_a_listing_keeps_the_frame_objects_a_job_holds(tmp_path: Path) -> None:
     astrometrics = Astrometrics(config=config)
     held_frame = astrometrics.targets.get("Framed Target").frames[0]
 
-    astrometrics.targets.query(detail="objects", limit=None)
+    astrometrics.targets.query(include_empty=True)
 
     assert astrometrics.targets.get("Framed Target").frames[0] is held_frame
     held_frame.quality_measured_file_size = 123
-    astrometrics.targets.save()
+    astrometrics.targets._save()
     stored = Astrometrics(config=config).targets.get("Framed Target")
     assert stored.frames[0].quality_measured_file_size == 123
 
@@ -432,7 +433,7 @@ def test_a_listing_refreshes_held_frames_adds_new_ones_and_drops_gone_ones(tmp_p
         ],
     )
     local_database.save_target(app_config=config, target=other)
-    astrometrics.targets.query(detail="objects", limit=None)
+    astrometrics.targets.query(include_empty=True)
 
     frames = astrometrics.targets.get("Framed Target").frames
     assert [frame.path for frame in frames] == ["/frames/c.fits", "/frames/b.fits"]
@@ -452,23 +453,22 @@ def test_a_listing_keeps_a_target_that_has_unsaved_edits(tmp_path: Path) -> None
     local_database.save_target(
         app_config=config, target=Target(id="Target Alpha", common_name="changed by other process")
     )
-    astrometrics.targets.query(detail="objects", limit=None)
+    astrometrics.targets.query(include_empty=True)
 
     assert held.common_name == "edited here"
-    astrometrics.targets.save()
+    astrometrics.targets._save()
     assert Astrometrics(config=config).targets.get("Target Alpha").common_name == "edited here"
 
 
-def test_scripts_that_edit_listed_targets_can_still_save_them(tmp_path: Path) -> None:
-    """Edits made to listed targets are still saved."""
+def test_scripts_that_edit_listed_targets_save_them_with_update(tmp_path: Path) -> None:
+    """A listed target is saved by ``update``; a listing writes nothing."""
     config = _make_isolated_config(tmp_path)
     local_database.save_target(app_config=config, target=Target(id="Target Alpha"))
     local_database.save_target(app_config=config, target=Target(id="Target Beta"))
     astrometrics = Astrometrics(config=config)
 
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
-        target.common_name = f"{target.id} edited"
-    astrometrics.targets.save()
+    for target in astrometrics.targets.query(include_empty=True):
+        astrometrics.targets.update(target, common_name=f"{target.id} edited")
 
     reloaded = Astrometrics(config=config)
     assert reloaded.targets.get("Target Alpha").common_name == "Target Alpha edited"
@@ -483,9 +483,9 @@ def test_read_saved_returns_what_is_stored_not_what_is_in_memory(tmp_path: Path)
     target = astrometrics.targets.get("Target Alpha")
     target.stacking.stacked_image = "/stacks/Alpha_L_Stacked.fits"
 
-    assert astrometrics.targets.get("Target Alpha", refresh="storage").stacking.stacked_image == ""
-    astrometrics.targets.save()
-    assert astrometrics.targets.get("Target Alpha", refresh="storage").stacking.stacked_image == (
+    assert read_saved_target(astrometrics, "Target Alpha").stacking.stacked_image == ""
+    astrometrics.targets._save()
+    assert read_saved_target(astrometrics, "Target Alpha").stacking.stacked_image == (
         "/stacks/Alpha_L_Stacked.fits"
     )
-    assert astrometrics.targets.get("No Such Target", refresh="storage") is None
+    assert read_saved_target(astrometrics, "No Such Target") is None

@@ -689,7 +689,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "exposure_groups": "One sub-stack per exposure length, with its details.",
     "zero_pixel_fraction": "Share of stack pixels that are exactly zero.",
-    "negative_pixel_max_percent": "Largest percentage of negative pixels the stacking engine reported.",
+    "negative_pixel_max_pct": "Largest percentage of negative pixels the stacking engine reported.",
     "stacked_fwhm_px": "Measured FWHM of the stacked image.",
     "median_input_fwhm_px": "Median FWHM of all frames in the stack.",
     "expected_fwhm_px": "Predicted stack FWHM: the weighted RMS of all input-frame FWHMs.",
@@ -721,7 +721,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         "Frames about which the spectral registration (alignment) test raised a concern."
     ),
     "spectral_registration_checked": "Whether the spectral registration (alignment) test ran.",
-    "stacking_duration_seconds": "How long the stacking run took, in seconds.",
+    "stacking_duration_s": "How long the stacking run took, in seconds.",
     "debayer_applied": (
         "Whether color frames were debayered (turned from the sensor's color-filter mosaic into full-"
         "color pixels)."

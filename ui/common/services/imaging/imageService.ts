@@ -196,23 +196,23 @@ export async function fetchFitsFileByPath(path: string, signal?: AbortSignal): P
  * Reads one of a target's FITS frames, chosen by gain, exposure and order, as FITS data.
  *
  * @param objectId The target.
- * @param iso Gain or ISO of the frame.
- * @param exposure Exposure length of the frame.
+ * @param gain Gain or ISO of the frame.
+ * @param exposureS Exposure length of the frame, in seconds.
  * @param index Which matching frame, by order.
  * @param signal Cancels the download when signalled.
  * @returns The file's bytes, typed as FITS.
  */
 export async function fetchTargetFrameAsFits(
     objectId: string,
-    iso: string,
-    exposure: string,
+    gain: number | null,
+    exposureS: number,
     index = 0,
     signal?: AbortSignal
 ): Promise<Blob> {
     const path = await callBackend("images:get_target_frame", {
         target_id: objectId,
-        iso,
-        exposure,
+        gain,
+        exposure_s: exposureS,
         index
     });
     return fetchFitsFileByPath(path, signal);
@@ -223,15 +223,15 @@ export async function fetchTargetFrameAsFits(
  */
 export async function fetchTargetFrame(
     objectId: string,
-    iso: string,
-    exposure: string,
+    gain: number | null,
+    exposureS: number,
     index = 0,
     signal?: AbortSignal
 ): Promise<Blob> {
     const path = await callBackend("images:get_target_frame", {
         target_id: objectId,
-        iso,
-        exposure,
+        gain,
+        exposure_s: exposureS,
         index
     });
     await loadStaticMounts();
@@ -251,8 +251,8 @@ export async function fetchTargetFrame(
  */
 export async function fetchLightFrame(
     objectId: string,
-    iso: string,
-    exposure: string,
+    gain: number | null,
+    exposureS: number,
     index = 0,
     maxdim = 2000,
     center?: number,
@@ -263,8 +263,8 @@ export async function fetchLightFrame(
     try {
         const result = await callBackend("images:get_light_frame_data", {
             target_id: objectId,
-            iso,
-            exposure,
+            gain,
+            exposure_s: exposureS,
             index,
             stretch
         });

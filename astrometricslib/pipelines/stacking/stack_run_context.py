@@ -59,6 +59,8 @@ class StackRun:
         When the stack started, with a time zone.
     quality_recording : `FrameQualityRecording` or `None`
         The configuration and calibration library for the quality rows.
+    make_preview : `bool`
+        Whether the run makes the stack's preview picture.
     """
 
     # What the caller asked for.
@@ -77,6 +79,7 @@ class StackRun:
     drivers: Drivers | None = None
     measured_at: datetime | None = None
     quality_recording: FrameQualityRecording | None = None
+    make_preview: bool = True
 
     # Set by the frame-choosing and frame-type steps.
     target_frames: list[Any] = field(default_factory=list)

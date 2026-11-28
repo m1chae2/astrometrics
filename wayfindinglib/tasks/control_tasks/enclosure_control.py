@@ -96,19 +96,19 @@ def check_motion_timeout(
     now : `datetime`
         The current time.
     enclosure : `Enclosure`
-        Supplies `motion_timeout_sec`.
+        Supplies `motion_timeout_s`.
 
     Returns
     -------
     state : `EnclosureState`
         `FAULT` if still `OPENING` or `CLOSING` past
-        `motion_timeout_sec`, so a stuck motor never reports an
+        `motion_timeout_s`, so a stuck motor never reports an
         indefinite in-progress state; `current_state` unchanged
         otherwise.
     """
     if current_state not in (EnclosureState.OPENING, EnclosureState.CLOSING):
         return current_state
     elapsed_sec = (now - motion_started_at).total_seconds()
-    if elapsed_sec > enclosure.motion_timeout_sec:
+    if elapsed_sec > enclosure.motion_timeout_s:
         return EnclosureState.FAULT
     return current_state

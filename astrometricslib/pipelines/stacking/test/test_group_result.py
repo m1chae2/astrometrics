@@ -18,7 +18,7 @@ def _make_result(exposure: float, summary_index: int, left_out_reason: str | Non
         path=f"exp{exposure:g}s.fits",
         diagnostics={},
         summary_index=summary_index,
-        exposure=exposure,
+        exposure_s=exposure,
         count=3,
         left_out_reason=left_out_reason,
     )

@@ -234,7 +234,7 @@ def photometry_fixture_noise_inputs() -> NoiseBudgetInputs:
     return NoiseBudgetInputs(
         session=SessionNoiseInputs(
             session_id="night-1",
-            exposure_seconds=10.0,
+            exposure_s=10.0,
             gain_e_per_adu=0.783,
             gain_is_assumed=False,
             read_noise_e=3.8,

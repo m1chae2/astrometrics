@@ -1,6 +1,6 @@
 """Purpose: The star-shape review of one target, for the screen.
 
-Description: `review.get_star_shape_review` returns a `StarShapeReview`. It
+Description: `review.targets.get_star_shapes` returns a `StarShapeReview`. It
 turns the star-shape measurements that `astrometricslib` stores (how
 stretched the stars are, which way, and how wide they are at the center and
 in the corners) into short plain verdicts: are the stars round, does the
@@ -14,7 +14,7 @@ chart.
 what it suggests. Nothing here is stored.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 __all__ = [
     "VERDICT_STATES",
@@ -60,7 +60,7 @@ class FrameStarShape(BaseModel):
         for a stack.
     elongation : `float` or `None`
         Long axis divided by short axis (1 is round).
-    angle_degrees : `float` or `None`
+    angle_deg : `float` or `None`
         Direction of the long axis, from 0 up to but not including 180
         degrees.
     direction_coherence : `float` or `None`
@@ -81,7 +81,11 @@ class FrameStarShape(BaseModel):
     path: str
     timestamp: float | None = None
     elongation: float | None = None
-    angle_degrees: float | None = Field(default=None, alias="angleDegrees")
+    angle_deg: float | None = Field(
+        default=None,
+        alias="angleDeg",
+        validation_alias=AliasChoices("angleDeg", "angle_deg", "angleDegrees", "angle_degrees"),
+    )
     direction_coherence: float | None = Field(default=None, alias="directionCoherence")
     center_width_px: float | None = Field(default=None, alias="centerWidthPx")
     corner_widths_px: dict[str, float] = Field(default_factory=dict, alias="cornerWidthsPx")

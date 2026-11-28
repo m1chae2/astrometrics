@@ -15,8 +15,8 @@ from backend.services.processing.image_processing_service import ImageProcessing
 from backend.services.processing.ingestion_service import IngestionService
 
 
-class _Calibration:
-    """A calibration catalog that records measuring calls and can wait."""
+class _Frames:
+    """The ``frames`` child of a calibration catalog stand-in."""
 
     def __init__(self) -> None:
         """Start with no calls; a call waits for the release."""
@@ -24,13 +24,7 @@ class _Calibration:
         self.release = threading.Event()
         self.release.set()
 
-    def measure_frames(
-        self,
-        kind: str | None = None,
-        camera_id: str | None = None,
-        force: bool = False,
-        register_job: bool = True,
-    ) -> dict[str, int]:
+    def record(self, kind: str | None = None, *, setting: Any = None, force: bool = False) -> dict[str, int]:
         """Record the call and wait for the release.
 
         Returns
@@ -38,9 +32,19 @@ class _Calibration:
         report : `dict` [`str`, `int`]
             A small report.
         """
-        self.calls.append({"kind": kind, "force": force, "register_job": register_job})
+        self.calls.append({"kind": kind, "force": force})
         self.release.wait(timeout=5.0)
         return {"measuredCount": 1}
+
+
+class _Calibration:
+    """A calibration catalog that records measuring calls and can wait."""
+
+    def __init__(self) -> None:
+        """Build the ``frames`` child and point at its calls and release."""
+        self.frames = _Frames()
+        self.calls = self.frames.calls
+        self.release = self.frames.release
 
 
 def _service(calibration: _Calibration, events: list[tuple[str, dict]]) -> ImageProcessingService:
@@ -84,7 +88,7 @@ def test_new_darks_start_one_measurement_and_the_end_is_announced() -> None:
     assert service.measure_new_calibration_frames(["dark"]) is True
     _wait_until_idle(service)
 
-    assert calibration.calls == [{"kind": "dark", "force": False, "register_job": True}]
+    assert calibration.calls == [{"kind": "dark", "force": False}]
     assert events == [("calibration:measured", {})]
 
 
@@ -156,7 +160,7 @@ def _sync(folder: str, added_by_folder: dict[str, int]) -> _Recorder:
     """
     recorder = _Recorder()
     remote = SimpleNamespace(
-        sync_frames=lambda target, on_copied=None, register_job=None: SimpleNamespace(
+        sync_frames=lambda target=None, kind=None, dry_run=False: SimpleNamespace(
             success=True, measurements=None, added_by_folder=added_by_folder
         )
     )

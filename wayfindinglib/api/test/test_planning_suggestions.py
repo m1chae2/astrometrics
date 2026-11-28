@@ -16,11 +16,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from astrometricslib import AppConfiguration, FilterType
+from astrometricslib import AppConfiguration, CaptureSetting, FilterType, Target
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,
@@ -31,7 +30,7 @@ from wayfindinglib.analytics.package_suggestions import DEFAULT_NOISE_GOAL
 from wayfindinglib.analytics.session_progress import current_night
 from wayfindinglib.analytics.test.frame_counting_helpers import FakeLibrary, judgment_row, make_frame
 from wayfindinglib.api.planning import ObservationPlanning
-from wayfindinglib.api.test.test_planning import _site, _telescope
+from wayfindinglib.api.test.test_planning import _configuration
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.planning.observation_package import (
     ExposureRequest,
@@ -39,7 +38,7 @@ from wayfindinglib.models.planning.observation_package import (
     ObservationPackage,
     PackageStatus,
 )
-from wayfindinglib.models.planning.suggestion_log import SuggestionEvent
+from wayfindinglib.models.planning.suggestion_log import PackageChange, SuggestionEvent
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (
     CandidateStatus,
@@ -57,9 +56,9 @@ from wayfindinglib.models.quality.statements import (
     StatementKind,
     TargetStatement,
 )
-from wayfindinglib.models.session.observation_session import ObservationSession, RunState
-from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
-from wayfindinglib.tasks.planning_tasks import advisory_tasks
+from wayfindinglib.models.session.observation_session import ObservationSession
+from wayfindinglib.models.session.session_progress import RunState
+from wayfindinglib.tasks.planning_tasks import advisory_tasks, tonight_ranking_tasks
 
 NOW = datetime(2026, 10, 24, 20, 0, tzinfo=UTC)
 """The fixed clock: two hours before the first test frame (22:00)."""
@@ -118,7 +117,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
         The clock, set to `NOW`.
     """
     fake = Clock(NOW)
-    monkeypatch.setattr("wayfindinglib.api.planning._utc_now", fake)
+    monkeypatch.setattr("wayfindinglib.tasks.planning_tasks.planning_context.utc_now", fake)
     return fake
 
 
@@ -174,11 +173,11 @@ def more_frames(frame_count: int = 40, *, filter_name: str = "L", exposure: floa
         kind=StatementKind.RECOMMENDATION,
         action_class=ActionClass.CAPTURE_SETTINGS,
         capture_setting=CaptureSetting(
-            camera="Test Camera", telescope="Test Scope", filter_name=filter_name, exposure_seconds=exposure
+            camera="Test Camera", telescope="Test Scope", filter_name=filter_name, exposure_s=exposure
         ),
         message=f"Take {frame_count} more frames.",
         plain_message=f"Take {frame_count} more frames: we expect less noise.",
-        proposed_action=ProposedAction(exposure_seconds=exposure, frame_count=frame_count),
+        proposed_action=ProposedAction(exposure_s=exposure, frame_count=frame_count),
         evidence=[MeasurementReference(row_id=5)],
         confidence=Confidence.PARTLY_MEASURED,
     )
@@ -353,12 +352,14 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
             raise NotFoundError(f"no report for {target}")
         return Report(made.statements.get(target, []))
 
-    def fake_tonight_advice(at: object = None) -> object:
+    def fake_tonight_advice(at: object = None, **_keywords: object) -> object:
         """Answer the ranking the refresh reads.
 
         Parameters
         ----------
         at : `object`, optional
+            Ignored.
+        **_keywords : `object`
             Ignored.
 
         Returns
@@ -376,8 +377,105 @@ def fixture(isolated_butler: DiskButler, clock: Clock, monkeypatch: pytest.Monke
         return made.ranking
 
     monkeypatch.setattr(advisory_tasks, "build_advisory", fake_advisory)
-    monkeypatch.setattr(planning, "get_tonight_advice", fake_tonight_advice)
+    monkeypatch.setattr(tonight_ranking_tasks, "rank_tonight", fake_tonight_advice)
     return made
+
+
+CONFIGURATION = _configuration().model_copy(
+    update={"camera": _configuration().camera.model_copy(update={"id": "cam1", "name": "cam1"})}
+)
+"""The test rig: telescope ``t1`` and camera ``cam1``, as the frames say."""
+
+
+def target_named(name: str) -> Target:
+    """Build the library target a test names.
+
+    Parameters
+    ----------
+    name : `str`
+        The target id.
+
+    Returns
+    -------
+    target : `Target`
+        A bare target with that id.
+    """
+    return Target(id=name)
+
+
+def refresh(fixture: Fixture, *names: str) -> PackageChange:
+    """Run the suggestion refresh for some targets, or for all.
+
+    Parameters
+    ----------
+    fixture : `Fixture`
+        The fixture.
+    *names : `str`
+        The targets; none refreshes every target and the ranking.
+
+    Returns
+    -------
+    change : `PackageChange`
+        What the refresh changed.
+    """
+    return fixture.planning.packages.record_suggestions([target_named(name) for name in names] or None)
+
+
+def listed(fixture: Fixture, **filters: object) -> list[ObservationPackage]:
+    """List the stored packages that match.
+
+    Parameters
+    ----------
+    fixture : `Fixture`
+        The fixture.
+    **filters : `object`
+        The `packages.query` filters.
+
+    Returns
+    -------
+    packages : `list` [`ObservationPackage`]
+        The matching packages, newest first.
+    """
+    return list(fixture.planning.packages.query(**filters))
+
+
+def current(fixture: Fixture, package: ObservationPackage) -> ObservationPackage:
+    """Read a package again, at its stored revision.
+
+    Parameters
+    ----------
+    fixture : `Fixture`
+        The fixture.
+    package : `ObservationPackage`
+        The package as once read.
+
+    Returns
+    -------
+    package : `ObservationPackage`
+        The stored package.
+    """
+    return fixture.planning.packages.get(package.id, required=True)
+
+
+def queue(fixture: Fixture, session: ObservationSession, package: ObservationPackage) -> ObservationSession:
+    """Add a package to the stored session of a night.
+
+    Parameters
+    ----------
+    fixture : `Fixture`
+        The fixture.
+    session : `ObservationSession`
+        The session, as once read.
+    package : `ObservationPackage`
+        The package to add.
+
+    Returns
+    -------
+    session : `ObservationSession`
+        The stored session.
+    """
+    stored = fixture.planning.sessions.get(session.night_date, required=True)
+    return fixture.planning.sessions.add(stored, [current(fixture, package)])
 
 
 def suggested(fixture: Fixture, target: str = "M 81") -> list[ObservationPackage]:
@@ -395,9 +493,7 @@ def suggested(fixture: Fixture, target: str = "M 81") -> list[ObservationPackage
     packages : `list` [`ObservationPackage`]
         The suggested packages of the target.
     """
-    return fixture.planning.query_plans(
-        kind="packages", status="SUGGESTED", target=target, include_dismissed=True
-    )
+    return listed(fixture, status="SUGGESTED", target=target_named(target), dismissed=None)
 
 
 def night_session(fixture: Fixture, offset_days: int = 0) -> ObservationSession:
@@ -416,9 +512,7 @@ def night_session(fixture: Fixture, offset_days: int = 0) -> ObservationSession:
         The session.
     """
     night = (current_night(NOW) + timedelta(days=offset_days)).isoformat()
-    return fixture.planning.create_session(
-        site_profile=_site(), telescope=_telescope(), camera_id="cam1", observing_night_id=night
-    )
+    return fixture.planning.sessions.create(night, CONFIGURATION)
 
 
 def frames(count: int, start: int = 0, target: str = "M 81") -> list:
@@ -477,7 +571,7 @@ def log_events(fixture: Fixture) -> list[tuple[str, str]]:
     events : `list` [`tuple`]
         The event and cause of each line.
     """
-    entries = fixture.planning.query_plans(kind="suggestion_log")
+    entries = list(fixture.planning.packages.query_suggestion_log())
     return [(entry.event.value, entry.cause) for entry in reversed(entries)]
 
 
@@ -487,7 +581,7 @@ def log_events(fixture: Fixture) -> list[tuple[str, str]]:
 def test_one_target_can_be_given_as_a_single_id(fixture: Fixture) -> None:
     """`target` takes one id or a list of ids."""
     fixture.statements["M 81"] = [more_frames(40)]
-    change = fixture.planning.refresh_suggestions("M 81", register_job=False)
+    change = refresh(fixture, "M 81")
     [package] = suggested(fixture)
     assert change.added == [package.id]
 
@@ -495,17 +589,17 @@ def test_one_target_can_be_given_as_a_single_id(fixture: Fixture) -> None:
 def test_a_rule_suggestion_becomes_a_suggested_package_with_a_keyed_row(fixture: Fixture) -> None:
     """A recommendation above the noise goal makes a suggested package."""
     fixture.statements["M 81"] = [more_frames(40)]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     [package] = suggested(fixture)
     assert change.added == [package.id]
     assert package.status == PackageStatus.SUGGESTED
     [row] = package.exposure_requests
-    assert (row.frame_type, row.count, row.exposure_sec) == (FrameType.LIGHT, 40, 60.0)
+    assert (row.frame_type, row.count, row.exposure_s) == (FrameType.LIGHT, 40, 60.0)
     assert row.source_key.startswith("more_frames|M 81|")
     assert row.reason == "Take 40 more frames: we expect less noise."
     assert row.evidence_fingerprint
     assert package.suggestion.confidence == "partly_measured"
-    entry = fixture.planning.query_plans(kind="suggestion_log")[0]
+    entry = fixture.planning.packages.query_suggestion_log()[0]
     assert entry.event == SuggestionEvent.CREATED
     assert sorted(entry.evidence_row_ids) == [5, 900]
     assert entry.values["noise"] == pytest.approx(3e-4)
@@ -515,9 +609,9 @@ def test_a_rule_suggestion_becomes_a_suggested_package_with_a_keyed_row(fixture:
 def test_a_second_refresh_with_the_same_evidence_changes_nothing(fixture: Fixture) -> None:
     """Nothing is written when the evidence is the same."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     revision = suggested(fixture)[0].revision
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.is_empty
     assert suggested(fixture)[0].revision == revision
 
@@ -525,9 +619,9 @@ def test_a_second_refresh_with_the_same_evidence_changes_nothing(fixture: Fixtur
 def test_a_changed_proposal_updates_the_row_and_the_package(fixture: Fixture) -> None:
     """A new frame count updates the row (and the log says so)."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     fixture.statements["M 81"] = [more_frames(120)]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     [package] = suggested(fixture)
     assert change.updated == [package.id]
     assert package.exposure_requests[0].count == 120
@@ -538,12 +632,12 @@ def test_a_changed_proposal_updates_the_row_and_the_package(fixture: Fixture) ->
 def test_a_target_below_the_noise_goal_gets_no_suggestion_and_loses_its_old_one(fixture: Fixture) -> None:
     """A noise at or below the goal deletes the suggestion."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL.default * 0.9)]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert len(change.deleted) == 1 and suggested(fixture) == []
     assert ("deleted", "the noise goal is met") in log_events(fixture)
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).added == []
+    assert refresh(fixture, "M 81").added == []
 
 
 def depth_row(value: float) -> QualityMeasurement:
@@ -601,11 +695,11 @@ def patch_depth_report(monkeypatch: pytest.MonkeyPatch, asked: list[float] | Non
 def test_a_reached_depth_goal_deletes_the_suggestion_even_above_the_noise_goal(fixture: Fixture) -> None:
     """The depth level replaces the noise goal of a galaxy with a depth."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     assert len(suggested(fixture)) == 1
     # The noise stays above the old goal; the depth now reaches Good.
     fixture.library.rows = [noise_row(3e-4), depth_row(24.8)]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert len(change.deleted) == 1 and suggested(fixture) == []
     assert ("deleted", "the depth goal is met") in log_events(fixture)
 
@@ -614,7 +708,7 @@ def test_a_depth_below_the_goal_keeps_a_suggestion_the_noise_goal_would_end(fixt
     """A noise at the old goal does not end a suggestion if depth is short."""
     fixture.library.rows = [noise_row(DEFAULT_NOISE_GOAL.default * 0.9), depth_row(24.2)]
     fixture.statements["M 81"] = [more_frames(40)]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert len(change.added) == 1
 
 
@@ -623,9 +717,9 @@ def test_the_chosen_level_sets_the_depth_goal(fixture: Fixture, monkeypatch: pyt
     patch_depth_report(monkeypatch)
     fixture.library.rows = [noise_row(3e-4), depth_row(24.8)]
     fixture.statements["M 81"] = [more_frames(40)]
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).added == []
-    fixture.planning.set_depth_goal("M 81", "deep")
-    assert len(fixture.planning.refresh_suggestions(["M 81"], register_job=False).added) == 1
+    assert refresh(fixture, "M 81").added == []
+    fixture.planning.packages.set_depth_goal(target_named("M 81"), "deep")
+    assert len(refresh(fixture, "M 81").added) == 1
 
 
 def test_the_depth_goal_is_set_and_read_through_the_planning_object(
@@ -635,22 +729,22 @@ def test_the_depth_goal_is_set_and_read_through_the_planning_object(
     asked: list[float] = []
     patch_depth_report(monkeypatch, asked)
     fixture.library.rows = [depth_row(24.2)]
-    assert fixture.planning.get_depth_goal("M 81").level.value == "good"
-    status = fixture.planning.set_depth_goal("M 81", "deep")
+    assert fixture.planning.packages.get_depth_goal(target_named("M 81")).level.value == "good"
+    status = fixture.planning.packages.set_depth_goal(target_named("M 81"), "deep")
     assert status.level.value == "deep" and status.goal_depth == pytest.approx(25.5)
-    assert fixture.planning.get_depth_goal("M 81").level.value == "deep"
+    assert fixture.planning.packages.get_depth_goal(target_named("M 81")).level.value == "deep"
     assert asked and asked[-1] == pytest.approx(10 ** (-0.4 * (25.5 - 24.2)))
     with pytest.raises(InvalidArgumentError):
-        fixture.planning.set_depth_goal("M 81", "excellent")
-    assert fixture.planning.get_depth_goal("M 81").level.value == "deep"
+        fixture.planning.packages.set_depth_goal(target_named("M 81"), "excellent")
+    assert fixture.planning.packages.get_depth_goal(target_named("M 81")).level.value == "deep"
 
 
 def test_a_stop_rule_deletes_the_suggestion(fixture: Fixture) -> None:
     """A rule that says more frames will not help removes the suggestion."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     fixture.statements["M 81"] = [more_frames(40), stop_warning()]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert len(change.deleted) == 1
     assert ("deleted", "a rule says more frames will not help") in log_events(fixture)
 
@@ -658,20 +752,20 @@ def test_a_stop_rule_deletes_the_suggestion(fixture: Fixture) -> None:
 def test_missing_data_never_deletes_a_suggestion(fixture: Fixture) -> None:
     """Missing data leaves the suggestion alone."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
     # The rules had no data this time.
     fixture.statements["M 81"] = [missing_data()]
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).is_empty
+    assert refresh(fixture, "M 81").is_empty
     # The report could not be built.
     fixture.report_errors.add("M 81")
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.is_empty and any("no report" in note for note in change.notes)
     fixture.report_errors.clear()
     # The noise is unknown.
     fixture.statements["M 81"] = [more_frames(40)]
     fixture.library.rows = []
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).is_empty
+    assert refresh(fixture, "M 81").is_empty
     assert [item.id for item in suggested(fixture)] == [package.id]
 
 
@@ -679,17 +773,17 @@ def test_no_noise_reading_creates_no_suggestion(fixture: Fixture) -> None:
     """Without a noise reading nothing is suggested."""
     fixture.library.rows = []
     fixture.statements["M 81"] = [more_frames(40)]
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).added == []
+    assert refresh(fixture, "M 81").added == []
 
 
 def test_a_key_held_by_a_planned_package_is_not_suggested(fixture: Fixture) -> None:
     """A planned package holding the source key blocks a suggestion."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
-    fixture.planning.add_to_queue(night_session(fixture).id, requests=[{"package_id": package.id}])
-    assert fixture.planning.query_plans(kind="packages", status="PLANNED")[0].id == package.id
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    queue(fixture, night_session(fixture), package)
+    assert listed(fixture, status="PLANNED")[0].id == package.id
+    change = refresh(fixture, "M 81")
     assert change.added == [] and suggested(fixture) == []
     assert ("promoted", "added to a session") in log_events(fixture)
 
@@ -697,29 +791,29 @@ def test_a_key_held_by_a_planned_package_is_not_suggested(fixture: Fixture) -> N
 def test_a_key_held_by_a_queue_entry_is_not_suggested(fixture: Fixture) -> None:
     """A queue entry holding the source key blocks a suggestion."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
     session = night_session(fixture)
-    fixture.planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
-    fixture.planning.delete_package(package.id)
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    queue(fixture, session, package)
+    fixture.planning.packages.delete(current(fixture, package))
+    change = refresh(fixture, "M 81")
     assert change.added == [] and suggested(fixture) == []
 
 
 def test_a_complete_package_holds_its_key_until_a_newer_stack(fixture: Fixture) -> None:
     """A complete package blocks its key only until the stack is made again."""
     fixture.statements["M 81"] = [more_frames(2)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
-    fixture.planning.add_to_queue(night_session(fixture).id, requests=[{"package_id": package.id}])
+    queue(fixture, night_session(fixture), package)
     judge(fixture, frames(2))
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.completed == [package.id]
     fixture.library.rows.append(noise_row(3e-4, measured_at=NOW))
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).added == []
+    assert refresh(fixture, "M 81").added == []
     fixture.library.rows = [row for row in fixture.library.rows if row.subject.level != SubjectLevel.STACK]
     fixture.library.rows.append(noise_row(2.5e-4, measured_at=NOW + timedelta(days=1)))
-    assert len(fixture.planning.refresh_suggestions(["M 81"], register_job=False).added) == 1
+    assert len(refresh(fixture, "M 81").added) == 1
 
 
 # -- Dismissal ---------------------------------------------------------------
@@ -728,35 +822,33 @@ def test_a_complete_package_holds_its_key_until_a_newer_stack(fixture: Fixture) 
 def test_a_dismissed_suggestion_stays_hidden_until_the_evidence_changes(fixture: Fixture) -> None:
     """A dismissal holds until the evidence changes."""
     fixture.statements["M 81"] = [more_frames(118)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
-    fixture.planning.dismiss_package(package.id)
-    assert fixture.planning.query_plans(kind="packages", status="SUGGESTED") == []
+    fixture.planning.packages.update(current(fixture, package), dismissed=True)
+    assert listed(fixture, status="SUGGESTED") == []
     # The same evidence: still dismissed, nothing changes.
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).is_empty
-    assert fixture.planning.query_plans(kind="packages", status="SUGGESTED") == []
+    assert refresh(fixture, "M 81").is_empty
+    assert listed(fixture, status="SUGGESTED") == []
     # A small change in the count (118 to 121) rounds to the same evidence.
     fixture.statements["M 81"] = [more_frames(121)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
-    assert fixture.planning.query_plans(kind="packages", status="SUGGESTED") == []
+    refresh(fixture, "M 81")
+    assert listed(fixture, status="SUGGESTED") == []
     # A different proposal is new evidence: the suggestion comes back.
     fixture.statements["M 81"] = [more_frames(200)]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.updated == [package.id]
-    [shown] = fixture.planning.query_plans(kind="packages", status="SUGGESTED")
+    [shown] = listed(fixture, status="SUGGESTED")
     assert shown.exposure_requests[0].count == 200 and not shown.suggestion.dismissed_fingerprint
 
 
 def test_undismiss_brings_a_suggestion_back(fixture: Fixture) -> None:
     """Undismiss shows the package again with no new evidence."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
-    fixture.planning.dismiss_package(package.id)
-    fixture.planning.undismiss_package(package.id)
-    assert [item.id for item in fixture.planning.query_plans(kind="packages", status="SUGGESTED")] == [
-        package.id
-    ]
+    fixture.planning.packages.update(current(fixture, package), dismissed=True)
+    fixture.planning.packages.restore(current(fixture, package))
+    assert [item.id for item in listed(fixture, status="SUGGESTED")] == [package.id]
     events = [event for event, _cause in log_events(fixture)]
     assert "dismissed" in events and "undismissed" in events
 
@@ -764,14 +856,14 @@ def test_undismiss_brings_a_suggestion_back(fixture: Fixture) -> None:
 def test_one_row_can_be_dismissed_and_restored(fixture: Fixture) -> None:
     """A dismissed row leaves, stays out, and returns on undismiss."""
     fixture.statements["M 81"] = [more_frames(40), more_frames(30, filter_name="R")]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [package] = suggested(fixture)
     key = package.exposure_requests[1].source_key
-    edited = fixture.planning.dismiss_package(package.id, source_key=key)
+    edited = fixture.planning.packages.update(current(fixture, package), dismissed_rows=[key])
     assert [row.source_key for row in edited.exposure_requests] == [package.exposure_requests[0].source_key]
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).is_empty
+    assert refresh(fixture, "M 81").is_empty
     assert len(suggested(fixture)[0].exposure_requests) == 1
-    restored = fixture.planning.undismiss_package(package.id, source_key=key)
+    restored = fixture.planning.packages.restore(current(fixture, package), source_keys=[key])
     assert len(restored.exposure_requests) == 2
 
 
@@ -779,9 +871,9 @@ def test_dismiss_is_refused_for_a_planned_package(fixture: Fixture) -> None:
     """Only a suggestion can be dismissed."""
     from astrometricslib.exceptions import ConflictError
 
-    package = fixture.planning.create_package(target="M 81")
+    package = fixture.planning.packages.create(target_named("M 81"))
     with pytest.raises(ConflictError):
-        fixture.planning.dismiss_package(package.id)
+        fixture.planning.packages.update(current(fixture, package), dismissed=True)
 
 
 # -- Ranking suggestions -----------------------------------------------------
@@ -790,8 +882,8 @@ def test_dismiss_is_refused_for_a_planned_package(fixture: Fixture) -> None:
 def test_the_top_three_of_each_use_become_tentative_packages_for_tonight(fixture: Fixture) -> None:
     """Tonight's top three become Tentative packages with no rows."""
     fixture.ranking = ranking("M 81", "M 13", "NGC 1", "NGC 2")
-    change = fixture.planning.refresh_suggestions(register_job=False)
-    packages = fixture.planning.query_plans(kind="packages", status="SUGGESTED")
+    change = refresh(fixture)
+    packages = listed(fixture, status="SUGGESTED")
     assert sorted(package.target_id for package in packages) == ["M 13", "M 81", "NGC 1"]
     assert len(change.added) == 3
     night = current_night(NOW).isoformat()
@@ -802,8 +894,8 @@ def test_the_top_three_of_each_use_become_tentative_packages_for_tonight(fixture
         assert package.suggestion.observing_night_id == night
         assert package.suggestion.source_key == f"ranking|{package.target_id}|imaging|{night}"
         assert "roughly" in package.suggestion.reason
-    assert fixture.planning.refresh_suggestions(register_job=False).added == []
-    assert len(fixture.planning.query_plans(kind="packages", status="SUGGESTED")) == 3
+    assert refresh(fixture).added == []
+    assert len(listed(fixture, status="SUGGESTED")) == 3
 
 
 def test_an_provisional_count_is_said_in_the_ranking_suggestion(fixture: Fixture) -> None:
@@ -814,10 +906,9 @@ def test_an_provisional_count_is_said_in_the_ranking_suggestion(fixture: Fixture
         update={"recommended_additional_frames_status": RecommendedAdditionalFramesStatus.PROVISIONAL}
     )
     fixture.ranking = made
-    fixture.planning.refresh_suggestions(register_job=False)
+    refresh(fixture)
     reasons = {
-        package.target_id: package.suggestion.reason
-        for package in fixture.planning.query_plans(kind="packages", status="SUGGESTED")
+        package.target_id: package.suggestion.reason for package in listed(fixture, status="SUGGESTED")
     }
     assert "provisional" not in reasons["M 81"]
     assert (
@@ -829,46 +920,42 @@ def test_an_provisional_count_is_said_in_the_ranking_suggestion(fixture: Fixture
 def test_a_ranking_suggestion_is_removed_when_it_falls_out_of_the_top(fixture: Fixture) -> None:
     """A target that drops out of tonight's top three loses its suggestion."""
     fixture.ranking = ranking("M 81", "M 13", "NGC 1")
-    fixture.planning.refresh_suggestions(register_job=False)
+    refresh(fixture)
     fixture.ranking = ranking("M 81", "M 13", "NGC 2")
-    change = fixture.planning.refresh_suggestions(register_job=False)
-    remaining = {
-        package.target_id for package in fixture.planning.query_plans(kind="packages", status="SUGGESTED")
-    }
+    change = refresh(fixture)
+    remaining = {package.target_id for package in listed(fixture, status="SUGGESTED")}
     assert remaining == {"M 81", "M 13", "NGC 2"} and len(change.deleted) == 1
 
 
 def test_ranking_suggestions_expire_after_their_night(fixture: Fixture, clock: Clock) -> None:
     """A ranking suggestion is deleted once its night has ended."""
     fixture.ranking = ranking("M 81")
-    fixture.planning.refresh_suggestions(register_job=False)
+    refresh(fixture)
     clock.now = NOW + timedelta(days=1)
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert len(change.deleted) == 1
-    assert fixture.planning.query_plans(kind="packages", status="SUGGESTED") == []
+    assert listed(fixture, status="SUGGESTED") == []
     assert ("deleted", "the night ended") in log_events(fixture)
 
 
 def test_a_failed_ranking_leaves_ranking_suggestions_alone(fixture: Fixture) -> None:
     """A failed ranking deletes nothing (missing data)."""
     fixture.ranking = ranking("M 81")
-    fixture.planning.refresh_suggestions(register_job=False)
+    refresh(fixture)
     fixture.ranking = None
-    change = fixture.planning.refresh_suggestions(register_job=False)
+    change = refresh(fixture)
     assert change.deleted == [] and any("No ranking" in note for note in change.notes)
-    assert len(fixture.planning.query_plans(kind="packages", status="SUGGESTED")) == 1
+    assert len(listed(fixture, status="SUGGESTED")) == 1
 
 
 def test_ranking_skips_a_target_already_queued_tonight_and_a_held_key(fixture: Fixture) -> None:
     """A queued target or a held key is not suggested."""
-    held = fixture.planning.create_package(target="M 81")
+    held = fixture.planning.packages.create(target_named("M 81"))
     session = night_session(fixture)
-    fixture.planning.add_to_queue(session.id, requests=[{"package_id": held.id}])
+    queue(fixture, session, held)
     fixture.ranking = ranking("M 81", "M 13")
-    fixture.planning.refresh_suggestions(register_job=False)
-    targets = {
-        package.target_id for package in fixture.planning.query_plans(kind="packages", status="SUGGESTED")
-    }
+    refresh(fixture)
+    targets = {package.target_id for package in listed(fixture, status="SUGGESTED")}
     assert targets == {"M 13"}
 
 
@@ -880,14 +967,14 @@ def test_a_calibration_statement_adds_a_checklist_item_merged_by_key(fixture: Fi
     session = night_session(fixture)
     fixture.statements["M 81"] = [flats_noisy()]
     fixture.statements["M 13"] = [flats_noisy()]
-    change = fixture.planning.refresh_suggestions(register_job=False)
-    stored = fixture.planning.get_plan(session.id)
+    change = refresh(fixture)
+    stored = fixture.planning.sessions.get(session.night_date)
     assert [item.rule for item in stored.checklist] == ["master_flat_noisy"]
     assert stored.checklist[0].label == "The master flat is noisy."
     assert change.checklist_item_ids == [stored.checklist[0].item_id]
-    again = fixture.planning.refresh_suggestions(register_job=False)
+    again = refresh(fixture)
     assert again.checklist_item_ids == []
-    assert len(fixture.planning.get_plan(session.id).checklist) == 1
+    assert len(fixture.planning.sessions.get(session.night_date).checklist) == 1
 
 
 def test_an_item_stored_without_a_label_reads_back_with_its_rules_purpose(fixture: Fixture) -> None:
@@ -896,11 +983,10 @@ def test_an_item_stored_without_a_label_reads_back_with_its_rules_purpose(fixtur
     from wayfindinglib.models.session.observation_session import ChecklistItem
 
     session = night_session(fixture)
-    fixture.planning.add_checklist_items(
-        session.id,
-        items=[ChecklistItem(rule="master_flat_noisy"), ChecklistItem(rule="no_such_rule")],
+    fixture.planning.sessions.update(
+        session, checklist=[ChecklistItem(rule="master_flat_noisy"), ChecklistItem(rule="no_such_rule")]
     )
-    labels = [item.label for item in fixture.planning.get_plan(session.id).checklist]
+    labels = [item.label for item in fixture.planning.sessions.get(session.night_date).checklist]
     purpose = next(rule.purpose for rule in ALL_RULES if rule.name == "master_flat_noisy")
     assert labels == [purpose, "no_such_rule"]
 
@@ -908,7 +994,7 @@ def test_an_item_stored_without_a_label_reads_back_with_its_rules_purpose(fixtur
 def test_a_calibration_statement_without_a_session_leaves_a_note(fixture: Fixture) -> None:
     """With no session tonight, nothing is added and the note says why."""
     fixture.statements["M 81"] = [flats_noisy()]
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.checklist_item_ids == []
     assert any("no session" in note for note in change.notes)
 
@@ -933,14 +1019,12 @@ def _planned_package_in_session(
     package, session : `ObservationPackage`, `ObservationSession`
         The package and its session.
     """
-    package = fixture.planning.create_package(
-        target="M 81",
-        exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=count)
-        ],
+    package = fixture.planning.packages.create(
+        target_named("M 81"),
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=count)],
     )
     session = night_session(fixture)
-    fixture.planning.add_to_queue(session.id, requests=[{"package_id": package.id}])
+    queue(fixture, session, package)
     return package, session
 
 
@@ -948,8 +1032,8 @@ def test_a_package_completes_when_its_frames_are_judged(fixture: Fixture) -> Non
     """Judged frames that meet every light row complete a package."""
     package, _session = _planned_package_in_session(fixture, 3)
     judge(fixture, frames(3))
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
-    stored = fixture.planning.query_plans(kind="packages", status="COMPLETE")[0]
+    change = refresh(fixture, "M 81")
+    stored = listed(fixture, status="COMPLETE")[0]
     assert change.completed == [package.id] and stored.completed_at is not None
     assert ("completed", "every light row is captured") in log_events(fixture)
 
@@ -958,18 +1042,18 @@ def test_frames_not_yet_judged_do_not_complete_a_package(fixture: Fixture) -> No
     """Captured frames with no judgment leave the package planned."""
     _planned_package_in_session(fixture, 3)
     fixture.library.frames_by_target["M 81"] = frames(3)
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).completed == []
+    assert refresh(fixture, "M 81").completed == []
 
 
 def test_complete_reverts_when_frames_are_set_aside(fixture: Fixture) -> None:
     """A complete package goes back to planned when a frame is set aside."""
     package, _session = _planned_package_in_session(fixture, 3)
     judge(fixture, frames(3))
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     judge(fixture, frames(3)[:2])
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.reverted == [package.id]
-    stored = fixture.planning.query_plans(kind="packages")[0]
+    stored = listed(fixture)[0]
     assert stored.status == PackageStatus.PLANNED and stored.completed_at is None
 
 
@@ -977,20 +1061,20 @@ def test_an_unreadable_target_does_not_revert_a_complete_package(fixture: Fixtur
     """Missing frame data leaves a complete package complete."""
     _package, _session = _planned_package_in_session(fixture, 3)
     judge(fixture, frames(3))
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     fixture.library.read_failures.add("M 81")
-    change = fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    change = refresh(fixture, "M 81")
     assert change.reverted == [] and any("could not be read" in note for note in change.notes)
-    assert fixture.planning.query_plans(kind="packages")[0].status == PackageStatus.COMPLETE
+    assert listed(fixture)[0].status == PackageStatus.COMPLETE
 
 
 def test_a_package_added_to_a_later_session_asks_only_for_missing_frames(fixture: Fixture) -> None:
     """Carry-over drops met rows and keeps the missing count."""
-    package = fixture.planning.create_package(
-        target="M 81",
-        exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=10),
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_sec=60.0, count=2),
+    package = fixture.planning.packages.create(
+        target_named("M 81"),
+        [
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=10),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_s=60.0, count=2),
         ],
     )
     judge(
@@ -999,17 +1083,17 @@ def test_a_package_added_to_a_later_session_asks_only_for_missing_frames(fixture
         + [make_frame(20 + n, filter_value=FilterType.R, camera="cam1", telescope="t1") for n in range(2)],
     )
     later = night_session(fixture, offset_days=1)
-    change = fixture.planning.add_to_queue(later.id, requests=[{"package_id": package.id}])
-    [entry] = change.session.queue
+    change = queue(fixture, later, package)
+    [entry] = change.queue
     assert [(row.filter, row.count) for row in entry.exposure_requests] == [(FilterType.L, 6)]
-    stored = fixture.planning.query_plans(kind="packages")[0]
+    stored = listed(fixture)[0]
     assert [row.count for row in stored.exposure_requests] == [10, 2]
 
 
 def test_a_package_with_nothing_captured_keeps_all_its_rows_in_a_session(fixture: Fixture) -> None:
     """With no frames captured, the entry copies the package's own rows."""
     _package, session = _planned_package_in_session(fixture, 10)
-    [entry] = fixture.planning.get_plan(session.id).queue
+    [entry] = fixture.planning.sessions.get(session.night_date).queue
     assert [row.count for row in entry.exposure_requests] == [10]
 
 
@@ -1018,34 +1102,33 @@ def test_a_package_with_nothing_captured_keeps_all_its_rows_in_a_session(fixture
 
 def test_edit_package_sets_the_framing(fixture: Fixture) -> None:
     """Edit_package stores the framing the Planetarium sends."""
-    package = fixture.planning.create_package(target="M 81")
-    edited = fixture.planning.update_package(
-        package.id, framing={"center_ra_deg": 148.9, "center_dec_deg": 69.1, "rotation_deg": 12.0}
+    package = fixture.planning.packages.create(target_named("M 81"))
+    edited = fixture.planning.packages.update(
+        current(fixture, package),
+        framing={"center_ra_deg": 148.9, "center_dec_deg": 69.1, "rotation_deg": 12.0},
     )
     assert edited.framing.center_ra_deg == pytest.approx(148.9) and edited.revision == 1
-    assert fixture.planning.query_plans(kind="packages")[0].framing.rotation_deg == pytest.approx(12.0)
+    assert listed(fixture)[0].framing.rotation_deg == pytest.approx(12.0)
     with pytest.raises(InvalidArgumentError):
-        fixture.planning.update_package(package.id, framing={"center_ra_deg": 1.0})
+        fixture.planning.packages.update(current(fixture, package), framing={"center_ra_deg": 1.0})
 
 
 def test_a_new_row_starts_counting_now_and_an_unchanged_row_keeps_its_time(
     fixture: Fixture, clock: Clock
 ) -> None:
     """A changed row restarts its counting time; a new count does not."""
-    package = fixture.planning.create_package(
-        target="M 81",
-        exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=5)
-        ],
+    package = fixture.planning.packages.create(
+        target_named("M 81"),
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=5)],
     )
     created = package.exposure_requests[0].counted_from
     assert created == NOW
     clock.now = NOW + timedelta(hours=3)
-    edited = fixture.planning.update_package(
-        package.id,
+    edited = fixture.planning.packages.update(
+        current(fixture, package),
         exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=9),
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_sec=60.0, count=3),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=9),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.R, exposure_s=60.0, count=3),
         ],
     )
     assert edited.exposure_requests[0].counted_from == NOW
@@ -1056,28 +1139,26 @@ def test_reopen_stores_a_baseline_so_old_frames_do_not_complete_it_again(fixture
     """Reopening stores a baseline so old frames do not complete it."""
     package, _session = _planned_package_in_session(fixture, 3)
     judge(fixture, frames(3))
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
-    reopened = fixture.planning.reopen_package(package.id)
+    refresh(fixture, "M 81")
+    reopened = fixture.planning.packages.update(current(fixture, package), status="PLANNED")
     assert reopened.status == PackageStatus.PLANNED
     assert reopened.exposure_requests[0].baseline_captured == 3
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).completed == []
+    assert refresh(fixture, "M 81").completed == []
     judge(fixture, frames(6))
-    assert fixture.planning.refresh_suggestions(["M 81"], register_job=False).completed == [package.id]
+    assert refresh(fixture, "M 81").completed == [package.id]
 
 
 def test_reopen_with_no_session_counts_from_now(fixture: Fixture, clock: Clock) -> None:
     """A package in no session reopens with rows counting from now."""
-    package = fixture.planning.create_package(
-        target="M 81",
-        exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=3)
-        ],
+    package = fixture.planning.packages.create(
+        target_named("M 81"),
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=3)],
     )
-    stored = fixture.planning._butler.get("observation_package", {"id": package.id})
+    stored = fixture.planning._context.butler.get("observation_package", {"id": package.id})
     stored.status = PackageStatus.COMPLETE
-    fixture.planning._butler.put(stored, "observation_package", {"id": package.id})
+    fixture.planning._context.butler.put(stored, "observation_package", {"id": package.id})
     clock.now = NOW + timedelta(hours=1)
-    reopened = fixture.planning.reopen_package(package.id)
+    reopened = fixture.planning.packages.update(current(fixture, package), status="PLANNED")
     assert reopened.exposure_requests[0].counted_from == clock.now
     assert reopened.exposure_requests[0].baseline_captured == 0
 
@@ -1085,46 +1166,36 @@ def test_reopen_with_no_session_counts_from_now(fixture: Fixture, clock: Clock) 
 # -- Reads --------------------------------------------------------------------
 
 
-def test_get_plan_can_include_the_card_progress(fixture: Fixture) -> None:
+def test_a_session_read_can_include_the_card_progress(fixture: Fixture) -> None:
     """`include=["progress"]` adds the entry counts and a run state."""
     _package, session = _planned_package_in_session(fixture, 4)
     judge(fixture, frames(2))
-    plain = fixture.planning.get_plan(session.id)
-    assert not isinstance(plain, ObservationSessionWithProgress)
-    with_progress = fixture.planning.get_plan(session.id, include=["progress"])
-    assert isinstance(with_progress, ObservationSessionWithProgress)
+    plain = fixture.planning.sessions.get(session.night_date)
+    assert plain.progress is None
+    with_progress = fixture.planning.sessions.get(session.night_date, include=["progress"])
+    assert type(with_progress) is type(plain)
     [entry] = with_progress.progress.entries
     assert (entry.requested, entry.captured) == (4, 2)
     assert with_progress.progress.run_state in (RunState.UPCOMING, RunState.IN_PROGRESS, RunState.IMAGING)
-    by_night = fixture.planning.get_plan(
-        observing_night_id=session.night_date.isoformat(), include=["progress"]
-    )
-    assert by_night.progress.entries[0].entry_id == entry.entry_id
 
 
 def test_the_session_list_can_include_the_run_state_including_not_run(fixture: Fixture) -> None:
     """A past night that never ran reads "not run" in the session list."""
     past = night_session(fixture, offset_days=-3)
-    package = fixture.planning.create_package(
-        target="M 81",
-        exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_sec=60.0, count=4)
-        ],
+    package = fixture.planning.packages.create(
+        target_named("M 81"),
+        [ExposureRequest(frame_type=FrameType.LIGHT, filter=FilterType.L, exposure_s=60.0, count=4)],
     )
-    fixture.planning.add_to_queue(past.id, requests=[{"package_id": package.id}])
-    summaries = fixture.planning.query_plans(include=["progress"])
-    assert [summary.run_state for summary in summaries] == [RunState.NOT_RUN]
-    assert fixture.planning.query_plans()[0].run_state is None
+    queue(fixture, past, package)
+    sessions = fixture.planning.sessions.query(include=["progress"])
+    assert [session.progress.run_state for session in sessions] == [RunState.NOT_RUN]
+    assert fixture.planning.sessions.query()[0].progress is None
 
 
 def test_include_is_refused_where_it_does_not_apply(fixture: Fixture) -> None:
-    """`include` is for session reads only, and only "progress" is known."""
+    """Only the session parts are known to `include`."""
     with pytest.raises(InvalidArgumentError):
-        fixture.planning.query_plans(kind="packages", include=["progress"])
-    with pytest.raises(InvalidArgumentError):
-        fixture.planning.query_plans(include=["everything"])
-    with pytest.raises(InvalidArgumentError):
-        fixture.planning.query_plans(kind="sessions", include_dismissed=True)
+        fixture.planning.sessions.query(include=["everything"])
 
 
 def test_the_package_for_a_target_is_the_planned_one_else_the_suggested_one(fixture: Fixture) -> None:
@@ -1138,26 +1209,26 @@ def test_the_package_for_a_target_is_the_planned_one_else_the_suggested_one(fixt
         package : `ObservationPackage` or `None`
             What the library picks.
         """
-        return fixture.planning.get_package_for_target(target=name)
+        return fixture.planning.packages.get_for_target(target_named(name))
 
     assert pick("M 81") is None
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
+    refresh(fixture, "M 81")
     [suggestion] = suggested(fixture)
     assert pick("m_81").id == suggestion.id
-    fixture.planning.dismiss_package(suggestion.id)
+    fixture.planning.packages.update(current(fixture, suggestion), dismissed=True)
     assert pick("M 81") is None
-    fixture.planning.undismiss_package(suggestion.id)
-    planned = fixture.planning.create_package(target="M 81")
+    fixture.planning.packages.restore(current(fixture, suggestion))
+    planned = fixture.planning.packages.create(target_named("M 81"))
     assert pick("M 81").id == planned.id
 
 
 def test_the_suggestion_log_can_be_read_for_one_target(fixture: Fixture) -> None:
     """The log lists lines newest first and can be narrowed to a target."""
     fixture.statements["M 81"] = [more_frames(40)]
-    fixture.planning.refresh_suggestions(["M 81"], register_job=False)
-    assert len(fixture.planning.query_plans(kind="suggestion_log", target="M 81")) == 1
-    assert fixture.planning.query_plans(kind="suggestion_log", target="M 13") == []
+    refresh(fixture, "M 81")
+    assert len(list(fixture.planning.packages.query_suggestion_log(target=target_named("M 81")))) == 1
+    assert list(fixture.planning.packages.query_suggestion_log(target=target_named("M 13"))) == []
 
 
 def test_the_judgments_helper_is_used_by_the_reader() -> None:
@@ -1168,8 +1239,8 @@ def test_the_judgments_helper_is_used_by_the_reader() -> None:
 
 def test_a_conditional_delete_checks_the_status_and_the_revision(fixture: Fixture) -> None:
     """A conditional delete checks the status and the revision."""
-    butler = fixture.planning._butler
-    package = fixture.planning.create_package(target="M 81")
+    butler = fixture.planning._context.butler
+    package = fixture.planning.packages.create(target_named("M 81"))
     assert not butler.delete_package(package.id, only_status="SUGGESTED")
     assert not butler.delete_package(package.id, expected_revision=4)
     assert butler.delete_package(package.id, expected_revision=0, only_status="PLANNED")

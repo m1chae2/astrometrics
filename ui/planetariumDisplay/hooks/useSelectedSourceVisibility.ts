@@ -62,7 +62,7 @@ export const useSelectedSourceVisibility = (
               azimuth: details[0].azimuth_deg,
               hourAngle: details[0].meridian?.hour_angle_hours,
               flipRequired: details[0].meridian?.flip_required,
-              timeToFlipSeconds: details[0].meridian?.time_to_flip_seconds,
+              timeToFlipS: details[0].meridian?.time_to_flip_s,
               riseTime: details[0].rise_utc,
               setTime: details[0].set_utc,
               transitTime: details[0].transit_utc,

@@ -429,7 +429,7 @@ def exposure_group_facts(group_entries: Sequence[dict[str, Any]]) -> list[Exposu
             facts.append(
                 ExposureGroupNoiseFacts(
                     combine_weight=float(entry["weight"]),
-                    exposure_seconds=float(entry["exposure_seconds"]),
+                    exposure_s=float(entry["exposure_s"]),
                     frame_count=int(entry["frame_count"]),
                     gain=float(entry["gain"]),
                     gain_measured=bool(entry["gain_measured"]),
@@ -1149,7 +1149,7 @@ def group_reference_exposure_measurements(
             "the group was left out of the combination, or the stack's member frames could not be worked out"
         )
         return [build_measurement(spec, None, context, subject, reason=reason)]
-    if reference.exposure_seconds is None:
+    if reference.exposure_s is None:
         return [
             build_measurement(
                 spec,
@@ -1159,7 +1159,7 @@ def group_reference_exposure_measurements(
                 reason=reference.reason or "the registration reference frame's exposure is not known",
             )
         ]
-    return [build_measurement(spec, reference.exposure_seconds, context, subject)]
+    return [build_measurement(spec, reference.exposure_s, context, subject)]
 
 
 def expected_noise_row_sequence(

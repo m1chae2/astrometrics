@@ -48,7 +48,7 @@ from astrometricslib.foundation.parameters import resolve
 # target should never pop open a GUI window mid-run.
 os.environ["HEADLESS"] = "1"
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import Astrometrics, Target, configure_logging
 from astrometricslib._internal.drivers.camera_profile_store import camera_identity, resolve_camera_profile
 from astrometricslib._internal.frames import frame_subject_id
 from astrometricslib._internal.processing_scripts import stack_subset
@@ -74,6 +74,7 @@ from astrometricslib.pipelines.stacking.odd_even_difference_run import (
     ODD_EVEN_DIFFERENCE_MINIMUM_FRAMES_PER_HALF,
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import parse_set_aside_action
+from astrometricslib.pipelines.target_batch import process_targets_in_parallel
 from astrometricslib.reports import EARLIER_NIGHTS_VARIANT
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
@@ -230,11 +231,10 @@ def _reindex_targets(astrometrics: Astrometrics, targets: list) -> None:
     reindexed_target_count = 0
     for target in targets:
         try:
-            astrometrics.targets.reindex_frames(target, refresh_headers=True)
+            astrometrics.targets.frames.scan(target)
             reindexed_target_count += 1
         except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as reindex_error:
             print(f"  [{target.id}] Reindex failed, continuing with stored frames: {reindex_error}")
-    astrometrics.targets.save()
     print(f"Reindexed {reindexed_target_count} of {len(targets)} target(s).")
 
 
@@ -563,9 +563,9 @@ def _earlier_nights_frames(astrometrics: Astrometrics, target: Any, since: datet
         when the stack holds fewer than two nights (including a stack that
         stored no weights).
     """
-    weight_rows = astrometrics.quality.query(
-        metric=STACKING_FRAME_WEIGHT, target_id=target.id, since=since, library_only=True
-    ).rows
+    weight_rows = astrometrics.quality.records.query(
+        metric=STACKING_FRAME_WEIGHT, target=target, since=since, library_only=True
+    )
     night_of_subject = {
         row.subject.subject_id: row.subject.observing_night_id
         for row in weight_rows
@@ -656,7 +656,7 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The library interface, for ``quality.query``.
+        The library interface, for ``quality.records.query``.
     target_id : `str`
         The target.
     since : `datetime` or `str` or `None`
@@ -670,20 +670,20 @@ def _noise_ratio(astrometrics: Any, target_id: str, since: Any) -> float | None:
         above zero.
     """
     stored = _measured_value(
-        astrometrics.quality.query(
+        astrometrics.quality.records.query(
             metric=STACKING_MEASURED_TO_PREDICTED_NOISE_RATIO,
-            target_id=target_id,
+            target=Target(id=target_id),
             since=since,
             library_only=True,
-        ).rows
+        )
     )
     if stored is not None:
         return stored
     measured, predicted = (
         _measured_value(
-            astrometrics.quality.query(
-                metric=metric, target_id=target_id, since=since, library_only=True
-            ).rows
+            astrometrics.quality.records.query(
+                metric=metric, target=Target(id=target_id), since=since, library_only=True
+            )
         )
         for metric in (
             STACKING_EMPTY_APERTURE_NOISE_STACK_UNIT,
@@ -723,7 +723,7 @@ def _odd_even_difference_note(astrometrics: Astrometrics, target: Any, since: da
         ratio = _noise_ratio(astrometrics, target.id, since)
         ratio_text = "no ratio" if ratio is None else f"ratio {ratio:.2f}"
         print(f"  [{target.id}] odd–even difference run ({ratio_text})")
-        astrometrics.processing.measure_noise(target, kind="odd_even_difference")
+        astrometrics.quality.stacks.record_odd_even_noise(target)
     except Exception as odd_even_difference_error:
         # The library stack is already made and recorded; the measurement is
         # an extra. Whatever its cause, it is noted and the run goes on.
@@ -745,11 +745,12 @@ def _stack_one_target(
 
     The frames are chosen as the full pipeline chooses them: one camera, one
     optic, imaging (not spectral) frames. Every one of them is measured first
-    (`QualityRecords.record_frame_measurements`), so the stack's
+    (`quality.frames.record`), so the stack's
     predicted noise has the sky of each frame. They then go to the public
-    `ProcessingPipelines.stack`, which sets aside bad frames, stacks, and
-    records the stack's quality rows. No astrometry, photometry or
-    spectroscopy runs, and no spectral stack is made.
+    `processing.stacking.run`, which sets aside bad frames, stacks, and
+    records the stack's quality rows, and `processing.enhancement.run`
+    makes the stack's picture. No astrometry, photometry or spectroscopy
+    runs, and no spectral stack is made.
 
     Parameters
     ----------
@@ -800,7 +801,7 @@ def _stack_one_target(
     # The stack's predicted noise needs the sky of every frame, so every
     # imaging frame is measured first. Frames measured before and unchanged
     # since are skipped, so a resumed run does not repeat the work.
-    measurement = astrometrics.quality.record_frame_measurements(target, frames=standard_frames)
+    measurement = astrometrics.quality.frames.record(target, frames=standard_frames)
     if measurement.already_running:
         raise RuntimeError(f"another run is measuring the frames of '{target.id}'; try again later")
     print(
@@ -809,7 +810,8 @@ def _stack_one_target(
         f"failed: {measurement.frames_failed}"
     )
     stack_started_at = datetime.now(UTC)
-    astrometrics.processing.stack(target, frames=standard_frames, force=force)
+    astrometrics.processing.stacking.run(target, frames=standard_frames, force=force)
+    astrometrics.processing.enhancement.run(target)
     notes = []
     if earlier_nights:
         notes.append(_stack_earlier_nights_note(astrometrics, target, stack_started_at))
@@ -891,7 +893,7 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The library interface, for ``quality.query``.
+        The library interface, for ``quality.records.query``.
     record : `dict`
         The target's newest progress record.
 
@@ -931,9 +933,12 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         rows : `list`
             The newest library rows of that metric for this target.
         """
-        return astrometrics.quality.query(
-            metric=metric, target_id=row["target"], since=record.get("run_started_at"), library_only=True
-        ).rows
+        return astrometrics.quality.records.query(
+            metric=metric,
+            target=Target(id=row["target"]),
+            since=record.get("run_started_at"),
+            library_only=True,
+        )
 
     weight_rows = query(STACKING_FRAME_WEIGHT)
     row["weights_known"] = _presence_label(weight_rows)
@@ -956,12 +961,12 @@ def build_review_row(astrometrics: Any, record: dict) -> dict[str, Any]:
         )
     elif len(nights) >= 2:
         earlier_rows = [
-            astrometrics.quality.query(
+            astrometrics.quality.records.query(
                 metric=metric,
-                target_id=row["target"],
+                target=Target(id=row["target"]),
                 since=record.get("run_started_at"),
                 variant=EARLIER_NIGHTS_VARIANT,
-            ).rows
+            )
             for metric in (STACKING_FRAME_WEIGHT, STACKING_EXPECTED_EMPTY_APERTURE_NOISE_STACK_UNIT)
         ]
         row["earlier_nights_present"] = (
@@ -992,7 +997,7 @@ def write_review_list(astrometrics: Any, progress_path: str, review_path: str) -
     Parameters
     ----------
     astrometrics : `Astrometrics`
-        The library interface, for ``quality.query``.
+        The library interface, for ``quality.records.query``.
     progress_path : `str`
         The progress file to read.
     review_path : `str`
@@ -1324,7 +1329,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         print(f"Wrote {row_count} row(s) to {arguments.review_list}.")
         return
 
-    targets = astrometrics.targets.query(detail="objects", limit=None).objects
+    targets = astrometrics.targets.query(include_empty=True).items
     if not targets:
         print("No targets found in the database catalog.")
         return
@@ -1378,7 +1383,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # erase real frame history rather than fail loudly.
     # Which cameras to process, and which targets each one gets, come from the
     # setups in the config file. Ids are passed explicitly to every pass:
-    # omitting them makes `process_target(None, ...)` walk the entire
+    # passing every target id to `process_targets_in_parallel` walks the entire
     # catalog, which would silently ignore a --target selection and
     # reprocess everything.
     camera_names = camera_pass_order(
@@ -1543,14 +1548,16 @@ def run_full_processing(argv: list[str] | None = None) -> None:
                 )
 
             # The full camera name is passed rather than a partial match:
-            # `process_target` matches it as a case-insensitive substring
+            # the batch matches it as a case-insensitive substring
             # against each frame's camera, so a partial string risks matching
             # more than one camera.
-            summary = astrometrics.processing.process_target(
+            summary = process_targets_in_parallel(
+                astrometrics.config,
                 runnable_ids,
                 camera_id=camera_name,
                 focal_length_mm=focal_length_mm,
                 on_item_complete=record_finished_target,
+                measured_at=datetime.now(UTC),
             )
             _print_pass_summary(f"{camera_name}{optic_label}", summary)
 
@@ -1559,10 +1566,11 @@ def run_full_processing(argv: list[str] | None = None) -> None:
         print(f"\nWrote {row_count} row(s) to {arguments.review_list}.")
 
 
-# This guard is REQUIRED, not stylistic boilerplate: `process_target`, given
-# several targets, runs them across a `ProcessPoolExecutor`, and Python 3.14
-# on Linux defaults to the "forkserver" start method, which re-imports this
-# module inside every worker process. Without the guard, each worker
+# This guard is REQUIRED, not stylistic boilerplate:
+# `process_targets_in_parallel` runs the targets across a
+# `ProcessPoolExecutor`, and Python 3.14 on Linux defaults to the
+# "forkserver" start method, which re-imports this module inside every worker
+# process. Without the guard, each worker
 # re-executes the whole script body, tries to start its own worker pool, and
 # the run dies immediately with "An attempt has been made to start a new
 # process before the current process has finished its bootstrapping phase."

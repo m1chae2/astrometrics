@@ -70,7 +70,7 @@ def look_up_frame_sensor_noise(
     """Find the gain and read noise the profile holds for a frame's setting.
 
     An entry whose gain setting, offset and binning all match always wins.
-    The frame record keeps the gain setting in its ``iso`` field (the header's
+    The frame record keeps the gain setting in its ``gain`` field (the header's
     ``GAIN`` card, or the ISO of a DSLR). With ``clipped_at_zero=False`` and
     no exact entry, the entry of the same gain and binning at the nearest
     other offset is used (see `CameraProfile.sensor_noise_for`), and its
@@ -98,12 +98,12 @@ def look_up_frame_sensor_noise(
     if camera_profile is None:
         return None, None, "no camera profile was given for this frame"
     gap = camera_profile.sensor_noise_gap_reason(
-        frame.iso, frame.offset, frame.binning, clipped_at_zero=clipped_at_zero
+        frame.gain, frame.offset, frame.binning, clipped_at_zero=clipped_at_zero
     )
     if gap is not None:
         return None, None, gap
     entry = camera_profile.sensor_noise_for(
-        frame.iso, frame.offset, frame.binning, clipped_at_zero=clipped_at_zero
+        frame.gain, frame.offset, frame.binning, clipped_at_zero=clipped_at_zero
     )
     if entry is None:
         return None, None, "camera profile has no entry for this setting"
@@ -119,7 +119,7 @@ def measure_sky_electrons(
     background_adu: float,
     bias_level_adu: float | None,
     gain: ProvenancedValue | None,
-    exposure_seconds: float | None,
+    exposure_s: float | None,
     gain_reason: str,
     bias_reason: str = "",
 ) -> SkyElectrons:
@@ -143,7 +143,7 @@ def measure_sky_electrons(
         estimator. `None` means unknown.
     gain : `ProvenancedValue` or `None`
         Electrons per ADU at the frame's setting.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure time.
     gain_reason : `str`
         Why the gain is missing, used when it is.
@@ -167,7 +167,7 @@ def measure_sky_electrons(
                 "(the OFFSET card is a camera setting, not a level in ADU)"
             ),
         )
-    if exposure_seconds is None:
+    if exposure_s is None:
         return SkyElectrons(background_adu=background_adu, reason="the frame has no usable exposure time")
     signal_adu = background_adu - bias_level_adu
     if signal_adu <= 0.0:
@@ -180,7 +180,7 @@ def measure_sky_electrons(
         )
     sky_electrons = signal_adu * gain.value
     return SkyElectrons(
-        rate_e_per_s_per_px=sky_electrons / exposure_seconds,
+        rate_e_per_s_per_px=sky_electrons / exposure_s,
         noise_e=math.sqrt(sky_electrons),
         background_adu=background_adu,
         reason=(

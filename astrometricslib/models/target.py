@@ -9,7 +9,15 @@ happens elsewhere to keep the code organized and avoid import errors.
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
@@ -29,6 +37,7 @@ __all__ = [
     "FitsHeaderEntry",
     "FrameMeasurements",
     "FrameRecord",
+    "ImageCrop",
     "ImageType",
     "RenderedImage",
     "StretchParameters",
@@ -36,7 +45,6 @@ __all__ = [
     "TargetObjectType",
     "TargetQualitySummaries",
     "TargetStackingResult",
-    "ViewableImage",
 ]
 
 
@@ -107,14 +115,22 @@ class FrameMeasurements(BaseModel):
 
 
 class FrameRecord(BaseModel):
-    """A single raw photograph and its settings (like ISO, exposure)."""
+    """A single raw photograph and its settings (like gain and exposure)."""
 
     path: str = Field(alias="path")
     filter: FilterType = Field(default=FilterType.NONE, alias="filter")
     role: str = Field(default="LIGHT", alias="role")  # LIGHT, DARK, FLAT, BIAS
-    iso: str = Field(default="800", alias="iso")
-    offset: str = Field(default="0", alias="offset")
-    exposure: str = Field(default="1.0", alias="exposure")
+    # The camera's gain setting, or the ISO of a DSLR (a plain number, not
+    # electrons per ADU), or None when it is not known. Records saved before
+    # the rename hold it as text under ``iso``.
+    gain: int | None = Field(default=800, alias="gain", validation_alias=AliasChoices("gain", "iso"))
+    # The constant the camera adds to every pixel.
+    offset: int = Field(default=0, alias="offset")
+    # The exposure time of the frame, in seconds. Records saved before the
+    # rename hold it as text under ``exposure``.
+    exposure_s: float = Field(
+        default=1.0, alias="exposureS", validation_alias=AliasChoices("exposureS", "exposure_s", "exposure")
+    )
     timestamp: float | None = Field(default=None, alias="timestamp")
     camera: str = Field(default="Unknown", alias="camera")
     telescope: str = Field(default="Unknown", alias="telescope")
@@ -132,8 +148,16 @@ class FrameRecord(BaseModel):
     # 1.0 means straight overhead; higher numbers mean closer to the
     # horizon, where more air blurs and dims the picture.
     airmass: float | None = Field(default=None, alias="airmass")
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
-    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float | None = Field(
+        default=None,
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
     # How much sky each pixel covers, in arcseconds. A smaller number
     # means a more zoomed-in picture.
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
@@ -142,6 +166,11 @@ class FrameRecord(BaseModel):
     # same target with two different telescopes over time, and those pictures
     # cannot be stacked together directly.
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
+    # The id of the observatory configuration (the set of equipment) the
+    # frame was taken with, matched by camera, focal length and night. None
+    # until the library's configurations were seeded, or when no stored
+    # configuration has this camera and focal length.
+    configuration_id: str | None = Field(default=None, alias="configurationId")
     binning: int | None = Field(default=None, alias="binning")
     sensor_temperature_c: float | None = Field(default=None, alias="sensorTemperatureC")
     focuser_position: int | None = Field(default=None, alias="focuserPosition")
@@ -210,6 +239,64 @@ class FrameRecord(BaseModel):
         migrated["measurements"] = found
         return migrated
 
+    @field_validator("gain", mode="before")
+    @classmethod
+    def read_gain_number(cls, value: Any) -> Any:
+        """Read a gain stored as text, such as ``"800"``, as a number.
+
+        Records saved before this field was a number hold it as text under
+        ``iso``. Text that holds no number, such as ``"Auto"``, means the
+        gain is not known.
+
+        Returns
+        -------
+        gain : `int` or `None`
+            The gain as a whole number, or `None` when it is not known.
+        """
+        from astrometricslib.utilities.iso_text import setting_number
+
+        return setting_number(value)
+
+    @field_validator("offset", mode="before")
+    @classmethod
+    def read_offset_number(cls, value: Any) -> Any:
+        """Read an offset stored as text, such as ``"10"``, as a number.
+
+        Records saved before this field was a number hold it as text. A
+        missing offset, or text that holds no number, counts as 0, the way
+        the calibration library files a frame with no ``OFFSET`` card.
+
+        Returns
+        -------
+        offset : `int`
+            The offset as a whole number.
+        """
+        from astrometricslib.utilities.iso_text import setting_number
+
+        number = setting_number(value)
+        return 0 if number is None else number
+
+    @field_validator("exposure_s", mode="before")
+    @classmethod
+    def read_exposure_number(cls, value: Any) -> Any:
+        """Read an exposure stored as text, such as ``"30.0"``, as a number.
+
+        Records saved before this field was a number hold it as text. Text
+        that holds no number gives the 1 second stand-in a header with no
+        ``EXPTIME`` gets.
+
+        Returns
+        -------
+        exposure_s : `Any`
+            The exposure in seconds.
+        """
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                return 1.0
+        return 1.0 if value is None else value
+
     @property
     def is_spectral(self) -> bool:
         """Whether this is a spectroscopy frame.
@@ -269,6 +356,11 @@ class StackConfigurationResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     configuration_key: str = Field(alias="configurationKey")
+    # The observatory configuration the stacked frames point at (their
+    # ``configuration_id``), or `None` for a stack recorded before frames
+    # had one, or made from frames of several configurations. Such a stack
+    # is matched to a configuration by ``configuration_key`` instead.
+    configuration_id: str | None = Field(default=None, alias="configurationId")
     camera: str = Field(default="", alias="camera")
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
     frames_stacked: int = Field(default=0, alias="framesStacked")
@@ -457,7 +549,13 @@ class Target(BaseModel):
     # The astrometry/photometry/spectroscopy run-level quality summaries,
     # grouped together (see `TargetQualitySummaries`).
     quality: TargetQualitySummaries = Field(default_factory=TargetQualitySummaries, alias="quality")
-    exposure_sec: float = Field(default=0, alias="exposureTime")
+    # The total exposure time of all the frames, in seconds. Records saved
+    # before the rename hold it under ``exposureTime``.
+    exposure_s: float = Field(
+        default=0,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureTime", "exposure_sec"),
+    )
     number_of_stars: int = Field(default=0, alias="numberOfStars")
     frames: list[FrameRecord] = Field(default_factory=list, alias="frames")
 
@@ -659,14 +757,8 @@ class Target(BaseModel):
         total : `float`
             The total exposure time in seconds.
         """
-        total = 0.0
-        if self.frames:
-            for frame in self.frames:
-                try:
-                    total += float(frame.exposure)
-                except ValueError, TypeError:
-                    continue
-        self.exposure_sec = total
+        total = float(sum(frame.exposure_s for frame in self.frames))
+        self.exposure_s = total
         return total
 
 
@@ -706,43 +798,96 @@ class StretchParameters(BaseModel):
     midtones: float = Field(alias="midtones")
 
 
+class ImageCrop(BaseModel):
+    """The piece of an image a picture shows, in full-image pixels.
+
+    Attributes
+    ----------
+    left_px, top_px : `int`
+        The column and row of the piece's first pixel, counted from 1.
+    width_px, height_px : `int`
+        The piece's size in pixels.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    left_px: int
+    top_px: int
+    width_px: int
+    height_px: int
+
+
 class RenderedImage(BaseModel):
-    """A finished picture ready to display in the app, plus brightness stats.
+    """A picture of an image, as the bytes of a PNG or JPEG file.
 
-    `Visualization.render_fits(kind="data_url")` returns it.
+    `Visualization.render` returns it. A Jupyter notebook shows it as a
+    picture. A client that needs text, such as a web page, turns
+    ``picture`` into a data URL itself.
+
+    Attributes
+    ----------
+    picture : `bytes`
+        The picture file.
+    media_type : `str`
+        ``"image/png"``, or ``"image/jpeg"`` for the stretched picture the
+        enhancement stage saved beside a stack.
+    path : `str` or `None`
+        The file that was drawn, or `None` for an array.
+    black, white : `float`
+        The pixel values drawn black and white. 0 and 255 for the saved
+        JPEG picture.
+    width_px, height_px : `int`
+        The picture's size.
+    full_width_px, full_height_px : `int` or `None`
+        The whole image's size. `None` for the saved JPEG picture.
+    crop : `ImageCrop` or `None`
+        The piece of the image shown, or `None` for the whole image.
+    stretched : `bool`
+        Whether the automatic stretch (or the saved stretched picture) was
+        used.
+    stretch_parameters : `StretchParameters` or `None`
+        The automatic stretch the picture was drawn with, or `None` when it
+        was drawn without one (a manual range, a linear view, an image with
+        no measurable sky, or the saved JPEG picture).
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(frozen=True)
 
-    # What the picture shows, such as the target id or the frame's folder.
-    id: str = Field(default="", alias="id")
-    # The brightness range shown, in pixel values (0 and 255 for a JPEG).
-    min: float = Field(alias="min")
-    max: float = Field(alias="max")
-    # The picture as a ``data:image/png;base64,...`` (or JPEG) URL.
-    image_data: str = Field(alias="imageData")
-    # The FITS header of the file that was drawn.
-    headers: list[FitsHeaderEntry] = Field(default_factory=list, alias="headers")
-    # The file that was drawn.
-    path: str | None = Field(default=None, alias="path")
-    # The automatic stretch the picture was drawn with, or `None` when it
-    # was drawn without one (a manual range, a linear view, an image with
-    # no measurable sky, or Siril's own preview picture).
-    stretch_parameters: StretchParameters | None = Field(default=None, alias="stretchParameters")
-
-
-class ViewableImage(BaseModel):
-    """A picture a client should show as an image, not as text.
-
-    `Visualization.render_fits(kind="image")` returns it. It holds the PNG
-    picture and a text description to show beside it.
-    """
-
-    # The PNG file.
-    png_bytes: bytes
-    # What the picture shows: the file, the brightness range, the size and
-    # the crop.
-    description: dict[str, Any] = Field(default_factory=dict)
-    # The automatic stretch the picture was drawn with, or `None` when it
-    # was drawn without one.
+    picture: bytes
+    media_type: str = "image/png"
+    path: str | None = None
+    black: float
+    white: float
+    width_px: int
+    height_px: int
+    full_width_px: int | None = None
+    full_height_px: int | None = None
+    crop: ImageCrop | None = None
+    stretched: bool = True
     stretch_parameters: StretchParameters | None = None
+
+    def __repr__(self) -> str:
+        """Describe the picture in one short line.
+
+        Returns
+        -------
+        text : `str`
+            The file name, the picture's size and its type.
+        """
+        name = self.path.replace("\\", "/").rsplit("/", 1)[-1] if self.path else "array"
+        return f"RenderedImage({name!r}, {self.width_px}x{self.height_px} px, {self.media_type})"
+
+    def _repr_mimebundle_(self, include: Any = None, exclude: Any = None) -> dict[str, bytes]:
+        """Let Jupyter show the picture itself.
+
+        Parameters
+        ----------
+        include, exclude : `Any`, optional
+            Jupyter's choice of formats. Not used.
+
+        Returns
+        -------
+        bundle : `dict` [`str`, `bytes`]
+            The picture under its media type.
+        """
+        return {self.media_type: self.picture}

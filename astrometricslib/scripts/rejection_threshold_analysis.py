@@ -138,7 +138,7 @@ def run_analysis() -> None:
 
             start_time = time.time()
             try:
-                stacked_path = astrometrics.processing.stack(
+                stacked_path = astrometrics.processing.stacking.run(
                     target,
                     frames=target_frames,
                     rejection_sigma=(sigma_low, sigma_high),
@@ -161,7 +161,7 @@ def run_analysis() -> None:
                 results.append(row)
                 continue
 
-            quality = astrometrics.quality.measure_stack(stacked_path, include=["fwhm", "rejected_fraction"])
+            quality = astrometrics.quality.stacks.measure(stacked_path, include=["fwhm", "rejected_fraction"])
             row["stacked_fwhm"] = quality.fwhm_px
             row["rejected_fraction"] = quality.rejected_fraction
             print(

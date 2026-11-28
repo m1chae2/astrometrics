@@ -190,11 +190,11 @@ def tune_dark_current(inputs: TuningInputs) -> TuningResult:
     for row, setting in level_rows:
         subject_id = row.subject.subject_id
         slot = temperature_slot_c(temperature_by_subject.get(subject_id))
-        if setting.exposure_seconds is None or slot is None or subject_id not in zero_by_subject:
+        if setting.exposure_s is None or slot is None or subject_id not in zero_by_subject:
             continue
-        key = (setting.gain_setting, setting.offset, setting.binning, slot)
-        levels[key][setting.exposure_seconds].append(row.value)
-        zeros[key][setting.exposure_seconds].append(zero_by_subject[subject_id])
+        key = (setting.gain, setting.offset, setting.binning, slot)
+        levels[key][setting.exposure_s].append(row.value)
+        zeros[key][setting.exposure_s].append(zero_by_subject[subject_id])
     minimum_frames = resolve(THIN_SET_FRAME_COUNT).value
     minimum_exposures = resolve(MINIMUM_DARK_EXPOSURES).value
     zero_limit = resolve(ZERO_PIXEL_FRACTION_LIMIT).value

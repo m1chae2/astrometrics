@@ -83,8 +83,8 @@ export const ImagePlanner: React.FC<ImagePlannerProps> = ({
         if (editingItem) {
             setLocalType(editingItem.type || 'Light');
             setLocalCount(editingItem.count);
-            setLocalExposure(editingItem.exposure);
-            setLocalDelay(editingItem.delay || 0);
+            setLocalExposure(editingItem.exposure_s);
+            setLocalDelay(editingItem.delay_s || 0);
             setLocalFilter(editingItem.filter);
         } else if (values) {
             // Sync local state with props when switching modes or when values prop changes

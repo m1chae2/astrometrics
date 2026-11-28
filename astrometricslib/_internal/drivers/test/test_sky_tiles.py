@@ -9,7 +9,7 @@ holds a point inside the region, including near the poles and across RA 0/360.
 import numpy as np
 import pytest
 
-from astrometricslib.drivers import (
+from astrometricslib._internal.drivers.sky_tiles import (
     healpix_pixels_of_points,
     pixel_source_id_range,
     pixels_near_circles,

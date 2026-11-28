@@ -44,12 +44,12 @@ def single_frame_stack_reason() -> str:
     return "single-frame stack: no rejection/registration quality processing applied"
 
 
-def exposure_group_left_out_reason(exposure_seconds: float, left_out_reason: str) -> str:
+def exposure_group_left_out_reason(exposure_s: float, left_out_reason: str) -> str:
     """Write the sentence for an exposure group left out of the stack.
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length of the group.
     left_out_reason : `str`
         Why the group was left out, as the stacker wrote it.
@@ -59,15 +59,15 @@ def exposure_group_left_out_reason(exposure_seconds: float, left_out_reason: str
     reason : `str`
         The sentence.
     """
-    return f"the {exposure_seconds:g} s exposure group {left_out_reason}"
+    return f"the {exposure_s:g} s exposure group {left_out_reason}"
 
 
-def exposure_group_not_judged_reason(exposure_seconds: float, not_judged_reason: str) -> str:
+def exposure_group_not_judged_reason(exposure_s: float, not_judged_reason: str) -> str:
     """Write the sentence for a group the brightness check did not judge.
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length of the group.
     not_judged_reason : `str`
         Why it was not judged, as the gain measurement wrote it.
@@ -77,7 +77,7 @@ def exposure_group_not_judged_reason(exposure_seconds: float, not_judged_reason:
     reason : `str`
         The sentence.
     """
-    return f"the {exposure_seconds:g} s exposure group {not_judged_reason}"
+    return f"the {exposure_s:g} s exposure group {not_judged_reason}"
 
 
 def flat_calibration_issue_reason(issue: str) -> str:

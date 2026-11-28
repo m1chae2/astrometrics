@@ -28,7 +28,7 @@ const prediction: StackPrediction = {
     ],
     flagged: [{ path: '/l/044.fits', file: '044.fits', kind: 'uneven_sky', reason: 'Uneven sky: 0.024, limit 0.010' }],
     groups: [{
-        exposure_seconds: 120, frames_kept: 44, first_file: '009.fits', last_file: '052.fits', filter_name: 'L',
+        exposure_s: 120, frames_kept: 44, first_file: '009.fits', last_file: '052.fits', filter_name: 'L',
         gain: '0', offset: '10', binning: '1x1',
         dark: part('dark', 30),
         bias: part('bias', 20),

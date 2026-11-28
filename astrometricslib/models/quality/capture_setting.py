@@ -7,11 +7,23 @@ so the same settings are not repeated on every row.
 
 Only the camera is required. A frame from an older session may lack some
 header cards, and a partial record is still worth storing.
+
+A caller also passes a `CaptureSetting` to say which calibration frames it
+means (`calibration.query`, `assess` and `measure_sensor_noise`). The fields
+it leaves empty are not compared.
+
+The field names carry their units (``exposure_s``), and the JSON names
+follow them (``exposureS``, ``gain``). The names a record saved before the
+rename used (``exposureSeconds``, ``exposure_seconds``, ``gainSetting`` and
+``gain_setting``) are still read, so such a record loads unchanged.
+
+`StoredCaptureSetting` pairs a stored setting with the id the quality store
+gave it.
 """
 
 import math
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from astrometricslib.foundation.parameters import resolve
 from astrometricslib.models.tuned_parameter import (
@@ -89,15 +101,19 @@ class CaptureSetting(BaseModel):
         `PIXEL_SCALE_SIGNIFICANT_FIGURES` significant figures.
     filter_name : `str` or `None`
         The filter in the light path, such as ``"L"`` or ``"Ha"``.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure time of one frame, in seconds.
-    gain_setting : `int` or `None`
+    gain : `int` or `None`
         The camera's gain setting (a unitless number in the FITS ``GAIN``
         card, not electrons per ADU).
     offset : `int` or `None`
         The constant the camera adds to every pixel.
     binning : `int` or `None`
         The binning factor (1 means no binning).
+    temperature_c : `float` or `None`
+        The sensor temperature, in degrees Celsius. It says which darks a
+        calibration call means. The quality store does not keep it, because
+        a measurement's setting is the same at any temperature.
     """
 
     model_config = ConfigDict(populate_by_name=True, frozen=True)
@@ -107,10 +123,23 @@ class CaptureSetting(BaseModel):
     focal_length_mm: float | None = Field(default=None, alias="focalLengthMm")
     pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
     filter_name: str | None = Field(default=None, alias="filterName")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
-    gain_setting: int | None = Field(default=None, alias="gainSetting")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
+    gain: int | None = Field(
+        default=None,
+        alias="gain",
+        validation_alias=AliasChoices("gain", "gainSetting", "gain_setting"),
+    )
     offset: int | None = None
     binning: int | None = None
+    temperature_c: float | None = Field(
+        default=None,
+        alias="temperatureC",
+        validation_alias=AliasChoices("temperatureC", "temperature_c"),
+    )
 
     @classmethod
     def unknown(cls) -> CaptureSetting:
@@ -163,3 +192,24 @@ class CaptureSetting(BaseModel):
             The value from `round_pixel_scale`.
         """
         return round_pixel_scale(value)
+
+
+class StoredCaptureSetting(BaseModel):
+    """A capture setting as the quality store keeps it, with its id.
+
+    A stored measurement carries only a ``capture_setting_id``.
+    ``astrometrics.quality.records.get_capture_settings`` gives these, so a
+    reader can turn the id into the setting.
+
+    Parameters
+    ----------
+    id : `int`
+        The store's id of the setting.
+    setting : `CaptureSetting`
+        The camera, telescope, filter, exposure, gain, offset and binning.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    setting: CaptureSetting

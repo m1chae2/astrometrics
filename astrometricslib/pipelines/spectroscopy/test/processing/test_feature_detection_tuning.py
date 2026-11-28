@@ -105,7 +105,7 @@ def test_tuner_skips_without_data() -> None:
     A filter without spectra, or a library with none, gives a skip, not a
     guess.
     """
-    no_targets = SimpleNamespace(objects=[])
+    no_targets = SimpleNamespace(items=())
     astrometrics = SimpleNamespace(targets=SimpleNamespace(query=lambda **_kwargs: no_targets))
     setup = SetupConfig(name="s", camera_name="cam", optic_name="optic")
     for filter_name in ("L", "SPEC"):

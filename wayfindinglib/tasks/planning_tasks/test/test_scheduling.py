@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
+from astrometricslib import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType, ObservationPackage
 from wayfindinglib.models.planning.planning_config import PlanningConfig
@@ -85,14 +85,14 @@ def _site(**overrides: Any) -> SiteProfile:
 
 
 def _package(
-    ra_key: float, exposure_sec: float = 600.0, count: int = 1, **overrides: Any
+    ra_key: float, exposure_s: float = 600.0, count: int = 1, **overrides: Any
 ) -> ObservationPackage:
     defaults = {
         "id": str(uuid.uuid4()),
         "name": f"pkg-{ra_key}",
         "target_id": f"target-{ra_key}",
         "exposure_requests": [
-            ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=exposure_sec, count=count)
+            ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=exposure_s, count=count)
         ],
     }
     defaults.update(overrides)
@@ -138,7 +138,7 @@ def _always_low_altitude(
 def test_two_packages_place_without_overlap(_mock_altaz: MagicMock) -> None:
     """Verify two independently-fitting packages are placed without overlap."""
     site, telescope = _site(), _telescope()
-    requests = [_soonest_request(1.0, exposure_sec=600.0), _soonest_request(2.0, exposure_sec=600.0)]
+    requests = [_soonest_request(1.0, exposure_s=600.0), _soonest_request(2.0, exposure_s=600.0)]
     queue, diagnostics = place(requests, (_WINDOW_START, _WINDOW_END), site, telescope)
 
     assert len(queue) == 2
@@ -202,7 +202,7 @@ def test_window_too_short() -> None:
         elapsed_min = (obstime.datetime - _WINDOW_START).total_seconds() / 60.0
         return (40.0 if 0 <= elapsed_min < 5 else 2.0), 180.0
 
-    requests = [_soonest_request(1.0, exposure_sec=3600.0)]  # needs a full hour
+    requests = [_soonest_request(1.0, exposure_s=3600.0)]  # needs a full hour
     with patch(
         "wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=brief_clearing
     ):
@@ -219,8 +219,8 @@ def test_night_fully_committed() -> None:
     # Two long packages consume the whole window; a third, shorter package
     # would fit in isolation but not once the first two have claimed the time.
     requests = [
-        _soonest_request(1.0, exposure_sec=(6 * 3600 - 60), count=1),
-        _soonest_request(2.0, exposure_sec=60.0, count=1),
+        _soonest_request(1.0, exposure_s=(6 * 3600 - 60), count=1),
+        _soonest_request(2.0, exposure_s=60.0, count=1),
     ]
     with patch(
         "wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude
@@ -268,7 +268,7 @@ def test_fixed_time_packages_placed_as_anchors(mock_visibility: MagicMock) -> No
     mock_visibility.return_value = (True, None)
     site, telescope = _site(), _telescope()
     fixed_start = _WINDOW_START + timedelta(hours=1)
-    package = _package(1.0, exposure_sec=600.0)
+    package = _package(1.0, exposure_s=600.0)
     request = PlacementRequest(
         package=package,
         start_time_mode=StartTimeMode.FIXED,
@@ -291,8 +291,8 @@ def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility: MagicMo
     mock_visibility.return_value = (True, None)
     site, telescope = _site(), _telescope()
     start = _WINDOW_START + timedelta(hours=1)
-    package_a = _package(1.0, exposure_sec=1800.0)
-    package_b = _package(2.0, exposure_sec=1800.0)
+    package_a = _package(1.0, exposure_s=1800.0)
+    package_b = _package(2.0, exposure_s=1800.0)
     request_a = PlacementRequest(
         package=package_a,
         start_time_mode=StartTimeMode.FIXED,

@@ -192,7 +192,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from astrometricslib import ProcessingPipelines
+from astrometricslib import StackingPipeline
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -505,7 +505,7 @@ class StackFrame(BaseModel):
     ----------
     frame_id : `str`
         A label for the frame.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure time, in seconds.
     sky_rate_e_per_s_per_px : `float`
         The frame's own sky rate, in electrons per second per pixel.
@@ -519,7 +519,7 @@ class StackFrame(BaseModel):
     model_config = ConfigDict(populate_by_name=True, alias_generator=to_camel, frozen=True)
 
     frame_id: str
-    exposure_seconds: float = Field(gt=0.0)
+    exposure_s: float = Field(gt=0.0)
     sky_rate_e_per_s_per_px: float = Field(ge=0.0)
     read_noise_e: float = Field(ge=0.0)
     star_width: float | None = Field(default=None, gt=0.0)
@@ -534,8 +534,8 @@ class StackFrame(BaseModel):
             ``(B t + RN^2) / t^2``, in (electrons per second) squared per
             pixel.
         """
-        photon_and_read = self.sky_rate_e_per_s_per_px * self.exposure_seconds + self.read_noise_e**2
-        return photon_and_read / self.exposure_seconds**2
+        photon_and_read = self.sky_rate_e_per_s_per_px * self.exposure_s + self.read_noise_e**2
+        return photon_and_read / self.exposure_s**2
 
 
 class NoiseForecast(BaseModel):
@@ -571,11 +571,11 @@ class NoiseForecast(BaseModel):
 
 
 def predict_weighting_mode(
-    configured_weight: str | None, exposure_seconds: Sequence[float], *, is_spectral: bool = False
+    configured_weight: str | None, exposure_s: Sequence[float], *, is_spectral: bool = False
 ) -> WeightingMode:
     """Predict the mode the stacker will use for a future stack.
 
-    This asks the library (`ProcessingPipelines.predict_stack_weights`),
+    This asks the library (`processing.stacking.predict_weights`),
     which runs the stacker's own rule: a configured mode wins; with none, the
     stacker weights by noise when equal weights would leave the stack at
     least 5 percent noisier (``sqrt(mean(1/t) * mean(t)) >= 1.05``).
@@ -584,7 +584,7 @@ def predict_weighting_mode(
     ----------
     configured_weight : `str` or `None`
         The ``Processing.Siril.stack_weight`` setting, or ``None`` for none.
-    exposure_seconds : `Sequence` [`float`]
+    exposure_s : `Sequence` [`float`]
         The exposure time of every frame the stack will hold.
     is_spectral : `bool`, optional
         Whether it is a spectral stack. Those keep their configured weight.
@@ -597,8 +597,8 @@ def predict_weighting_mode(
         ``equal``; ``unknown`` for a configured mode the forward model does
         not know (such as star count).
     """
-    prediction = ProcessingPipelines.predict_stack_weights(
-        list(exposure_seconds), configured_weight, is_spectral=is_spectral
+    prediction = StackingPipeline.predict_weights(
+        list(exposure_s), configured_weight, kind="spectral" if is_spectral else "imaging"
     )
     return {
         "group": WeightingMode.GROUP,
@@ -608,17 +608,17 @@ def predict_weighting_mode(
     }.get(prediction.mode, WeightingMode.UNKNOWN)
 
 
-def fold_exposure_lengths(exposure_seconds: Sequence[float | None]) -> list[float | None]:
+def fold_exposure_lengths(exposure_s: Sequence[float | None]) -> list[float | None]:
     """Give the exposure group each frame would land in.
 
     The stacker stacks each exposure length on its own. A length with too few
     frames is folded into the nearest length that has enough. The rule is the
     stacker's own, asked of the library
-    (`ProcessingPipelines.predict_stack_weights`).
+    (`processing.stacking.predict_weights`).
 
     Parameters
     ----------
-    exposure_seconds : `Sequence` [`float` or `None`]
+    exposure_s : `Sequence` [`float` or `None`]
         The exposure of each frame, in seconds.
 
     Returns
@@ -627,20 +627,20 @@ def fold_exposure_lengths(exposure_seconds: Sequence[float | None]) -> list[floa
         The group length of each frame. Every entry is `None` when a length
         cannot be read, because the frames then stay in one group.
     """
-    return ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).folded_exposure_lengths
+    return StackingPipeline.predict_weights(list(exposure_s)).folded_exposure_lengths
 
 
-def exposure_lengths_left_out(exposure_seconds: Sequence[float | None]) -> list[str | None]:
+def exposure_lengths_left_out(exposure_s: Sequence[float | None]) -> list[str | None]:
     """Say which frames the stacker would leave out for their exposure length.
 
     A length with too few frames to stack on its own is folded into the
     nearest group only when that group is near enough in exposure. A frame
     with no such group is left out of the stack. The rule is the stacker's
-    own, asked of the library (`ProcessingPipelines.predict_stack_weights`).
+    own, asked of the library (`processing.stacking.predict_weights`).
 
     Parameters
     ----------
-    exposure_seconds : `Sequence` [`float` or `None`]
+    exposure_s : `Sequence` [`float` or `None`]
         The exposure of each frame, in seconds.
 
     Returns
@@ -649,7 +649,7 @@ def exposure_lengths_left_out(exposure_seconds: Sequence[float | None]) -> list[
         For each frame, `None` when the stacker would stack it, or the
         sentence that says why it would leave it out.
     """
-    return list(ProcessingPipelines.predict_stack_weights(list(exposure_seconds)).left_out_reasons)
+    return list(StackingPipeline.predict_weights(list(exposure_s)).left_out_reasons)
 
 
 def star_width_weights(widths_px: Sequence[float]) -> list[float] | None:
@@ -671,7 +671,7 @@ def star_width_weights(widths_px: Sequence[float]) -> list[float] | None:
     """
     if not widths_px:
         return None
-    return ProcessingPipelines.predict_stack_weights(
+    return StackingPipeline.predict_weights(
         [1.0] * len(widths_px), "wfwhm", star_width_px=list(widths_px)
     ).weights
 
@@ -871,7 +871,7 @@ def identify_weighting_mode(
     if observed.mean() <= 0.0:
         return WeightingModeEvidence(mode=WeightingMode.UNKNOWN, reason="The recorded weights are all 0.")
     observed = observed / observed.mean()
-    group_lengths = fold_exposure_lengths([frame.exposure_seconds for frame in frames])
+    group_lengths = fold_exposure_lengths([frame.exposure_s for frame in frames])
     if len(set(group_lengths)) > 1:
         return _identify_group_weighting(frames, group_lengths, observed, group_frame_noises_adu)
     matches: list[WeightingMode] = []
@@ -1035,7 +1035,7 @@ def _new_frame(template: Sequence[StackFrame], index: int, new_exposure_seconds:
     return template[index % len(template)].model_copy(
         update={
             "frame_id": f"new_{index}",
-            **({"exposure_seconds": new_exposure_seconds} if new_exposure_seconds else {}),
+            **({"exposure_s": new_exposure_seconds} if new_exposure_seconds else {}),
         }
     )
 
@@ -1298,15 +1298,15 @@ def frames_to_cut_noise(
             forecasts[count] = forecast if forecast.noise is not None else None
         return noise_ratio_with_fixed_pattern_noise(current, forecasts[count], pattern)
 
-    exposure = new_exposure_seconds or float(np.mean([frame.exposure_seconds for frame in template]))
+    exposure = new_exposure_seconds or float(np.mean([frame.exposure_s for frame in template]))
     return _take_more_result_graded(
         ratio_for,
         minimum_count=1,
         maximum_count=maximum_new_frames,
         target_noise_ratio=target_noise_ratio,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         fixed_pattern=fixed_pattern,
-        held_exposure_seconds=sum(frame.exposure_seconds for frame in existing),
+        held_exposure_seconds=sum(frame.exposure_s for frame in existing),
     )
 
 
@@ -1400,7 +1400,7 @@ def _take_more_result(
     minimum_count: int,
     maximum_count: int,
     target_noise_ratio: float,
-    exposure_seconds: float,
+    exposure_s: float,
     fixed_pattern: StackFixedPatternNoise | None,
     held_exposure_seconds: float | None = None,
 ) -> TakeMoreResult:
@@ -1420,7 +1420,7 @@ def _take_more_result(
         The fewest frames that may be asked for and where the search gives up.
     target_noise_ratio : `float`
         The ratio aimed for.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure of one new frame.
     fixed_pattern : `StackFixedPatternNoise` or `None`
         The stack's fixed-pattern noise, when one was found.
@@ -1470,19 +1470,19 @@ def _take_more_result(
     fixed_pattern_present = fixed_pattern is not None and fixed_pattern.fixed_pattern_noise_detected
     beyond_practical_limit = needed is None or (
         held_exposure_seconds is not None
-        and needed * exposure_seconds
+        and needed * exposure_s
         > (resolve_parameter(PRACTICAL_TIME_FACTOR).value - 1.0) * held_exposure_seconds
     )
     if fixed_pattern_present and beyond_practical_limit and held_exposure_seconds:
-        doubling_frames = max(minimum_count, round(held_exposure_seconds / exposure_seconds))
+        doubling_frames = max(minimum_count, round(held_exposure_seconds / exposure_s))
         doubling_ratio = ratio_for(doubling_frames)
         most_ratio = ratio_for(maximum_count)
         if doubling_ratio is not None and most_ratio is not None:
             doubling_cut = 1.0 - doubling_ratio
             return TakeMoreResult(
                 target_noise_ratio=target_noise_ratio,
-                added_exposure_seconds=doubling_frames * exposure_seconds,
-                new_exposure_seconds=exposure_seconds,
+                added_exposure_seconds=doubling_frames * exposure_s,
+                new_exposure_seconds=exposure_s,
                 fixed_pattern_limited=needed is None,
                 lowest_reachable_ratio=most_ratio,
                 practical_limit_applied=True,
@@ -1545,8 +1545,8 @@ def _take_more_result(
         frames_needed=needed,
         predicted_noise_ratio=ratio_for(needed),
         target_noise_ratio=target_noise_ratio,
-        added_exposure_seconds=needed * exposure_seconds,
-        new_exposure_seconds=exposure_seconds,
+        added_exposure_seconds=needed * exposure_s,
+        new_exposure_seconds=exposure_s,
         reason=reason,
         **fixed_pattern_fields,
     )
@@ -2812,7 +2812,7 @@ class StackGroup(BaseModel):
             return 0.0
         counts: dict[float, int] = {}
         for frame in self.frames:
-            counts[frame.exposure_seconds] = counts.get(frame.exposure_seconds, 0) + 1
+            counts[frame.exposure_s] = counts.get(frame.exposure_s, 0) + 1
         return min(counts, key=lambda exposure: (-counts[exposure], exposure))
 
     @property
@@ -2845,13 +2845,13 @@ class StackGroup(BaseModel):
         length = self.noise_length
         factors = []
         for frame in self.frames:
-            scale = self.reference_exposure_seconds / frame.exposure_seconds
-            own = frame.sky_rate_e_per_s_per_px * frame.exposure_seconds + frame.read_noise_e**2
+            scale = self.reference_exposure_seconds / frame.exposure_s
+            own = frame.sky_rate_e_per_s_per_px * frame.exposure_s + frame.read_noise_e**2
             at_length = frame.sky_rate_e_per_s_per_px * length + frame.read_noise_e**2
             if own > 0.0 and at_length > 0.0:
                 factors.append(scale * math.sqrt(own / at_length))
             else:
-                factors.append(scale * math.sqrt(frame.exposure_seconds / length))
+                factors.append(scale * math.sqrt(frame.exposure_s / length))
         return tuple(factors)
 
     @property
@@ -2865,10 +2865,10 @@ class StackGroup(BaseModel):
         """
         if not self.frames:
             return 0.0
-        return math.fsum(frame.exposure_seconds for frame in self.frames) / len(self.frames)
+        return math.fsum(frame.exposure_s for frame in self.frames) / len(self.frames)
 
 
-def frame_noise_from_group_weight(group_weight: float, frame_count: int, exposure_seconds: float) -> float:
+def frame_noise_from_group_weight(group_weight: float, frame_count: int, exposure_s: float) -> float:
     """Get a group's frame noise back from its stored combine weight.
 
     The combine weight is ``W_g = N_g t_g^2 / s_g^2`` and the stored
@@ -2890,7 +2890,7 @@ def frame_noise_from_group_weight(group_weight: float, frame_count: int, exposur
         The sum of the group's ``stacking.frame_weight`` rows.
     frame_count : `int`
         Frames stacked in the group (``stacking.group_frames_stacked_count``).
-    exposure_seconds : `float`
+    exposure_s : `float`
         The group's exposure (``stacking.group_exposure_s``).
 
     Returns
@@ -2903,9 +2903,9 @@ def frame_noise_from_group_weight(group_weight: float, frame_count: int, exposur
     ValueError
         If an input is not positive.
     """
-    if group_weight <= 0.0 or frame_count <= 0 or exposure_seconds <= 0.0:
+    if group_weight <= 0.0 or frame_count <= 0 or exposure_s <= 0.0:
         raise ValueError("The group weight, frame count and exposure must be positive.")
-    return exposure_seconds * math.sqrt(frame_count / group_weight)
+    return exposure_s * math.sqrt(frame_count / group_weight)
 
 
 def predict_group_frame_noise_adu(frames: Sequence[StackFrame], electrons_per_adu: float) -> float:
@@ -2939,7 +2939,7 @@ def predict_group_frame_noise_adu(frames: Sequence[StackFrame], electrons_per_ad
     if not frames or electrons_per_adu <= 0.0:
         raise ValueError("Frames and a positive camera gain are needed.")
     variance_electrons = math.fsum(
-        frame.sky_rate_e_per_s_per_px * frame.exposure_seconds + frame.read_noise_e**2 for frame in frames
+        frame.sky_rate_e_per_s_per_px * frame.exposure_s + frame.read_noise_e**2 for frame in frames
     ) / len(frames)
     return math.sqrt(variance_electrons) / electrons_per_adu
 
@@ -3038,7 +3038,7 @@ def combine_group_weights(
     ``i`` of group ``g`` counts ``W_g w_i / sum(w)``, where the sum runs over
     the group's frames. This is a copy of the rule of the stacker's own
     records, for groups that are already known; a test checks it against
-    `ProcessingPipelines.predict_stack_weights`.
+    `processing.stacking.predict_weights`.
 
     Parameters
     ----------
@@ -3176,7 +3176,7 @@ def forecast_group_noise(groups: Sequence[StackGroup]) -> NoiseForecast:
     )
     if base.variance is None:
         return base
-    mean_exposure = math.fsum(frame.exposure_seconds for frame in frames) / len(frames)
+    mean_exposure = math.fsum(frame.exposure_s for frame in frames) / len(frames)
     variance = base.variance * mean_exposure**2
     return NoiseForecast(
         variance=variance,
@@ -3320,12 +3320,12 @@ class GroupPlan(BaseModel):
     reason: str | None = None
 
 
-def _length_key(exposure_seconds: float) -> float | None:
+def _length_key(exposure_s: float) -> float | None:
     """Give the exposure length a frame is grouped under.
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         A frame's exposure.
 
     Returns
@@ -3334,7 +3334,7 @@ def _length_key(exposure_seconds: float) -> float | None:
         The exposure rounded the way `fold_exposure_lengths` rounds it (lengths
         that match to three significant figures are one length).
     """
-    return fold_exposure_lengths([exposure_seconds])[0]
+    return fold_exposure_lengths([exposure_s])[0]
 
 
 def _refused_plan(reason: str, placements: list[FramePlacement] | None = None) -> GroupPlan:
@@ -3437,8 +3437,8 @@ def plan_group_stack(
     new = list(new_frames)
     if not existing:
         return _refused_plan("The stack has no exposure groups.")
-    old_exposures = [frame.exposure_seconds for group in existing for frame in group.frames]
-    all_exposures = old_exposures + [frame.exposure_seconds for frame in new]
+    old_exposures = [frame.exposure_s for group in existing for frame in group.frames]
+    all_exposures = old_exposures + [frame.exposure_s for frame in new]
     # Only the new frames matter here: the old ones are the frames of the
     # stack that exists, and the later checks compare them with it.
     left_out = [
@@ -3473,7 +3473,7 @@ def plan_group_stack(
     placements = []
     frames_by_length: dict[float, list[StackFrame]] = {}
     for frame, destination in zip(new, new_destinations, strict=True):
-        own_length = fold_exposure_lengths([frame.exposure_seconds])[0]
+        own_length = fold_exposure_lengths([frame.exposure_s])[0]
         if own_length != destination:
             outcome = "folded_into_group"
         elif destination in existing_lengths:
@@ -3483,7 +3483,7 @@ def plan_group_stack(
         placements.append(
             FramePlacement(
                 frame_id=frame.frame_id,
-                own_exposure_seconds=frame.exposure_seconds,
+                own_exposure_seconds=frame.exposure_s,
                 group_exposure_seconds=destination,
                 outcome=outcome,
             )
@@ -3494,15 +3494,15 @@ def plan_group_stack(
     planned_lengths: list[float] = []
     for group, length in zip(existing, existing_lengths, strict=True):
         added = frames_by_length.pop(float(length), [])
-        lengths_held = {_length_key(frame.exposure_seconds) for frame in (*group.frames, *added)}
+        lengths_held = {_length_key(frame.exposure_s) for frame in (*group.frames, *added)}
         if group.reference_exposure_seconds is None and len(lengths_held) > 1:
-            if len({_length_key(frame.exposure_seconds) for frame in group.frames}) == 1:
+            if len({_length_key(frame.exposure_s) for frame in group.frames}) == 1:
                 # The old frames share one length, so the reference frame was
                 # one of them; the new frames of another length scale to it.
                 group = group.model_copy(
                     update={
-                        "reference_exposure_seconds": group.frames[0].exposure_seconds,
-                        "noise_length_seconds": group.frames[0].exposure_seconds,
+                        "reference_exposure_seconds": group.frames[0].exposure_s,
+                        "noise_length_seconds": group.frames[0].exposure_s,
                     }
                 )
             else:
@@ -3528,7 +3528,7 @@ def plan_group_stack(
                 f"{length:g} s group.",
                 placements,
             )
-        own_length_frames = [frame for frame in added if _length_key(frame.exposure_seconds) == length]
+        own_length_frames = [frame for frame in added if _length_key(frame.exposure_s) == length]
         planned.append(
             StackGroup(
                 frames=tuple(added),
@@ -3620,11 +3620,9 @@ def frames_to_cut_noise_in_groups(
             target_noise_ratio=target_noise_ratio,
             reason="There are no past frames of this setting to follow.",
         )
-    exposure = new_exposure_seconds or float(np.mean([frame.exposure_seconds for frame in template]))
+    exposure = new_exposure_seconds or float(np.mean([frame.exposure_s for frame in template]))
     existing_lengths = {
-        fold_exposure_lengths([frame.exposure_seconds])[0]
-        for group in existing_groups
-        for frame in group.frames
+        fold_exposure_lengths([frame.exposure_s])[0] for group in existing_groups for frame in group.frames
     }
     new_length = fold_exposure_lengths([exposure])[0]
     starts_new_group = new_length not in existing_lengths
@@ -3682,11 +3680,9 @@ def frames_to_cut_noise_in_groups(
         minimum_count=minimum_count,
         maximum_count=maximum_new_frames,
         target_noise_ratio=target_noise_ratio,
-        exposure_seconds=exposure,
+        exposure_s=exposure,
         fixed_pattern=fixed_pattern,
-        held_exposure_seconds=sum(
-            frame.exposure_seconds for group in existing_groups for frame in group.frames
-        ),
+        held_exposure_seconds=sum(frame.exposure_s for group in existing_groups for frame in group.frames),
     )
     answer_plan = plan_for(result.frames_needed or result.doubling_frames or minimum_count)
     notes = []

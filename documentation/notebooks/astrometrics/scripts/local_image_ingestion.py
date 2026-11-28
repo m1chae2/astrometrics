@@ -44,13 +44,6 @@ def run_ingestion() -> None:
         help="The local filesystem path to the FITS image to ingest. Defaults to "
         "M 13's stacked frame under the configured frames directory.",
     )
-    parser.add_argument(
-        "--role",
-        type=str,
-        default="LIGHT",
-        choices=["LIGHT", "DARK", "FLAT", "BIAS"],
-        help="The frame role type (defaults to 'LIGHT').",
-    )
 
     arguments = parser.parse_args()
 
@@ -72,19 +65,24 @@ def run_ingestion() -> None:
         print(f"Found active target index: ID={target.id}, Total Local Frames={len(target.frames)}")
 
     # 2. Add local frame record (extracts metadata)
-    print(f"Registering local FITS frame: {image_path} with role={arguments.role}")
+    print(f"Registering local FITS frame: {image_path}")
     if not os.path.exists(image_path):
         print(
             f"Warning: Local file path does not exist on disk, but proceeding with cataloging: {image_path}"
         )
 
     try:
-        astrometrics.targets.reindex_frames(target, paths=[image_path], role=arguments.role)
-        frame_record = next(frame for frame in target.frames if frame.path == image_path)
+        # A file outside the target's camera folders is moved into place
+        # first; a dark, flat or bias frame goes to the calibration folders.
+        added = astrometrics.targets.frames.add(target, [image_path])
+        if not len(added):
+            print("The file was sorted into the calibration or other folders; no light frame was added.")
+            return
+        frame_record = added[0]
         print("Success! Registered Frame:")
         print(f"  Path: {frame_record.path}")
         print(f"  Filter: {frame_record.filter.name if frame_record.filter else 'None'}")
-        print(f"  Exposure: {frame_record.exposure}s")
+        print(f"  Exposure: {frame_record.exposure_s}s")
         print(f"  Camera: {frame_record.camera or 'Unknown'}")
         print("Target metadata updated successfully.")
     except Exception as error:

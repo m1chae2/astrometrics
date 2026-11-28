@@ -1,4 +1,4 @@
-"""What `QualityRecords.resolve_rows` returns: the file behind each row.
+"""What `quality.records.get_paths` returns: the file behind each row.
 
 A stored quality row names its subject (a frame, a stack or a run) by a stable
 id, never by a path on disk. A viewer needs a path to open the picture. These

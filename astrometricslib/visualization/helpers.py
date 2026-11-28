@@ -1,7 +1,10 @@
-"""Purpose: High-level API entry points for visualization tools.
+"""Purpose: Draw the charts of a target's or a star's results.
 
-Description: Contains functions for rendering star fields, light curves,
-spectra, and multi-panel target dashboards.
+Description: The owners of ``Visualization.plot_target``, ``plot_star``,
+``plot_astrometry``, ``plot_photometry``, ``plot_spectroscopy`` and
+``plot_asteroids``: star fields, light curves, spectra and multi-panel target
+dashboards, drawn with Matplotlib. A target's stars are read from the catalog
+storage with the star query owner, never through the public star catalog.
 """
 
 from collections.abc import Callable
@@ -461,15 +464,15 @@ def _magnitude_sort_key(obj: Any) -> float:
     return float(magnitude)
 
 
-def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list, dict]:
+def _load_target_stars(target: Any, storage: Any, limit: int) -> tuple[list, list, dict]:
     """Fetch astrometry-identified and spectroscopy-extracted stars for target.
 
     Parameters
     ----------
     target : `Any`
         Target object.
-    stars : `astrometricslib.api.stars.StellarCatalog`
-        Stellar catalog used to look up identified objects.
+    storage : `AbstractCatalogAccess`
+        The catalog storage that holds the star records.
     limit : `int`
         Maximum number of astrometry stars to retrieve.
 
@@ -493,7 +496,9 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     target_id = getattr(target, "id", "")
     # Only this target's stars are read from the database, not the whole
     # catalog of every target ever imaged.
-    all_objects = stars.query(target_id=target_id, detail="objects", limit=None).objects or []
+    from astrometricslib.pipelines.shared.star_catalog_queries import StarFilters, query_stars
+
+    all_objects = list(query_stars(storage, StarFilters(target_id=target_id), include=["light_curves"]))
 
     astrometry_stars = sorted(
         (
@@ -518,6 +523,39 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     spectral_by_id = {getattr(star, "id", ""): star for star in spectral_stars}
 
     return astrometry_stars, spectral_stars, spectral_by_id
+
+
+def _selected_index(stars: list, selected_star: Any | None) -> int:
+    """Find the star to show first in a chart's side panel.
+
+    Parameters
+    ----------
+    stars : `list`
+        The stars the chart lists.
+    selected_star : `StellarObject`, `str` or `None`
+        The star to show first, by record, id or name.
+
+    Returns
+    -------
+    index : `int`
+        Its position in ``stars``, or 0 when it is not there or none is
+        given.
+    """
+    if selected_star is None:
+        return 0
+    wanted_id = getattr(selected_star, "id", str(selected_star)).lower()
+    wanted_name = (getattr(selected_star, "name", None) or str(selected_star)).lower()
+    for index, star in enumerate(stars):
+        star_id = getattr(star, "id", "").lower()
+        star_name = (getattr(star, "name", None) or "").lower()
+        if (
+            wanted_id in (star_id, star_name)
+            or wanted_name in (star_id, star_name)
+            or star_id.startswith(wanted_id)
+            or wanted_id.startswith(star_id)
+        ):
+            return index
+    return 0
 
 
 def _find_star_index(astrometry_stars: list, x: float, y: float, config: VisualizationConfig) -> int | None:
@@ -633,7 +671,7 @@ def _wire_star_click_selection(
 
 def plot_astrometry(
     target: Any,
-    stars: Any,
+    storage: Any,
     limit: int = 15,
     figsize: tuple[int, int] = (10, 10),
 ) -> plt.Figure:
@@ -643,8 +681,8 @@ def plot_astrometry(
     ----------
     target : `Target`
         Target object.
-    stars : `astrometricslib.api.stars.StellarCatalog`
-        Astrometrics library instance.
+    storage : `AbstractCatalogAccess`
+        The catalog storage that holds the target's stars.
     limit : `int`, optional
         Maximum number of catalog stars to overlay, default `15`.
     figsize : `tuple[int, int]`, optional
@@ -655,7 +693,7 @@ def plot_astrometry(
     fig : `plt.Figure`
         Matplotlib figure instance.
     """
-    astrometry_stars, _, _ = _load_target_stars(target, stars, limit)
+    astrometry_stars, _, _ = _load_target_stars(target, storage, limit)
 
     # Close any figures left open by a previous call (e.g. from a
     # long-running scripting console) before creating this one, so repeated
@@ -735,9 +773,10 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
 
 def plot_target_photometry(
     target: Any,
-    stars: Any,
+    storage: Any,
     limit: int = 15,
     figsize: tuple[int, int] = (16, 9),
+    selected_star: Any | None = None,
 ) -> plt.Figure:
     """Create interactive 2-panel photometry dashboard.
 
@@ -745,19 +784,22 @@ def plot_target_photometry(
     ----------
     target : `Target`
         Target object.
-    stars : `astrometricslib.api.stars.StellarCatalog`
-        Astrometrics library instance.
+    storage : `AbstractCatalogAccess`
+        The catalog storage that holds the target's stars.
     limit : `int`, optional
         Maximum number of stars to highlight, default `15`.
     figsize : `tuple[int, int]`, optional
         Figure dimensions, default `(16, 9)`.
+    selected_star : `StellarObject` or `str` or `None`, optional
+        The star whose light curve to show first.
 
     Returns
     -------
     fig : `plt.Figure`
         Matplotlib figure instance.
     """
-    astrometry_stars, _, _ = _load_target_stars(target, stars, limit)
+    astrometry_stars, _, _ = _load_target_stars(target, storage, limit)
+    active_index = _selected_index(astrometry_stars, selected_star)
 
     # Close any figures left open by a previous call before creating this
     # one, so repeated calls don't accumulate Figures in pyplot's global
@@ -782,7 +824,7 @@ def plot_target_photometry(
         config.default_percentile,
         title=f"{target.id} - Astrometry Solved Star Field",
     )
-    star_patches = star_layer.render(astrometry_stars, active_index=0)
+    star_patches = star_layer.render(astrometry_stars, active_index=active_index)
 
     def render_photometry_panel(index: int) -> None:
         """Render photometry panel for star at given index."""
@@ -805,15 +847,16 @@ def plot_target_photometry(
     _wire_star_click_selection(
         fig, ax_astrometry, astrometry_stars, star_patches, config, render_photometry_panel
     )
-    render_photometry_panel(0)
+    render_photometry_panel(active_index)
     return fig
 
 
 def plot_target_spectroscopy(
     target: Any,
-    stars: Any,
+    storage: Any,
     limit: int = 15,
     figsize: tuple[int, int] = (16, 9),
+    selected_star: Any | None = None,
 ) -> plt.Figure:
     """Create interactive 2-panel spectroscopy dashboard.
 
@@ -821,12 +864,14 @@ def plot_target_spectroscopy(
     ----------
     target : `Target`
         Target object.
-    stars : `astrometricslib.api.stars.StellarCatalog`
-        Astrometrics library instance.
+    storage : `AbstractCatalogAccess`
+        The catalog storage that holds the target's stars.
     limit : `int`, optional
         Maximum number of stars to highlight, default `15`.
     figsize : `tuple[int, int]`, optional
         Figure dimensions, default `(16, 9)`.
+    selected_star : `StellarObject` or `str` or `None`, optional
+        The star whose spectrum to show first.
 
     Returns
     -------
@@ -844,7 +889,7 @@ def plot_target_spectroscopy(
             f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_spectral_target."
         )
 
-    _, spectral_stars, _ = _load_target_stars(target, stars, limit)
+    _, spectral_stars, _ = _load_target_stars(target, storage, limit)
     # The extraction boxes live in the spectral stack's pixel grid, so only
     # stars that actually have a box can be drawn on it.
     spectral_stars = sorted(
@@ -878,7 +923,8 @@ def plot_target_spectroscopy(
         config.default_percentile,
         title=f"{target.id} - Stacked Spectral Image (extraction boxes)",
     )
-    box_patches = dispersion_layer.render(spectral_stars, active_index=0)
+    active_index = _selected_index(spectral_stars, selected_star)
+    box_patches = dispersion_layer.render(spectral_stars, active_index=active_index)
     # Circle radius is the size source detection measured for each star
     # (`radius_px`); the box sizes were already set by the extraction pipeline.
     star_circles = []
@@ -986,14 +1032,14 @@ def plot_target_spectroscopy(
     # matplotlib only weak-references bound-method callbacks; keep the
     # handler alive for the figure's lifetime.
     fig._star_click_interaction = interaction
-    highlight_active_box(0)
-    render_spectrum_panel(0)
+    highlight_active_box(active_index)
+    render_spectrum_panel(active_index)
     return fig
 
 
 def plot_target_dashboard(
     target: Any,
-    stars: Any,
+    storage: Any,
     limit: int = 15,
     figsize: tuple[int, int] = (16, 9),
     selected_star: Any | None = None,
@@ -1004,8 +1050,8 @@ def plot_target_dashboard(
     ----------
     target : `Target`
         Target object.
-    stars : `astrometricslib.api.stars.StellarCatalog`
-        Astrometrics library instance.
+    storage : `AbstractCatalogAccess`
+        The catalog storage that holds the target's stars.
     limit : `int`, optional
         Maximum number of catalog stars to retrieve, default `15`.
     figsize : `tuple[int, int]`, optional
@@ -1018,26 +1064,12 @@ def plot_target_dashboard(
     fig : `plt.Figure`
         Matplotlib figure instance.
     """
-    astrometry_stars, spectral_stars, spectral_by_id = _load_target_stars(target, stars, limit)
+    astrometry_stars, spectral_stars, spectral_by_id = _load_target_stars(target, storage, limit)
 
     has_photometry = any(getattr(s, "photometry", None) is not None for s in astrometry_stars)
     has_spectroscopy = len(spectral_stars) > 0
 
-    active_index = 0
-    if selected_star is not None:
-        target_str = getattr(selected_star, "id", str(selected_star)).lower()
-        target_name = getattr(selected_star, "name", str(selected_star)).lower()
-        for idx, s in enumerate(astrometry_stars):
-            sid = getattr(s, "id", "").lower()
-            sname = getattr(s, "name", "").lower()
-            if (
-                target_str in (sid, sname)
-                or target_name in (sid, sname)
-                or sid.startswith(target_str)
-                or target_str.startswith(sid)
-            ):
-                active_index = idx
-                break
+    active_index = _selected_index(astrometry_stars, selected_star)
 
     # Close any figures left open by a previous call before creating this
     # one, so repeated calls don't accumulate Figures in pyplot's global

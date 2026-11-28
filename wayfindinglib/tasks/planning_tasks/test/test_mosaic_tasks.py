@@ -9,9 +9,8 @@ library's target catalog.
 
 import pytest
 
-from astrometricslib import Target
+from astrometricslib import Camera, ObservatoryConfiguration, Target, Telescope
 from astrometricslib.exceptions import InvalidArgumentError
-from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, Telescope
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
 from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels, create_mosaic
 
@@ -24,19 +23,22 @@ class _FakeTargetCatalog:
         self.targets: dict[str, Target] = {}
         self.saved = False
 
-    def add(self, target: Target) -> None:
-        """Keep one target.
+    def add(self, target: Target) -> Target:
+        """Keep and save one target, as the library's ``add`` does.
 
         Parameters
         ----------
         target : `Target`
             The target to keep.
+
+        Returns
+        -------
+        target : `Target`
+            The same target.
         """
         self.targets[target.id] = target
-
-    def save(self) -> None:
-        """Remember that the catalog was saved."""
         self.saved = True
+        return target
 
 
 class _FakeAstrometrics:
@@ -47,17 +49,17 @@ class _FakeAstrometrics:
         self.targets = _FakeTargetCatalog()
 
 
-def _equipment() -> EquipmentConfiguration:
+def _equipment() -> ObservatoryConfiguration:
     """Build a small refractor and camera pair.
 
     Returns
     -------
-    equipment : `EquipmentConfiguration`
+    equipment : `ObservatoryConfiguration`
         A 450 mm telescope with a square sensor.
     """
     telescope = Telescope(id="t1", name="Test Scope", focal_length_mm=450.0, focal_ratio=6.0)
     camera = Camera(id="c1", name="Test Cam", pixel_size_um=3.76, sensor_width_px=3008, sensor_height_px=3008)
-    return EquipmentConfiguration(telescope=telescope, camera=camera)
+    return ObservatoryConfiguration(telescope=telescope, camera=camera)
 
 
 def _parent() -> Target:
@@ -96,7 +98,7 @@ def test_create_mosaic_adds_one_target_and_package_per_panel() -> None:
     """A 2x2 grid gives four distinct panel targets and four packages."""
     astrometrics = _FakeAstrometrics()
     panels = calculate_panels(None, 314.695833, 44.33, 2, 2, 10.0, _equipment())
-    exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)]
+    exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_s=300.0, count=10)]
 
     plan = create_mosaic(astrometrics, _parent(), panels, exposure_requests, None, packages=True)
 

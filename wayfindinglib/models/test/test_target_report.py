@@ -60,12 +60,12 @@ def test_forecast_tolerance_cannot_be_negative() -> None:
 def test_starting_point_states_why_a_value_is_not_computed() -> None:
     """The clipping cap may be missing, but never without a reason."""
     point = StartingPoint(
-        exposure_seconds=90.0,
+        exposure_s=90.0,
         exposure_reason="Sky noise is nine times the read noise squared.",
         clipping_cap_reason="Not computed: no usable zero point exists.",
         confidence=Confidence.DESIGN_ESTIMATE,
     )
-    assert point.clipping_cap_seconds is None
+    assert point.clipping_cap_s is None
     with pytest.raises(ValidationError):
         StartingPoint(exposure_reason="", clipping_cap_reason="x", confidence=Confidence.MEASURED)
 

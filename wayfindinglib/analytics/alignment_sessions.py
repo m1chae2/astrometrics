@@ -283,7 +283,7 @@ def _jitter(runs: list[list[AlignmentAttempt]]) -> tuple[float, float, float]:
 
     Returns
     -------
-    elapsed_seconds, rms_ra, rms_dec : `float`
+    elapsed_s, rms_ra, rms_dec : `float`
         Time spent across runs of two or more solves, and the pooled RMS
         scatter in RA and declination, in arcseconds.
     """
@@ -309,14 +309,14 @@ def _jitter(runs: list[list[AlignmentAttempt]]) -> tuple[float, float, float]:
     return elapsed, math.sqrt(sum_var_ra / frames), math.sqrt(sum_var_dec / frames)
 
 
-def _drift(points: list[AlignmentTrackPoint], elapsed_seconds: float) -> tuple[float, float]:
+def _drift(points: list[AlignmentTrackPoint], elapsed_s: float) -> tuple[float, float]:
     """Fit lines to the offsets against time, keeping real drifts only.
 
     Parameters
     ----------
     points : `list` [`AlignmentTrackPoint`]
         The target's solves.
-    elapsed_seconds : `float`
+    elapsed_s : `float`
         Time spent tracking; not used for the decision, which rests on the
         slope's standard error (`DRIFT_SIGNIFICANCE_SIGMAS`).
 
@@ -328,7 +328,7 @@ def _drift(points: list[AlignmentTrackPoint], elapsed_seconds: float) -> tuple[f
         fitted (fewer than three solves).
     """
     sigmas = float(resolve_parameter(DRIFT_SIGNIFICANCE_SIGMAS).value)
-    minutes = [p.elapsed_seconds / 60.0 for p in points]
+    minutes = [p.elapsed_s / 60.0 for p in points]
     return (
         significant_slope(minutes, [p.delta_ra_arcsec for p in points], sigmas),
         significant_slope(minutes, [p.delta_dec_arcsec for p in points], sigmas),
@@ -373,7 +373,7 @@ def _summarize(group: list[AlignmentAttempt], index: int) -> AlignmentTargetSess
         )
         points.append(
             AlignmentTrackPoint(
-                elapsed_seconds=timestamp - t0,
+                elapsed_s=timestamp - t0,
                 delta_ra_arcsec=attempt.delta_ra_arcsec or 0.0,
                 delta_dec_arcsec=attempt.delta_dec_arcsec or 0.0,
                 total_error_arcsec=_total_error(attempt),
@@ -396,7 +396,7 @@ def _summarize(group: list[AlignmentAttempt], index: int) -> AlignmentTargetSess
         drift_dec_arcsec_per_min=drift_dec,
         start_time=first.timestamp,
         end_time=last.timestamp,
-        elapsed_seconds=elapsed,
+        elapsed_s=elapsed,
         time_series=points,
         attempts=group,
     )

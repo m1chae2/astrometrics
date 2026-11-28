@@ -117,27 +117,28 @@ def test_indi_interface_ignores_zero_delta_echo_during_sync() -> None:
 
 
 def test_alignment_service_polls_external_syncs_through_the_library() -> None:
-    """Verify AlignmentService asks `control.mount` to store the syncs."""
+    """Verify AlignmentService asks `review.alignment` to store the syncs."""
     from backend.services.observatory.alignment_service import AlignmentService
 
-    observatory_mock = MagicMock()
+    review_mock = MagicMock()
 
-    AlignmentService(observatory_api=observatory_mock).poll_external_syncs()
+    AlignmentService(observatory_api=MagicMock(), review=review_mock).poll_external_syncs()
 
-    observatory_mock.mount.poll_external_alignment.assert_called_once_with()
+    review_mock.alignment.record_external.assert_called_once_with()
 
 
 def test_alignment_service_reads_the_polar_alignment_from_the_library() -> None:
     """Verify the polar alignment is the library's, with camelCase keys."""
     from backend.services.observatory.alignment_service import AlignmentService
-    from wayfindinglib import ObservatoryControl
+    from wayfindinglib import ObservationReview, ObservatoryControl
 
     observatory = ObservatoryControl(config=MagicMock())
     observatory._context.driver = MagicMock(
         get_polar_alignment_status=MagicMock(return_value={"status": "in_progress", "totalErrorArcsec": 12.0})
     )
 
-    status = AlignmentService(observatory_api=observatory).get_polar_alignment()
+    service = AlignmentService(observatory_api=observatory, review=ObservationReview(observatory))
+    status = service.get_polar_alignment()
 
     assert status["status"] == "in_progress"
     assert status["totalErrorArcsec"] == pytest.approx(12.0)
@@ -239,10 +240,14 @@ def test_telescope_service_prioritizes_driver_target_name() -> None:
     from backend.services.observatory.telescope_service import TelescopeService
 
     wayfinder_mock = MagicMock()
-    wayfinder_mock.control.mount.status.return_value = SimpleNamespace(
-        model_dump=lambda by_alias=False: {"ra": "00 42 44", "dec": "+41 16 09", "targetName": "IC 1396"}
+    wayfinder_mock.control.mount.get_status.return_value = SimpleNamespace(
+        ra_deg=None,
+        dec_deg=None,
+        altitude_deg=None,
+        azimuth_deg=None,
+        model_dump=lambda **_: {"ra": "00 42 44", "dec": "+41 16 09", "targetName": "IC 1396"},
     )
-    wayfinder_mock.control.imaging.status.return_value = SimpleNamespace(
+    wayfinder_mock.control.imaging.get_status.return_value = SimpleNamespace(
         camera_status="Idle", current_filter="L", focuser_position=0, camera_temperature="-"
     )
 
@@ -418,9 +423,8 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
     observatory_mock = MagicMock()
     review = ObservationReview(ObservatoryControl(config=MagicMock()))
     review._context._records = records_mock
-    review.query = MagicMock(
-        return_value=SimpleNamespace(sessions=[{"sessionId": "2026-09-24", "syncCount": 5}])
-    )
+    review._context._astrometrics = MagicMock()
+    review._context.astrometrics.targets.count_by_night.return_value = SimpleNamespace(targets_by_night={})
     service = AlignmentService(observatory_api=observatory_mock, review=review)
     sessions = service.list_sessions()
     assert len(sessions) == 1

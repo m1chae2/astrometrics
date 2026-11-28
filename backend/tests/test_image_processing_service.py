@@ -1,9 +1,10 @@
 """Unit tests for the background image processing service and its worker task.
 
 Verifies that `start_siril_processing_task` runs the full stacking stage
-(through `ProcessingPipelines.stack`) on the frames the viewer chose, so a
+(through ``processing.stacking.run``) on the frames the viewer chose, so a
 stack made from the viewer gets the same post-processing as a batch stack,
-and that it saves the target and reports the outcome.
+then makes its picture (``processing.enhancement.run``), and that it saves the
+target and reports the outcome.
 """
 
 import logging
@@ -44,13 +45,15 @@ def _target_service(target: Target | None) -> MagicMock:
     target_service : `MagicMock`
         A service that finds ``target``. Its ``astrometrics.processing`` is
         a real `ProcessingPipelines` over a mock target catalog, so its
-        ``astrometrics.processing._targets.save`` records the save.
+        ``astrometrics.processing._targets._save`` records the save.
     """
     target_service = MagicMock()
     target_service.get_targets.return_value = target
     target_service.astrometrics.processing = ProcessingPipelines(
-        AppConfiguration(), MagicMock(), targets=MagicMock()
+        AppConfiguration(), MagicMock(), targets=MagicMock(_config=AppConfiguration())
     )
+    # The picture step is checked on its own below.
+    target_service.astrometrics.processing.enhancement = MagicMock()
     return target_service
 
 
@@ -76,7 +79,38 @@ def test_worker_runs_the_full_stacking_stage_on_the_chosen_frames() -> None:
     assert stage.call_args.args == (target,)
     assert stage.call_args.kwargs["frames_to_stack"] == target.frames[:2]
     assert stage.call_args.kwargs["job_id"] == "job-1"
-    target_service.astrometrics.processing._targets.save.assert_called_once()
+    target_service.astrometrics.processing._targets._save.assert_called_once()
+    assert notification_service.notify.call_args.kwargs["status"] == "success"
+    # The stack's picture is made after the stack, by the enhancement pipeline.
+    target_service.astrometrics.processing.enhancement.run.assert_called_once_with(target, None, stacked_path)
+
+
+def test_worker_sends_the_picture_settings_and_keeps_a_stack_whose_picture_failed() -> None:
+    """The overrides reach the picture; its failure does not fail the stack."""
+    from astrometricslib import EnhancementSettings
+
+    paths = ["/lights/M_42/lum_001.fits"]
+    target = _target_with_frames("M 42", paths)
+    target_service = _target_service(target)
+    target_service.astrometrics.processing.enhancement.run.side_effect = ProcessingError("no picture")
+    notification_service = MagicMock()
+    stacked_path = "/stacks/M 42/M_42_L_Stacked.fits"
+
+    with patch(STAGE, return_value=stacked_path) as stage:
+        result = start_siril_processing_task(
+            job_id="job-1",
+            target_id="M 42",
+            image_files=paths,
+            target_service=target_service,
+            notification_service=notification_service,
+            stack_options={"force": True, "denoise": False, "star_toning": True},
+        )
+
+    assert result == stacked_path
+    assert stage.call_args.kwargs["force"] is True
+    target_service.astrometrics.processing.enhancement.run.assert_called_once_with(
+        target, EnhancementSettings(denoise=False, star_toning=True), stacked_path
+    )
     assert notification_service.notify.call_args.kwargs["status"] == "success"
 
 
@@ -113,7 +147,7 @@ def test_worker_reports_failure_and_does_not_save_when_nothing_was_stacked() -> 
         )
 
     assert result is None
-    target_service.astrometrics.processing._targets.save.assert_not_called()
+    target_service.astrometrics.processing._targets._save.assert_not_called()
     assert notification_service.notify.call_args.kwargs["status"] == "error"
 
 
@@ -230,28 +264,38 @@ def _service(processing_api: MagicMock, target: Target | None) -> ImageProcessin
     )
 
 
-def test_open_siril_opens_the_stacked_image_through_the_library_api(tmp_path: Path) -> None:
-    """The stack is opened by the library's `open_in_siril`."""
+def test_open_siril_opens_the_stacked_image_through_the_stacking_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stack is opened by the library's public stacking driver."""
+    import astrometricslib.drivers as drivers
+
+    engine = MagicMock()
+    monkeypatch.setattr(drivers, "get_stacking_driver", lambda: engine)
     stack = tmp_path / "stack.fits"
     stack.write_bytes(b"")
     target = Target(id="M 42")
     target.stacking.stacked_image = str(stack)
-    processing_api = MagicMock()
 
-    assert _service(processing_api, target).open_siril("M 42") is True
-    processing_api.open_in_siril.assert_called_once_with(str(stack))
+    assert _service(MagicMock(), target).open_siril("M 42") is True
+    engine.open_in_viewer.assert_called_once_with(str(stack))
 
 
-def test_open_siril_falls_back_to_the_first_frame_and_reports_a_library_error() -> None:
+def test_open_siril_falls_back_to_the_first_frame_and_reports_a_library_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Without a stack the first frame opens; a library error returns False."""
+    import astrometricslib.drivers as drivers
+
+    engine = MagicMock()
+    monkeypatch.setattr(drivers, "get_stacking_driver", lambda: engine)
     target = _target_with_frames("M 42", ["/lights/M_42/lum_001.fits"])
-    processing_api = MagicMock()
 
-    assert _service(processing_api, target).open_siril("M 42") is True
-    processing_api.open_in_siril.assert_called_once_with("/lights/M_42/lum_001.fits")
+    assert _service(MagicMock(), target).open_siril("M 42") is True
+    engine.open_in_viewer.assert_called_once_with("/lights/M_42/lum_001.fits")
 
-    processing_api.open_in_siril.side_effect = ProcessingError("no window")
-    assert _service(processing_api, target).open_siril("M 42") is False
+    engine.open_in_viewer.side_effect = ProcessingError("no window")
+    assert _service(MagicMock(), target).open_siril("M 42") is False
 
 
 def test_worker_writes_job_log_lines_to_the_given_job_repository() -> None:
@@ -340,7 +384,7 @@ def test_a_stacking_job_cancelled_while_waiting_for_a_slot_never_runs_and_stays_
         with acquire_resource_slot(None, "job", 1, poll_interval_seconds=0.05):
             stages_run.append("stage 1")
 
-    target_service.astrometrics.processing.stack = stack_that_waits_for_the_slot
+    target_service.astrometrics.processing.stacking.run = stack_that_waits_for_the_slot
     holder_thread = threading.Thread(target=holder, daemon=True)
     holder_thread.start()
     assert holder_has_slot.wait(timeout=20)

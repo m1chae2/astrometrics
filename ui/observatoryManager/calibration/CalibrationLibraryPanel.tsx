@@ -178,7 +178,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
                     detail: 'match',
                     camera_id: setting.camera,
                     ...(request.calibrationKey ? { kind: request.calibrationKey as CalibrationKind } : {}),
-                    ...(setting.gainSetting != null ? { gain: setting.gainSetting } : {}),
+                    ...(setting.gain != null ? { gain: setting.gain } : {}),
                     ...(setting.offset != null ? { offset: setting.offset } : {}),
                     ...(setting.binning != null ? { binning: setting.binning } : {}),
                 });
@@ -238,7 +238,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
         if (activeKind === 'dark') {
             return (
                 <>
-                    <td>{formatExposure(row.exposure)}</td>
+                    <td>{formatExposure(row.exposure_s)}</td>
                     <td className="data-table-cell-right">{row.offset ?? '—'}</td>
                     <td className="data-table-cell-right">{formatTemperature(row.temperature_c)}</td>
                 </>
@@ -247,7 +247,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
         if (activeKind === 'bias') {
             return (
                 <>
-                    <td>{row.iso ?? '—'}</td>
+                    <td>{row.gain ?? '—'}</td>
                     <td className="data-table-cell-right">{row.offset ?? '—'}</td>
                 </>
             );
@@ -255,7 +255,7 @@ export const CalibrationLibraryPanel: React.FC = () => {
         return (
             <>
                 <td>{row.filter ?? '—'}</td>
-                <td>{row.iso ?? '—'}</td>
+                <td>{row.gain ?? '—'}</td>
                 <td className="data-table-cell-right">{row.offset ?? '—'}</td>
             </>
         );

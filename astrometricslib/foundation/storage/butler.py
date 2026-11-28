@@ -802,6 +802,83 @@ class Butler(AbstractButler):
             conn.close()
 
     @_recheck_schema_once
+    def get_by_ids_leaving_out(
+        self,
+        dataset_type: str,
+        ids: list[str],
+        leave_out: tuple[str, ...],
+        count: tuple[str, ...] | None = None,
+    ) -> list[tuple[Any, dict[str, int]]]:
+        """Load some rows with a few large lists taken out of their records.
+
+        The database removes the lists from each row's ``data_json`` before
+        it is parsed, so a record whose bulk is in those lists (a star's
+        light curve) reads quickly. The length each counted list had is
+        returned beside the record.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        ids : `list` [`str`]
+            The rows to read.
+        leave_out : `tuple` [`str`, ...]
+            Dotted paths of the lists to take out, such as
+            ``"photometry.timestamps"``: keys of letters, digits and
+            underscores only.
+        count : `tuple` [`str`, ...] or `None`, optional
+            Dotted paths of the lists whose stored length to return, by the
+            same rules. `None` counts every path in ``leave_out``. Counting
+            fewer lists reads faster.
+
+        Returns
+        -------
+        records : `list` [`tuple` [`Any`, `dict` [`str`, `int`]]]
+            Each record found, in no particular order, with the stored
+            length of each counted list (0 when the record has none).
+
+        Raises
+        ------
+        InvalidArgumentError
+            If a path holds any other character.
+        """
+        counted = leave_out if count is None else count
+        for path in (*leave_out, *counted):
+            if not re.fullmatch(r"[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*", path):
+                raise InvalidArgumentError(f"get_by_ids_leaving_out: unsafe record path {path!r}")
+        if not ids:
+            return []
+        spec = self._spec(dataset_type)
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return []
+        json_paths = [f"$.{path}" for path in leave_out]
+        counted_paths = [f"$.{path}" for path in counted]
+        removed = f"json_remove(data_json{', ?' * len(json_paths)}) AS data_json"
+        lengths = [
+            f"COALESCE(json_array_length(data_json, ?), 0) AS length_{i}" for i in range(len(counted_paths))
+        ]
+        columns_sql = ", ".join((removed, *spec.read_columns, *lengths))
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            records: list[tuple[Any, dict[str, int]]] = []
+            for start in range(0, len(ids), _IDS_PER_QUERY):
+                id_chunk = list(ids[start : start + _IDS_PER_QUERY])
+                placeholders = ",".join("?" for _ in id_chunk)
+                cursor.execute(
+                    f"SELECT {columns_sql} FROM {spec.table_name} WHERE id IN ({placeholders})",
+                    [*json_paths, *counted_paths, *id_chunk],
+                )
+                for row in cursor.fetchall():
+                    list_lengths = {path: int(row[f"length_{i}"]) for i, path in enumerate(counted)}
+                    records.append((self._row_to_obj(spec, row), list_lengths))
+            return records
+        finally:
+            conn.close()
+
+    @_recheck_schema_once
     def read_record_field(self, dataset_type: str, ids: list[str], record_key: str) -> dict[str, Any]:
         """Read one top-level field of the stored records of some rows.
 

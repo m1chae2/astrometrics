@@ -14,7 +14,7 @@ tolerate.
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
 
@@ -25,7 +25,9 @@ class RecoveryPolicy(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     max_attempts: int = Field(default=3, gt=0)
-    initial_interval_sec: int = Field(default=30, gt=0)
+    initial_interval_s: int = Field(
+        default=30, gt=0, validation_alias=AliasChoices("initial_interval_s", "initial_interval_sec")
+    )
     backoff_multiplier: float = Field(default=2.0, ge=1.0)
 
     def interval_for_attempt(self, attempt_number: int) -> float:
@@ -41,7 +43,7 @@ class RecoveryPolicy(BaseModel):
         """
         if attempt_number <= 1:
             return 0.0
-        return self.initial_interval_sec * (self.backoff_multiplier ** (attempt_number - 2))
+        return self.initial_interval_s * (self.backoff_multiplier ** (attempt_number - 2))
 
 
 class RecoveryAttempt(BaseModel):

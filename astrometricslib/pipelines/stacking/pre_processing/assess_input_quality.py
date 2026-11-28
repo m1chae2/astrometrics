@@ -281,7 +281,7 @@ def describe_background_splits(background_split: dict | list[dict] | None) -> st
         return None
     details = []
     for split in splits:
-        prefix = f"{split['exposure_seconds']:g} s frames: " if "exposure_seconds" in split else ""
+        prefix = f"{split['exposure_s']:g} s frames: " if "exposure_s" in split else ""
         details.append(
             f"{prefix}{split['low_group_count']} frame(s) at background~"
             f"{split['low_group_median']:.0f} vs {split['high_group_count']} "

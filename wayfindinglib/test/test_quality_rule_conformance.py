@@ -226,7 +226,7 @@ def registry() -> dict[str, MetricSpec]:
     registry : `dict` [`str`, `MetricSpec`]
         Every registered metric, by name.
     """
-    return {spec.name: spec for spec in Astrometrics().quality.metrics(detail="full")}
+    return {spec.name: spec for spec in Astrometrics().quality.records.get_metrics()}
 
 
 @pytest.fixture(scope="module")

@@ -20,7 +20,7 @@ soon as the equipment, and so every limit, changed.
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from wayfindinglib.models.quality.statements import TargetStatement
 
@@ -35,7 +35,7 @@ class GuidingInputQuality(BaseModel):
     ----------
     runs : `int`
         Continuous stretches of guiding in the night.
-    guided_seconds : `float`
+    guided_s : `float`
         Total time spent guiding.
     frames_total : `int`
         Guide frames the guider took.
@@ -50,7 +50,7 @@ class GuidingInputQuality(BaseModel):
         Whether `lost_fraction` exceeds `lost_fraction_limit`.
     samples_analyzed : `int`
         Measured guide samples available.
-    cadence_seconds : `float` or `None`
+    cadence_s : `float` or `None`
         Median time between guide samples.
     excursion_count : `int` or `None`
         Samples whose error exceeds the excursion limit: events such as a
@@ -77,7 +77,7 @@ class GuidingInputQuality(BaseModel):
         The equipment's typical guide-star brightness on earlier nights.
     has_dim_star : `bool` or `None`
         Whether `median_star_mass` is below `star_mass_limit`.
-    typical_cadence_seconds : `float` or `None`
+    typical_cadence_s : `float` or `None`
         The equipment's typical guide cycle. A guide star that is dim because
         the guide exposure was shortened has a shorter cycle than this.
     calibration_problems : `list` [`str`]
@@ -98,14 +98,22 @@ class GuidingInputQuality(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     runs: int = 0
-    guided_seconds: float = Field(default=0.0, alias="guidedSeconds")
+    guided_s: float = Field(
+        default=0.0,
+        alias="guidedS",
+        validation_alias=AliasChoices("guidedS", "guided_s", "guidedSeconds", "guided_seconds"),
+    )
     frames_total: int = Field(default=0, alias="framesTotal")
     frames_lost: int = Field(default=0, alias="framesLost")
     lost_fraction: float | None = Field(default=None, alias="lostFraction")
     lost_fraction_limit: float | None = Field(default=None, alias="lostFractionLimit")
     has_high_loss: bool | None = Field(default=None, alias="hasHighLoss")
     samples_analyzed: int = Field(default=0, alias="samplesAnalyzed")
-    cadence_seconds: float | None = Field(default=None, alias="cadenceSeconds")
+    cadence_s: float | None = Field(
+        default=None,
+        alias="cadenceS",
+        validation_alias=AliasChoices("cadenceS", "cadence_s", "cadenceSeconds", "cadence_seconds"),
+    )
     excursion_count: int | None = Field(default=None, alias="excursionCount")
     excursion_fraction: float | None = Field(default=None, alias="excursionFraction")
     excursion_fraction_limit: float | None = Field(default=None, alias="excursionFractionLimit")
@@ -117,7 +125,13 @@ class GuidingInputQuality(BaseModel):
     star_mass_limit: float | None = Field(default=None, alias="starMassLimit")
     typical_star_mass: float | None = Field(default=None, alias="typicalStarMass")
     has_dim_star: bool | None = Field(default=None, alias="hasDimStar")
-    typical_cadence_seconds: float | None = Field(default=None, alias="typicalCadenceSeconds")
+    typical_cadence_s: float | None = Field(
+        default=None,
+        alias="typicalCadenceS",
+        validation_alias=AliasChoices(
+            "typicalCadenceS", "typical_cadence_s", "typicalCadenceSeconds", "typical_cadence_seconds"
+        ),
+    )
     calibration_problems: list[str] = Field(default_factory=list, alias="calibrationProblems")
     guide_scale_matches_configuration: bool | None = Field(
         default=None, alias="guideScaleMatchesConfiguration"
@@ -135,7 +149,7 @@ class GuidingRunPerformance(BaseModel):
         The run's identifier.
     started_at : `float`
         When the run began, in seconds since the Unix epoch.
-    duration_seconds : `float` or `None`
+    duration_s : `float` or `None`
         Length of the run.
     samples : `int`
         Samples in the run that were not excursions.
@@ -143,13 +157,13 @@ class GuidingRunPerformance(BaseModel):
         Robust guiding error per axis, in arcseconds.
     lost_fraction : `float` or `None`
         Share of the run's frames that were lost.
-    net_dec_correction_arcsec_per_minute : `float` or `None`
+    net_dec_correction_arcsec_per_min : `float` or `None`
         The run's net Dec correction rate (see `GuidingPerformance`).
-    altitude_degrees : `float` or `None`
+    altitude_deg : `float` or `None`
         Altitude when the run began.
-    azimuth_degrees : `float` or `None`
+    azimuth_deg : `float` or `None`
         Azimuth when the run began.
-    declination_degrees : `float` or `None`
+    declination_deg : `float` or `None`
         Declination when the run began.
     pier_side : `str` or `None`
         Side of the pier the telescope was on.
@@ -159,16 +173,41 @@ class GuidingRunPerformance(BaseModel):
 
     run_id: str = Field(alias="runId")
     started_at: float = Field(alias="startedAt")
-    duration_seconds: float | None = Field(default=None, alias="durationSeconds")
+    duration_s: float | None = Field(
+        default=None,
+        alias="durationS",
+        validation_alias=AliasChoices("durationS", "duration_s", "durationSeconds", "duration_seconds"),
+    )
     samples: int = 0
     rms_per_axis_arcsec: float | None = Field(default=None, alias="rmsPerAxisArcsec")
     lost_fraction: float | None = Field(default=None, alias="lostFraction")
-    net_dec_correction_arcsec_per_minute: float | None = Field(
-        default=None, alias="netDecCorrectionArcsecPerMinute"
+    net_dec_correction_arcsec_per_min: float | None = Field(
+        default=None,
+        alias="netDecCorrectionArcsecPerMin",
+        validation_alias=AliasChoices(
+            "netDecCorrectionArcsecPerMin",
+            "net_dec_correction_arcsec_per_min",
+            "netDecCorrectionArcsecPerMinute",
+            "net_dec_correction_arcsec_per_minute",
+        ),
     )
-    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
-    azimuth_degrees: float | None = Field(default=None, alias="azimuthDegrees")
-    declination_degrees: float | None = Field(default=None, alias="declinationDegrees")
+    altitude_deg: float | None = Field(
+        default=None,
+        alias="altitudeDeg",
+        validation_alias=AliasChoices("altitudeDeg", "altitude_deg", "altitudeDegrees", "altitude_degrees"),
+    )
+    azimuth_deg: float | None = Field(
+        default=None,
+        alias="azimuthDeg",
+        validation_alias=AliasChoices("azimuthDeg", "azimuth_deg", "azimuthDegrees", "azimuth_degrees"),
+    )
+    declination_deg: float | None = Field(
+        default=None,
+        alias="declinationDeg",
+        validation_alias=AliasChoices(
+            "declinationDeg", "declination_deg", "declinationDegrees", "declination_degrees"
+        ),
+    )
     pier_side: str | None = Field(default=None, alias="pierSide")
 
 
@@ -184,7 +223,7 @@ class ExposureFeasibility(BaseModel):
 
     Attributes
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The exposure length.
     windows : `int`
         Start times tried, counting only times when guiding was running.
@@ -204,7 +243,10 @@ class ExposureFeasibility(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    exposure_seconds: float = Field(alias="exposureSeconds")
+    exposure_s: float = Field(
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     windows: int = 0
     clean_fraction: float | None = Field(default=None, alias="cleanFraction")
     lost_fraction: float | None = Field(default=None, alias="lostFraction")
@@ -231,7 +273,7 @@ class GuidingPerformance(BaseModel):
         How much this guiding error widens a star, as a fraction of its
         width, given the equipment's measured star width. `None` if the star
         width is unknown.
-    net_dec_correction_arcsec_per_minute : `float` or `None`
+    net_dec_correction_arcsec_per_min : `float` or `None`
         How far, on average, the guider moved the mount along Dec per minute
         (positive is north), from the Dec corrections it issued. It is a
         description of what the guider did, not a polar alignment estimate:
@@ -246,7 +288,7 @@ class GuidingPerformance(BaseModel):
         For each exposure length in use, how often guiding stayed clean for
         the whole exposure. Empty when the limits or exposure lengths are not
         known.
-    longest_reliable_exposure_seconds : `float` or `None`
+    longest_reliable_exposure_s : `float` or `None`
         The longest of those lengths for which at least half the windows were
         clean, or `None` if none reached half.
     """
@@ -258,13 +300,27 @@ class GuidingPerformance(BaseModel):
     rms_per_axis_arcsec: float | None = Field(default=None, alias="rmsPerAxisArcsec")
     rms_including_excursions_arcsec: float | None = Field(default=None, alias="rmsIncludingExcursionsArcsec")
     expected_star_widening_fraction: float | None = Field(default=None, alias="expectedStarWideningFraction")
-    net_dec_correction_arcsec_per_minute: float | None = Field(
-        default=None, alias="netDecCorrectionArcsecPerMinute"
+    net_dec_correction_arcsec_per_min: float | None = Field(
+        default=None,
+        alias="netDecCorrectionArcsecPerMin",
+        validation_alias=AliasChoices(
+            "netDecCorrectionArcsecPerMin",
+            "net_dec_correction_arcsec_per_min",
+            "netDecCorrectionArcsecPerMinute",
+            "net_dec_correction_arcsec_per_minute",
+        ),
     )
     runs: list[GuidingRunPerformance] = Field(default_factory=list)
     exposure_feasibility: list[ExposureFeasibility] = Field(default_factory=list, alias="exposureFeasibility")
-    longest_reliable_exposure_seconds: float | None = Field(
-        default=None, alias="longestReliableExposureSeconds"
+    longest_reliable_exposure_s: float | None = Field(
+        default=None,
+        alias="longestReliableExposureS",
+        validation_alias=AliasChoices(
+            "longestReliableExposureS",
+            "longest_reliable_exposure_s",
+            "longestReliableExposureSeconds",
+            "longest_reliable_exposure_seconds",
+        ),
     )
 
 

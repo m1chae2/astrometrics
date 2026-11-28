@@ -16,7 +16,7 @@ The step is built to be undone:
   each frame came from and why it was moved (the rule, the frame's value and
   the limit, in plain words).
 - `restore_quarantined_frames` moves the frames back.
-- `ProcessingPipelines.predict_stack` shows which frames the step would
+- `processing.stacking.predict` shows which frames the step would
   move, without moving any.
 - It judges each frame against the other frames of its own session, camera,
   filter and exposure, so a poor night is not mistaken for a few bad frames.
@@ -655,8 +655,8 @@ def capture_setting_key(frame: Any) -> tuple[str, ...]:
     Parameters
     ----------
     frame : `Any`
-        A frame record with ``camera``, ``filter`` and ``exposure``, and
-        optionally ``focal_length_mm`` and ``iso``.
+        A frame record with ``camera``, ``filter`` and ``exposure_s``, and
+        optionally ``focal_length_mm`` and ``gain``.
 
     Returns
     -------
@@ -669,8 +669,8 @@ def capture_setting_key(frame: Any) -> tuple[str, ...]:
         str(frame.camera),
         str(round(float(focal_length))) if focal_length else "",
         str(getattr(frame.filter, "value", frame.filter)),
-        str(frame.exposure),
-        canonical_iso_text(getattr(frame, "iso", None)),
+        str(frame.exposure_s),
+        canonical_iso_text(getattr(frame, "gain", None)),
     )
 
 
@@ -686,8 +686,8 @@ def split_into_batches(frames: Sequence[Any]) -> list[list[Any]]:
     Parameters
     ----------
     frames : `Sequence`
-        Frame records with ``camera``, ``filter``, ``exposure`` and
-        ``timestamp``, and optionally ``iso`` (the gain) and
+        Frame records with ``camera``, ``filter``, ``exposure_s`` and
+        ``timestamp``, and optionally ``gain`` and
         ``focal_length_mm`` (the optic). A frame with no timestamp is placed
         by file name.
 

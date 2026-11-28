@@ -1,4 +1,4 @@
-"""What `QualityRecords.get_aperture_record` returns: the noise record.
+"""What `quality.stacks.get_aperture_record` returns: the noise record.
 
 The odd–even difference job saves, beside a stack, the sum and the difference
 of each empty sky aperture it measured. `OddEvenApertureRecord` holds that

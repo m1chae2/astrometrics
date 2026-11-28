@@ -3,8 +3,8 @@
 Description: This module has real branching logic of its own -- classifying
 a target as success, skipped, or failed, and reconciling worker counts -- so
 it gets behavior tests rather than delegation-contract tests. The last tests
-check that `ProcessingPipelines.process_target` hands a list of targets, or
-every target, to it.
+check that `process_targets_in_parallel` hands the targets it is given to the
+worker pool, with the configured worker counts.
 """
 
 from unittest.mock import MagicMock
@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.drivers import catalog_access as catalog_access_module
-from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation import config as config_module
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import target_batch, tasks
@@ -148,45 +147,19 @@ class TestProcessSingleTargetWorker:
 class TestProcessTargetsInParallel:
     """Behavior tests for target selection and worker-count reconciliation."""
 
-    def _make_pipelines(self, target_ids: list) -> ProcessingPipelines:
-        """Build the processing API over a fake catalog and worker config.
-
-        Returns
-        -------
-        pipelines : `ProcessingPipelines`
-            The API, whose target catalog lists ``target_ids``.
-        """
+    def test_uses_the_listed_targets(self, monkeypatch: object) -> None:
+        """Verify the targets given go to the worker pool as they are."""
         config = MagicMock()
         config.get_target_workers.return_value = "auto"
         config.get_photometry_workers.return_value = "auto"
         config.get_worker_niceness.return_value = 5
-        targets = MagicMock()
-        targets.query.return_value.objects = [Target(id=target_id) for target_id in target_ids]
-        targets.get.side_effect = lambda target_id, refresh=False: Target(id=target_id)
-        return ProcessingPipelines(config, MagicMock(), targets=targets)
-
-    def test_defaults_to_every_catalog_target_when_target_is_none(self, monkeypatch: object) -> None:
-        """Verify `target=None` processes the whole catalog."""
-        pipelines = self._make_pipelines(["M13", "M31"])
         run_mock = MagicMock()
         monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
 
-        pipelines.process_target(None, camera_id="ASI294", register_job=False)
+        target_batch.process_targets_in_parallel(config, ["M31", "M13"], camera_id="ASI294")
 
         called_item_ids = run_mock.call_args[0][0]
-        assert called_item_ids == ["M13", "M31"]
-
-    def test_uses_the_listed_targets_instead_of_the_full_catalog(self, monkeypatch: object) -> None:
-        """Verify a list of targets is used as it is, unfiltered."""
-        pipelines = self._make_pipelines(["M13", "M31"])
-        run_mock = MagicMock()
-        monkeypatch.setattr(parallel_batch, "run_parallel_batch", run_mock)
-
-        pipelines.process_target(["M31"], camera_id="ASI294", register_job=False)
-
-        called_item_ids = run_mock.call_args[0][0]
-        assert called_item_ids == ["M31"]
-        pipelines._targets.query.assert_not_called()
+        assert called_item_ids == ["M31", "M13"]
 
     def test_forwards_resolved_worker_counts_and_niceness(self, monkeypatch: object) -> None:
         """Verify config settings reach run_parallel_batch resolved.

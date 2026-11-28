@@ -16,7 +16,7 @@ vi.mock('../common/services/backendApi', () => ({ callBackend: vi.fn().mockResol
 
 
 const frame = (camera: string) => ({
-    path: `/lib/${camera}.fits`, name: `${camera}.fits`, camera, iso: '', exposure: '60.0', filter: 'L', date: '2026-11-04',
+    path: `/lib/${camera}.fits`, name: `${camera}.fits`, camera, gain: null, exposureS: 60.0, filter: 'L', date: '2026-11-04',
 });
 
 describe('FileBrowser camera filter', () => {

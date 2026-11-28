@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from astrometricslib import Camera, GuideScope, ObservatoryConfiguration, Telescope
 from astrometricslib.reports import LimitTier
 from wayfindinglib.analytics.performance_envelope import (
     DEFAULT_BLUR_TOLERANCE_FRACTION,
@@ -21,23 +22,17 @@ from wayfindinglib.analytics.performance_envelope import (
     derive_performance_envelope,
     robust_median_and_spread,
 )
-from wayfindinglib.models.equipment_and_site.equipment import (
-    Camera,
-    EquipmentConfiguration,
-    GuideScope,
-    Telescope,
-)
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
 )
 
 
-def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> EquipmentConfiguration:
+def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> ObservatoryConfiguration:
     """Build an imaging telescope and camera.
 
     Returns
     -------
-    equipment : `EquipmentConfiguration`
+    equipment : `ObservatoryConfiguration`
         The defaults are this observatory's telescope and camera.
     """
     telescope = Telescope(id="t", name="Apertura 75Q", focal_length_mm=focal_length_mm)
@@ -48,7 +43,7 @@ def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> E
         sensor_width_px=3008,
         sensor_height_px=3008,
     )
-    return EquipmentConfiguration(telescope=telescope, camera=camera)
+    return ObservatoryConfiguration(telescope=telescope, camera=camera)
 
 
 def _guide_scope(focal_length_mm: float = 121.05) -> GuideScope:
@@ -362,10 +357,10 @@ def test_a_baseline_limit_for_a_positive_quantity_is_never_negative() -> None:
 
 def test_image_quality_records_the_exposure_cut_it_used() -> None:
     """Verify the minimum exposure behind a star width is on the record."""
-    quality = MeasuredImageQuality(5.6, 361, minimum_exposure_seconds=9.6)
+    quality = MeasuredImageQuality(5.6, 361, minimum_exposure_s=9.6)
     envelope = _envelope(measured_image_quality=quality)
 
-    assert envelope.limit_inputs["guiding_rms_limit"]["minimum_exposure_seconds"] == pytest.approx(9.6)
+    assert envelope.limit_inputs["guiding_rms_limit"]["minimum_exposure_s"] == pytest.approx(9.6)
 
 
 def test_the_excursion_limit_is_the_larger_of_five_sigma_and_one_guide_pixel() -> None:

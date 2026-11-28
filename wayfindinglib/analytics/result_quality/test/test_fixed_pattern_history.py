@@ -19,13 +19,14 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
+from astrometricslib import CaptureSetting
 from astrometricslib._internal.quality import MeasurementOrigin, QualitySubject
 from astrometricslib._internal.stacking import aperture_identity_to_number
 from astrometricslib.models.quality.calibration_identities import (
     CalibrationFileIdentity,
     CalibrationIdentities,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementStatus, QualityMeasurement, SubjectLevel
+from astrometricslib.reports import MeasurementStatus, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality import forecast as fc
 from wayfindinglib.analytics.result_quality.aggregates import MeasuredNoiseCheck, _unknown_part
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
@@ -44,7 +45,7 @@ from wayfindinglib.analytics.result_quality.report_rules import (
     more_frames_statement,
 )
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
 START = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 APERTURE_SET = "v3-156104df543d"
 RECORD_PATH = "/library/T0/T0_stack_odd_even_apertures.json"
@@ -540,7 +541,7 @@ def test_a_take_more_statement_on_assumed_fixed_pattern_noise_says_so() -> None:
     assumed = fc.history_fixed_pattern_noise(history, _run_of("T0", _target_rows("T0", 0.0)), "T0")
     assert assumed is not None
     frames = [
-        StackFrame(frame_id=f"f{i}", exposure_seconds=60.0, sky_rate_e_per_s_per_px=1.0, read_noise_e=3.0)
+        StackFrame(frame_id=f"f{i}", exposure_s=60.0, sky_rate_e_per_s_per_px=1.0, read_noise_e=3.0)
         for i in range(30)
     ]
     result = frames_to_cut_noise(

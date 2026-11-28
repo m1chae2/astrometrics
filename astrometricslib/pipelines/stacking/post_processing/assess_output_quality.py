@@ -222,15 +222,15 @@ def output_quality_gates(
         )
 
     negative_source = "Siril's own 'many negative pixels' warning"
-    if metrics.negative_pixel_max_percent is not None and is_negative_pixel_percent_significant(
-        metrics.negative_pixel_max_percent
+    if metrics.negative_pixel_max_pct is not None and is_negative_pixel_percent_significant(
+        metrics.negative_pixel_max_pct
     ):
         gates.append(
             failed_gate(
                 NEGATIVE_PIXELS_GATE_NAME,
-                f"Siril reported up to {metrics.negative_pixel_max_percent}% negative pixels after "
+                f"Siril reported up to {metrics.negative_pixel_max_pct}% negative pixels after "
                 "dark subtraction: calibration frames are probably incorrect",
-                float(metrics.negative_pixel_max_percent),
+                float(metrics.negative_pixel_max_pct),
                 float(default_negative_pixel_flag_percent),
                 negative_source,
             )
@@ -239,14 +239,10 @@ def output_quality_gates(
         gates.append(
             passed_gate(
                 NEGATIVE_PIXELS_GATE_NAME,
-                float(metrics.negative_pixel_max_percent)
-                if metrics.negative_pixel_max_percent is not None
-                else None,
+                float(metrics.negative_pixel_max_pct) if metrics.negative_pixel_max_pct is not None else None,
                 float(default_negative_pixel_flag_percent),
                 negative_source,
-                "Siril printed no negative-pixel warning"
-                if metrics.negative_pixel_max_percent is None
-                else "",
+                "Siril printed no negative-pixel warning" if metrics.negative_pixel_max_pct is None else "",
             )
         )
     return gates

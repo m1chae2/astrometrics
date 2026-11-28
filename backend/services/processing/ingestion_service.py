@@ -55,8 +55,8 @@ class IngestionService(BaseBackgroundService):
     def _resolve_remote_folder(self, folder_name: str | None) -> str | None:
         """Find the remote folder a target or folder name refers to.
 
-        Uses the library's name matching (`control.remote.list` with a
-        `folder_name`), so a copy and this lookup always agree.
+        Uses the library's name matching (`control.remote.query_folders`
+        with ``text``), so a copy and this lookup always agree.
 
         Parameters
         ----------
@@ -70,8 +70,8 @@ class IngestionService(BaseBackgroundService):
         """
         if not folder_name:
             return None
-        matches = self._wayfinder.control.remote.list("folders", folder_name=folder_name)
-        return matches[0] if matches else None
+        matches = self._wayfinder.control.remote.query_folders(kind="all", text=folder_name)
+        return matches[0] if len(matches) else None
 
     def scan_remote_targets(self) -> list[Any]:
         """Return list of folders in remote Pictures.
@@ -81,7 +81,7 @@ class IngestionService(BaseBackgroundService):
         folders : `list`
             Folder names found in the remote Pictures directory.
         """
-        return self._wayfinder.control.remote.list("folders")
+        return list(self._wayfinder.control.remote.query_folders(kind="all"))
 
     def scan_remote_targets_rpc(self) -> dict:
         """RPC wrapper for scanning remote targets.
@@ -95,8 +95,22 @@ class IngestionService(BaseBackgroundService):
             a status, not an error.
         """
         folders = self.scan_remote_targets()
-        reachable = True if folders else bool(self._wayfinder.control.remote.check_connection())
-        return {"folders": folders, "reachable": reachable}
+        return {"folders": folders, "reachable": True if folders else self._remote_reachable()}
+
+    def _remote_reachable(self) -> bool:
+        """Say whether the observatory computer answers.
+
+        Returns
+        -------
+        reachable : `bool`
+            `False` when the library reports the computer offline, which is
+            a status, not an error.
+        """
+        try:
+            self._wayfinder.control.remote.check_connection()
+        except ExternalServiceError:
+            return False
+        return True
 
     def _list_calibration_files(self) -> dict[str, list[str]]:
         """List remote FITS files for each Dark/Bias/Flat folder found.
@@ -113,8 +127,10 @@ class IngestionService(BaseBackgroundService):
             Folders not found on the telescope are omitted.
         """
         files_by_folder: dict[str, list[str]] = {}
-        for remote_folder in self._wayfinder.control.remote.list("calibration_folders"):
-            files = self._wayfinder.control.remote.list("files", folder_name=remote_folder)
+        for remote_folder in self._wayfinder.control.remote.query_folders(kind="calibration"):
+            files = [
+                remote_file.path for remote_file in self._wayfinder.control.remote.query_files(remote_folder)
+            ]
             if files:
                 files_by_folder[remote_folder] = files
         return files_by_folder
@@ -141,7 +157,7 @@ class IngestionService(BaseBackgroundService):
             if not folder_name:
                 folder_name = folder
 
-            count = len(self._wayfinder.control.remote.list("files", folder_name=folder_name))
+            count = len(self._wayfinder.control.remote.query_files(folder_name))
         except ExternalServiceError as error:
             logger.debug("Remote folder stats unavailable: %s", error)
             return {"fileCount": 0, "resolvedFolder": folder, "reachable": False}
@@ -188,8 +204,34 @@ class IngestionService(BaseBackgroundService):
         folder_name = self._resolve_remote_folder(folder)
         if not folder_name:
             folder_name = folder
-        files = self._wayfinder.control.remote.list("files", folder_name=folder_name)
+        files = [remote_file.path for remote_file in self._wayfinder.control.remote.query_files(folder_name)]
         return {"files": files, "resolvedFolder": folder_name, "reachable": True}
+
+    def _as_job(self, job_id: str, job_type: str, target_id: str) -> Any:
+        """Make this ingestion job the current job for library work.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The ingestion job's id.
+        job_type : `str`
+            The job's type.
+        target_id : `str`
+            The target or folder the work is for.
+
+        Returns
+        -------
+        context : `contextlib.AbstractContextManager`
+            ``running_as_job`` over the job store, or a context that does
+            nothing when there is no job service.
+        """
+        import contextlib
+
+        from astrometricslib.jobs import running_as_job
+
+        if self._job_service is None:
+            return contextlib.nullcontext()
+        return running_as_job(job_id, self._job_service.repository, job_type=job_type, target_id=target_id)
 
     def get_ingestion_status(self, job_id: str) -> dict:
         """Return ingestion job status, progress, and tail of log lines.
@@ -344,29 +386,26 @@ class IngestionService(BaseBackgroundService):
         self._log(job_id, "Starting full library re-index...")
 
         # 1. Reindex every target folder on disk. The library creates a
-        # target for a new folder and saves each target as it finishes.
-        def report_progress(index: int, total: int, folder: str) -> None:
-            """Log the target being indexed and move the job's progress."""
-            self._log(job_id, f"Indexing target {index + 1}/{total}: {folder}")
-            if self._job_service:
-                self._job_service.update_job(job_id, progress=int(((index + 1) / total) * 100))
+        # target for a new folder and saves each target as it finishes. Run
+        # as this job, the library logs each folder and counts them as the
+        # job's progress.
+        if self._job_service:
+            from astrometricslib.jobs import running_as_job
 
-        report = self._target_service.reindex_library(prune_missing=True, on_progress=report_progress)
+            with running_as_job(job_id, self._job_service.repository, job_type="reindex", target_id="global"):
+                report = self._target_service.reindex_library(prune_missing=True)
+        else:
+            report = self._target_service.reindex_library(prune_missing=True)
         for change in report.targets:
             if change.frames_after > change.frames_before:
                 self._start_measurement(job_id, change.target_id)
         self._log(job_id, f"Light frames of {len(report.targets)} target folders indexed and saved.")
 
         # 3. Refresh calibration frames
-        added_kinds: list[str] = []
-        for kind in ("dark", "bias", "flat"):
-            self._log(job_id, f"Scanning {kind} frames...")
-            report = self._calibration.reindex_frames(kind, prune_missing=True)
-            if report.added_count:
-                added_kinds.append(kind)
-
-        self._log(job_id, "Calibration frames indexed. Saving library...")
-        self._calibration.save()
+        self._log(job_id, "Scanning dark, bias and flat frames...")
+        reports = self._calibration.frames.scan(prune_missing=True)
+        added_kinds = [report.kind for report in reports if report.added_count]
+        self._log(job_id, "Calibration frames indexed and saved.")
         self._measure_new_calibration_frames(job_id, added_kinds)
 
         # 4. Migrate Stellar Objects to SQLite
@@ -540,7 +579,6 @@ class IngestionService(BaseBackgroundService):
             target = self._target_service.get_targets(target_name)
             if not target:
                 self._target_service.create_target(target_name)
-                self._target_service.save_targets()
 
         # --- 1. Determine Source ---
         source_dir = ""
@@ -571,7 +609,6 @@ class IngestionService(BaseBackgroundService):
                 # downloaded anyway -- this is how "Darks only" works:
                 # select only Dark files (e.g. via the "Dark Only" button).
                 folder_selected_files_by_folder: dict[str, list[str] | None] = {}
-                total_calibration_files = 0
                 for rf in downloaded_folders:
                     if selected_files:
                         prefix = f"{rf}/"
@@ -579,10 +616,6 @@ class IngestionService(BaseBackgroundService):
                     else:
                         folder_files = None
                     folder_selected_files_by_folder[rf] = folder_files
-                    if folder_files is not None:
-                        total_calibration_files += len(folder_files)
-                    else:
-                        total_calibration_files += len(calibration_files_by_folder[rf])
 
                 downloaded_count = 0
 
@@ -593,26 +626,17 @@ class IngestionService(BaseBackgroundService):
                         continue
 
                     self._log(job_id, f"Downloading {rf} into the calibration library...")
-
-                    def calibration_log_callback(msg: str) -> None:
-                        nonlocal downloaded_count
-                        self._log(job_id, msg)
-                        # rsync reports one "Downloading: <file>" line per
-                        # transferred file, so counting them against the
-                        # combined Dark+Bias+Flat file count gives real
-                        # progress instead of sitting at 0% for the whole
-                        # multi-folder transfer.
-                        if msg.startswith("Downloading:") and self._job_service and total_calibration_files:
-                            downloaded_count += 1
-                            progress_pct = min(int((downloaded_count / total_calibration_files) * 100), 99)
-                            self._job_service.update_job(job_id, progress=progress_pct)
-
                     try:
-                        self._wayfinder.control.remote.sync_frames(
-                            rf, files=folder_selected_files, log_callback=calibration_log_callback
-                        )
+                        with self._as_job(job_id, "ingestion", rf):
+                            self._wayfinder.control.remote.sync_frames(
+                                kind=rf.strip().lower(), files=folder_selected_files
+                            )
                     except (AstrometricsError, OSError) as e:
                         self._log(job_id, f"Failed to download {rf}: {e}")
+                    downloaded_count += 1
+                    if self._job_service and downloaded_folders:
+                        progress_pct = min(int(downloaded_count / len(downloaded_folders) * 100), 99)
+                        self._job_service.update_job(job_id, progress=progress_pct)
 
                 self._log(job_id, "Download complete.")
 
@@ -630,7 +654,7 @@ class IngestionService(BaseBackgroundService):
                 total_files = (
                     len(selected_files)
                     if selected_files
-                    else len(self._wayfinder.control.remote.list("files", folder_name=remote_target))
+                    else len(self._wayfinder.control.remote.query_files(remote_target))
                 )
                 self._log(job_id, f"Found {total_files} files in {remote_target}")
 
@@ -641,24 +665,14 @@ class IngestionService(BaseBackgroundService):
 
                 self._log(job_id, f"Downloading telescope frames for Target {target_name}...")
                 try:
-                    downloaded_count = 0
-
-                    def ingest_log_callback(msg: str) -> None:
-                        nonlocal downloaded_count
-                        self._log(job_id, msg)
-                        # rsync reports one "Downloading: <file>" line per
-                        # transferred file (wayfindinglib's
-                        # download_target_folder), so counting them against
-                        # the file count found above gives real progress
-                        # instead of sitting at 0% for the whole transfer.
-                        if msg.startswith("Downloading:") and self._job_service and total_files:
-                            downloaded_count += 1
-                            progress_pct = min(int((downloaded_count / total_files) * 100), 99)
-                            self._job_service.update_job(job_id, progress=progress_pct)
-
-                    sync_result = self._wayfinder.control.remote.sync_frames(
-                        target_name, files=selected_files, log_callback=ingest_log_callback
-                    )
+                    # Run as this job: the library writes its progress
+                    # messages (one "Downloading: <file>" line per file) to
+                    # this job's log.
+                    library_target = self._wayfinder.astrometrics.targets.create(target_name)
+                    with self._as_job(job_id, "ingestion", target_name):
+                        sync_result = self._wayfinder.control.remote.sync_frames(
+                            library_target, files=selected_files, force=False
+                        )
                     measurement_results = list(sync_result.measurements or [])
                     self._log(job_id, "Download complete.")
                 except AstrometricsError as e:
@@ -675,10 +689,17 @@ class IngestionService(BaseBackgroundService):
 
         # --- 2. Ingestion Logic ---
         if ingest_type != "remote":
-            # Local ingestion goes through the same library entry point
-            # as remote downloads.
-            sync_result = self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
-            measurement_results = list(sync_result.measurements or [])
+            # Local frames are added through the core library: it moves the
+            # files into the target's folder, indexes them and saves; the
+            # new frames are then measured like a copy's.
+            astrometrics = self._wayfinder.astrometrics
+            library_target = astrometrics.targets.create(target_name)
+            added = astrometrics.targets.frames.add(library_target, [source_dir])
+            if added:
+                summary = astrometrics.quality.frames.record(
+                    astrometrics.targets.get(target_name, required=True), frames=list(added)
+                )
+                measurement_results = [summary.model_dump(mode="json")]
             self._log(job_id, "Local frames ingested successfully.")
 
         # The sync already measured the frames it added. Announce that run's
@@ -695,11 +716,8 @@ class IngestionService(BaseBackgroundService):
             try:
                 if self._calibration:
                     added_kinds = [
-                        kind
-                        for kind in ("dark", "bias", "flat")
-                        if self._calibration.reindex_frames(kind).added_count
+                        report.kind for report in self._calibration.frames.scan() if report.added_count
                     ]
-                    self._calibration.save()
                     self._measure_new_calibration_frames(job_id, added_kinds)
             except (AstrometricsError, *FITS_READ_ERRORS) as e:
                 logger.warning("Failed to refresh calibration library in ingestion job: %s", e)
@@ -711,8 +729,6 @@ class IngestionService(BaseBackgroundService):
                 if not target:
                     target = self._target_service.create_target(target_name)
                 self._target_service.refresh_target_images(target)
-
-            self._target_service.save_targets()
 
         self._log(job_id, "Ingestion Complete.")
         return True

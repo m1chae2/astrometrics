@@ -46,7 +46,7 @@ def make_target(frame_count: int = 10) -> Target:
                 path=f"/fake/l_{index}.fits",
                 filter=FilterType.L,
                 camera="ZWO ASI 533MM Pro",
-                exposure="120.0",
+                exposure_s=120.0,
                 timestamp=float(index) * 120.0,
             )
             for index in range(frame_count)

@@ -284,7 +284,7 @@ def test_an_extractor_without_a_noise_model_stores_no_variance() -> None:
     frame = _noisy_frames(1)[0]
     extractor = SpectrumExtractor(radius=8)
 
-    extractor.extract_with_flare_mask(frame, ZERO_ORDER_XY, 30, 70, 8, "horizontal", angle_degrees=-2.0)
+    extractor.extract_with_flare_mask(frame, ZERO_ORDER_XY, 30, 70, 8, "horizontal", angle_deg=-2.0)
 
     assert extractor.last_diagnostics.sample_variance == []
 
@@ -296,7 +296,7 @@ def test_box_variance_matches_the_scatter_without_sky_subtraction() -> None:
     variances = []
     for frame in _noisy_frames(REALIZATIONS):
         profile, _, _ = extractor.extract_with_flare_mask(
-            frame, ZERO_ORDER_XY, 30, 130, 8, "horizontal", angle_degrees=-2.0
+            frame, ZERO_ORDER_XY, 30, 130, 8, "horizontal", angle_deg=-2.0
         )
         profiles.append(profile)
         variances.append(extractor.last_diagnostics.sample_variance)
@@ -317,7 +317,7 @@ def test_flare_mask_errors_match_the_scatter_over_200_noise_realizations() -> No
     variances = []
     for frame in _noisy_frames(REALIZATIONS):
         profile, _, _ = extractor.extract_with_flare_mask(
-            frame, ZERO_ORDER_XY, 30, 70, 8, "horizontal", angle_degrees=-2.0
+            frame, ZERO_ORDER_XY, 30, 70, 8, "horizontal", angle_deg=-2.0
         )
         profiles.append(profile)
         variances.append(extractor.last_diagnostics.sample_variance)
@@ -394,7 +394,7 @@ def test_traced_flare_mask_gives_one_finite_variance_per_sample() -> None:
     frame = _noisy_frames(1)[0]
 
     profile, _, _, _, _ = extractor.extract_with_flare_mask_traced(
-        frame, ZERO_ORDER_XY, 30, 60, 8, "horizontal", angle_degrees=-2.0, centerline_polynomial_degree=2
+        frame, ZERO_ORDER_XY, 30, 60, 8, "horizontal", angle_deg=-2.0, centerline_polynomial_degree=2
     )
     variance = np.array(extractor.last_diagnostics.sample_variance)
 
@@ -409,7 +409,7 @@ def test_a_box_off_the_image_has_no_flux_and_no_variance() -> None:
     frame = _noisy_frames(1)[0]
 
     profile, _, _ = extractor.extract_with_flare_mask(
-        frame, ZERO_ORDER_XY, 200, 280, 8, "horizontal", angle_degrees=-2.0
+        frame, ZERO_ORDER_XY, 200, 280, 8, "horizontal", angle_deg=-2.0
     )
     variance = np.array(extractor.last_diagnostics.sample_variance)
 
@@ -746,7 +746,7 @@ def _profile_with_offset_ten_noise() -> CameraProfile:
     measured = ValueProvenance(kind="measured", source="test")
     assumed = ValueProvenance(kind="assumed", source="test")
     entry = SensorSettingNoise(
-        gain_setting="0",
+        gain="0",
         offset="10",
         binning="1x1",
         gain_e_per_adu=ProvenancedValue(value=0.783, provenance=measured),

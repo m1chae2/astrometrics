@@ -282,7 +282,7 @@ def test_stats_report_the_offset(tmp_path: Path) -> None:
 
     dark = library.get_stats()["darks"][0]
 
-    assert dark["iso"] == "0.0"
+    assert dark["gain"] == "0.0"
     assert dark["offset"] == pytest.approx(30.0)
 
 

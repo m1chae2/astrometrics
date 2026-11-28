@@ -240,7 +240,6 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
 
         astrometrics = Astrometrics()
         astrometrics.targets.create("WorkerFallbackTestTarget")
-        astrometrics.targets.save()
 
         result = batch._process_single_spectroscopy_frame_worker_v2(
             str(frame_path), "WorkerFallbackTestTarget", [], None
@@ -260,7 +259,6 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
 
         astrometrics = Astrometrics()
         astrometrics.targets.create("WorkerNoWcsFallbackTarget")
-        astrometrics.targets.save()
 
         seed_star = _make_seed_star()
 
@@ -501,9 +499,9 @@ class TestAttachSpectroscopyQualitySummary:
     def test_records_the_camera_profile_of_the_frames_that_were_processed(self) -> None:
         """The summary names the camera of the session's frames."""
         frames = [
-            FrameRecord(path="a.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0"),
-            FrameRecord(path="b.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0"),
-            FrameRecord(path="other.fits", role="LIGHT", camera="Acme Imager 9000", exposure="1.0"),
+            FrameRecord(path="a.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure_s=1.0),
+            FrameRecord(path="b.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure_s=1.0),
+            FrameRecord(path="other.fits", role="LIGHT", camera="Acme Imager 9000", exposure_s=1.0),
         ]
         target = Target(id="CameraProfileTestTarget", frames=frames)
         results = {

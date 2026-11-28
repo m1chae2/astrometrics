@@ -27,9 +27,9 @@ const summary = {
     sessions: [], rejected_pixel_fraction: 0.0123,
     star_width_px: { stack: 2.31, expected_from_inputs: 2.2, median_of_inputs: 2.4 },
     exposure_groups: [
-        { exposure_seconds: 30, frames_submitted: 30, frames_stacked: 30, saturated: true, clipped_at_zero: false,
+        { exposure_s: 30, frames_submitted: 30, frames_stacked: 30, saturated: true, clipped_at_zero: false,
           alignment_shift_pixels: null, left_out_reason: null },
-        { exposure_seconds: 5, frames_submitted: 10, frames_stacked: 6, saturated: false, clipped_at_zero: true,
+        { exposure_s: 5, frames_submitted: 10, frames_stacked: 6, saturated: false, clipped_at_zero: true,
           alignment_shift_pixels: [3, 4], left_out_reason: 'gain disagrees' },
     ],
     calibration_mismatches: 0,
@@ -288,9 +288,9 @@ describe('StackSummaryPanel', () => {
     it('formats numbers with units', () => {
         expect(formatExposureSeconds(0.5)).toBe('0.5 s');
         expect(formatExposureSeconds(30)).toBe('30 s');
-        expect(describeGroupNotes({ exposure_seconds: 5, frames_submitted: 1, frames_stacked: 0, left_out_reason: 'x' })).toBe('x');
-        expect(describeGroupNotes({ exposure_seconds: 5, frames_submitted: 2, frames_stacked: 1 })).toBe('some frames left out');
-        expect(describeGroupNotes({ exposure_seconds: 5, frames_submitted: 1, frames_stacked: 1 })).toBe('—');
+        expect(describeGroupNotes({ exposure_s: 5, frames_submitted: 1, frames_stacked: 0, left_out_reason: 'x' })).toBe('x');
+        expect(describeGroupNotes({ exposure_s: 5, frames_submitted: 2, frames_stacked: 1 })).toBe('some frames left out');
+        expect(describeGroupNotes({ exposure_s: 5, frames_submitted: 1, frames_stacked: 1 })).toBe('—');
     });
 });
 

@@ -1,14 +1,15 @@
-"""Purpose: Tests for running an imaging queue from `control`.
+"""Purpose: Tests for running an imaging queue on the control work.
 
-Description: `imaging_dependencies` builds the queue-cycle steps from
-`control`, `capture_entry` captures an entry's exposure requests, and
-`run_queue` keeps advancing a session until nothing is left to run. The
-tests use a stand-in `control` that records what it is asked to do, and
-check: a safe, authoritative cycle slews to the target and captures each
-request with its filter and dithering; an unsafe assessment suspends the
-session before anything moves; a failed capture is recorded on the entry;
-and `ObservationExecution.advance_session` with a stop event works the
-whole queue through and saves it.
+Description: `imaging_dependencies` builds the queue-cycle steps on the
+functions behind `control`, `capture_entry` captures an entry's exposure
+requests, and `run_queue` keeps advancing a session until nothing is left
+to run. The tests put a stand-in `control` in place of those functions,
+which records what it is asked to do, and check: a safe, authoritative
+cycle slews to the target and captures each request with its filter and
+dithering; an unsafe assessment suspends the session before anything
+moves; a failed capture is recorded on the entry; and
+`ObservationExecution.run` with a stop event works the whole queue
+through and saves it.
 """
 
 import threading
@@ -40,7 +41,7 @@ from wayfindinglib.tasks.execution_tasks import imaging_queue, queue_runner
 
 
 class _Control:
-    """A stand-in `control` that records slews and captures."""
+    """A stand-in for the control work that records slews and captures."""
 
     def __init__(
         self, verdict: SafetyVerdict = SafetyVerdict.SAFE, capture_error: Exception | None = None
@@ -61,7 +62,7 @@ class _Control:
         )
         self.mount = SimpleNamespace(slew=lambda target: self.calls.append(("slew", target)))
 
-        def capture(exposure_seconds: float, **options: Any) -> CaptureResult:
+        def capture(exposure_s: float, **options: Any) -> CaptureResult:
             """Record a capture, or fail.
 
             Returns
@@ -72,10 +73,44 @@ class _Control:
             """
             if capture_error is not None:
                 raise capture_error
-            self.calls.append(("capture", (exposure_seconds, options)))
-            return CaptureResult(frames_captured=options["count"], exposure_seconds=exposure_seconds)
+            self.calls.append(("capture", (exposure_s, options)))
+            return CaptureResult(frames_captured=options["count"], exposure_s=exposure_s)
 
         self.imaging = SimpleNamespace(capture_image=capture)
+        self._context = SimpleNamespace()
+
+
+@pytest.fixture
+def install(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Give a function that puts a stand-in in place of the control work.
+
+    Returns
+    -------
+    install : `Callable` [[`_Control`], `_Control`]
+        Routes the queue's safety read, slew and capture to the stand-in
+        and returns it.
+    """
+
+    def install(control: _Control) -> _Control:
+        """Route the queue's steps to `control`.
+
+        Returns
+        -------
+        control : `_Control`
+            The same stand-in.
+        """
+        monkeypatch.setattr(
+            imaging_queue, "read_safety_status", lambda context, include: control.safety.status(include)
+        )
+        monkeypatch.setattr(imaging_queue, "slew_to", lambda context, target: control.mount.slew(target))
+        monkeypatch.setattr(
+            imaging_queue,
+            "capture_frames",
+            lambda context, exposure_s, **options: control.imaging.capture_image(exposure_s, **options),
+        )
+        return control
+
+    return install
 
 
 class _Butler:
@@ -125,8 +160,8 @@ def _entry(target_id: str = "M 81", start: datetime | None = None) -> QueuedObse
         observation_package_id="package",
         target_id=target_id,
         exposure_requests=[
-            ExposureRequest(frame_type=FrameType.LIGHT, filter="Luminance", exposure_sec=60.0, count=3),
-            ExposureRequest(frame_type=FrameType.LIGHT, filter="Ha", exposure_sec=120.0, count=2),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter="Luminance", exposure_s=60.0, count=3),
+            ExposureRequest(frame_type=FrameType.LIGHT, filter="Ha", exposure_s=120.0, count=2),
         ],
         dither_config=DitherConfig(enabled=True, every_n_frames=2),
         start_time_mode=StartTimeMode.SOONEST,
@@ -152,13 +187,15 @@ def _session(*entries: QueuedObservationPackage) -> ObservationSession:
     )
 
 
-def test_a_safe_cycle_slews_and_captures_every_request() -> None:
+def test_a_safe_cycle_slews_and_captures_every_request(install: Any) -> None:
     """The target is slewed to, then each request captured with its filter."""
     from wayfindinglib.tasks.execution_tasks.session_runner import advance_session
 
-    control = _Control()
+    control = install(_Control())
     butler = _Butler()
-    session = advance_session(_session(_entry()), imaging_queue.imaging_dependencies(control, butler))
+    session = advance_session(
+        _session(_entry()), imaging_queue.imaging_dependencies(control._context, butler)
+    )
 
     entry = session.queue[0]
     assert entry.status == QueueEntryStatus.COMPLETED
@@ -173,32 +210,33 @@ def test_a_safe_cycle_slews_and_captures_every_request() -> None:
     assert butler.saved["s1"].status == SessionStatus.COMPLETED
 
 
-def test_an_unsafe_assessment_suspends_before_anything_moves() -> None:
+def test_an_unsafe_assessment_suspends_before_anything_moves(install: Any) -> None:
     """Unknown or unsafe weather suspends the session; nothing moves."""
     from wayfindinglib.tasks.execution_tasks.session_runner import advance_session
 
-    control = _Control(verdict=SafetyVerdict.UNKNOWN)
-    session = advance_session(_session(_entry()), imaging_queue.imaging_dependencies(control, _Butler()))
+    control = install(_Control(verdict=SafetyVerdict.UNKNOWN))
+    session = advance_session(
+        _session(_entry()), imaging_queue.imaging_dependencies(control._context, _Butler())
+    )
 
     assert session.status == SessionStatus.SUSPENDED
     assert control.calls == []
 
 
-def test_a_failed_capture_is_recorded_on_the_entry() -> None:
+def test_a_failed_capture_is_recorded_on_the_entry(install: Any) -> None:
     """A capture that fails ends the entry with the reason."""
-    frames, detail = imaging_queue.capture_entry(
-        _Control(capture_error=HardwareError("Camera offline.")), _entry()
-    )
+    control = install(_Control(capture_error=HardwareError("Camera offline.")))
+    frames, detail = imaging_queue.capture_entry(control._context, _entry())
 
     assert frames == 0
     assert "Camera offline." in detail
 
 
-def test_a_target_without_coordinates_is_not_slewed_to() -> None:
+def test_a_target_without_coordinates_is_not_slewed_to(install: Any) -> None:
     """A slew the target cannot take is skipped, and the capture goes on."""
     from wayfindinglib.tasks.execution_tasks.session_runner import advance_session
 
-    control = _Control()
+    control = install(_Control())
 
     def refuse(target: str) -> None:
         """Refuse the slew.
@@ -211,7 +249,9 @@ def test_a_target_without_coordinates_is_not_slewed_to() -> None:
         raise InvalidArgumentError("No coordinates yet.")
 
     control.mount = SimpleNamespace(slew=refuse)
-    session = advance_session(_session(_entry()), imaging_queue.imaging_dependencies(control, _Butler()))
+    session = advance_session(
+        _session(_entry()), imaging_queue.imaging_dependencies(control._context, _Butler())
+    )
 
     assert session.queue[0].frames_captured == 5
 
@@ -224,13 +264,13 @@ def test_no_filter_leaves_the_wheel_alone() -> None:
     assert imaging_queue.filter_name(FilterType.OIII) == "OIII"
 
 
-def test_advance_session_with_a_stop_event_works_the_queue_through() -> None:
+def test_run_with_a_stop_event_works_the_queue_through(install: Any) -> None:
     """Both entries run in turn, and the saved session is complete."""
     butler = _Butler()
     butler.put(_session(_entry("M 81"), _entry("M 13")), "observation_session", {"session_id": "s1"})
-    execution = ObservationExecution(SimpleNamespace(), butler, control=_Control())
+    execution = ObservationExecution(SimpleNamespace(), butler, control=install(_Control()))
 
-    session = execution.advance_session("s1", stop=threading.Event())
+    session = execution.run(_session(_entry("M 81"), _entry("M 13")), stop=threading.Event())
 
     assert [entry.status for entry in session.queue] == [QueueEntryStatus.COMPLETED] * 2
     assert butler.saved["s1"].status == SessionStatus.COMPLETED
@@ -259,13 +299,13 @@ def test_the_runner_waits_for_a_later_start_and_stops_when_asked() -> None:
     assert waits == [queue_runner.POLL_SECONDS]
 
 
-def test_advance_session_without_control_or_steps_is_refused() -> None:
+def test_run_without_control_is_refused() -> None:
     """Building the imaging steps needs `control`."""
     from astrometricslib.exceptions import ConfigurationError
 
     execution = ObservationExecution(SimpleNamespace(), _Butler())
     with pytest.raises(ConfigurationError):
-        execution.advance_session(_session(_entry()))
+        execution.run(_session(_entry()))
 
 
 def test_safety_assessment_model_is_what_the_gate_reads() -> None:

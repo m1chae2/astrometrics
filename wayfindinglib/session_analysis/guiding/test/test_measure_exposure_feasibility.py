@@ -27,7 +27,7 @@ def _by_length(feasibility: list) -> dict[float, Any]:
     by_length : `dict` [`float`, `ExposureFeasibility`]
         Each result, keyed by its exposure length.
     """
-    return {result.exposure_seconds: result for result in feasibility}
+    return {result.exposure_s: result for result in feasibility}
 
 
 def test_a_steady_night_is_clean_at_every_length(make_samples: Any, make_envelope: Any) -> None:
@@ -128,7 +128,7 @@ def test_a_length_longer_than_the_night_has_too_few_windows_to_report(
 
     feasibility, _ = measure_exposure_feasibility(samples, [30, 600], make_envelope(), "exact")
 
-    assert [result.exposure_seconds for result in feasibility] == [30.0]
+    assert [result.exposure_s for result in feasibility] == [30.0]
 
 
 def test_the_longest_reliable_length_needs_half_the_exposures_clean(

@@ -55,7 +55,7 @@ def meridian_from_hour_angle(sky: Any, hour_angle: float) -> dict[str, Any]:
         Status dictionary containing:
         - "hour_angle": Hour Angle in hours (-12.0 to 12.0).
         - "flip_required": Boolean indicating if a meridian flip is needed.
-        - "time_to_flip_seconds": Float seconds remaining until
+        - "time_to_flip_s": Float seconds remaining until
           meridian crossing.
     """
     # Flip is required if the object has transited the meridian and is past
@@ -66,12 +66,12 @@ def meridian_from_hour_angle(sky: Any, hour_angle: float) -> dict[str, Any]:
     # Seconds until meridian transit (hour_angle = 0)
     # If object is east (hour_angle < 0), time_to_flip is positive.
     # If west, negative.
-    time_to_flip_seconds = -hour_angle * 3600.0
+    time_to_flip_s = -hour_angle * 3600.0
 
     return {
         "hour_angle": hour_angle,
         "flip_required": flip_required,
-        "time_to_flip_seconds": time_to_flip_seconds,
+        "time_to_flip_s": time_to_flip_s,
     }
 
 

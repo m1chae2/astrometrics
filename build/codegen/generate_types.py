@@ -11,21 +11,21 @@ import os
 import sys
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Union, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
 # Ensure we can import from backend
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from astrometricslib import FilterType
+from astrometricslib import FilterType, Telescope
 from astrometricslib.exceptions import ErrorInfo
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_ingest import CalibrationMeasurementReport, CalibrationSetHealth
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
-from astrometricslib.models.catalog_queries import CalibrationQueryResult, OverlayStar, TargetStarCount
-from astrometricslib.models.job_queries import JobLogLine, JobQueryResult, JobSummary, JobWarning, LineageRun
+from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
+from astrometricslib.models.job_queries import JobLogLine, JobSummary, JobWarning, LineageRun
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -143,7 +143,6 @@ from astrometricslib.models.target import (
     FrameRecord,
     ImageType,
     PreviewBrightObject,
-    RenderedImage,
     StackConfigurationResult,
     StretchParameters,
     Target,
@@ -157,6 +156,7 @@ from astrometricslib.models.wavelength_scale import (
     WavelengthZeroPointRecord,
 )
 from backend.public_interface import ROUTES, RPC_METHODS, UI_EVENTS
+from backend.services.data.image_service import ViewerImage
 from backend.services.infrastructure.system_status_service import (
     FrameCopyPulse,
     IndiStatus,
@@ -167,11 +167,12 @@ from backend.services.infrastructure.system_status_service import (
     SystemPulse,
     TelescopePulse,
 )
+from backend.services.processing.calibration_service import CalibrationQueryResult
+from backend.services.processing.job_history_service import JobQueryResult
 from backend.services.processing.stack_review_service import StackReviewStart
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.control_status import SafetyStatus
 from wayfindinglib.models.equipment_and_site.camera_noise import CameraNoiseSetting
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.performance_envelope import (
     PerformanceEnvelope,
     TrackingRiskMap,
@@ -207,7 +208,6 @@ from wayfindinglib.models.session.observation_session import (
     PlanChangeItem,
     WeatherSample,
 )
-from wayfindinglib.models.session.session_progress import ObservationSessionWithProgress
 from wayfindinglib.models.session.star_shape_review import StarShapeReview
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
@@ -281,6 +281,11 @@ def get_ts_type(py_type: Any) -> str:
 
     origin = get_origin(py_type)
     args = get_args(py_type)
+
+    if origin is Annotated:
+        # A field type with a validator attached, such as `SettingNumber`:
+        # the type it holds is what the JSON carries.
+        return get_ts_type(args[0])
 
     if origin is Union:
         # Resolve all arguments of the Union to map properly to TS
@@ -356,12 +361,25 @@ def generate_enum(enum_cls: type[Enum], name: str) -> str:
 
 FIELD_TYPE_OVERRIDES: dict[str, dict[str, Any]] = {
     "TelescopePulse": {"alignment_targets": list[AlignmentTargetSession]},
+    "RenderedImage": {
+        "headers": list[FitsHeaderEntry],
+        "stretch_parameters": StretchParameters | None,
+    },
+    "JobQueryResult": {
+        "jobs": list[JobSummary] | None,
+        "job": JobSummary | None,
+        "log_lines": list[JobLogLine] | None,
+        "runs": list[LineageRun] | None,
+        "warnings": list[JobWarning] | None,
+    },
 }
 """Fields whose TypeScript type is richer than the backend model's annotation.
 
-The backend may only use the libraries' public names, so `TelescopePulse` holds
-the grouped alignment sessions as plain dictionaries. The reply carries
-`AlignmentTargetSession` records, and the UI wants that type.
+The backend may only use the libraries' public names, so its reply models hold
+library records as plain dictionaries: `TelescopePulse` the grouped alignment
+sessions, the viewer's picture (`ViewerImage`, sent as ``RenderedImage``) its
+header cards and stretch, and `JobQueryResult` its jobs, log lines, runs and
+warnings. The replies carry those records, and the UI wants their types.
 """
 
 
@@ -629,7 +647,7 @@ def render_types() -> str:
         generate_interface(GuidingStats, "GuidingStats"),
         generate_interface(LiveGuidingStatus, "LiveGuidingStatus"),
         generate_interface(StretchParameters, "StretchParameters"),
-        generate_interface(RenderedImage, "RenderedImage"),
+        generate_interface(ViewerImage, "RenderedImage"),
         generate_interface(SequenceItem, "SequenceItem"),
         generate_interface(SequencePlan, "SequencePlan"),
         generate_interface(CalibrationEntry, "CalibrationEntry"),
@@ -708,7 +726,6 @@ def render_types() -> str:
         generate_closure(
             [
                 ObservationSession,
-                ObservationSessionWithProgress,
                 ObservationPackage,
                 PackageChange,
                 SuggestionLogEntry,

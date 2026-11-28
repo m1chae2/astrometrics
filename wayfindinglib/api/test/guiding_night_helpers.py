@@ -8,7 +8,7 @@ a night different.
 
 import numpy as np
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
@@ -83,8 +83,8 @@ def record_guiding_night(
             ended_at=start + 60.0 + 1280.0,
             pixel_scale_arcsec_per_px=6.445,
             focal_length_mm=120.0,
-            ra_rate_arcsec_per_second=5.0,
-            dec_rate_arcsec_per_second=7.5,
+            ra_rate_arcsec_per_s=5.0,
+            dec_rate_arcsec_per_s=7.5,
             frames_total=400 + lost,
             frames_lost=lost,
             samples_stored=400,

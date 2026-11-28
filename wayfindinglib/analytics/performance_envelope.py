@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from astrometricslib import Camera, GuideScope, ObservatoryConfiguration
 from astrometricslib.parameters import (
     EquipmentKind,
     HardcodedKind,
@@ -36,7 +37,6 @@ from astrometricslib.parameters import (
     resolve_parameter,
 )
 from astrometricslib.reports import LimitTier, QualityLimit
-from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, GuideScope
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 
 REGISTER_ENTRY_BY_LIMIT = {
@@ -296,7 +296,7 @@ class MeasuredImageQuality:
         Median width of a star in the equipment's frames, in arcseconds.
     sample_count : `int`
         How many frames the median rests on.
-    minimum_exposure_seconds : `float` or `None`
+    minimum_exposure_s : `float` or `None`
         Shortest exposure a frame needed to be included, or `None` if no
         cut was made. Short exposures are left out because guiding error
         only widens a star when the exposure spans several guide cycles.
@@ -304,7 +304,7 @@ class MeasuredImageQuality:
 
     fwhm_arcsec: float
     sample_count: int
-    minimum_exposure_seconds: float | None = None
+    minimum_exposure_s: float | None = None
 
 
 def robust_median_and_spread(values: Sequence[float]) -> tuple[float, float]:
@@ -406,7 +406,7 @@ def _insufficient(
 
 
 def _geometry_thresholds(
-    equipment: EquipmentConfiguration, guide_scope: GuideScope | None, guide_camera: Camera | None
+    equipment: ObservatoryConfiguration, guide_scope: GuideScope | None, guide_camera: Camera | None
 ) -> list[_DerivedLimit]:
     """Derive the limits that follow from dimensions and physics alone.
 
@@ -552,7 +552,7 @@ def _budget_thresholds(
     inputs: dict[str, float | str | None] = {
         "fwhm_arcsec": fwhm,
         "blur_tolerance_fraction": blur_tolerance_fraction,
-        "minimum_exposure_seconds": measured_image_quality.minimum_exposure_seconds,
+        "minimum_exposure_s": measured_image_quality.minimum_exposure_s,
     }
     sample_count = measured_image_quality.sample_count
     return [
@@ -804,7 +804,7 @@ def _percentile_baseline_thresholds(
 
 
 def derive_performance_envelope(
-    equipment: EquipmentConfiguration,
+    equipment: ObservatoryConfiguration,
     guide_scope: GuideScope | None,
     guide_camera: Camera | None,
     equipment_fingerprint: str,
@@ -820,7 +820,7 @@ def derive_performance_envelope(
 
     Parameters
     ----------
-    equipment : `EquipmentConfiguration`
+    equipment : `ObservatoryConfiguration`
         The active imaging telescope and camera.
     guide_scope : `GuideScope` or `None`
         The guide scope, or `None` if the main telescope guides.

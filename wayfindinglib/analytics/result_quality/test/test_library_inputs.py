@@ -14,8 +14,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import AppConfiguration, FrameRecord, Target
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import AppConfiguration, CaptureSetting, FrameRecord, Target
 from wayfindinglib.analytics.result_quality import library_inputs
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation, baseline_key
 from wayfindinglib.analytics.result_quality.library_inputs import (
@@ -86,7 +85,7 @@ def _butler(stored: SiteProfile | None = None) -> Any:
 def test_frame_times_are_mid_exposure_of_light_frames() -> None:
     """Each light frame's time is its start plus half its exposure."""
     target = make_target(STAR, 1, frames_per_night=2)
-    target.frames.append(FrameRecord(path="/lib/darks/x.fits", role="DARK", timestamp=1.0, exposure="60"))
+    target.frames.append(FrameRecord(path="/lib/darks/x.fits", role="DARK", timestamp=1.0, exposure_s=60))
 
     times = frame_times(target)
 
@@ -141,10 +140,26 @@ def test_frames_in_an_excluded_folder_are_counted_with_their_manifest_reason() -
 def test_the_inputs_read_the_listing_and_note_a_listing_that_fails() -> None:
     """The inputs use the library listing, and note one that fails."""
     listed = [SimpleNamespace(subject_id="T:1", path="/p", kind="trailed", reason="", action_taken=None)]
-    good = SimpleNamespace(quality=SimpleNamespace(set_aside_frames=lambda target_id: listed))
+
+    def library(listing: Any) -> SimpleNamespace:
+        """Make a library whose set-aside listing is ``listing``.
+
+        Returns
+        -------
+        library : `SimpleNamespace`
+            A stand-in with ``targets.get`` and ``targets.frames``.
+        """
+        return SimpleNamespace(
+            targets=SimpleNamespace(
+                get=lambda target_id, required=False: SimpleNamespace(id=target_id),
+                frames=SimpleNamespace(get_set_aside=listing),
+            )
+        )
+
+    good = library(lambda target: listed)
     assert LibraryInputs(good, None, None).set_aside_reasons("T", []) == {"T:1": "trailed"}
 
-    def fail(target_id: str) -> list[Any]:
+    def fail(target: Any) -> list[Any]:
         """Raise like an unreadable folder.
 
         Raises
@@ -154,17 +169,17 @@ def test_the_inputs_read_the_listing_and_note_a_listing_that_fails() -> None:
         """
         raise OSError("disk gone")
 
-    broken = LibraryInputs(SimpleNamespace(quality=SimpleNamespace(set_aside_frames=fail)), None, None)
+    broken = LibraryInputs(library(fail), None, None)
     assert broken.set_aside_reasons("T", []) == {}
     assert any("could not be listed" in note for note in broken.notes)
 
 
 def test_the_dominant_setting_holds_the_most_exposure() -> None:
     """The setting with the most exposure time wins."""
-    other = SETTING.model_copy(update={"exposure_seconds": 120.0})
+    other = SETTING.model_copy(update={"exposure_s": 120.0})
     observations = [
-        FrameObservation(frame_id="a", capture_setting=SETTING, exposure_seconds=60.0),
-        FrameObservation(frame_id="b", capture_setting=other, exposure_seconds=120.0),
+        FrameObservation(frame_id="a", capture_setting=SETTING, exposure_s=60.0),
+        FrameObservation(frame_id="b", capture_setting=other, exposure_s=120.0),
     ]
     assert dominant_setting(observations) == other
     assert dominant_setting([]) is None
@@ -467,7 +482,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
 
     target = make_target(STAR, 1)
     library = FakeLibrary([target], make_rows(target, REVIEWED))
-    good_query = library.quality.query
+    good_query = library.quality.records.query
     state = {"fail": True}
 
     def flaky(**keywords: Any) -> Any:
@@ -475,7 +490,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
 
         Returns
         -------
-        answer : `QualityQueryResult`
+        answer : `Page`
             The rows.
 
         Raises
@@ -487,7 +502,7 @@ def test_a_failed_read_of_a_cameras_frames_is_not_kept(
             raise AstrometricsError("busy")
         return good_query(**keywords)
 
-    library.quality.query = flaky
+    library.quality.records.query = flaky
     inputs = LibraryInputs(library, _butler(SITE), config)
     assert inputs.camera_observations(SETTING.camera) == []
     assert inputs.notes

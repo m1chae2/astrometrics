@@ -4,7 +4,7 @@ Description: Checks, with synthetic measurements, that each conversion of
 the table in simulator/README.md gives the number the INDI 2.2.5 drivers need,
 that a value without data falls back one step, that every value is clamped to
 its property's range and says so, that the results file holds what the README
-requires, that a truncated reply is refused, and that the exposure driver
+requires, and that the exposure driver
 reads the properties from the same file. The INDI simulators are not started
 here; the live checks are in `test_fit_live.py`.
 """
@@ -30,11 +30,9 @@ from simulator.fit.fitting import (
     fit_values,
 )
 from simulator.fit.measurements import (
-    GUIDING_RUN_LIMITS,
     J2000_EPOCH_SECONDS,
     Candidate,
     Measurements,
-    TruncatedReplyError,
     collect_measurements,
     meridian_ra_degrees,
 )
@@ -89,7 +87,7 @@ def _setup(**guide: Any) -> WorldSetup:
         guide=_camera(
             width_px=1280, height_px=960, gain=50.0, bias_level_adu=None, read_noise_adu=None, **guide
         ),
-        declination_degrees=DECLINATION,
+        declination_deg=DECLINATION,
     )
 
 
@@ -240,7 +238,7 @@ def test_a_guide_rate_above_the_range_is_clamped_and_says_so() -> None:
 
 def test_periodic_error_is_zero_to_peak_divided_by_cos_dec() -> None:
     """The amplitude is not halved, and cos(dec) is taken out."""
-    candidate = _candidate("history fit", {"amplitude_arcsec": 3.0, "period_seconds": 40.0})
+    candidate = _candidate("history fit", {"amplitude_arcsec": 3.0, "period_s": 40.0})
     result = fit_values(_measurements(periodic_error=candidate), _setup())
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEMAX") == pytest.approx(6.0)
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEPERIOD") == pytest.approx(40.0)
@@ -250,7 +248,7 @@ def test_periodic_error_is_zero_to_peak_divided_by_cos_dec() -> None:
 
 def test_a_period_beyond_the_main_simulators_limit_keeps_the_peak_speed() -> None:
     """A 479 s worm period is clamped to 60 s; the amplitude shrinks too."""
-    candidate = _candidate("history fit", {"amplitude_arcsec": 4.0, "period_seconds": 480.0})
+    candidate = _candidate("history fit", {"amplitude_arcsec": 4.0, "period_s": 480.0})
     result = fit_values(_measurements(periodic_error=candidate), _setup())
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEPERIOD") == pytest.approx(60.0)
     assert _written(result, MAIN_CAMERA, SETTINGS, "SIM_PEMAX") == pytest.approx(8.0 * 60.0 / 480.0)
@@ -264,7 +262,7 @@ def test_a_period_beyond_the_main_simulators_limit_keeps_the_peak_speed() -> Non
 
 def test_the_guide_simulators_periodic_amplitude_is_clamped_to_100() -> None:
     """A huge amplitude is written as 100 arcsec and the clamp is recorded."""
-    candidate = _candidate("history fit", {"amplitude_arcsec": 80.0, "period_seconds": 400.0})
+    candidate = _candidate("history fit", {"amplitude_arcsec": 80.0, "period_s": 400.0})
     result = fit_values(_measurements(periodic_error=candidate), _setup())
     entry = next(v for v in result.values if v.element == "SIM_PE_MAX")
     assert entry.value == pytest.approx(100.0)
@@ -321,14 +319,14 @@ def test_the_controller_settings_come_from_the_newest_run_and_are_checked() -> N
     """Aggressiveness, hysteresis, minimum move and exposure go to PHD2."""
     candidate = _candidate(
         "newest real record",
-        {"aggressiveness": 0.45, "hysteresis": 0.25, "minimum_move": 0.277, "exposure_seconds": 2.0},
+        {"aggressiveness": 0.45, "hysteresis": 0.25, "minimum_move": 0.277, "exposure_s": 2.0},
     )
     result = fit_values(_measurements(guide_controller=candidate), _setup())
     assert result.controller_settings == {
         "aggressiveness": 0.45,
         "hysteresis": 0.25,
         "minimum_move": 0.277,
-        "exposure_seconds": 2.0,
+        "exposure_s": 2.0,
     }
     too_much = _candidate("newest real record", {"aggressiveness": 3.0})
     result = fit_values(_measurements(guide_controller=too_much), _setup())
@@ -486,7 +484,7 @@ def _full_result() -> FitResult:
     """
     measurements = _measurements(
         guide_rate=_candidate("newest real record", {"dec_rate_arcsec_per_s": 7.5}),
-        periodic_error=_candidate("history fit", {"amplitude_arcsec": 3.0, "period_seconds": 40.0}),
+        periodic_error=_candidate("history fit", {"amplitude_arcsec": 3.0, "period_s": 40.0}),
         seeing=_candidate("performance envelope", {"fwhm_arcsec": 4.2}),
         sky_glow=_candidate("history fit", {"sky_rate_adu_per_s_per_px": 2.5}),
         guide_controller=_candidate("newest real record", {"aggressiveness": 0.45, "hysteresis": 0.25}),
@@ -535,6 +533,16 @@ def test_the_exposure_driver_reads_the_same_values(tmp_path: Path) -> None:
     assert fitted_guide_rate_fraction(path) == {"GUIDE_RATE_WE": 0.5, "GUIDE_RATE_NS": 0.5}
     glow = next(s for s in settings if s.device == MAIN_CAMERA and ("SIM_SKYGLOW" in dict(s.elements)))
     assert glow.read_back_decimals == 1
+
+
+def test_a_results_file_written_before_the_rename_gives_the_new_setting_name(tmp_path: Path) -> None:
+    """An older file's ``exposure_seconds`` comes back as ``exposure_s``."""
+    path = tmp_path / RESULTS_FILE_NAME
+    write_results(path, _full_result(), fingerprint_library_copy(tmp_path))
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["controller_settings"] = {"aggressiveness": 0.45, "exposure_seconds": 2.0}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert fitted_controller_settings(path) == {"aggressiveness": 0.45, "exposure_s": 2.0}
 
 
 def test_a_missing_or_foreign_results_file_gives_nothing(tmp_path: Path) -> None:
@@ -593,10 +601,6 @@ def test_read_back_is_compared_at_the_displayed_precision() -> None:
 # ----------------------------------------------------------------------
 
 
-class _Reply(SimpleNamespace):
-    """A review reply with the fields the fit reads."""
-
-
 def _attempt(
     target: str,
     minutes: float,
@@ -651,7 +655,7 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
     """
     calibration = SimpleNamespace(
         id="cal-1",
-        dec_rate_arcsec_per_sec=7.1,
+        dec_rate_arcsec_per_s=7.1,
         source_note="Measured by PHD2",
         calibrated_at=SimpleNamespace(timestamp=lambda: 1_790_000_000.0),
     )
@@ -660,21 +664,21 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
             "session_id": "2026-10-03",
             "started_at": 1_790_000_000.0,
             "written_by_ekos": False,
-            "dec_rate_arcsec_per_second": 7.3,
+            "dec_rate_arcsec_per_s": 7.3,
             "ra_aggressiveness": 0.6,
             "ra_hysteresis": 0.1,
             "ra_minimum_move_px": 0.2,
-            "guide_exposure_seconds": 2.0,
+            "guide_exposure_s": 2.0,
         }
     ]
-    periodic = SimpleNamespace(amplitude_arcsec=3.0, period_seconds=479.0, runs_used=4)
-    axis = SimpleNamespace(drift_median_arcsec_per_minute=0.5, random_step_median_arcsec=0.3)
+    periodic = SimpleNamespace(amplitude_arcsec=3.0, period_s=479.0, runs_used=4)
+    axis = SimpleNamespace(drift_median_arcsec_per_min=0.5, random_step_median_arcsec=0.3)
     summary = SimpleNamespace(
         periodic_error=periodic, ra=axis, dec=axis, nights_used=["2026-10-02", "2026-10-03"]
     )
     answers: dict[str, Any] = {
         "calibrations": [calibration],
-        "query": _Reply(runs=runs, truncated=False),
+        "runs": [SimpleNamespace(model_dump=lambda run=run: run) for run in runs],
         "mount_error": SimpleNamespace(summary=summary),
         "spectrum": SimpleNamespace(dec_backlash_estimate_ms=None, message="too few samples"),
         "polar": SimpleNamespace(total_error_arcsec=2065.0, timestamp=1_790_000_000.0),
@@ -702,19 +706,25 @@ def _fake_wayfinder(**overrides: Any) -> SimpleNamespace:
         return answer
 
     guiding = SimpleNamespace(
-        query_calibrations=lambda: record("query_calibrations", answers["calibrations"])
+        query_guider_calibrations=lambda: record("query_guider_calibrations", answers["calibrations"])
     )
-    mount = SimpleNamespace(get_polar_alignment=lambda: record("get_polar_alignment", answers["polar"]))
     review = SimpleNamespace(
-        query=lambda **kwargs: record(f"query:{kwargs}", answers["query"]),
-        query_alignment_records=lambda **kwargs: record(f"records:{kwargs}", answers["records"]),
-        measure_unguided_mount_error=lambda: record("measure_unguided_mount_error", answers["mount_error"]),
-        measure_guiding_spectrum=lambda: record("measure_guiding_spectrum", answers["spectrum"]),
-        get_performance_envelope=lambda: record("get_performance_envelope", answers["envelope"]),
-        get_sky_rate_prediction=lambda *a, **k: record("get_sky_rate_prediction", answers["sky"]),
-        measure_focus_temperature_coefficient=lambda: record("measure_focus", answers["focus"]),
+        guiding=SimpleNamespace(
+            query_runs=lambda **kwargs: record(f"query_runs:{kwargs}", answers["runs"]),
+            measure_unguided_error=lambda: record("measure_unguided_error", answers["mount_error"]),
+            measure_spectrum=lambda: record("measure_spectrum", answers["spectrum"]),
+        ),
+        alignment=SimpleNamespace(
+            query=lambda **kwargs: record(f"records:{kwargs}", answers["records"]),
+            get_polar_alignment=lambda: record("get_polar_alignment", answers["polar"]),
+        ),
+        performance=SimpleNamespace(
+            get_envelope=lambda: record("get_envelope", answers["envelope"]),
+            predict_sky_rate=lambda *a, **k: record("predict_sky_rate", answers["sky"]),
+            measure_focus_temperature=lambda: record("measure_focus", answers["focus"]),
+        ),
     )
-    return SimpleNamespace(control=SimpleNamespace(guiding=guiding, mount=mount), review=review, calls=calls)
+    return SimpleNamespace(control=SimpleNamespace(guiding=guiding), review=review, calls=calls)
 
 
 def test_collect_reads_every_row_and_names_the_public_calls() -> None:
@@ -723,7 +733,7 @@ def test_collect_reads_every_row_and_names_the_public_calls() -> None:
     rows = measurements.candidates
     assert rows["guide_rate"][0].kind == "newest real record"
     assert {c.kind for c in rows["guide_rate"]} == {"newest real record", "history fit"}
-    assert rows["periodic_error"][0].call == "wayfinder.review.measure_unguided_mount_error"
+    assert rows["periodic_error"][0].call == "wayfinder.review.guiding.measure_unguided_error"
     assert rows["periodic_error"][0].nights == ["2026-10-02", "2026-10-03"]
     assert rows["polar_error"][0].note.startswith("A single polar alignment measurement")
     assert rows["seeing"][0].kind == "performance envelope"
@@ -741,51 +751,12 @@ def test_a_simulator_calibration_is_not_a_real_record() -> None:
     """A simulator calibration is not used as the real guide speed."""
     simulated = SimpleNamespace(
         id="simulator-x",
-        dec_rate_arcsec_per_sec=7.52,
+        dec_rate_arcsec_per_s=7.52,
         source_note="Simulator value, not the real camera's",
         calibrated_at=SimpleNamespace(timestamp=lambda: 1.0),
     )
     measurements = collect_measurements(_fake_wayfinder(calibrations=[simulated]), 0.0, 0.0)
     assert [c.kind for c in measurements.candidates["guide_rate"]] == ["history fit"]
-
-
-def test_a_truncated_reply_is_refused_and_the_row_falls_back() -> None:
-    """A cut-short run list is not used; two rows lose it."""
-    truncated = _Reply(runs=[{"dec_rate_arcsec_per_second": 9.0}], truncated=True)
-    wayfinder = _fake_wayfinder(query=truncated, calibrations=[])
-    measurements = collect_measurements(wayfinder, 0.0, 0.0)
-    assert "guide_rate" not in measurements.candidates
-    assert "guide_controller" not in measurements.candidates
-    assert any("truncated" in note for note in measurements.notes)
-    assert issubclass(TruncatedReplyError, RuntimeError)
-
-
-def test_a_cut_reply_is_asked_again_for_fewer_runs() -> None:
-    """A run list too large to send is asked for again with a smaller limit."""
-    wayfinder = _fake_wayfinder(calibrations=[])
-    full = _Reply(runs=[{"dec_rate_arcsec_per_second": 9.0}], truncated=True)
-    small = _Reply(
-        runs=[{"dec_rate_arcsec_per_second": 7.3, "session_id": "n", "started_at": 1.0}], truncated=False
-    )
-    limits: list[int] = []
-
-    def query(**kwargs: Any) -> _Reply:
-        """Cut the reply unless few runs are asked for.
-
-        Returns
-        -------
-        reply : `_Reply`
-            The cut reply for the first limit, a whole one after.
-        """
-        limits.append(kwargs["limit"])
-        return full if kwargs["limit"] == GUIDING_RUN_LIMITS[0] else small
-
-    wayfinder.review.query = query
-    measurements = collect_measurements(wayfinder, 0.0, 0.0)
-    assert limits == list(GUIDING_RUN_LIMITS[:2])
-    candidate = measurements.candidates["guide_rate"][0]
-    assert candidate.values["dec_rate_arcsec_per_s"] == pytest.approx(7.3)
-    assert candidate.parameters["limit"] == GUIDING_RUN_LIMITS[1]
 
 
 def test_the_meridian_is_the_local_sidereal_time() -> None:
@@ -813,7 +784,7 @@ def test_a_target_below_the_horizon_is_moved_to_the_meridian() -> None:
     )
     asked: list[float] = []
 
-    def predict(epoch_seconds: float, ra_deg: float, dec_deg: float) -> SimpleNamespace:
+    def predict(ra_deg: float, dec_deg: float, *, time: object = None) -> SimpleNamespace:
         """Say the target is down unless it is on the meridian.
 
         Returns
@@ -825,7 +796,7 @@ def test_a_target_below_the_horizon_is_moved_to_the_meridian() -> None:
         return up if len(asked) > 1 else down
 
     wayfinder = _fake_wayfinder()
-    wayfinder.review.get_sky_rate_prediction = predict
+    wayfinder.review.performance.predict_sky_rate = predict
     measurements = collect_measurements(wayfinder, 250.4, 36.46, J2000_EPOCH_SECONDS, -110.74)
     candidate = measurements.candidates["sky_glow"][0]
     assert asked[1] == pytest.approx(meridian_ra_degrees(J2000_EPOCH_SECONDS, -110.74))
@@ -849,18 +820,18 @@ def test_a_failing_call_is_a_note_and_other_rows_still_run() -> None:
         """
         raise ValueError("nothing recorded")
 
-    wayfinder.review.measure_unguided_mount_error = fail
+    wayfinder.review.guiding.measure_unguided_error = fail
     measurements = collect_measurements(wayfinder, 0.0, 0.0)
     assert "periodic_error" not in measurements.candidates
     assert "seeing" in measurements.candidates
     assert any("nothing recorded" in note for note in measurements.notes)
 
 
-def test_collect_registers_no_job() -> None:
-    """The review query is asked not to record a job in the library."""
+def test_collect_passes_no_job_switch() -> None:
+    """The guiding run read is a read; no job switch is passed to it."""
     wayfinder = _fake_wayfinder()
     collect_measurements(wayfinder, 0.0, 0.0)
-    assert any("'register_job': False" in call for call in wayfinder.calls if call.startswith("query"))
+    assert not any("register_job" in call for call in wayfinder.calls if call.startswith("query_runs"))
 
 
 # ----------------------------------------------------------------------
@@ -917,8 +888,8 @@ def test_goto_offset_is_the_median_of_first_attempts_only() -> None:
     """Repeats are ignored; right ascension is divided by cos(dec)."""
     measurements = collect_measurements(_fake_wayfinder(), 0.0, 0.0)
     candidate = measurements.candidates["mount_model"][0]
-    assert candidate.call == "wayfinder.review.query_alignment_records"
-    assert candidate.parameters == {"session_id": "all"}
+    assert candidate.call == "wayfinder.review.alignment.query"
+    assert candidate.parameters == {}
     assert candidate.values["count"] == pytest.approx(6.0)
     # Median sky offset 605 arcsec (even count) over cos(60 degrees) = 0.5.
     assert candidate.values["ra_angle_median_arcsec"] == pytest.approx(1210.0)

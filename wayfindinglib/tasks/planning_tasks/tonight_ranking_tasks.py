@@ -52,7 +52,7 @@ from typing import Any
 import numpy as np
 from astropy.time import Time
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target, Telescope
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -60,7 +60,7 @@ from astrometricslib.parameters import (
     TunedParameter,
     resolve_parameter,
 )
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.result_quality.capture_overheads import (
     AUTOFOCUS_RUNS_PER_HOUR,
     DITHER_EVERY_FRAMES,
@@ -109,7 +109,6 @@ from wayfindinglib.analytics.result_quality.science_goal import (
 )
 from wayfindinglib.analytics.result_quality.sky_model import SkyModel, predict_sky_rate_at
 from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, earth_location
-from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.planning.tonight_ranking import (
@@ -442,7 +441,7 @@ def score_candidate(
     if mode == WeightingMode.UNKNOWN:
         mode = predict_weighting_mode(
             configured_weight,
-            [frame.exposure_seconds for frame in existing],
+            [frame.exposure_s for frame in existing],
             is_spectral=use == RankedUse.SPECTROSCOPY,
         )
     current = (
@@ -454,15 +453,13 @@ def score_candidate(
         return _no_forecast(
             target_id, use, altitude_deg, current.reason or "The stack's noise could not be found."
         )
-    captured_seconds = sum(frame.exposure_seconds for frame in existing)
+    captured_s = sum(frame.exposure_s for frame in existing)
 
     # The new frames follow the main setting's past frames, with tonight's sky.
     template = [
-        frame for frame in existing if abs(frame.exposure_seconds - (setting.exposure_seconds or 0.0)) < 0.5
+        frame for frame in existing if abs(frame.exposure_s - (setting.exposure_s or 0.0)) < 0.5
     ] or list(existing)
-    exposure_seconds = float(
-        setting.exposure_seconds or np.median([frame.exposure_seconds for frame in template])
-    )
+    exposure_s = float(setting.exposure_s or np.median([frame.exposure_s for frame in template]))
     sky_rate: float | None = None
     sky_source = "history"
     model = sky_models.get(baseline_key(setting))
@@ -496,7 +493,7 @@ def score_candidate(
 
     overheads = overheads_for(setting)
     per_frame_seconds = (
-        exposure_seconds
+        exposure_s
         + overheads.download_seconds
         + overheads.dither_settle_seconds / resolve_parameter(DITHER_EVERY_FRAMES).value
     )
@@ -511,11 +508,11 @@ def score_candidate(
             altitude_deg,
             "One frame and its overheads do not fit in an hour.",
             capture_setting=setting,
-            exposure_seconds=exposure_seconds,
+            exposure_s=exposure_s,
         )
     wall = wall_clock_estimate(
         frames_in_hour,
-        exposure_seconds,
+        exposure_s,
         overheads,
         dither_every_frames=resolve_parameter(DITHER_EVERY_FRAMES).value,
         autofocus_runs=resolve_parameter(AUTOFOCUS_RUNS_PER_HOUR).value,
@@ -532,7 +529,7 @@ def score_candidate(
         # stacker would place them (a new length needs 5 frames to be a group).
         plan = plan_group_stack(
             run_groups.groups,
-            new_frames_like(template, frames_in_hour, exposure_seconds),
+            new_frames_like(template, frames_in_hour, exposure_s),
             electrons_per_adu=electrons_per_adu,
         )
         later: NoiseForecast | None = plan.forecast if plan.forecast.noise is not None else None
@@ -550,7 +547,7 @@ def score_candidate(
         if plan.folded_group_lengths:
             remarks.append("Some of the new frames would be folded into another exposure group.")
     else:
-        later = noise_ratio_after_adding(existing, template, frames_in_hour, mode, exposure_seconds)
+        later = noise_ratio_after_adding(existing, template, frames_in_hour, mode, exposure_s)
     ratio = noise_ratio_for_ranking(current, later, fixed_pattern)
     if fixed_pattern is not None and fixed_pattern.basis == FIXED_PATTERN_BASIS_SETUP_HISTORY:
         remarks.append(
@@ -575,12 +572,12 @@ def score_candidate(
         "altitude_deg": altitude_deg,
         "capture_setting": setting,
         "frames_in_hour": frames_in_hour,
-        "exposure_seconds": exposure_seconds,
+        "exposure_s": exposure_s,
         "overhead_fraction": wall.overhead_fraction,
-        "effective_hours_so_far": captured_seconds / 3600.0,
+        "effective_hours_so_far": captured_s / 3600.0,
         "sky_rate_e_per_s_per_px": sky_rate,
         "sky_source": sky_source,
-        "thin_dataset": captured_seconds < resolve_parameter(THIN_DATASET_SECONDS).value,
+        "thin_dataset": captured_s < resolve_parameter(THIN_DATASET_SECONDS).value,
         "evidence": evidence,
     }
     stop = target_stop_signal(runs)
@@ -803,7 +800,9 @@ def rank_tonight(
     inputs = LibraryInputs(astrometrics, butler, config, known_site=site_profile)
     site_profile = inputs.site
     targets = list(inputs.targets().values())
-    capture_settings = astrometrics.quality.capture_settings()
+    capture_settings = {
+        stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings()
+    }
     models, unavailable = inputs.all_sky_models()
 
     location = earth_location(site_profile.latitude_deg, site_profile.longitude_deg, site_profile.elevation_m)
@@ -826,11 +825,11 @@ def rank_tonight(
             Measured from the records when there are enough, else the
             design estimates.
         """
-        key = (setting.exposure_seconds, setting.filter_name)
+        key = (setting.exposure_s, setting.filter_name)
         if key not in overhead_cache:
             overhead_cache[key] = estimate_capture_overheads(
                 list(ekos_contexts or []),
-                exposure_seconds=setting.exposure_seconds,
+                exposure_s=setting.exposure_s,
                 filter_name=setting.filter_name,
             )
         return overhead_cache[key]
@@ -881,19 +880,19 @@ def rank_tonight(
         if not visible:
             skipped["targets not visible at that time"] += 1
             continue
-        frame_rows = astrometrics.quality.query(target_id=target.id, level="frame", library_only=True).rows
+        frame_rows = list(astrometrics.quality.records.query(target=target, level="frame", library_only=True))
         all_observations = build_target_observations(target, frame_rows, capture_settings)
         history = [
-            *astrometrics.quality.query(
-                target_id=target.id, level="stack", library_only=True, latest_only=False
-            ).rows,
-            *astrometrics.quality.query(
-                target_id=target.id,
+            *astrometrics.quality.records.query(
+                target=target, level="stack", library_only=True, latest_only=False
+            ),
+            *astrometrics.quality.records.query(
+                target=target,
                 level="frame",
                 metric=FRAME_WEIGHT_METRIC,
                 library_only=True,
                 latest_only=False,
-            ).rows,
+            ),
         ]
         all_runs = stack_runs_from_measurements(history)
         # Whether the target's "take N more" count is confirmed, provisional

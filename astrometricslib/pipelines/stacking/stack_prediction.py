@@ -16,6 +16,9 @@ No decision is written a second time here, so the prediction and the stack
 cannot disagree. Nothing is stacked, moved, stored or saved. The frames are
 read (the cloud and trailing check measures each one), so a large target
 takes a while.
+
+`predict_target_stack` is the owner of `processing.stacking.predict`: it
+chooses the frames as `processing.stacking.run` does, then predicts.
 """
 
 import os
@@ -35,6 +38,7 @@ from astrometricslib.models.processing_results import (
 )
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.camera_selection import split_frames_by_camera
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.stacking.frame_screening import (
     BACKGROUND_SPLIT_REASON,
@@ -44,10 +48,9 @@ from astrometricslib.pipelines.stacking.frame_screening import (
     FrameScreening,
     screen_frames,
 )
-from astrometricslib.pipelines.stacking.pre_processing.camera_selection import split_frames_by_camera
 from astrometricslib.pipelines.stacking.stack_runner import split_into_stack_batches
 
-__all__ = ["predict_stack"]
+__all__ = ["predict_stack", "predict_target_stack"]
 
 _KIND_BY_REASON = {
     MINORITY_GAIN_REASON: "minority_gain",
@@ -124,7 +127,7 @@ def _predicted_group(group: Any, library: CalibrationLibrary) -> PredictedGroup:
         if not part.frames and not part.blocking_flags:
             warnings.append(f"{name}: no {name} frames fit these lights.")
     return PredictedGroup(
-        exposure_seconds=float(group.exposure_seconds),
+        exposure_s=float(group.exposure_s),
         night=group.night,
         frames_kept=len(group.frames),
         first_file=os.path.basename(paths[0]) if paths else "",
@@ -273,3 +276,30 @@ def predict_stack(
         unreadable=list(report.unreadable) if report is not None else [],
         nothing_left=not screening.frames,
     )
+
+
+def predict_target_stack(
+    target: Target, frames: Any = None, *, calibration: CalibrationLibrary
+) -> StackPrediction:
+    """Choose a stack's frames as a stacking run does, then predict the stack.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to stack. It is not changed.
+    frames : `FrameChoice`, optional
+        The frames (see `stack_request.frames_for_stack`). Left out, every
+        imaging light frame of the target.
+    calibration : `CalibrationLibrary`
+        The library of calibration frames, as the stack would use it.
+
+    Returns
+    -------
+    prediction : `StackPrediction`
+        The frames set aside and flagged, each group's calibration choice,
+        and the checks' warnings.
+    """
+    from astrometricslib.pipelines.stacking.stack_request import frames_for_stack
+
+    chosen, kind = frames_for_stack(target, frames)
+    return predict_stack(target, chosen, kind, calibration)

@@ -2,13 +2,13 @@
 
 Description: A test can build the root with a plate solver, a stacking
 program and a SIMBAD client. These tests give it fakes and check that the
-astrometry stage, `StellarCatalog.plate_solve` and `ProcessingPipelines.stack`
-use them, and that none of the real drivers (Astrometry.net, SIMBAD, Siril)
-is touched. Another test checks that, with no drivers given, the real ones
+astrometry and photometry pipelines, `processing.astrometry.solve` and
+`processing.stacking.run` use them, and that none of the real drivers
+(Astrometry.net, SIMBAD, Siril) is touched. Another test checks that, with
+no drivers given, the real ones
 are what gets built. No network, solver or Siril is needed.
 """
 
-from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,7 +31,6 @@ from astrometricslib._internal.drivers import (
 from astrometricslib._internal.drivers.driver_set import Drivers
 from astrometricslib._internal.drivers.interfaces import PipelineSteps
 from astrometricslib._internal.testing import astrometrics_with_drivers
-from astrometricslib.exceptions import InvalidArgumentError
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
@@ -257,9 +256,7 @@ def test_the_astrometry_stage_uses_the_injected_solver_and_simbad(
     )
     target = Target(id="Injection Field")
 
-    result = astrometrics.processing.process_target(
-        target, stages=["astrometry"], astrometry={"path": field_image}, register_job=False
-    )
+    result = astrometrics.processing.astrometry.run(target, stack=field_image)
 
     assert len(solver.calls) == 1
     assert solver.calls[0]["image_path"] == field_image
@@ -302,7 +299,7 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
             filter=FilterType.L,
             camera="ZWO ASI 533MM Pro",
             role="LIGHT",
-            exposure="30.0",
+            exposure_s=30.0,
             timestamp=1_777_593_600.0 + 60.0 * index,
         )
         for index, frame_path in enumerate(frame_paths)
@@ -317,14 +314,10 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
     target = Target(id="Injection Field", frames=frames)
+    # Photometry alone, as if astrometry had just run.
+    monkeypatch.setattr("astrometricslib.pipelines.tasks.stage_staleness_reason", lambda *_a, **_k: None)
 
-    result = astrometrics.processing.process_target(
-        target,
-        stages=["photometry"],
-        run_prerequisites=False,
-        photometry={"frames": frames, "max_workers": 1},
-        register_job=False,
-    )
+    result = astrometrics.processing.photometry.run(target, frames=frames)
 
     assert "photometry" in result.results
     assert len(solver.calls) == 1
@@ -333,13 +326,13 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
 
 
 def test_plate_solve_on_the_star_catalog_uses_the_injected_solver(field_image: str) -> None:
-    """`processing.plate_solve` uses the fake solver and the fake SIMBAD."""
+    """`processing.astrometry.solve` uses the fake solver and SIMBAD."""
     solver, simbad = FakePlateSolver(), field_simbad()
     astrometrics = astrometrics_with_drivers(
         AppConfiguration(), MagicMock(), plate_solve_driver=solver, simbad_driver=simbad
     )
 
-    solution = astrometrics.processing.plate_solve(field_image)
+    solution = astrometrics.processing.astrometry.solve(field_image)
 
     assert len(solver.calls) == 1
     assert simbad.region_calls
@@ -361,7 +354,7 @@ def make_stacking_target(tmp_path: Path) -> Target:
             filter=FilterType.L,
             camera="ZWO ASI 533MM Pro",
             role="LIGHT",
-            exposure="60.0",
+            exposure_s=60.0,
             timestamp=1000.0 + 60.0 * index,
         )
         for index in range(3)
@@ -370,7 +363,7 @@ def make_stacking_target(tmp_path: Path) -> Target:
 
 
 def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> None:
-    """`processing.stack` hands its frames to the fake stacking program."""
+    """`processing.stacking.run` hands its frames to the fake stacker."""
     stacker = FakeStacker(str(tmp_path / "Injection_Stack_L_Stacked.fits"))
     astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock(), stacking_driver=stacker)
     target = make_stacking_target(tmp_path)
@@ -385,10 +378,13 @@ def test_processing_stack_uses_the_injected_stacking_driver(tmp_path: Path) -> N
 
     with (
         patch("astrometricslib.pipelines.stacking.stage._build_stack_quality_summary", return_value=summary),
-        patch.object(astrometrics.processing, "acquire_job_slot", nullcontext),
-        patch.object(astrometrics.processing, "_target_catalog", MagicMock()),
+        patch(
+            "astrometricslib.foundation.storage.process_locks.acquire_resource_slot",
+            lambda *_args, **_kwargs: nullcontext(),
+        ),
+        patch.object(astrometrics.processing, "_target_catalog", MagicMock(_config=AppConfiguration())),
     ):
-        result = astrometrics.processing.stack(target, frames=list(target.frames), register_job=False)
+        result = astrometrics.processing.stacking.run(target, frames=list(target.frames))
 
     assert stacker.stacked_frame_paths == [[frame.path for frame in target.frames]]
     assert result.stacked_path == stacker.output_path
@@ -517,47 +513,12 @@ def test_a_given_driver_is_used_and_the_others_stay_default() -> None:
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)
 
 
-@pytest.mark.parametrize("driver_name", ["plate_solve_driver", "stacking_driver", "simbad_driver"])
-def test_processing_several_targets_refuses_injected_drivers(driver_name: str) -> None:
-    """A batch run is refused, since workers cannot receive drivers."""
-    fake: dict[str, Callable[[], object]] = {
-        "plate_solve_driver": FakePlateSolver,
-        "stacking_driver": lambda: FakeStacker("/stack.fits"),
-        "simbad_driver": FakeSimbad,
-    }
-    astrometrics = astrometrics_with_drivers(
-        AppConfiguration(), MagicMock(), **{driver_name: fake[driver_name]()}
-    )
+def test_the_public_stacking_driver_is_the_built_in_one() -> None:
+    """`drivers.get_stacking_driver` gives Siril, which opens and stops."""
+    from astrometricslib._internal.drivers.siril_stacking_driver import SirilStackingDriver
+    from astrometricslib.drivers import get_stacking_driver
 
-    with pytest.raises(InvalidArgumentError, match="worker process"):
-        astrometrics.processing.process_target(None, camera_id="ZWO ASI 533MM Pro")
-
-
-def test_open_in_siril_uses_the_stacking_driver_and_refuses_one_without_a_window() -> None:
-    """`open_in_siril` hands the path to the stacking driver's window."""
-    from astrometricslib.exceptions import ProcessingError
-
-    class WindowedStacker(FakeStacker):
-        """A fake stacking program that records the files it shows."""
-
-        def __init__(self, output_path: str) -> None:
-            """Start with nothing shown."""
-            super().__init__(output_path)
-            self.shown: list[str] = []
-
-        def open_in_viewer(self, file_path: str) -> None:
-            """Record the path."""
-            self.shown.append(file_path)
-
-    windowed = WindowedStacker("/stacks/x.fits")
-    astrometrics_with_drivers(
-        AppConfiguration(), MagicMock(), stacking_driver=windowed
-    ).processing.open_in_siril("/stacks/M 42/stack.fits")
-    assert windowed.shown == ["/stacks/M 42/stack.fits"]
-
-    windowless = FakeStacker("/stacks/x.fits")
-    processing = astrometrics_with_drivers(
-        AppConfiguration(), MagicMock(), stacking_driver=windowless
-    ).processing
-    with pytest.raises(ProcessingError):
-        processing.open_in_siril("/stacks/M 42/stack.fits")
+    engine = get_stacking_driver()
+    assert isinstance(engine, SirilStackingDriver)
+    assert callable(engine.open_in_viewer)
+    assert callable(engine.stop_running_programs)

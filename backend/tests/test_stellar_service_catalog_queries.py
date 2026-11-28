@@ -18,59 +18,31 @@ from backend.services.data.stellar_service import StellarService
 class _Stars:
     """A stand-in for the library's star catalog that fails on a full read."""
 
-    def __init__(self, by_target: dict[str, list[StellarObject]] | None = None) -> None:
-        """Set which stars each target owns and start recording calls."""
-        self.by_target = by_target or {}
+    def __init__(self) -> None:
+        """Start recording calls."""
         self.calls: list[tuple] = []
-        self.existing = set()
         self.spectrum_ids: list[str] = []
-        self.found_or_created = StellarObject(id="Created")
 
-    def query(
-        self,
-        ids: list[str] | None = None,
-        target_id: str | None = None,
-        has_spectra: bool | None = None,
-        detail: str = "summary",
-        limit: int | None = 50,
-        include_unresolved: bool = False,
-    ) -> SimpleNamespace:
-        """Answer the star queries the service may make, and record them.
+    def query(self, has_spectra: bool | None = None, **arguments: object) -> list[StellarObject]:
+        """Answer the stars-with-spectra query, and refuse any other.
 
         Returns
         -------
-        answer : `types.SimpleNamespace`
-            ``objects`` for one target's stars, ``found`` for an ``exists``
-            check, or ``ids`` for the stars with spectra.
+        stars : `list` [`StellarObject`]
+            The stars with spectra.
 
         Raises
         ------
         AssertionError
             If the query would read every star in the catalog.
         """
-        if detail == "exists":
-            self.calls.append(("exists", sorted(ids or [])))
-            return SimpleNamespace(found=sorted(self.existing & set(ids or [])))
-        if detail == "ids" and has_spectra:
-            return SimpleNamespace(ids=self.spectrum_ids)
-        if detail == "objects" and target_id is not None:
-            self.calls.append(("query", target_id, include_unresolved))
-            return SimpleNamespace(objects=self.by_target.get(target_id, []))
+        self.calls.append(("query", has_spectra, arguments))
+        if has_spectra and not arguments:
+            return [StellarObject(id=star_id) for star_id in self.spectrum_ids]
         raise AssertionError("the whole star catalog was read")
 
-    def find_or_create_by_position(self, ra: float, dec: float, **details: object) -> StellarObject:
-        """Record the request and return the prepared star.
 
-        Returns
-        -------
-        star : `StellarObject`
-            The star set by the test.
-        """
-        self.calls.append(("find_or_create_by_position", ra, dec, details))
-        return self.found_or_created
-
-
-def _make_service(stars: _Stars, planning_sources: list | None = None) -> StellarService:
+def _make_service(stars: _Stars) -> StellarService:
     """Build a service over a library stand-in and a mock wayfinder.
 
     Returns
@@ -78,12 +50,8 @@ def _make_service(stars: _Stars, planning_sources: list | None = None) -> Stella
     service : `StellarService`
         A service whose star catalog is `stars`.
     """
-    astrometrics = SimpleNamespace(
-        stars=stars, targets=SimpleNamespace(query=lambda **_k: SimpleNamespace(objects=[]))
-    )
-    wayfinder = MagicMock()
-    wayfinder.planning.query_sources.return_value = SimpleNamespace(sources=planning_sources or [])
-    return StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=wayfinder)
+    astrometrics = SimpleNamespace(stars=stars)
+    return StellarService(config=MagicMock(), astrometrics=astrometrics, wayfinder=MagicMock())
 
 
 def test_saving_does_not_read_or_rewrite_the_catalog() -> None:
@@ -101,42 +69,8 @@ def test_saving_does_not_read_or_rewrite_the_catalog() -> None:
     assert stars.calls == []
 
 
-def test_find_or_create_by_position_is_handed_to_the_library() -> None:
-    """The service does not search the catalog itself any more."""
-    stars = _Stars()
-
-    result = _make_service(stars).find_or_create_by_position(
-        279.2, 38.8, name="Vega", spectral_type="A0V", magnitude=0.03, target_id="Vega", tolerance_arcsec=3.0
-    )
-
-    assert result is stars.found_or_created
-    assert stars.calls == [
-        (
-            "find_or_create_by_position",
-            279.2,
-            38.8,
-            {
-                "name": "Vega",
-                "spectral_type": "A0V",
-                "magnitude": 0.03,
-                "target_id": "Vega",
-                "tolerance_arcsec": 3.0,
-            },
-        )
-    ]
-
-
-def test_find_or_create_by_position_leaves_the_distance_to_the_library_by_default() -> None:
-    """With no tolerance the service passes none, so the library decides."""
-    stars = _Stars()
-
-    _make_service(stars).find_or_create_by_position(279.2, 38.8, name="Vega")
-
-    assert stars.calls[0][3]["tolerance_arcsec"] is None
-
-
 def test_the_list_of_stars_with_spectra_comes_from_the_library() -> None:
-    """The spectra list is answered from the library's index."""
+    """The spectra list is answered from one filtered library query."""
     stars = _Stars()
     stars.spectrum_ids = ["Vega", "Deneb"]
 

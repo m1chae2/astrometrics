@@ -339,7 +339,7 @@ def _frames(count: int = FRAME_COUNT, root: str = "/frames", **fields: Any) -> l
         FrameRecord(
             path=f"{root}/lights/M 99/Scope/Cam/f{index:03d}.fits",
             camera="Cam",
-            exposure="60",
+            exposure_s=60,
             timestamp=start + index * 120.0,
             **fields,
         )

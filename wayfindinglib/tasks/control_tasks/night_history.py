@@ -1,31 +1,25 @@
-"""Answer questions about past observing nights, in replies of bounded size.
+"""Purpose: The owners of the night, guiding run and pointing model reads.
 
-The app records each observing night in several places: the Ekos session
-logs, the guiding runs, the guide-log samples, the frame library and the
-plate solves. The analyses in `night_analysis` turn these into findings.
-This module is the front door behind `review.query`. It checks
-the arguments for a ``kind`` of question, picks the right analysis,
-shrinks the answer to plain data, and guarantees that the reply fits under
-a size limit.
+Description: The app records each observing night in several places: the
+Ekos session logs, the guiding runs, the guide-log samples, the frame
+library and the plate solves. The analyses in `night_analysis` turn these
+into findings. The functions here are the owners behind the public review
+methods: each reads one kind of answer for one night, or lists the nights,
+the guiding runs or the Ekos sessions as a `Page`.
 
-The limit matters because a caller that relays the reply as text may cut it
-at 40,000 characters, in the middle of the data. Several of the methods can
-produce more than that: a single Ekos session can hold hundreds of mount
-positions, and a list of every guiding run is about 40,000 characters
-today. Here the reply is measured, and if it is too big it is shrunk in
-steps until it fits, with a flag that says it was shrunk.
-
-Nothing here writes. For exact behavior, read the code.
+A list returns every match unless the caller asks for fewer; an adapter
+that relays a reply as text keeps it to the size its client accepts.
+Nothing here writes.
 """
 
 from __future__ import annotations
 
 import copy
-import json
 import time
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import Page, check_include, observing_night_id
 from astrometricslib.exceptions import (
     ConfigurationError,
     ConflictError,
@@ -33,8 +27,6 @@ from astrometricslib.exceptions import (
     NotFoundError,
     StorageError,
 )
-from astrometricslib.reports import observing_night_id
-from wayfindinglib._internal.arguments import check_limit
 from wayfindinglib.analytics import night_index
 from wayfindinglib.analytics.data_versions import (
     nights_context_signs,
@@ -42,45 +34,18 @@ from wayfindinglib.analytics.data_versions import (
     nights_index_version,
 )
 from wayfindinglib.analytics.night_index import NightFrame, NightIndex, build_night_index
+from wayfindinglib.models.session.ekos_session import EkosSessionSummary
 from wayfindinglib.models.session.night_list import NightListEntry
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
-
-KINDS = (
-    "capture",
-    "guiding",
-    "sky_coverage",
-    "recurring_issues",
-    "ekos_sessions",
-    "guiding_runs",
-    "pointing_model",
-    "alignment",
-)
-"""The kinds of question `build_night_history` answers."""
-
-KIND_ARGUMENTS = {
-    "capture": ("session_id",),
-    "guiding": ("session_id",),
-    "sky_coverage": (),
-    "recurring_issues": (),
-    "ekos_sessions": ("session_id", "ekos_file_id", "include"),
-    "guiding_runs": ("session_id",),
-    "pointing_model": ("session_id",),
-    "alignment": ("session_id",),
-}
-"""The optional arguments each kind uses. Any other one is refused."""
-
-TYPED_KIND_ARGUMENTS = {
-    "nights": (),
-    "target_changes": ("session_id",),
-    "night_quality": ("session_id",),
-}
-"""The kinds that answer with a typed list instead of a dictionary, and the
-optional arguments each uses. `ObservationReview.query` answers these itself
-(see `refuse_unused_arguments`). They are kept apart from ``KINDS`` because
-their replies are lists of models, which `fit_to_budget` does not shrink."""
+    from wayfindinglib.models.session.capture_quality import CaptureSessionAnalysis
+    from wayfindinglib.models.session.ekos_session import EkosSessionContext
+    from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+    from wayfindinglib.models.session.session_quality import GuidingSessionAnalysis
+    from wayfindinglib.models.session.sky_quality import SkyAnalysis
+    from wayfindinglib.models.session.telemetry import MountPointingModel
 
 EKOS_SECTIONS = (
     "captures",
@@ -95,18 +60,8 @@ EKOS_SECTIONS = (
 )
 """The parts of an Ekos session record that can be asked for."""
 
-DEFAULT_LIMIT = 10
-"""How many nights, runs or sessions an answer covers by default."""
-
 MAXIMUM_LIMIT = 50
-"""Most nights, runs, sessions or list items one answer covers."""
-
-MAXIMUM_REPLY_CHARACTERS = 30_000
-"""Largest reply, measured as indented JSON. The server cuts at 40,000."""
-
-SHRINK_LEVELS = ((50, 500, 10), (20, 300, 7), (8, 200, 5), (3, 120, 3))
-"""Steps tried in order when a reply is too big: most list items kept,
-longest text kept, deepest nesting kept."""
+"""Most items of each Ekos section the live status keeps."""
 
 
 def to_plain(value: Any) -> Any:
@@ -130,138 +85,6 @@ def to_plain(value: Any) -> Any:
     if isinstance(value, list | tuple):
         return [to_plain(item) for item in value]
     return value
-
-
-def reply_size(payload: Any) -> int:
-    """Measure a reply as the number of characters of its JSON text.
-
-    Parameters
-    ----------
-    payload : `Any`
-        The reply.
-
-    Returns
-    -------
-    size : `int`
-        Its length in characters as indented JSON.
-    """
-    return len(json.dumps(payload, indent=2, default=str))
-
-
-def shrink(value: Any, maximum_items: int, maximum_text: int, maximum_depth: int) -> Any:
-    """Make nested data smaller by cutting lists, text and depth.
-
-    Parameters
-    ----------
-    value : `Any`
-        Plain data.
-    maximum_items : `int`
-        Most items kept in any list. A note says how many were left out.
-    maximum_text : `int`
-        Longest string kept, in characters.
-    maximum_depth : `int`
-        Deepest nesting kept. Deeper dicts become a note.
-
-    Returns
-    -------
-    smaller : `Any`
-        The cut data.
-    """
-    if isinstance(value, dict):
-        if maximum_depth <= 0:
-            return f"<{len(value)} fields left out>"
-        return {
-            key: shrink(item, maximum_items, maximum_text, maximum_depth - 1) for key, item in value.items()
-        }
-    if isinstance(value, list):
-        kept = [
-            shrink(item, maximum_items, maximum_text, maximum_depth - 1) for item in value[:maximum_items]
-        ]
-        if len(value) > maximum_items:
-            kept.append(f"<{len(value) - maximum_items} more items left out>")
-        return kept
-    if isinstance(value, str) and len(value) > maximum_text:
-        return value[: maximum_text - 1] + "…"
-    return value
-
-
-def trim_oldest_rows(payload: dict[str, Any], budget: int) -> dict[str, Any] | None:
-    """Make a reply fit by dropping the oldest rows of its longest list.
-
-    Lists in a reply run oldest first, so dropping from the front keeps the
-    newest rows complete. This is tried before the blunter `shrink`.
-
-    Parameters
-    ----------
-    payload : `dict` [`str`, `Any`]
-        The reply.
-    budget : `int`
-        Largest allowed size in characters.
-
-    Returns
-    -------
-    reply : `dict` [`str`, `Any`] or `None`
-        A copy with the longest top-level list cut to its newest rows, with
-        ``truncated`` set and ``shown`` updated, or `None` if cutting rows
-        cannot make the reply fit.
-    """
-    lists = {key: value for key, value in payload.items() if isinstance(value, list) and len(value) > 1}
-    if not lists:
-        return None
-    key = max(lists, key=lambda name: len(lists[name]))
-    rows = lists[key]
-    for keep in range(len(rows) - 1, 0, -1):
-        candidate = {**payload, key: rows[-keep:], "truncated": True}
-        candidate["truncation_note"] = (
-            f"The answer was too large, so only the newest {keep} of {len(rows)} rows are shown. "
-            "Ask for a smaller limit or a single night."
-        )
-        if "shown" in candidate:
-            candidate["shown"] = keep
-        if reply_size(candidate) <= budget:
-            return candidate
-    return None
-
-
-def fit_to_budget(payload: dict[str, Any], budget: int = MAXIMUM_REPLY_CHARACTERS) -> dict[str, Any]:
-    """Make a reply fit under a size limit.
-
-    Parameters
-    ----------
-    payload : `dict` [`str`, `Any`]
-        The reply.
-    budget : `int`, optional
-        Largest allowed size in characters.
-
-    Returns
-    -------
-    reply : `dict` [`str`, `Any`]
-        The reply unchanged if it fits. Otherwise the least-shrunk version
-        that fits, with ``truncated`` set and a note. If nothing fits, only
-        the kind and the names of the top-level fields.
-    """
-    if reply_size(payload) <= budget:
-        return payload
-    trimmed = trim_oldest_rows(payload, budget)
-    if trimmed is not None:
-        return trimmed
-    note = (
-        "The answer was too large, so lists and long text were cut. Ask a narrower question: "
-        "one night, fewer items, or fewer sections."
-    )
-    for items, text, depth in SHRINK_LEVELS:
-        candidate = shrink(payload, items, text, depth)
-        if isinstance(candidate, dict):
-            candidate["truncated"] = True
-            candidate["truncation_note"] = note
-            if reply_size(candidate) <= budget:
-                return candidate
-    return {
-        "kind": payload.get("kind"),
-        "truncated": True,
-        "truncation_note": note,
-        "fields": sorted(payload),
-    }
 
 
 def sample_evenly(items: list[Any], count: int) -> list[Any]:
@@ -344,61 +167,7 @@ def ekos_sections(context: Any, include: list[str], limit: int) -> dict[str, Any
     return answer
 
 
-def refuse_unused_arguments(
-    kind: str,
-    used: tuple[str, ...],
-    session_id: str | None = None,
-    ekos_file_id: str | None = None,
-    include: list[str] | None = None,
-) -> None:
-    """Refuse an optional argument that a kind of question does not use.
-
-    Parameters
-    ----------
-    kind : `str`
-        The kind of question, for the message.
-    used : `tuple` [`str`, ...]
-        The optional arguments the kind uses.
-    session_id, ekos_file_id, include
-        The caller's optional arguments. An empty one counts as not given.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If an argument is given that `kind` does not use.
-    """
-    given = {"session_id": session_id, "ekos_file_id": ekos_file_id, "include": include}
-    unused = [name for name, value in given.items() if value and name not in used]
-    if unused:
-        raise InvalidArgumentError(
-            f"kind={kind!r} does not use {', '.join(unused)}. It uses: "
-            f"{', '.join(used) or 'no optional arguments'}."
-        )
-
-
-def checked_limit(limit: int) -> int:
-    """Check that a caller's `limit` lies between 1 and ``MAXIMUM_LIMIT``.
-
-    A value outside the range is refused with `InvalidArgumentError` (by
-    `check_limit`), not moved into it, as everywhere in the public API.
-
-    Parameters
-    ----------
-    limit : `int`
-        The caller's value.
-
-    Returns
-    -------
-    limit : `int`
-        The same value.
-    """
-    check_limit(limit, 1, MAXIMUM_LIMIT, allow_none=False)
-    return int(limit)
-
-
-def build_night_list(
-    context: ControlContext, limit: int = DEFAULT_LIMIT, now: float | None = None
-) -> list[NightListEntry]:
+def build_night_list(context: ControlContext, now: float | None = None) -> list[NightListEntry]:
     """List the recorded observing nights and what data each has.
 
     A night is listed if it has light frames from the active equipment, an
@@ -418,8 +187,6 @@ def build_night_list(
     context : `ControlContext`
         Supplies the recorded Ekos sessions, guiding runs and the science
         library's frame records.
-    limit : `int`, optional
-        How many of the most recent nights to list.
     now : `float`, optional
         The moment that decides which night is in progress, as seconds since
         the Unix epoch. Defaults to the present.
@@ -431,7 +198,6 @@ def build_night_list(
         context's review cache until the data behind them change (the live
         guiding samples do not count), and each caller gets its own copy.
     """
-    limit = checked_limit(limit)
     tonight = observing_night_id(time.time() if now is None else now)
     signs = nights_context_signs(context.config)
     cache = context.review_cache
@@ -456,7 +222,7 @@ def build_night_list(
         copy_result=False,
     )
     entries: list[NightListEntry] = []
-    for night_id, entry in sorted([*finished, *in_progress], key=lambda pair: pair[0])[-limit:]:
+    for night_id, entry in sorted([*finished, *in_progress], key=lambda pair: pair[0]):
         # A recorded session named by something that is not a date fails here,
         # and only when that night is among the ones listed.
         entries.append(entry if entry is not None else _entry_of(night_id, [], index, frozenset()))
@@ -562,250 +328,248 @@ def _entry_of(
     )
 
 
-def build_night_history(
-    context: ControlContext,
-    kind: str,
-    session_id: str | None = None,
-    ekos_file_id: str | None = None,
-    include: list[str] | None = None,
-    limit: int = DEFAULT_LIMIT,
-) -> dict[str, Any]:
-    """Answer one question about past observing nights.
+def query_nights(
+    context: ControlContext, limit: int | None = None, offset: int = 0, now: float | None = None
+) -> Page[NightListEntry]:
+    """List the recorded observing nights, oldest first, as a `Page`.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the recorded data (see `build_night_list`).
+    limit : `int` or `None`, optional
+        The most nights to return. `None` returns every night.
+    offset : `int`, optional
+        How many nights to skip first.
+    now : `float`, optional
+        The moment that decides which night is in progress.
+
+    Returns
+    -------
+    nights : `Page` [`NightListEntry`]
+        The nights, oldest first.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if `limit` is below 1 or `offset` is
+    below 0.
+    """
+    _check_page(limit, offset)
+    return Page.of(build_night_list(context, now=now), offset=offset, limit=limit)
+
+
+def _check_page(limit: int | None, offset: int) -> None:
+    """Refuse a page size below 1 or an offset below 0.
+
+    Parameters
+    ----------
+    limit : `int` or `None`
+        The most items to return; `None` for every one.
+    offset : `int`
+        How many items to skip first.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If either value is out of range.
+    """
+    if limit is not None and limit < 1:
+        raise InvalidArgumentError("limit must be at least 1, or None for every match.")
+    if offset < 0:
+        raise InvalidArgumentError("offset must be 0 or more.")
+
+
+def get_capture_analysis(context: ControlContext, night: str) -> CaptureSessionAnalysis:
+    """Analyse one night's captured frames.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the recorded data.
-    kind : `str`
-        One of ``KINDS``. ``KIND_ARGUMENTS`` lists the optional arguments
-        each kind uses.
-    session_id : `str`, optional
-        An observing night, named for the local date it began, such as
-        ``"2026-09-24"``.
-    ekos_file_id : `str`, optional
-        For ``kind="ekos_sessions"``, one session's id.
-    include : `list` [`str`], optional
-        For one Ekos session, the sections to return (``EKOS_SECTIONS``).
-    limit : `int`, optional
-        How many of the most recent nights, runs or sessions to cover, and
-        how many items of each Ekos section. From 1 to 50.
+    night : `str`
+        The observing night, such as ``"2026-09-24"``.
 
     Returns
     -------
-    reply : `dict` [`str`, `Any`]
-        The answer under a key named for the kind. Always under
-        ``MAXIMUM_REPLY_CHARACTERS``; if it had to be cut, ``truncated``
-        is set.
+    analysis : `CaptureSessionAnalysis`
+        The night's capture analysis.
 
     Raises
     ------
-    InvalidArgumentError
-        If `kind` is unknown, or an argument is given that `kind` does not
-        use.
-
-    Notes
-    -----
-    The helpers also raise: `NotFoundError` when nothing is recorded for
-    the night, Ekos session or alignment night asked about,
-    `InvalidArgumentError` when a required argument is missing,
-    `ConflictError` for ``"sky_coverage"`` when no telescope and camera
-    are active, and `ConfigurationError` for
-    ``"pointing_model"`` when no observer location is known.
+    NotFoundError
+        If nothing is recorded for the night, or no equipment is active.
     """
-    if kind not in KINDS:
-        raise InvalidArgumentError(f"kind must be one of: {', '.join(KINDS)}.")
-    refuse_unused_arguments(kind, KIND_ARGUMENTS[kind], session_id, ekos_file_id, include)
-    limit = checked_limit(limit)
-    reply = _answer(context, kind, session_id, ekos_file_id, include, limit)
-    return fit_to_budget(reply)
+    analysis = night_analysis.capture_night_analysis(context, night)
+    if analysis is None:
+        raise NotFoundError(
+            f"Nothing is recorded for the capture analysis of night {night!r}.", details={"night": night}
+        )
+    return analysis
 
 
-def _answer(
-    context: ControlContext,
-    kind: str,
-    session_id: str | None,
-    ekos_file_id: str | None,
-    include: list[str] | None,
-    limit: int,
-) -> dict[str, Any]:
-    """Build the reply for a valid kind, before the size check.
+def get_guiding_analysis(context: ControlContext, night: str) -> GuidingSessionAnalysis:
+    """Analyse one night's guiding.
 
     Parameters
     ----------
-    context, kind, session_id, ekos_file_id, include, limit
-        As in `build_night_history`; ``limit`` is already in range.
+    context : `ControlContext`
+        Supplies the recorded data.
+    night : `str`
+        The observing night, such as ``"2026-09-24"``.
 
     Returns
     -------
-    reply : `dict` [`str`, `Any`]
-        The answer.
+    analysis : `GuidingSessionAnalysis`
+        The night's guiding analysis.
+
+    Raises
+    ------
+    NotFoundError
+        If nothing is recorded for the night.
+    """
+    analysis = night_analysis.guiding_night_analysis(context, night)
+    if analysis is None:
+        raise NotFoundError(
+            f"Nothing is recorded for the guiding analysis of night {night!r}.", details={"night": night}
+        )
+    return analysis
+
+
+def get_sky_coverage(context: ControlContext) -> SkyAnalysis:
+    """Analyse where on the sky the active equipment has imaged.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the recorded data.
+
+    Returns
+    -------
+    analysis : `SkyAnalysis`
+        The sky-coverage analysis.
 
     Raises
     ------
     ConflictError
-        If ``kind="sky_coverage"`` and no telescope and camera are active.
+        If no telescope and camera are active.
     """
-    if kind in ("capture", "guiding"):
-        return _capture_or_guiding(context, kind, session_id, limit)
-    if kind == "sky_coverage":
-        analysis = night_analysis.sky_coverage_analysis(context)
-        if analysis is None:
-            raise ConflictError("No telescope and camera are active, so the sky coverage cannot be analysed.")
-        return {"kind": kind, "analysis": to_plain(analysis)}
-    if kind == "recurring_issues":
-        issues = night_analysis.recurring_issues(context, latest_nights=limit)
-        return {"kind": kind, "nights_covered": f"the latest {limit}", "issues": to_plain(issues)}
-    if kind == "guiding_runs":
-        runs = night_analysis.guiding_runs(context, session_id)
-        shown = runs[-limit:]
-        return {"kind": kind, "total": len(runs), "shown": len(shown), "runs": to_plain(shown)}
-    if kind == "ekos_sessions":
-        return _ekos(context, session_id, ekos_file_id, include, limit)
-    if kind == "alignment":
-        from wayfindinglib.tasks.control_tasks import alignment_history
-
-        if session_id:
-            return alignment_history.alignment_night(context, session_id)
-        return alignment_history.alignment_nights(context, limit)
-    return _pointing_model(context, session_id)
+    analysis = night_analysis.sky_coverage_analysis(context)
+    if analysis is None:
+        raise ConflictError("No telescope and camera are active, so the sky coverage cannot be analysed.")
+    return analysis
 
 
-def _capture_or_guiding(
-    context: ControlContext, kind: str, session_id: str | None, limit: int
-) -> dict[str, Any]:
-    """Answer a capture or guiding question: one night, or recent nights.
+def query_guiding_runs(
+    context: ControlContext, night: str | None = None, limit: int | None = None, offset: int = 0
+) -> Page[GuidingRunSummary]:
+    """List the recorded guiding runs, oldest first, as a `Page`.
 
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the recorded data.
-    kind : `str`
-        ``"capture"`` or ``"guiding"``.
-    session_id : `str` or `None`
-        A night for the full analysis, or `None` for one summary row per
-        recent night.
-    limit : `int`
-        How many recent nights the summary covers.
+        Supplies the stored runs.
+    night : `str`, optional
+        Only the runs of this observing night.
+    limit : `int` or `None`, optional
+        The most runs to return. `None` returns every run.
+    offset : `int`, optional
+        How many runs to skip first.
 
     Returns
     -------
-    reply : `dict` [`str`, `Any`]
-        The analysis or the summary rows.
-
-    Raises
-    ------
-    NotFoundError
-        If nothing is recorded for `session_id`.
+    runs : `Page` [`GuidingRunSummary`]
+        The runs, oldest first.
     """
-    if session_id:
-        analyze = (
-            night_analysis.capture_night_analysis
-            if kind == "capture"
-            else night_analysis.guiding_night_analysis
-        )
-        analysis = analyze(context, session_id)
-        if analysis is None:
-            raise NotFoundError(
-                f"Nothing is recorded for the {kind} analysis of night {session_id!r}.",
-                details={"session_id": session_id},
-            )
-        return {"kind": kind, "session_id": session_id, "analysis": to_plain(analysis)}
-    summarize = (
-        night_analysis.capture_night_summaries
-        if kind == "capture"
-        else night_analysis.guiding_night_summaries
-    )
-    rows = summarize(context, latest_nights=limit)
-    return {"kind": kind, "nights_covered": f"the latest {limit}", "nights": to_plain(rows)}
+    _check_page(limit, offset)
+    return Page.of(night_analysis.guiding_runs(context, night), offset=offset, limit=limit)
 
 
-def _ekos(
-    context: ControlContext,
-    session_id: str | None,
-    ekos_file_id: str | None,
-    include: list[str] | None,
-    limit: int,
-) -> dict[str, Any]:
-    """Answer an Ekos question: a list of sessions, or one session's sections.
+def query_ekos_sessions(
+    context: ControlContext, night: str | None = None, limit: int | None = None, offset: int = 0
+) -> Page[EkosSessionSummary]:
+    """List the recorded Ekos sessions, oldest first, as a `Page`.
 
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the recorded sessions.
-    session_id : `str` or `None`
-        Keep only the sessions of this night when listing.
-    ekos_file_id : `str` or `None`
-        One session to read in detail.
-    include : `list` [`str`] or `None`
-        Sections of the session to return. `None` returns only the overview.
-    limit : `int`
-        How many sessions to list, or items to keep per section.
+        Supplies the stored session records.
+    night : `str`, optional
+        Only the sessions of this observing night.
+    limit : `int` or `None`, optional
+        The most sessions to return. `None` returns every session.
+    offset : `int`, optional
+        How many sessions to skip first.
 
     Returns
     -------
-    reply : `dict` [`str`, `Any`]
-        The list, the overview, or the chosen sections.
-
-    Raises
-    ------
-    InvalidArgumentError
-        If `include` is given without `ekos_file_id`, or names an unknown
-        section.
-    NotFoundError
-        If no Ekos session has the id `ekos_file_id`.
+    sessions : `Page` [`EkosSessionSummary`]
+        One summary per session: its id, night, times, equipment and how
+        many items each section holds.
     """
-    if ekos_file_id:
-        record = night_analysis.ekos_session_record(context, ekos_file_id)
-        if record is None:
-            raise NotFoundError(
-                f"No Ekos session with id {ekos_file_id!r}. List the sessions to find an id.",
-                details={"ekos_file_id": ekos_file_id},
-            )
-        unknown = [name for name in (include or []) if name not in EKOS_SECTIONS]
-        if unknown:
-            raise InvalidArgumentError(
-                f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."
-            )
-        if not include:
-            return {"kind": "ekos_sessions", "session": {"overview": ekos_overview(record)}}
-        return {"kind": "ekos_sessions", "session": ekos_sections(record, include, limit)}
-    if include:
-        raise InvalidArgumentError("include needs an ekos_file_id: it picks sections of one session.")
-    summaries = night_analysis.ekos_session_summaries(context)
-    if session_id:
-        summaries = [row for row in summaries if row["sessionId"] == session_id]
-    shown = summaries[-limit:]
-    return {"kind": "ekos_sessions", "total": len(summaries), "shown": len(shown), "sessions": shown}
+    _check_page(limit, offset)
+    records = sorted(context.butler.get_all("ekos_session_context"), key=lambda record: record.started_at)
+    if night:
+        records = [record for record in records if record.session_id == night]
+    summaries = [EkosSessionSummary.of(record) for record in records]
+    return Page.of(summaries, offset=offset, limit=limit)
 
 
-def _pointing_model(context: ControlContext, session_id: str | None) -> dict[str, Any]:
-    """Answer a pointing-model question for one night.
+def get_ekos_session(
+    context: ControlContext, ekos_id: str, include: list[str] | None = None
+) -> EkosSessionContext | None:
+    """Read one recorded Ekos session, with only the sections asked for.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the stored session records.
+    ekos_id : `str`
+        The session's id, the analyze file's time stamp, such as
+        ``"2026-09-23T20-31-48"``.
+    include : `list` [`str`], optional
+        The sections to keep (names from `EKOS_SECTIONS`). The other
+        sections come back empty. `None` keeps none.
+
+    Returns
+    -------
+    session : `EkosSessionContext` or `None`
+        The session, or `None` if none has that id.
+
+    Notes
+    -----
+    Raises `InvalidArgumentError` if `include` names an unknown section.
+    """
+    kept = set(check_include(include, EKOS_SECTIONS))
+    record = night_analysis.ekos_session_record(context, ekos_id)
+    if record is None:
+        return None
+    cleared: dict[str, Any] = {name: [] for name in EKOS_SECTIONS if name != "equipment" and name not in kept}
+    if "equipment" not in kept:
+        cleared["equipment"] = None
+    return record.model_copy(update=cleared)
+
+
+def get_pointing_model(context: ControlContext, night: str) -> MountPointingModel:
+    """Fit the mount's pointing model to one night's plate solves.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the plate solves and the observer location.
-    session_id : `str` or `None`
-        The night to fit. Required: a fit that mixes several nights'
-        polar alignments is not meaningful.
+    night : `str`
+        The night to fit. A model that mixes several nights' polar
+        alignments is not meaningful, so one night is required.
 
     Returns
     -------
-    reply : `dict` [`str`, `Any`]
+    model : `MountPointingModel`
         The fitted model.
 
     Raises
     ------
-    InvalidArgumentError
-        If `session_id` is not given.
     ConfigurationError
         If no observer location is known.
     """
-    if not session_id:
-        raise InvalidArgumentError(
-            "kind='pointing_model' needs a session_id, because a model that mixes "
-            "several nights is not meaningful."
-        )
     if context.observer_location() is None:
         raise ConfigurationError(
             "No observer location is known, so the fit would have to guess the latitude. Set "
@@ -813,5 +577,4 @@ def _pointing_model(context: ControlContext, session_id: str | None) -> dict[str
         )
     from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
 
-    model = pointing_log_ingestion.compute_pointing_model(context, context.records, session_id)
-    return {"kind": "pointing_model", "session_id": session_id, "model": to_plain(model)}
+    return pointing_log_ingestion.compute_pointing_model(context, context.records, night)

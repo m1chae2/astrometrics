@@ -173,7 +173,7 @@ def test_each_guiding_run_is_recorded_with_its_lost_frames(
     assert run.focal_length_mm == pytest.approx(121.05)
     assert run.written_by_ekos is True
     assert run.lost_fraction == pytest.approx(1 / 3)
-    assert run.duration_seconds == pytest.approx(300.0)
+    assert run.duration_s == pytest.approx(300.0)
 
 
 def test_a_log_with_only_a_calibration_records_no_run(records: ControlRecordStore, tmp_path: Path) -> None:
@@ -415,9 +415,9 @@ def test_frame_lookup_returns_only_light_frames_in_the_time_span() -> None:
                 Returns
                 -------
                 answer : `SimpleNamespace`
-                    ``objects`` holds a single target with five frames.
+                    ``items`` holds a single target with five frames.
                 """
-                return SimpleNamespace(objects=[_Target()])
+                return SimpleNamespace(items=(_Target(),))
 
     lookup = build_frame_lookup(_Astrometrics())
 

@@ -25,6 +25,7 @@
     "documentation/library_design/*_Library_*.md",
     "documentation/library_design/Wayfinding_Quality_Judgment.md",
     "documentation/library_design/Wayfinding_Quality_Use_Cases.md",
+    "documentation/library_design/Public_API_Design_Guide.md",
     "documentation/user_interface/**/*.md",
     "documentation/library_design/pipelines/*.md",
     "documentation/library_design/validation/*.md"

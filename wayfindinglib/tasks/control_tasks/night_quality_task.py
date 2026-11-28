@@ -1,7 +1,7 @@
 """Purpose: Review the quality of one observing night.
 
 Description: `build_night_quality` is the work behind
-`review.query(kind="night_quality", session_id=...)`
+`review.nights.get(night)`
 (use case UC1 in `Wayfinding_Quality_Use_Cases.md`). For each target imaged
 that night it states where the time went: frames set aside, and the efficiency
 lost in the frames kept, against the user's own best nights with the same
@@ -45,10 +45,9 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FilterType, Target
+from astrometricslib import CaptureSetting, FilterType, Target
 from astrometricslib.exceptions import NotFoundError
 from astrometricslib.reports import (
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,
@@ -254,8 +253,8 @@ def _target_quality(
         goal=goal,
         frames_taken=summary.frames_taken,
         frames_set_aside=summary.frames_set_aside,
-        captured_seconds=summary.captured_seconds,
-        efficiency_effective_seconds=summary.efficiency_effective_seconds,
+        captured_s=summary.captured_s,
+        efficiency_effective_s=summary.efficiency_effective_s,
         capture_settings=summary.setting_summaries,
         loss_account=summary.loss_account,
         statements=statements,
@@ -490,6 +489,39 @@ def build_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     )
 
 
+def get_night_quality(context: ControlContext, night: str, required: bool = False) -> NightQuality | None:
+    """Review one night, or say there is nothing to review.
+
+    The owner of `review.nights.get`: `build_night_quality`, with a night
+    that has nothing recorded read as `None` unless `required` is set.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        As in `build_night_quality`.
+    night : `str`
+        The night, named for the local date on which it began.
+    required : `bool`, optional
+        Raise `NotFoundError` instead of returning `None`.
+
+    Returns
+    -------
+    quality : `NightQuality` or `None`
+        The review, or `None` when nothing is recorded for the night.
+
+    Raises
+    ------
+    NotFoundError
+        If nothing is recorded for the night and `required` is set.
+    """
+    try:
+        return build_night_quality(context, night)
+    except NotFoundError:
+        if required:
+            raise
+        return None
+
+
 def review_night_quality(context: ControlContext, night_id: str) -> NightQuality:
     """Review one observing night from the stored records, always afresh.
 
@@ -516,8 +548,10 @@ def review_night_quality(context: ControlContext, night_id: str) -> NightQuality
         If the night has neither frame measurements nor guiding data.
     """
     astrometrics = context.astrometrics
-    capture_settings = astrometrics.quality.capture_settings()
-    night_rows = astrometrics.quality.query(observing_night_id=night_id, library_only=True).rows
+    capture_settings = {
+        stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings()
+    }
+    night_rows = list(astrometrics.quality.records.query(night=night_id, library_only=True))
     inputs = LibraryInputs(astrometrics, context.butler, context.config)
     # The targets are listed once and handed to every step that needs them.
     targets: dict[str, Target] = inputs.targets()
@@ -581,7 +615,9 @@ def review_night_quality(context: ControlContext, night_id: str) -> NightQuality
             moonless or None,
         )
         target_night_rows = rows_by_target[target_id]
-        stack_rows = astrometrics.quality.query(target_id=target_id, level="stack", library_only=True).rows
+        stack_rows = list(
+            astrometrics.quality.records.query(target=goal_target, level="stack", library_only=True)
+        )
         statements = _target_statements(
             target_night_rows, stack_rows, capture_settings, _main_setting_id(target_night_rows)
         )
@@ -710,10 +746,8 @@ def _summary_by_goal(
                 moonless_sky_rate_by_frame=moonless_sky_rate_by_frame,
             ),
         ))
-    parts.sort(key=lambda part: (-part[1].captured_seconds, part[0].value))
-    effective = [
-        p.efficiency_effective_seconds for _g, p in parts if p.efficiency_effective_seconds is not None
-    ]
+    parts.sort(key=lambda part: (-part[1].captured_s, part[0].value))
+    effective = [p.efficiency_effective_s for _g, p in parts if p.efficiency_effective_s is not None]
     summaries = [
         item.model_copy(update={"science_goal": group_goal})
         for group_goal, part in parts
@@ -731,8 +765,8 @@ def _summary_by_goal(
         nights=sorted({n for _g, part in parts for n in part.nights}),
         frames_taken=sum(p.frames_taken for _g, p in parts),
         frames_set_aside=sum(p.frames_set_aside for _g, p in parts),
-        captured_seconds=sum(p.captured_seconds for _g, p in parts),
-        efficiency_effective_seconds=sum(effective) if effective else None,
+        captured_s=sum(p.captured_s for _g, p in parts),
+        efficiency_effective_s=sum(effective) if effective else None,
         setting_summaries=summaries,
         loss_account=None,
         notes=notes,
@@ -788,7 +822,7 @@ def _unobserved_set_aside(
         setting = capture_settings[setting_id]
         found[frame_id] = SetAsideInput(
             frame_id=frame_id,
-            exposure_seconds=setting.exposure_seconds or 0.0,
+            exposure_s=setting.exposure_s or 0.0,
             reason=reasons[frame_id],
             capture_setting=setting,
             night_id=night_id,

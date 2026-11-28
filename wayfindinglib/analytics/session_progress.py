@@ -17,7 +17,7 @@ Register row WAY-D84 holds the window.
 
 from datetime import UTC, date, datetime
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib.analytics.frame_counting import (
     EquipmentNames,
     RequestCount,
@@ -29,9 +29,13 @@ from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     QueuedObservationPackage,
     QueueEntryStatus,
-    RunState,
 )
-from wayfindinglib.models.session.session_progress import EntryProgress, RowProgress, SessionProgress
+from wayfindinglib.models.session.session_progress import (
+    EntryProgress,
+    RowProgress,
+    RunState,
+    SessionProgress,
+)
 
 IMAGING_NOW_WINDOW_SECONDS = 600.0
 """An entry is being imaged now when its newest frame arrived this recently.
@@ -169,7 +173,7 @@ def _entry_progress(
             RowProgress(
                 source_key=row.source_key,
                 filter_name=str(row.filter.value),
-                exposure_sec=row.exposure_sec,
+                exposure_s=row.exposure_s,
                 requested=count.requested,
                 captured=count.captured,
                 judged=count.judged,

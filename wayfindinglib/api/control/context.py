@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from astrometricslib.drivers import VersionedCache
+from wayfindinglib._internal.renames import MovedNames
 from wayfindinglib.analytics.night_index import TargetFrameMemo
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -36,7 +37,7 @@ from wayfindinglib.tasks.control_tasks.live_guiding import LiveGuidingMonitor
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 
 if TYPE_CHECKING:
-    from astrometricslib import AppConfiguration, Astrometrics
+    from astrometricslib import AppConfiguration, Astrometrics, Camera, GuideScope, Telescope
     from wayfindinglib.drivers.control_record_store import ControlRecordStore
     from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
     from wayfindinglib.drivers.indi_worker import IndiWorkerClient
@@ -53,7 +54,6 @@ if TYPE_CHECKING:
     from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
     from wayfindinglib.drivers.ssh_port_forward import SshPortForward
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
-    from wayfindinglib.models.equipment_and_site.equipment import Camera, GuideScope, Telescope
     from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
     from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
     from wayfindinglib.models.policy.delegation import DelegationPolicy
@@ -157,7 +157,13 @@ class ControlContext:
         """Each target's frames in their nights, for the list of nights."""
         self._indi_diagnostics: IndiDiagnostics | None = None
         self.motion_stop = threading.Event()
-        """Set by `control.mount.abort_motion` to stop a centering loop."""
+        """Set by `control.mount.stop` to stop a centering loop."""
+        self.guide_loop_lock = threading.Lock()
+        """Lets one caller at a time start or stop this app's guide loop."""
+        self.guide_loop_thread: threading.Thread | None = None
+        """The thread of this app's guide loop, while one runs."""
+        self.guide_loop_stop: threading.Event | None = None
+        """Set to end the guide loop that `guide_loop_thread` runs."""
 
     # -- Shared handles --------------------------------------------------
 
@@ -631,8 +637,10 @@ class ControlContext:
 
         Builds nothing: a driver that was never asked for has nothing
         running. This includes the INDI worker process, if one was
-        started. Safe to call more than once.
+        started, and this app's guide loop. Safe to call more than once.
         """
+        if self.guide_loop_stop is not None:
+            self.guide_loop_stop.set()
         with self._guiding_driver_lock:
             guiding_driver = self._guiding_driver
             port_forward, self._phd2_port_forward = self._phd2_port_forward, None
@@ -771,9 +779,9 @@ class ControlContext:
         camera = self.active_camera()
         if telescope is None or camera is None:
             return None
-        from wayfindinglib.models.equipment_and_site.equipment import EquipmentConfiguration
+        from astrometricslib import ObservatoryConfiguration
 
-        configuration = EquipmentConfiguration(telescope=telescope, camera=camera)
+        configuration = ObservatoryConfiguration(telescope=telescope, camera=camera)
         return configuration.guider_plate_scale_arcsec_per_px(
             self.active_guide_scope(), self.active_guide_camera()
         )
@@ -937,7 +945,7 @@ def require_text(**texts: str) -> None:
             raise InvalidArgumentError(f"{name} must not be empty.")
 
 
-class ControlChild:
+class ControlChild(MovedNames):
     """Base of the `control` children: each holds the shared context.
 
     Parameters

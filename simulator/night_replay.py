@@ -108,7 +108,7 @@ class CapturedFrame:
         The target's name (the ``OBJECT`` header).
     saved_utc : `datetime.datetime`
         When the log says the file was saved (naive UTC).
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length.
     ra_hours, dec_degrees : `float`
         Where the mount pointed (from the header's ``RA`` in degrees and
@@ -121,7 +121,7 @@ class CapturedFrame:
     remote_relpath: str
     target_id: str
     saved_utc: datetime
-    exposure_seconds: float
+    exposure_s: float
     ra_hours: float
     dec_degrees: float
     source: Path
@@ -284,7 +284,7 @@ def captured_frames(captures: list[SavedCapture], library: dict[str, list[Path]]
                 remote_relpath=part.group(1),
                 target_id=str(header.get("OBJECT", "")),
                 saved_utc=datetime.fromtimestamp(capture.completed_at, UTC).replace(tzinfo=None),
-                exposure_seconds=capture.exposure_seconds,
+                exposure_s=capture.exposure_s,
                 ra_hours=float(header["RA"]) / 15.0,
                 dec_degrees=float(header["DEC"]),
                 source=candidates[0],
@@ -314,7 +314,7 @@ def clock_check_seconds(frames: list[CapturedFrame]) -> float | None:
     for frame in frames[:: max(1, len(frames) // 20)]:
         header = fits.getheader(frame.source, memmap=False)
         observed = datetime.fromisoformat(str(header["DATE-OBS"]).split("+")[0])
-        differences.append((frame.saved_utc - observed).total_seconds() - frame.exposure_seconds)
+        differences.append((frame.saved_utc - observed).total_seconds() - frame.exposure_s)
     return statistics.median(differences) if differences else None
 
 
@@ -404,7 +404,7 @@ def refuse_real_folder(path: Path) -> None:
 def build_plan(
     night: str = DEFAULT_NIGHT,
     speed: float = 1.0,
-    window_seconds: float = DEFAULT_WINDOW_SECONDS,
+    window_s: float = DEFAULT_WINDOW_SECONDS,
     preload_frames: int = DEFAULT_PRELOAD_FRAMES,
     window_start: datetime | None = None,
     log_directory: Path | None = None,
@@ -419,7 +419,7 @@ def build_plan(
     speed : `float`, optional
         Replay speed. At 2 the window covers twice as much night in the same
         real time.
-    window_seconds : `float`, optional
+    window_s : `float`, optional
         Real seconds of live replay.
     preload_frames : `int`, optional
         How many earlier frames to load before the run.
@@ -463,7 +463,7 @@ def build_plan(
         moment for moment, _, event in guide_lines if event and event["Event"] in ("GuideStep", "StarLost")
     ]
     span = (guide_times[0], guide_times[-1])
-    length = window_seconds * speed
+    length = window_s * speed
     if window_start is None:
         settles = [m for m, _, event in guide_lines if event and event["Event"] == "SettleBegin"]
         lost = [m for m, _, event in guide_lines if event and event["Event"] == "StarLost"]
@@ -511,7 +511,7 @@ def build_plan(
             "start_utc": window_start.isoformat(),
             "end_utc": window_end.isoformat(),
             "night_seconds": length,
-            "real_seconds": window_seconds,
+            "real_seconds": window_s,
         },
         "guide_log_name": guide_path.name,
         "analyze_log_name": analyze_path.name,
@@ -549,7 +549,7 @@ def _frame_entry(frame: CapturedFrame, offset_seconds: float | None) -> dict:
         "name": frame.name,
         "remote_relpath": frame.remote_relpath,
         "target_id": frame.target_id,
-        "exposure_seconds": frame.exposure_seconds,
+        "exposure_s": frame.exposure_s,
         "ra_hours": frame.ra_hours,
         "dec_degrees": frame.dec_degrees,
         "saved_utc": frame.saved_utc.isoformat(),

@@ -60,19 +60,19 @@ def merge_exposure_requests(requests: Iterable[ExposureRequest]) -> list[Exposur
         key = (
             request.frame_type,
             request.filter,
-            request.exposure_sec,
-            request.gain_setting,
+            request.exposure_s,
+            request.gain,
             request.offset,
             request.binning,
         )
         existing = merged.get(key)
         if existing is None:
             merged[key] = request.model_copy()
-        elif existing.delay_sec != request.delay_sec:
+        elif existing.delay_s != request.delay_s:
             raise InvalidArgumentError(
                 "Two requests for the same frame type, filter, exposure and camera setting give different "
-                f"delays ({existing.delay_sec} s and {request.delay_sec} s). Keep one.",
-                details={"delays": [existing.delay_sec, request.delay_sec]},
+                f"delays ({existing.delay_s} s and {request.delay_s} s). Keep one.",
+                details={"delays": [existing.delay_s, request.delay_s]},
             )
         else:
             merged[key] = existing.model_copy(update={"count": existing.count + request.count})
@@ -103,7 +103,7 @@ def check_exposure_requests(requests: Iterable[ExposureRequest], allowed: Allowe
     notes: list[str] = []
     reasons: list[str] = []
     for request in requests:
-        verdict = allowed.check(request.gain_setting, request.offset, request.binning, request.filter)
+        verdict = allowed.check(request.gain, request.offset, request.binning, request.filter)
         reasons.extend(reason for reason in verdict.reasons if reason not in reasons)
         notes.extend(f"{allowed.camera_name}: {note}" for note in verdict.notes)
     if reasons:

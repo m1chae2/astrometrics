@@ -1,4 +1,4 @@
-"""Purpose: The result model of `ObservationReview.query_alignment_records`.
+"""Purpose: The result model of `review.alignment.query`.
 
 Description: The stored alignment records of the mount, as the app's
 alignment views show them: the plate-solve attempts, the same attempts
@@ -19,7 +19,7 @@ from wayfindinglib.models.session.telemetry import (
 class AlignmentRecords(BaseModel):
     """Stored alignment attempts, their grouping by target, and a polar run.
 
-    Returned by `ObservationReview.query_alignment_records`.
+    Returned by `review.alignment.query`.
 
     Attributes
     ----------

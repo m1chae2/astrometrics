@@ -30,7 +30,7 @@ _PLATE_SCALE = 6.39
 def _frame(
     generator: np.random.Generator,
     exposure: float,
-    flux_per_second: float,
+    flux_per_s: float,
     centre: tuple[float, float],
     fwhm: float = 1.6,
     background: float = 100.0,
@@ -48,7 +48,7 @@ def _frame(
     sigma = fwhm / 2.3548
     profile = np.exp(-((columns - centre[0]) ** 2 + (rows - centre[1]) ** 2) / (2.0 * sigma**2))
     profile /= profile.sum()
-    signal = flux_per_second * exposure * profile
+    signal = flux_per_s * exposure * profile
     expected = background + signal
     frame = (
         expected
@@ -60,7 +60,7 @@ def _frame(
 
 def _series(
     exposure: float,
-    flux_per_second: float,
+    flux_per_s: float,
     seed: int,
     count: int = 10,
     seeing_px: float = 0.05,
@@ -80,7 +80,7 @@ def _series(
             32.0 + drift_px * index + generator.normal(0.0, seeing_px),
             30.0 - drift_px * index + generator.normal(0.0, seeing_px),
         )
-        frames.append(_frame(generator, exposure, flux_per_second, centre))
+        frames.append(_frame(generator, exposure, flux_per_s, centre))
     return frames
 
 
@@ -132,7 +132,7 @@ def test_a_bright_star_needs_only_a_short_exposure() -> None:
 
     test = analyze_guide_exposure_ladder(ladder, _PLATE_SCALE, _CEILING, 1.09, 0.10)
 
-    assert test.recommended_exposure_seconds == pytest.approx(0.5)
+    assert test.recommended_exposure_s == pytest.approx(0.5)
     assert "already" in test.summary
     assert "not needed" in test.summary
 
@@ -142,12 +142,12 @@ def test_a_faint_star_needs_a_longer_exposure_and_the_test_finds_it() -> None:
     ladder = {t: _series(t, 1500.0, seed=int(t * 10), seeing_px=0.01) for t in (0.25, 0.5, 1.0, 2.0, 4.0)}
 
     test = analyze_guide_exposure_ladder(ladder, _PLATE_SCALE, _CEILING, 1.09, 0.10)
-    by_length = {result.exposure_seconds: result for result in test.results}
+    by_length = {result.exposure_s: result for result in test.results}
 
     assert by_length[0.25].jitter_arcsec > by_length[4.0].jitter_arcsec
     assert not by_length[0.25].acceptable
-    assert test.recommended_exposure_seconds is not None
-    assert test.recommended_exposure_seconds > 0.25
+    assert test.recommended_exposure_s is not None
+    assert test.recommended_exposure_s > 0.25
     assert "shortest exposure" in test.summary
 
 
@@ -157,7 +157,7 @@ def test_brightness_grows_with_exposure() -> None:
 
     test = analyze_guide_exposure_ladder(ladder, _PLATE_SCALE, _CEILING, 1.09, 0.10)
 
-    rates = [result.flux_per_second for result in test.results]
+    rates = [result.flux_per_s for result in test.results]
     assert max(rates) / min(rates) < 1.2
 
 
@@ -169,7 +169,7 @@ def test_a_saturated_star_is_not_acceptable_however_steady() -> None:
 
     assert test.results[0].saturated
     assert not test.results[0].acceptable
-    assert test.recommended_exposure_seconds is None
+    assert test.recommended_exposure_s is None
     assert "saturates" in test.summary
 
 
@@ -179,7 +179,7 @@ def test_a_star_that_is_too_faint_at_every_length_says_what_to_check() -> None:
 
     test = analyze_guide_exposure_ladder(ladder, _PLATE_SCALE, _CEILING, 1.09, 0.10)
 
-    assert test.recommended_exposure_seconds is None
+    assert test.recommended_exposure_s is None
     assert "focus, dew" in test.summary or "No star was found" in test.summary
 
 
@@ -207,4 +207,4 @@ def test_without_a_guiding_limit_nothing_is_acceptable() -> None:
     test = analyze_guide_exposure_ladder(ladder, _PLATE_SCALE, _CEILING, None, 0.10)
 
     assert test.jitter_limit_arcsec is None
-    assert test.recommended_exposure_seconds is None
+    assert test.recommended_exposure_s is None

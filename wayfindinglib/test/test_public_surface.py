@@ -2,14 +2,22 @@
 
 Description: `wayfindinglib/__init__.py` is the only door into this library
 that code outside it should use. `Wayfinder.control` is split into a root
-and six children named by topic, and `planning` and `execution` are
-single classes. Renaming, adding or removing a public name is a change to
-the library's contract with the backend, the MCP servers and the UI, so it
+and six children named by topic, `planning` holds four objects, and
+`execution` is a single class. Renaming, adding or removing a public name
+is a change to the library's contract with the backend, the MCP servers and
+the UI, so it
 must be a deliberate edit to the lists below rather than a side effect of
 moving code. The tests also check that every export resolves, that
 `control` stays under its size limit, and that the argument guards work:
-`SkyPosition` checks its ranges, and `control.remote.list` refuses
-arguments its `kind` does not use.
+`SkyPosition` checks its ranges, and `control.remote.query_folders` and
+`query_files` refuse a bad kind and tell an offline computer from a missing
+folder.
+
+The last test checks every public method of `Wayfinder` against the public
+API design rules (`documentation/library_design/Public_API_Design_Guide.md`),
+with the rule code shared from `astrometricslib._internal.public_api_rules`.
+Known departures are listed in `public_api_rules_baseline.txt` next to this
+file; a new departure fails, and so does a listed one that no longer occurs.
 """
 
 import importlib
@@ -19,14 +27,25 @@ import pytest
 from pydantic import ValidationError
 
 import wayfindinglib
-from astrometricslib import AppConfiguration
+from astrometricslib import AppConfiguration, SkyPosition
+from astrometricslib._internal.public_api_rules import baseline_problems, find_violations, walk_public_api
 from astrometricslib.exceptions import ExternalServiceError, InvalidArgumentError, NotFoundError
 from wayfindinglib import ObservationExecution, ObservationPlanning, ObservationReview, ObservatoryControl
-from wayfindinglib._internal.control import SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
+BASELINE = Path(__file__).with_name("public_api_rules_baseline.txt")
+"""Known departures from the public API design rules, emptied by issue #206."""
+
 EXPECTED_EXPORTS = frozenset({
-    "FrameEndDetector",
+    "ChecklistItem",
+    "DitherConfig",
+    "ExposureRequest",
+    "FocusModel",
+    "Framing",
+    "GuiderCalibration",
+    "HorizonZone",
+    "MosaicPanel",
+    "QueueRequest",
     "ObservationExecution",
     "ObservationPackage",
     "ObservationPlanning",
@@ -47,83 +66,81 @@ EXPECTED_MODULE_NAMES = {
         "PlanRevisionConflictError",
     }),
     "wayfindinglib.logs": frozenset({
+        "FrameEndDetector",
         "SavedCapture",
         "ekos_utc_offset_hours",
         "read_ekos_captures",
     }),
     "wayfindinglib.reports": frozenset({
+        "DelegationState",
         "DepthGoalState",
         "DepthLevel",
+        "ObservatoryCapability",
         "PackageStatus",
         "RunState",
     }),
 }
 """Names each public module of wayfindinglib offers (its `__all__`)."""
 
-PLANNING_MEMBERS = frozenset({
-    "get_visibility",
-    "get_tonight_advice",
-    "get_calibration_advice",
-    "get_depth_goal",
-    "set_depth_goal",
-    "calculate_panels",
-    "tick_checklist_item",
-    "create_mosaic",
-    "create_sequence",
-    "create_package",
-    "create_session",
-    "add_to_queue",
-    "reorder_queue",
-    "remove_from_queue",
-    "set_entry_exposures",
-    "add_checklist_items",
-    "set_framing",
-    "update_package",
-    "reopen_package",
-    "dismiss_package",
-    "undismiss_package",
-    "delete_package",
-    "refresh_suggestions",
-    "get_plan",
-    "query_plans",
-    "get_package_for_target",
-    "get_deep_catalog_status",
-    "build_deep_star_catalog",
-    # Sky browsing around a point, and name lookups.
-    "query_sources",
-    "query_catalogs",
-    "get_constellation_lines",
-    "lookup_coordinates",
-})
-"""The public members of `ObservationPlanning`."""
+PLANNING_MEMBERS = frozenset({"sessions", "packages", "sky", "catalogs"})
+"""The four objects of `ObservationPlanning`; it has no methods of its own."""
+
+PLANNING_OBJECTS = {
+    "sessions": frozenset({"get", "query", "create", "add", "remove", "update"}),
+    "packages": frozenset({
+        "get",
+        "get_for_target",
+        "query",
+        "query_suggestion_log",
+        "create",
+        "update",
+        "restore",
+        "delete",
+        "record_suggestions",
+        "get_depth_goal",
+        "set_depth_goal",
+        "create_mosaic",
+    }),
+    "sky": frozenset({"get_visibility", "get_tonight_advice", "get_constellation_lines", "get_panels"}),
+    "catalogs": frozenset({
+        "query",
+        "query_sources",
+        "get_deep_status",
+        "predict_deep_catalog",
+        "record_deep_catalog",
+    }),
+}
+"""Each object of `ObservationPlanning` and its public members."""
 
 EXECUTION_MEMBERS = frozenset({
-    "advance_session",
-    "abort_session",
-    "reconcile_session",
-    "build_divergence_record",
+    "run",
+    "abort",
+    "reconcile",
     "create_recorder",
 })
 """The public members of `ObservationExecution`."""
 
-REVIEW_MEMBERS = frozenset({
-    "query",
-    "query_alignment_sessions",
-    "query_alignment_records",
-    "get_advisory",
-    "get_live_session_status",
-    "frame_guiding",
-    "get_performance_envelope",
-    "get_star_shape_review",
-    # What the recorded nights say about the equipment itself.
-    "measure_unguided_mount_error",
-    "measure_guiding_spectrum",
-    "measure_focus_temperature_coefficient",
-    "get_sky_rate_prediction",
-    # The wayfinding tuned values, worked out from the stored records.
-    "measure_tuned_parameters",
-})
-"""The public members of `ObservationReview`."""
+REVIEW_MEMBERS = frozenset({"nights", "targets", "guiding", "performance", "alignment"})
+"""The public members of `ObservationReview`: its five objects."""
+
+REVIEW_CHILDREN = {
+    "nights": {
+        "query",
+        "get",
+        "get_target_changes",
+        "get_capture",
+        "get_sky_coverage",
+        "get_recurring_issues",
+        "query_ekos_sessions",
+        "get_ekos_session",
+        "get_live_status",
+    },
+    "targets": {"get_report", "get_result", "get_star_shapes", "get_frame_guiding"},
+    "guiding": {"get_night", "query_runs", "measure_spectrum", "record_spectrum", "measure_unguided_error"},
+    "performance": {"get_envelope", "predict_sky_rate", "measure_focus_temperature"},
+    "alignment": {"query", "query_nights", "get_pointing_model", "get_polar_alignment", "record_external"},
+}
+
 
 ROOT_LIFECYCLE = frozenset({"close"})
 """Lifecycle methods on `control` itself, outside the operation count.
@@ -145,60 +162,57 @@ to the observatory.
 
 CHILDREN = {
     "mount": {
-        "status",
-        "poll_external_alignment",
-        "get_polar_alignment",
+        "get_status",
         "get_centering_exposure",
         "slew",
+        "stop",
+        "move",
         "park",
         "unpark",
         "set_tracking",
-        "manual_move",
-        "abort_motion",
-        "cancel_centering",
         "set_slew_rate",
     },
     "imaging": {
-        "status",
-        "capture_image",
-        "stop_capture",
+        "get_status",
+        "check_capture",
+        "capture",
+        "stop",
         "set_filter",
-        "focus_move",
+        "move_focuser",
         "query_focus_models",
-        "record_focus_model",
+        "create_focus_model",
     },
     "guiding": {
-        "status",
-        "query_calibrations",
-        "record_calibration",
-        "expose",
-        "refit_spectrum",
-        "run_loop",
-        "stop_loop",
+        "get_status",
+        "start",
+        "stop",
+        "capture",
+        "query_guider_calibrations",
+        "create_guider_calibration",
     },
-    "remote": {"list", "check_connection", "frame_locations", "sync_frames", "sync_logs"},
-    "safety": {
-        "status",
-        "apply_promotion_decision",
-        "enter_monitoring_mode",
-        "enter_controller_mode",
+    "remote": {
+        "check_connection",
+        "query_folders",
+        "query_files",
+        "get_frame_locations",
+        "sync_frames",
+        "sync_logs",
     },
+    "safety": {"get_status", "set_mode", "update"},
     "equipment": {
-        "status",
+        "get_status",
         "connect",
-        "disconnect",
-        "apply_configuration",
-        "set_active_telescope",
-        "set_active_camera",
+        "get_active",
+        "set_active",
+        "set_pointing_limits",
         "set_device_property",
     },
 }
 """Each child of `control` and its public members."""
 
 MAXIMUM_CONTROL_MEMBERS = 72
-"""Most operations `control` and its children may offer together. Raised from
-70 for `guiding.stop_loop` and `mount.cancel_centering` (issue #95, decision
-U4/20): monitor mode refuses a stop, and the guarantee lives in the library."""
+"""Most operations `control` and its children may offer together (38 since
+issue #206 merged the stops and the status reads)."""
 
 
 def _public_names(instance: object) -> set[str]:
@@ -240,9 +254,12 @@ def test_the_package_exports_exactly_the_expected_names() -> None:
         assert getattr(wayfindinglib, name) is not None, name
 
 
-def test_planning_offers_exactly_its_pinned_members() -> None:
-    """`ObservationPlanning` offers exactly the pinned methods."""
-    assert _public_names(ObservationPlanning) == PLANNING_MEMBERS
+def test_planning_offers_exactly_its_pinned_members(control: ObservatoryControl) -> None:
+    """`ObservationPlanning` holds four objects with their pinned methods."""
+    planning = ObservationPlanning(control._context.config, control._context.butler)
+    assert _public_names(planning) == PLANNING_MEMBERS
+    for name, members in PLANNING_OBJECTS.items():
+        assert _public_names(getattr(planning, name)) == members, name
 
 
 def test_execution_offers_exactly_its_pinned_members() -> None:
@@ -255,21 +272,38 @@ def test_review_offers_exactly_its_pinned_members(control: ObservatoryControl) -
     assert _public_names(ObservationReview(control)) == REVIEW_MEMBERS
 
 
+@pytest.mark.parametrize("child", sorted(REVIEW_CHILDREN))
+def test_each_review_object_offers_exactly_its_pinned_members(
+    control: ObservatoryControl, child: str
+) -> None:
+    """A review object's public members match the pinned list."""
+    assert _public_names(getattr(ObservationReview(control), child)) == REVIEW_CHILDREN[child]
+
+
 def test_review_shares_the_context_of_control(control: ObservatoryControl) -> None:
-    """Review reads through control's context and holds no reference to it."""
+    """Review and its objects share control's context, not control."""
     review = ObservationReview(control)
     assert review._context is control._context
     assert control not in vars(review).values()
+    for child in REVIEW_CHILDREN:
+        assert getattr(review, child)._context is control._context, child
 
 
-def test_background_jobs_can_skip_registering_a_job() -> None:
-    """Every `@background_job` method of planning takes `register_job`."""
+def test_no_background_job_can_skip_registering_a_job() -> None:
+    """No `@background_job` method of planning takes a `register_job` switch.
+
+    Every pipeline run records a job, whoever starts it.
+    """
     import inspect
 
-    for name in PLANNING_MEMBERS:
-        method = getattr(ObservationPlanning, name)
-        if getattr(method, "__background_job_type__", None) is not None:
-            assert inspect.signature(method).parameters["register_job"].default is True, name
+    from wayfindinglib.api.planning.catalogs import PlanningCatalogs
+    from wayfindinglib.api.planning.packages import PlanningPackages
+
+    for owner in (PlanningCatalogs, PlanningPackages):
+        for name in dir(owner):
+            method = getattr(owner, name)
+            if getattr(method, "__background_job_type__", None) is not None:
+                assert "register_job" not in inspect.signature(method).parameters, name
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:
@@ -317,22 +351,10 @@ def test_sky_position_checks_its_ranges_and_converts_to_hours() -> None:
         SkyPosition(ra_deg=0.0, dec_deg=91.0)
 
 
-@pytest.mark.parametrize(
-    ("kind", "arguments", "message"),
-    [
-        ("folders", {"sizes": True}, "sizes"),
-        ("target_folders", {"sizes": True}, "sizes"),
-        ("unassociated_folders", {"folder_name": "M 81", "sizes": True}, "sizes"),
-        ("files", {}, "needs a folder_name"),
-        ("everything", {}, "kind must be one of"),
-    ],
-)
-def test_remote_list_refuses_arguments_its_kind_does_not_use(
-    control: ObservatoryControl, kind: str, arguments: dict[str, object], message: str
-) -> None:
-    """`control.remote.list` refuses an argument its kind does not use."""
-    with pytest.raises(InvalidArgumentError, match=message):
-        control.remote.list(kind, **arguments)
+def test_remote_query_folders_refuses_an_unknown_kind(control: ObservatoryControl) -> None:
+    """`control.remote.query_folders` names the kinds it knows."""
+    with pytest.raises(InvalidArgumentError, match="kind must be one of"):
+        control.remote.query_folders(kind="everything")
 
 
 @pytest.mark.parametrize(
@@ -342,7 +364,7 @@ def test_remote_list_refuses_arguments_its_kind_does_not_use(
         (True, NotFoundError, "No folder named"),
     ],
 )
-def test_remote_list_files_tells_unreachable_from_missing_folder(
+def test_remote_query_files_tells_unreachable_from_missing_folder(
     control: ObservatoryControl,
     monkeypatch: pytest.MonkeyPatch,
     is_reachable: bool,
@@ -355,8 +377,10 @@ def test_remote_list_files_tells_unreachable_from_missing_folder(
     monkeypatch.setattr(tasks, "list_remote_targets", lambda context: [])
     monkeypatch.setattr(tasks, "matching_remote_folder", lambda context, name, folders: None)
     monkeypatch.setattr(tasks, "check_remote_connection", lambda context: is_reachable)
-    with pytest.raises(error_type, match=message):
-        control.remote.list("files", folder_name="NGC 7331")
+    with pytest.raises(error_type, match=message) as raised:
+        control.remote.query_files("NGC 7331")
+    if not is_reachable:
+        assert raised.value.report == "status"
 
 
 def test_each_public_module_offers_exactly_its_pinned_names() -> None:
@@ -367,3 +391,25 @@ def test_each_public_module_offers_exactly_its_pinned_names() -> None:
         assert not actual - expected, f"{module_name} offers new name(s): {sorted(actual - expected)}"
         assert not expected - actual, f"{module_name} lost name(s): {sorted(expected - actual)}"
         assert all(hasattr(module, name) for name in actual), module_name
+
+
+def test_public_methods_follow_the_design_rules_or_are_in_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every departure from the rules is listed; every listed one occurs."""
+    from unittest.mock import MagicMock
+
+    config_path = tmp_path / "astrometrics.config.toml"
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
+    config = AppConfiguration()
+    config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
+    wayfinder = wayfindinglib.Wayfinder(config, astrometrics=MagicMock(), simulated=True)
+    try:
+        methods, objects = walk_public_api(
+            wayfinder, "wayfinder", lambda value: type(value).__module__.startswith("wayfindinglib.api.")
+        )
+    finally:
+        wayfinder.control.close()
+    assert len(methods) > 50, "the walk from the root object found too few public methods"
+    problems = baseline_problems(find_violations(methods, objects), BASELINE)
+    assert not problems, "\n\n".join(problems)

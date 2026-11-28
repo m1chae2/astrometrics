@@ -150,8 +150,12 @@ _FILTER_ALIASES = {
     "r": "red",
     "g": "green",
     "b": "blue",
+    "spec": "star analyzer 200",
 }
-"""Short filter names and the long names the library stores them under."""
+"""Short filter names and the long names the library stores them under.
+``"SPEC"`` names the spectroscopy grating, so
+``targets.frames.query(target, filter_name="SPEC")`` gives the spectral
+frames."""
 
 
 def _normalized_filter_name(name: Any) -> str:
@@ -286,7 +290,7 @@ def select_target_light_frames(
         less than 1.
     """
     # The shared argument reader imports this module, so it is imported here.
-    from astrometricslib.pipelines.shared.api_arguments import to_epoch_seconds
+    from astrometricslib.foundation.arguments import to_epoch_seconds
 
     selection = FrameSelection(
         filter_name=filter_name,

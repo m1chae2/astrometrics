@@ -15,14 +15,16 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from astrometricslib import Target
 from backend.public_interface import RPC_METHODS
 from backend.routers.rpc_router import rpc_registry
 from backend.services.infrastructure.sync_service import SyncService
 from backend.services.observatory.equipment_service import EquipmentService
 from backend.services.observatory.suggestion_refresh_worker import SuggestionRefreshWorker
 from backend.services.processing.quality_measurement_service import QualityMeasurementService
-from wayfindinglib import ObservationPlanning
 from wayfindinglib._internal.planning import PackageChange
+from wayfindinglib.api.planning.packages import PlanningPackages
+from wayfindinglib.api.planning.sessions import PlanningSessions
 
 
 class _Sockets:
@@ -37,26 +39,59 @@ class _Sockets:
         self.events.append((action, payload or {}))
 
 
+def _planning() -> SimpleNamespace:
+    """Build a planning stand-in of autospec ``packages`` and ``sessions``.
+
+    Returns
+    -------
+    planning : `SimpleNamespace`
+        The stand-in.
+    """
+    return SimpleNamespace(
+        packages=create_autospec(PlanningPackages, instance=True),
+        sessions=create_autospec(PlanningSessions, instance=True),
+    )
+
+
 def _worker(planning: Any, sockets: _Sockets | None = None) -> SuggestionRefreshWorker:
-    """Build a worker over an autospec planning API.
+    """Build a worker over the planning stand-in; the catalog knows M 81.
 
     Returns
     -------
     worker : `SuggestionRefreshWorker`
         The worker.
     """
-    return SuggestionRefreshWorker(SimpleNamespace(planning=planning), sockets)
+    targets = SimpleNamespace(get=lambda target_id: Target(id=target_id) if target_id == "M 81" else None)
+    wayfinder = SimpleNamespace(planning=planning, astrometrics=SimpleNamespace(targets=targets))
+    return SuggestionRefreshWorker(wayfinder, sockets)
+
+
+def _names(call: Any) -> list[str] | None:
+    """Read the target ids of one refresh call.
+
+    Parameters
+    ----------
+    call : `unittest.mock._Call`
+        The call.
+
+    Returns
+    -------
+    names : `list` [`str`] or `None`
+        The ids of the targets refreshed, or `None` for every target.
+    """
+    targets = call.args[0]
+    return None if targets is None else [target.id for target in targets]
 
 
 def test_many_triggers_run_one_refresh_and_one_more() -> None:
     """Triggers during a run join one queued run; two never overlap."""
-    planning = create_autospec(ObservationPlanning, instance=True)
+    planning = _planning()
     started = threading.Event()
     release = threading.Event()
     running = []
     peak = []
 
-    def refresh(target_ids: list[str] | None = None, register_job: bool = True) -> PackageChange:
+    def refresh(targets: list[Target] | None = None) -> PackageChange:
         """Block the first run so more triggers can pile up.
 
         Returns
@@ -71,7 +106,7 @@ def test_many_triggers_run_one_refresh_and_one_more() -> None:
         running.pop()
         return PackageChange()
 
-    planning.refresh_suggestions.side_effect = refresh
+    planning.packages.record_suggestions.side_effect = refresh
     worker = _worker(planning)
 
     worker.request(["M 81"])
@@ -81,27 +116,28 @@ def test_many_triggers_run_one_refresh_and_one_more() -> None:
     release.set()
 
     assert worker.wait_until_idle()
-    assert planning.refresh_suggestions.call_count == 2
-    assert planning.refresh_suggestions.call_args_list[0].args == (["M 81"],)
-    assert planning.refresh_suggestions.call_args_list[1].args == (["M 13", "M 57", "NGC 2403"],)
+    assert planning.packages.record_suggestions.call_count == 2
+    first, second = planning.packages.record_suggestions.call_args_list
+    assert _names(first) == ["M 81"]
+    assert _names(second) == ["M 13", "M 57", "NGC 2403"]
     assert max(peak) == 1
 
 
 def test_a_request_with_no_targets_refreshes_everything() -> None:
     """No target names means all targets, and wins over named ones."""
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.refresh_suggestions.return_value = PackageChange()
+    planning = _planning()
+    planning.packages.record_suggestions.return_value = PackageChange()
     worker = _worker(planning)
     worker.request(None)
     assert worker.wait_until_idle()
 
-    planning.refresh_suggestions.assert_called_once_with(None)
+    planning.packages.record_suggestions.assert_called_once_with(None)
 
 
 def test_a_failing_refresh_is_logged_and_the_worker_goes_on(caplog: pytest.LogCaptureFixture) -> None:
     """A raising refresh does not reach the caller or stop later runs."""
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.refresh_suggestions.side_effect = [RuntimeError("boom"), PackageChange()]
+    planning = _planning()
+    planning.packages.record_suggestions.side_effect = [RuntimeError("boom"), PackageChange()]
     worker = _worker(planning)
 
     worker.request(["M 81"])
@@ -109,17 +145,17 @@ def test_a_failing_refresh_is_logged_and_the_worker_goes_on(caplog: pytest.LogCa
     worker.request(["M 13"])
     assert worker.wait_until_idle()
 
-    assert planning.refresh_suggestions.call_count == 2
+    assert planning.packages.record_suggestions.call_count == 2
     assert "The suggestion refresh failed" in caplog.text
 
 
 def test_a_finished_refresh_announces_the_counts_and_the_checklist() -> None:
     """A change sends `packages:changed` with counts, then `plan:changed`."""
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.refresh_suggestions.return_value = PackageChange(
+    planning = _planning()
+    planning.packages.record_suggestions.return_value = PackageChange(
         added=["a"], completed=["b"], deleted=["d"], checklist_item_ids=["c"]
     )
-    planning.get_plan.return_value = SimpleNamespace(id="night-1", revision=4)
+    planning.sessions.get.return_value = SimpleNamespace(id="night-1", revision=4)
     sockets = _Sockets()
     worker = _worker(planning, sockets)
 
@@ -150,8 +186,8 @@ def test_a_finished_refresh_announces_the_counts_and_the_checklist() -> None:
 
 def test_a_refresh_that_changed_nothing_announces_nothing() -> None:
     """An empty change sends no event."""
-    planning = create_autospec(ObservationPlanning, instance=True)
-    planning.refresh_suggestions.return_value = PackageChange()
+    planning = _planning()
+    planning.packages.record_suggestions.return_value = PackageChange()
     sockets = _Sockets()
     worker = _worker(planning, sockets)
 
@@ -198,7 +234,7 @@ def test_a_failing_trigger_never_breaks_the_announcement() -> None:
 def test_a_finished_target_sync_asks_for_a_refresh_and_a_calibration_sync_does_not() -> None:
     """A target sync triggers a refresh for it; a Flat folder sync does not."""
     triggers: list[list[str]] = []
-    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None, register_job=None: {})
+    remote = SimpleNamespace(sync_frames=lambda target=None, kind=None, dry_run=False: {})
     service = SyncService(SimpleNamespace(remote=remote), suggestion_trigger=triggers.append)
 
     service._trigger_suggestions("M 81")
@@ -212,7 +248,7 @@ def test_the_sync_thread_triggers_after_the_library_sync() -> None:
     from backend.services.infrastructure import thread_management
 
     triggers: list[list[str]] = []
-    remote = SimpleNamespace(sync_frames=lambda object_id, on_copied=None, register_job=None: {})
+    remote = SimpleNamespace(sync_frames=lambda target=None, kind=None, dry_run=False: {})
     service = SyncService(SimpleNamespace(remote=remote), suggestion_trigger=triggers.append)
 
     service.start_sync("M 42")
@@ -226,14 +262,15 @@ def test_the_telescope_methods_pass_limits_through_an_autospec() -> None:
     from wayfindinglib.api.control.equipment import EquipmentControl
 
     equipment = create_autospec(EquipmentControl, instance=True)
-    equipment.set_active_telescope.return_value = True
-    equipment.status.return_value = SimpleNamespace(telescope="scope")
-    service = EquipmentService(SimpleNamespace(equipment=equipment))
+    equipment.get_active.return_value = SimpleNamespace(telescope=SimpleNamespace(id="scope-1"))
+    equipment.get_status.return_value = SimpleNamespace(telescope="scope")
+    service = EquipmentService(SimpleNamespace(equipment=equipment), configurations=None)
 
     assert service.set_active_telescope("scope-1", {"min_altitude_deg": 25.0}) is True
-    equipment.set_active_telescope.assert_called_once_with("scope-1", limits={"min_altitude_deg": 25.0})
+    equipment.set_pointing_limits.assert_called_once_with(min_altitude_deg=25.0)
+    equipment.set_active.assert_not_called()
     assert service.get_active_telescope() == "scope"
-    equipment.status.assert_called_once_with(include=["telescope"])
+    equipment.get_status.assert_called_once_with(include=["telescope"])
     for method in ("observatory:get_active_telescope", "observatory:set_active_telescope"):
         assert method in RPC_METHODS
         assert rpc_registry._handlers[method][0] == "equipment_service"

@@ -117,6 +117,8 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from astrometricslib import CaptureSetting
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.parameters import (
     HardcodedKind,
     ParameterRole,
@@ -126,13 +128,12 @@ from astrometricslib.parameters import (
 )
 from astrometricslib.reports import (
     EARLIER_NIGHTS_VARIANT,
-    CaptureSetting,
     MeasurementReference,
     MeasurementStatus,
     QualityMeasurement,
     SubjectLevel,
-    observing_night_id,
 )
+from wayfindinglib.analytics.camera_profiles import profile_for_name
 from wayfindinglib.analytics.result_quality.efficiency import FrameObservation
 from wayfindinglib.analytics.result_quality.fixed_pattern_location import (
     FixedPatternAccount,
@@ -315,7 +316,7 @@ class RecordedGroup(BaseModel):
     ----------
     subject_id : `str`
         The group stack's id in the measurement store.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The group's exposure length (``stacking.group_exposure_s``).
     frames_stacked : `int`
         Frames stacked in the group (``stacking.group_frames_stacked_count``).
@@ -333,7 +334,7 @@ class RecordedGroup(BaseModel):
     model_config = _MODEL_CONFIG
 
     subject_id: str
-    exposure_seconds: float
+    exposure_s: float
     frames_stacked: int
     gain_applied: float | None = None
     reference_exposure_seconds: float | None = None
@@ -348,7 +349,7 @@ class CalibrationSummary(BaseModel):
     """The calibration a stack run used, kept for the confound rules.
 
     Built from a stored calibration record
-    (`QualityRecords.calibration_identities`) by
+    (`quality.records.get_calibration_identities`) by
     `calibration_summary_from_record`. The record is read with duck typing
     because the record's class is not in the science library's public root.
 
@@ -802,7 +803,7 @@ def _recorded_group(subject_id: str, rows: Sequence[QualityMeasurement]) -> Reco
         return None
     return RecordedGroup(
         subject_id=subject_id,
-        exposure_seconds=float(exposure),
+        exposure_s=float(exposure),
         frames_stacked=round(stacked),
         gain_applied=float(gain) if gain is not None and gain > 0.0 else None,
         reference_exposure_seconds=float(reference) if reference is not None and reference > 0.0 else None,
@@ -1181,8 +1182,8 @@ def attach_calibration_identities(
     """Put each run's stored calibration record on the run.
 
     The calibration is not a measurement row: it is a record of master file
-    identities, read with `QualityRecords.calibration_identities`. A run is
-    matched on its run id and its stack's subject id. A run with no record
+    identities, read with `quality.records.get_calibration_identities`. A run
+    is matched on its run id and its stack's subject id. A run with no record
     keeps ``calibration`` as ``None``, and the confound rules then count it as
     confounded.
 
@@ -1254,7 +1255,7 @@ def stack_frames_from_observations(
         frames.append(
             StackFrame(
                 frame_id=frame_id,
-                exposure_seconds=float(exposure or 0.0),
+                exposure_s=float(exposure or 0.0),
                 sky_rate_e_per_s_per_px=float(observation.sky_rate_e_per_s_per_px or 0.0),
                 read_noise_e=float(observation.read_noise_e or 0.0),
                 star_width=observation.star_width_effective_arcsec,
@@ -1465,7 +1466,7 @@ def stack_groups_of_run(
         ``is_group_stack`` false for a run of one exposure group (or of mixed
         lengths in one group); else the groups, or the reason there are none.
     """
-    lengths = fold_exposure_lengths([frame.exposure_seconds for frame in frames])
+    lengths = fold_exposure_lengths([frame.exposure_s for frame in frames])
     unique = sorted({length for length in lengths if length is not None})
     if len(unique) < 2:
         return RunGroups(is_group_stack=False)
@@ -1488,7 +1489,7 @@ def stack_groups_of_run(
         # 129.0 s over its 20 stacked members, 0.9 percent apart). The group's
         # reference exposure is exactly its folded length, so it is tried
         # first; the mean and the length, within 0.5 percent, are the fallback.
-        mean_exposure = math.fsum(frames[index].exposure_seconds for index in indices) / len(indices)
+        mean_exposure = math.fsum(frames[index].exposure_s for index in indices) / len(indices)
         recorded = next(
             (
                 group
@@ -1502,7 +1503,7 @@ def stack_groups_of_run(
                 group
                 for target in (mean_exposure, length)
                 for group in run.groups
-                if abs(group.exposure_seconds - target) <= 0.005 * target
+                if abs(group.exposure_s - target) <= 0.005 * target
             ),
             None,
         )
@@ -1519,7 +1520,7 @@ def stack_groups_of_run(
                     f"but {len(indices)} are listed as members."
                 ),
             )
-        own_lengths = {fold_exposure_lengths([frames[index].exposure_seconds])[0] for index in indices}
+        own_lengths = {fold_exposure_lengths([frames[index].exposure_s])[0] for index in indices}
         if len(own_lengths) > 1 and recorded.reference_exposure_seconds is None:
             return RunGroups(
                 is_group_stack=True,
@@ -1537,7 +1538,7 @@ def stack_groups_of_run(
             StackGroup(
                 frames=tuple(frames[index] for index in indices),
                 frame_noise_adu=frame_noise_from_group_weight(
-                    total, recorded.frames_stacked, recorded.exposure_seconds
+                    total, recorded.frames_stacked, recorded.exposure_s
                 ),
                 gain=recorded.gain_applied or 1.0,
                 electrons_per_adu=electrons_per_adu,
@@ -1849,7 +1850,7 @@ def fixed_pattern_shares_by_setup(
         Stack-level rows of every target, with every run kept.
     identities : `Iterable` [`Any`]
         The stored calibration records of every run
-        (``QualityRecords.calibration_identities()``).
+        (``quality.records.get_calibration_identities()``).
 
     Returns
     -------
@@ -1950,7 +1951,7 @@ def aperture_record_reader(astrometrics: Any) -> Callable[[str], dict[str, Any] 
     Returns
     -------
     reader : `Callable` [[`str`], `dict` or `None`]
-        Reads a record file (`QualityRecords.get_aperture_record`) and gives
+        Reads a record file (`quality.stacks.get_aperture_record`) and gives
         its content as a dictionary. It gives `None` for a file that is
         missing, unreadable or of another version.
     """
@@ -1968,7 +1969,7 @@ def aperture_record_reader(astrometrics: Any) -> Callable[[str], dict[str, Any] 
         record : `dict` or `None`
             The file's content, or `None`.
         """
-        record = astrometrics.quality.get_aperture_record(path)
+        record = astrometrics.quality.stacks.get_aperture_record(path)
         return None if record is None else record.model_dump()
 
     return read
@@ -2054,7 +2055,7 @@ def noise_model_setting_key(
     key : `tuple`
         ``(camera, telescope, gain_setting, offset, binning)``.
     """
-    return (setting.camera, setting.telescope, setting.gain_setting, setting.offset, setting.binning)
+    return (setting.camera, setting.telescope, setting.gain, setting.offset, setting.binning)
 
 
 def noise_model_error_sample(record: StackRunRecord, target_id: str) -> NoiseModelErrorSample | None:
@@ -2186,11 +2187,11 @@ def camera_gain_for_setting(astrometrics: Any, setting: CaptureSetting) -> float
         Electrons per ADU, or ``None`` when the camera has no profile or no
         entry for the setting.
     """
-    profile = astrometrics.processing.calibration.camera_profile(setting.camera)
+    profile = profile_for_name(astrometrics, setting.camera)
     if profile.is_generic_fallback:
         return None
     entry = profile.sensor_noise_for(
-        setting.gain_setting, setting.offset or 0, setting.binning or 1, clipped_at_zero=False
+        setting.gain, setting.offset or 0, setting.binning or 1, clipped_at_zero=False
     )
     if entry is None or entry.gain_e_per_adu is None:
         return None
@@ -2441,7 +2442,7 @@ def _is_group_stack(frames: Sequence[StackFrame]) -> bool:
     is_group : `bool`
         True when the frames fall into more than one group length.
     """
-    lengths = fold_exposure_lengths([frame.exposure_seconds for frame in frames])
+    lengths = fold_exposure_lengths([frame.exposure_s for frame in frames])
     return None not in lengths and len(set(lengths)) > 1
 
 
@@ -2486,7 +2487,7 @@ def _given_group_forecast(
     )
     if base.variance is None:
         return base
-    mean_exposure = math.fsum(frame.exposure_seconds for frame in ordered) / len(ordered)
+    mean_exposure = math.fsum(frame.exposure_s for frame in ordered) / len(ordered)
     variance = base.variance * mean_exposure**2
     return NoiseForecast(
         variance=variance,
@@ -2555,7 +2556,7 @@ def _group_forecast(
         current_frames, current.recorded_weights, group_frame_noises_adu=noises
     )
     mode_name = evidence.mode.value if evidence.mode != WeightingMode.UNKNOWN else "recorded_weights"
-    planned_exposure = float(np.median([frame.exposure_seconds for frame in new_frames]))
+    planned_exposure = float(np.median([frame.exposure_s for frame in new_frames]))
     plan = plan_group_stack(
         previous_groups.groups,
         new_frames_like(previous_frames, len(new_frames), planned_exposure),
@@ -2623,11 +2624,11 @@ def _flat_forecast(
         previous_mode.mode
         if previous_mode.mode != WeightingMode.UNKNOWN
         else predict_weighting_mode(
-            configured_stack_weight, [frame.exposure_seconds for frame in [*previous_frames, *new_frames]]
+            configured_stack_weight, [frame.exposure_s for frame in [*previous_frames, *new_frames]]
         )
     )
     before = forecast_stack_noise(previous_frames, planned_mode)
-    planned_exposure = float(np.median([frame.exposure_seconds for frame in new_frames]))
+    planned_exposure = float(np.median([frame.exposure_s for frame in new_frames]))
     planned_after = noise_ratio_after_adding(
         previous_frames, previous_frames, len(new_frames), planned_mode, planned_exposure
     )

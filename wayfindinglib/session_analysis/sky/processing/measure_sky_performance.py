@@ -133,7 +133,7 @@ def _compare_metric(
 
     cells: dict[tuple[str, str], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for sample, value in relative:
-        for bin_key in bins_of(sample.altitude_degrees, sample.azimuth_degrees, sample.pier_side):
+        for bin_key in bins_of(sample.altitude_deg, sample.azimuth_deg, sample.pier_side):
             cells[bin_key][sample.night].append(value)
 
     # A night gives one value per part of the sky it observed enough in. A
@@ -256,5 +256,5 @@ def measure_sky_performance(
         if result is not None:
             metrics.append(result)
     return SkyPerformance(
-        metrics=metrics, suggested_minimum_altitude_degrees=_suggested_minimum_altitude(metrics)
+        metrics=metrics, suggested_minimum_altitude_deg=_suggested_minimum_altitude(metrics)
     )

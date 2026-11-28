@@ -39,9 +39,9 @@ def _frames(exposure: float, iso: str | None, count: int) -> list[SimpleNamespac
     Returns
     -------
     frames : `list`
-        `count` frames. A frame with an ISO of `None` has no ``iso`` field.
+        `count` frames. A frame with an ISO of `None` has no ``gain`` field.
     """
-    fields = {"exposure": exposure} if iso is None else {"exposure": exposure, "iso": iso}
+    fields = {"exposure_s": exposure} if iso is None else {"exposure_s": exposure, "gain": iso}
     return [SimpleNamespace(**fields) for _ in range(count)]
 
 
@@ -50,13 +50,13 @@ def test_groups_at_different_iso_stay_apart_like_the_ic_1805_600_s_group() -> No
     frames = _frames(600.0, "800", 13) + _frames(600.0, "100", 1) + _frames(360.0, "200", 20)
     frames += _frames(300.0, "800", 10)
     folding = plan_exposure_folding(
-        [float(frame.exposure) for frame in frames], isos=[float(frame.iso) for frame in frames]
+        [float(frame.exposure_s) for frame in frames], isos=[float(frame.gain) for frame in frames]
     )
     reasons = [reason for reason in folding.left_out_reasons if reason]
     assert len(reasons) == 1
     assert "ISO 100" in reasons[0]
     groups = split_frames_by_exposure(frames)
-    keys = [(group.exposure_seconds, group.iso, len(group.frames)) for group in groups]
+    keys = [(group.exposure_s, group.gain, len(group.frames)) for group in groups]
     assert keys == [(300.0, 800.0, 10), (360.0, 200.0, 20), (600.0, 800.0, 13)]
 
 
@@ -64,7 +64,7 @@ def test_a_short_list_is_never_folded_across_iso() -> None:
     """Three 300 s frames at ISO 800 stay out of a 360 s ISO 200 group."""
     frames = _frames(360.0, "200", 20) + _frames(300.0, "800", 3)
     folding = plan_exposure_folding(
-        [float(frame.exposure) for frame in frames], isos=[float(frame.iso) for frame in frames]
+        [float(frame.exposure_s) for frame in frames], isos=[float(frame.gain) for frame in frames]
     )
     assert folding.left_out_reasons[:20] == [None] * 20
     assert all("no group of that ISO" in reason for reason in folding.left_out_reasons[20:])
@@ -77,7 +77,7 @@ def test_frames_with_no_iso_are_grouped_by_exposure_alone() -> None:
     """With no ISO anywhere, exposure length alone makes the groups."""
     frames = _frames(180.0, None, 12) + _frames(300.0, None, 8)
     groups = split_frames_by_exposure(frames)
-    assert [(group.exposure_seconds, group.iso, len(group.frames)) for group in groups] == [
+    assert [(group.exposure_s, group.gain, len(group.frames)) for group in groups] == [
         (180.0, None, 12),
         (300.0, None, 8),
     ]
@@ -86,7 +86,7 @@ def test_frames_with_no_iso_are_grouped_by_exposure_alone() -> None:
 def test_the_iso_stays_on_a_group_split_by_night() -> None:
     """Splitting a group by night keeps its ISO."""
     groups = split_frames_by_exposure(_frames(5.0, "800", 6))
-    assert split_groups_by_night(groups)[0].iso == pytest.approx(800.0)
+    assert split_groups_by_night(groups)[0].gain == pytest.approx(800.0)
 
 
 def test_the_sky_ratio_is_divided_by_the_iso_ratio() -> None:
@@ -126,13 +126,13 @@ def _group_result(image: np.ndarray, exposure: float, count: int) -> GroupResult
     result : `GroupResult`
         A group of `count` frames of one ISO, with the stack `image`.
     """
-    group = SimpleNamespace(frames=_frames(exposure, "800", count), exposure_seconds=exposure)
+    group = SimpleNamespace(frames=_frames(exposure, "800", count), exposure_s=exposure)
     return GroupResult(
         group=group,
         path="",
         diagnostics={},
         summary_index=0,
-        exposure=exposure,
+        exposure_s=exposure,
         count=count,
         image=image,
         frame_noise=1.0,

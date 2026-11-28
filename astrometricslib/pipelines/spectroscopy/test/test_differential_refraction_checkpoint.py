@@ -31,7 +31,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.differential_refracti
     REASON_NO_SITE,
     DifferentialRefraction,
     local_dispersion_angstrom_per_px,
-    parallactic_angle_degrees,
+    parallactic_angle_deg,
 )
 from astrometricslib.pipelines.spectroscopy.test.pre_processing.test_differential_refraction import (
     CONDITIONS,
@@ -56,7 +56,7 @@ DAR_METRIC_NAMES = (
     "dar_along_dispersion_angstrom",
     "dar_across_dispersion_px",
     "target_altitude_degrees",
-    "parallactic_to_dispersion_angle_degrees",
+    "parallactic_to_dispersion_angle_deg",
 )
 
 # Cold air at sea level bends light about a third more than the conditions
@@ -126,8 +126,8 @@ def _computed_record(**changes: float) -> DifferentialRefraction:
     fields = {
         "is_computed": True,
         "is_applied": True,
-        "altitude_degrees": 40.0,
-        "parallactic_to_dispersion_angle_degrees": 0.0,
+        "altitude_deg": 40.0,
+        "parallactic_to_dispersion_angle_deg": 0.0,
         "along_dispersion_span_angstrom": 9.0,
         "across_dispersion_span_px": 0.0,
     }
@@ -149,8 +149,8 @@ def test_the_four_refraction_metrics_carry_their_values_and_limits() -> None:
         _computed_record(
             along_dispersion_span_angstrom=9.0,
             across_dispersion_span_px=0.4,
-            altitude_degrees=40.3,
-            parallactic_to_dispersion_angle_degrees=-35.0,
+            altitude_deg=40.3,
+            parallactic_to_dispersion_angle_deg=-35.0,
         )
     )
 
@@ -163,7 +163,7 @@ def test_the_four_refraction_metrics_carry_their_values_and_limits() -> None:
     assert (across.value, across.unit, across.limit, across.passed) == (0.4, "pixel", None, None)
     altitude = metrics["target_altitude_degrees"]
     assert (altitude.value, altitude.unit, altitude.limit, altitude.passed) == (40.3, "degree", 20.0, True)
-    angle = metrics["parallactic_to_dispersion_angle_degrees"]
+    angle = metrics["parallactic_to_dispersion_angle_deg"]
     assert (angle.value, angle.unit, angle.limit, angle.passed) == (-35.0, "degree", None, None)
     assert _checkpoint_flags(_computed_record()) == []
 
@@ -204,7 +204,7 @@ def test_a_record_that_was_not_computed_has_empty_metrics_and_dar_not_computed()
 
 def test_a_low_target_fails_the_altitude_limit_and_is_flagged() -> None:
     """Below 20 degrees the altitude metric fails and the model is refused."""
-    record = DifferentialRefraction(False, False, "too low", altitude_degrees=15.0)
+    record = DifferentialRefraction(False, False, "too low", altitude_deg=15.0)
 
     metrics = _checkpoint_metrics(record)
 
@@ -252,7 +252,7 @@ def _build_pipeline_result(
     )
     target = _target(hour_angle_hours, 10.0)
     if with_wcs:
-        _, zenith_angle = parallactic_angle_degrees(target, MID_EXPOSURE, SITE)
+        _, zenith_angle = parallactic_angle_deg(target, MID_EXPOSURE, SITE)
         image._wcs = _wcs_with_x_axis_at(target, zenith_angle + angle_from_zenith_degrees)
     pipeline = _build_pipeline("traced")
     pipeline.observatory_site = site
@@ -300,7 +300,7 @@ def test_a_pipeline_built_result_carries_the_refraction_metrics_at_checkpoint_ze
     assert metrics["dar_across_dispersion_px"].value == pytest.approx(0.0, abs=0.02)
     assert metrics["target_altitude_degrees"].value == pytest.approx(40.3, abs=0.1)
     assert metrics["target_altitude_degrees"].passed is True
-    assert metrics["parallactic_to_dispersion_angle_degrees"].value == pytest.approx(0.0, abs=0.01)
+    assert metrics["parallactic_to_dispersion_angle_deg"].value == pytest.approx(0.0, abs=0.01)
     assert not {"dar_large", "dar_not_computed", "target_altitude_low"} & set(result.stage_quality[0].flags)
 
 
@@ -315,14 +315,14 @@ def test_the_stored_record_holds_the_geometry_the_conditions_and_the_displacemen
     assert record.reason is None
     assert record.mid_exposure_utc is not None
     assert record.mid_exposure_utc.startswith("2025-06-01T04:00:00")
-    assert record.altitude_degrees == pytest.approx(40.3, abs=0.1)
-    assert record.parallactic_angle_degrees == pytest.approx(44.9, abs=1.0)
+    assert record.altitude_deg == pytest.approx(40.3, abs=0.1)
+    assert record.parallactic_angle_deg == pytest.approx(44.9, abs=1.0)
     assert record.pixel_scale_arcsec == pytest.approx(PIXEL_SCALE_ARCSEC, rel=1e-3)
     assert record.effective_wavelength_angstrom is not None
     assert 5000.0 < record.effective_wavelength_angstrom < 7500.0
     assert record.pressure_hpa == pytest.approx(CONDITIONS.pressure_hpa)
     assert record.temperature_c == pytest.approx(CONDITIONS.temperature_c)
-    assert record.relative_humidity_percent == pytest.approx(CONDITIONS.relative_humidity_percent)
+    assert record.relative_humidity_pct == pytest.approx(CONDITIONS.relative_humidity_pct)
     assert record.atmosphere_source == CONDITIONS.source
     assert record.along_dispersion_arcsec_at_4200 is not None
     assert record.along_dispersion_arcsec_at_8000 is not None
@@ -362,7 +362,7 @@ def test_dispersion_across_the_vertical_changes_no_wavelength_but_widens_the_tra
     np.testing.assert_allclose(np.array(result.wavelengths_angstrom), raw, atol=0.05)
     assert metrics["dar_along_dispersion_angstrom"].value == pytest.approx(0.0, abs=0.05)
     assert metrics["dar_across_dispersion_px"].value == pytest.approx(0.8, abs=0.15)
-    assert abs(metrics["parallactic_to_dispersion_angle_degrees"].value) == pytest.approx(90.0, abs=0.05)
+    assert abs(metrics["parallactic_to_dispersion_angle_deg"].value) == pytest.approx(90.0, abs=0.05)
 
 
 def test_a_low_cold_target_exceeds_the_limit_and_the_flag_is_raised() -> None:

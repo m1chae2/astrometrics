@@ -121,7 +121,7 @@ The policy checks these rules when a state changes, comparing the prior state wi
 <!-- impl: wayfindinglib.models.policy.delegation.DelegationPolicy -->
 <!-- impl: wayfindinglib.data_access.delegation_policy_reader.validate_delegation_policy -->
 <!-- impl: wayfindinglib.data_access.delegation_policy_reader.promote_capability -->
-<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations._require_authoritative -->
+<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations.require_authoritative -->
 
 ### 2.4 Delegation phases
 
@@ -188,8 +188,8 @@ $$
 
 The field of view follows from the pixel scale and the sensor size. A guide telescope has its own focal length, which sets its camera's pixel scale.
 
-<!-- impl: wayfindinglib.models.equipment_and_site.equipment.EquipmentConfiguration -->
-<!-- impl: wayfindinglib.models.equipment_and_site.equipment.GuideScope -->
+<!-- impl: astrometricslib.models.observatory_configuration.ObservatoryConfiguration -->
+<!-- impl: astrometricslib.models.observatory_configuration.GuideScope -->
 
 The enclosure is specified beside the equipment because its constraint is mutual: a roof can close only when the mount clears it, and the mount can leave park only when the roof is open. The permitted closing position is configuration, a park position with a tolerance, so the interlock can be checked without commanding anything.
 
@@ -266,7 +266,7 @@ Archive-derived advice informs authoring and placement without dictating them. A
 <!-- impl: wayfindinglib.models.planning.target_report.TargetDatasetReport -->
 <!-- impl: wayfindinglib.models.equipment_and_site.calibration.CalibrationAdvisory -->
 <!-- impl: wayfindinglib.tasks.planning_tasks.target_report_tasks.build_target_dataset_report -->
-<!-- impl: wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks.build_calibration_advisory -->
+<!-- impl: astrometricslib.pipelines.stacking.calibration_catalog.query_calibration_sets -->
 
 An operator may also build or edit a queue by hand. Both paths write the same structure. Planning also answers visibility questions that place nothing.
 

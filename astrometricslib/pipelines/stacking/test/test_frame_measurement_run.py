@@ -111,7 +111,7 @@ def _profile() -> CameraProfile:
         saturation_threshold_adu=ProvenancedValue(value=60000.0, provenance=datasheet),
         sensor_noise=(
             SensorSettingNoise(
-                gain_setting=GAIN_SETTING,
+                gain=GAIN_SETTING,
                 offset="0",
                 binning="1x1",
                 gain_e_per_adu=ProvenancedValue(value=0.5, provenance=provenance),
@@ -189,10 +189,10 @@ def target(tmp_path: Path) -> Target:
                 path=str(path),
                 camera="Test Camera",
                 telescope="Scope",
-                iso=GAIN_SETTING,
-                offset="0",
+                gain=GAIN_SETTING,
+                offset=0,
                 binning=1,
-                exposure="10.0",
+                exposure_s=10.0,
                 timestamp=1_792_000_000.0 + 60.0 * index,
                 pixelScaleArcsec=2.0,
                 sensorTemperatureC=-10.0,
@@ -475,8 +475,8 @@ def test_the_capture_setting_describes_the_frame(target: Target) -> None:
 
     assert setting.camera == "Test Camera"
     assert setting.telescope == "Scope"
-    assert setting.exposure_seconds == pytest.approx(10.0)
-    assert setting.gain_setting == 100
+    assert setting.exposure_s == pytest.approx(10.0)
+    assert setting.gain == 100
     assert setting.offset == 0
     assert setting.binning == 1
     assert setting.filter_name is None
@@ -590,13 +590,13 @@ def mountain_time() -> Iterator[None]:
 
 
 @pytest.mark.usefixtures("mountain_time")
-def test_the_processing_api_runs_the_job_and_checks_the_limit(
+def test_the_quality_api_runs_the_job_and_measures_each_frame_once(
     target: Target, tmp_path: Path, biases: list[str]
 ) -> None:
-    """The public method stores rows, saves only stamps, checks the limit."""
+    """The public method stores rows, saves only stamps, measures once."""
     pipelines, catalog_access = _pipelines(tmp_path, biases)
 
-    summary = pipelines.record_frame_measurements(target, register_job=False)
+    summary = pipelines.frames.record(target)
 
     assert summary.target_id == "M 99"
     assert summary.frames_measured == 3
@@ -604,10 +604,10 @@ def test_the_processing_api_runs_the_job_and_checks_the_limit(
     assert catalog_access.merge_and_record.call_count == 1
     assert catalog_access.merge_and_record.call_args.args[0] == "target_catalog"
     assert QualityStore(str(tmp_path / "astrometrics.db")).query(target_id="M 99")
-    again = pipelines.record_frame_measurements(target, register_job=False)
+    again = pipelines.frames.record(target)
     assert again.frames_measured == 0
-    with pytest.raises(InvalidArgumentError, match="limit"):
-        pipelines.record_frame_measurements(target, limit=0, register_job=False)
+    with pytest.raises(InvalidArgumentError, match=r"targets\.get"):
+        pipelines.frames.record("M 99")  # type: ignore[arg-type]
 
 
 def test_the_stamps_are_saved_every_few_frames_and_at_the_end(
@@ -1109,10 +1109,10 @@ def test_stamps_reach_storage_when_the_targets_are_listed_during_measurement(
                 path=str(path),
                 camera="Test Camera",
                 telescope="Scope",
-                iso=GAIN_SETTING,
-                offset="0",
+                gain=GAIN_SETTING,
+                offset=0,
                 binning=1,
-                exposure="10.0",
+                exposure_s=10.0,
                 timestamp=1_792_000_000.0 + 60.0 * index,
                 pixelScaleArcsec=2.0,
                 sensorTemperatureC=-10.0,
@@ -1134,7 +1134,7 @@ def test_stamps_reach_storage_when_the_targets_are_listed_during_measurement(
             selection : `CalibrationSelection`
                 The bias frames.
             """
-            astrometrics.targets.query(detail="objects", limit=None)
+            astrometrics.targets.query(include_empty=True)
             return super().select_bias_frames(camera, **settings)
 
     recording = FrameQualityRecording(

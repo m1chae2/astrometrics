@@ -13,7 +13,8 @@ from collections import Counter
 
 import pytest
 
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.analytics.result_quality import report_rules as rr
 from wayfindinglib.analytics.result_quality.capture_overheads import CaptureOverheads
 from wayfindinglib.analytics.result_quality.efficiency import (
@@ -33,7 +34,7 @@ from wayfindinglib.analytics.result_quality.noise_growth import (
 from wayfindinglib.analytics.result_quality.starting_point import (
     StartingPointInputs,
     build_starting_point,
-    clipping_cap_seconds,
+    clipping_cap_s,
     sky_dominated_exposure_seconds,
 )
 from wayfindinglib.models.quality.capture_summary import CaptureSettingSummary
@@ -56,8 +57,8 @@ SETTING = CaptureSetting(
     camera="ASI533MM Pro",
     telescope="RC8",
     filter_name="L",
-    exposure_seconds=60.0,
-    gain_setting=100,
+    exposure_s=60.0,
+    gain=100,
     offset=50,
     binning=1,
 )
@@ -66,7 +67,7 @@ SETTING = CaptureSetting(
 def _summary(
     frames_taken: int = 100,
     frames_set_aside: int = 0,
-    captured_seconds: float = 6000.0,
+    captured_s: float = 6000.0,
     account: LossAccount | None = None,
 ) -> CaptureSettingSummary:
     """Build the summary of one setting.
@@ -81,7 +82,7 @@ def _summary(
         framesTaken=frames_taken,
         nights=3,
         framesSetAside=frames_set_aside,
-        capturedSeconds=captured_seconds,
+        capturedS=captured_s,
         lossAccount=account,
     )
 
@@ -102,7 +103,7 @@ def _account(sky_seconds: float, moon_seconds: float | None) -> LossAccount:
     return LossAccount(
         goal=ScienceGoal.FAINT_POINT_SOURCE,
         referenceName="baseline:x",
-        setAsideSeconds=0.0,
+        setAsideS=0.0,
         keptFrameDeficit=shares,
         causeUnknownReason="not measured",
         transparencyIncluded=False,
@@ -171,9 +172,9 @@ def test_sky_cost_without_a_split_uses_the_whole_sky_loss_and_says_so() -> None:
 def test_sky_cost_needs_the_minimum_captured_time() -> None:
     """One short frame cannot say the sky lost 100% of the time."""
     tiny = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS.default - 1.0
-    assert rr.sky_cost_statements([_summary(captured_seconds=tiny, account=_account(tiny, None))]) == []
+    assert rr.sky_cost_statements([_summary(captured_s=tiny, account=_account(tiny, None))]) == []
     enough = rr.SKY_COST_MINIMUM_CAPTURED_SECONDS.default
-    statements = rr.sky_cost_statements([_summary(captured_seconds=enough, account=_account(enough, None))])
+    statements = rr.sky_cost_statements([_summary(captured_s=enough, account=_account(enough, None))])
     assert len(statements) == 1
 
 
@@ -235,7 +236,7 @@ def _frames(count: int, sky: float = 1.0) -> list[StackFrame]:
         The frames.
     """
     return [
-        StackFrame(frame_id=f"f{index}", exposure_seconds=60.0, sky_rate_e_per_s_per_px=sky, read_noise_e=3.0)
+        StackFrame(frame_id=f"f{index}", exposure_s=60.0, sky_rate_e_per_s_per_px=sky, read_noise_e=3.0)
         for index in range(count)
     ]
 
@@ -285,7 +286,7 @@ def _stack_group(count: int, exposure: float, frame_noise: float) -> StackGroup:
     frames = tuple(
         StackFrame(
             frame_id=f"g{exposure:g}_{index}",
-            exposure_seconds=exposure,
+            exposure_s=exposure,
             sky_rate_e_per_s_per_px=1.0,
             read_noise_e=3.0,
             star_width=2.0 + 0.1 * index,
@@ -345,17 +346,17 @@ DARK_TEMPERATURE_TOLERANCE_C = 3.0
 
 DARK_OK = {
     "camera": "ASI533MM Pro",
-    "iso": "100",
+    "gain": "100",
     "offset": 50.0,
     "binning": "1x1",
     "temperature_c": -10.0,
-    "exposure": 60.0,
+    "exposure_s": 60.0,
     "count": 20,
 }
 FLAT_OK = {
     "camera": "ASI533MM Pro",
     "filter": "L",
-    "iso": "100",
+    "gain": "100",
     "offset": 50.0,
     "binning": "1x1",
     "count": 30,
@@ -381,8 +382,8 @@ def test_calibration_gap_is_quiet_when_darks_and_flats_match() -> None:
 @pytest.mark.parametrize(
     ("change", "differs"),
     [
-        ({"exposure": 120.0}, "exposure"),
-        ({"iso": "200"}, "gain"),
+        ({"exposure_s": 120.0}, "exposure"),
+        ({"gain": "200"}, "gain"),
         ({"offset": 10.0}, "offset"),
         ({"binning": "2x2"}, "binning"),
         ({"temperature_c": 5.0}, "temperature"),
@@ -454,12 +455,12 @@ def test_more_frames_statement_gives_the_count_the_time_and_the_noise() -> None:
     assert statement.kind == StatementKind.RECOMMENDATION
     assert statement.confidence == Confidence.DESIGN_ESTIMATE
     assert statement.proposed_action.frame_count == 20
-    assert statement.proposed_action.exposure_seconds == pytest.approx(90.0)
+    assert statement.proposed_action.exposure_s == pytest.approx(90.0)
     assert (
         statement.message == "Recommended additional frames: 20 at 90 s (about 32 min with downloads), "
         "which cuts the noise by about 29%."
     )
-    assert statement.expected_effect.wall_clock_seconds == pytest.approx(1900.0)
+    assert statement.expected_effect.wall_clock_s == pytest.approx(1900.0)
     assert rr.more_frames_statement(TakeMoreResult(target_noise_ratio=0.707), SETTING, overheads, []) is None
 
 
@@ -491,9 +492,9 @@ def test_sky_dominated_exposure_is_nine_read_noise_variances_over_the_sky_rate()
 
 def test_clipping_cap_aims_the_peak_at_the_target_fraction_of_the_room() -> None:
     """A peak rate of 100 ADU/s and 40000 ADU of room give 320 s."""
-    assert clipping_cap_seconds(100.0, 40000.0) == pytest.approx(320.0)
+    assert clipping_cap_s(100.0, 40000.0) == pytest.approx(320.0)
     with pytest.raises(ValueError, match="above 0"):
-        clipping_cap_seconds(0.0, 1.0)
+        clipping_cap_s(0.0, 1.0)
 
 
 def _inputs(**changes: object) -> StartingPointInputs:
@@ -521,8 +522,8 @@ def _inputs(**changes: object) -> StartingPointInputs:
 def test_starting_point_has_an_exposure_and_no_cap_without_a_zero_point() -> None:
     """The exposure is computed; the cap is not computed and says why."""
     point = build_starting_point(_inputs())
-    assert point.exposure_seconds == pytest.approx(162.0)
-    assert point.clipping_cap_seconds is None
+    assert point.exposure_s == pytest.approx(162.0)
+    assert point.clipping_cap_s is None
     assert "No zero point" in point.clipping_cap_reason
     assert point.confidence == Confidence.DESIGN_ESTIMATE
 
@@ -530,15 +531,15 @@ def test_starting_point_has_an_exposure_and_no_cap_without_a_zero_point() -> Non
 def test_starting_point_is_held_to_the_clipping_cap_when_it_is_shorter() -> None:
     """A cap of 80 s (0.8 * 10000 / 100) holds the 162 s exposure to 80 s."""
     point = build_starting_point(_inputs(peak_rate_adu_per_s=100.0, room_adu=10000.0))
-    assert point.clipping_cap_seconds == pytest.approx(80.0)
-    assert point.exposure_seconds == pytest.approx(80.0)
+    assert point.clipping_cap_s == pytest.approx(80.0)
+    assert point.exposure_s == pytest.approx(80.0)
     assert "clipping cap" in point.exposure_reason
 
 
 def test_starting_point_says_what_is_missing_instead_of_inventing_a_number() -> None:
     """With no read noise there is no exposure, and the reason names it."""
     point = build_starting_point(_inputs(read_noise_e=None, read_noise_note="No measured read noise exists."))
-    assert point.exposure_seconds is None
+    assert point.exposure_s is None
     assert "No measured read noise" in point.exposure_reason
 
 
@@ -564,7 +565,7 @@ def _width_observations(width_arcsec: float, count: int = 5) -> list[FrameObserv
         FrameObservation(
             frameId=f"frame-{index}",
             captureSetting=SETTING,
-            exposureSeconds=60.0,
+            exposureS=60.0,
             starWidthEffectiveArcsec=width_arcsec,
         )
         for index in range(count)

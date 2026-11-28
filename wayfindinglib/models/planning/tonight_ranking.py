@@ -19,9 +19,10 @@ model's confidence (`TonightSkyModel`).
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from astrometricslib.reports import CaptureSetting, MeasurementReference
+from astrometricslib import CaptureSetting
+from astrometricslib.reports import MeasurementReference
 from wayfindinglib.models.planning.target_report import RecommendedAdditionalFramesStatus
 from wayfindinglib.models.quality.statements import Confidence
 
@@ -147,7 +148,7 @@ class RankedCandidate(BaseModel):
         The setting the forecast assumes (the one most used so far).
     frames_in_hour : `int` or `None`
         How many frames of that setting fit in one clock hour.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure of one of those frames, in seconds.
     overhead_fraction : `float` or `None`
         Downloads, dithers and autofocus over exposure time (0.2 means the
@@ -188,7 +189,12 @@ class RankedCandidate(BaseModel):
     altitude_deg: float | None = Field(default=None, alias="altitudeDeg")
     capture_setting: CaptureSetting | None = Field(default=None, alias="captureSetting")
     frames_in_hour: int | None = Field(default=None, ge=0, alias="framesInHour")
-    exposure_seconds: float | None = Field(default=None, gt=0.0, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        gt=0.0,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     overhead_fraction: float | None = Field(default=None, ge=0.0, alias="overheadFraction")
     effective_hours_so_far: float | None = Field(default=None, ge=0.0, alias="effectiveHoursSoFar")
     sky_rate_e_per_s_per_px: float | None = Field(default=None, ge=0.0, alias="skyRateEPerSPerPx")

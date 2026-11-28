@@ -10,7 +10,8 @@ imports:
   ``wayfindinglib`` or the notebooks' own helper modules under
   ``documentation.notebooks``;
 * a submodule of either library, such as ``astrometricslib.api`` or
-  ``astrometricslib._internal`` (only the top-level package is public);
+  ``astrometricslib._internal``, other than the public modules
+  (``PUBLIC_MODULES``, such as ``astrometricslib.parameters``);
 * a name that starts with an underscore.
 
 The check is static because the docs build does not run the notebooks
@@ -27,6 +28,19 @@ NOTEBOOKS_DIR = REPO_ROOT / "documentation" / "notebooks"
 LIBRARIES = ("astrometricslib", "wayfindinglib")
 HELPER_PREFIX = "documentation.notebooks"
 THIRD_PARTY_ALLOWED = ("matplotlib",)
+PUBLIC_MODULES = frozenset({
+    "astrometricslib.arguments",
+    "astrometricslib.drivers",
+    "astrometricslib.exceptions",
+    "astrometricslib.jobs",
+    "astrometricslib.parameters",
+    "astrometricslib.reports",
+    "wayfindinglib.drivers",
+    "wayfindinglib.exceptions",
+    "wayfindinglib.logs",
+    "wayfindinglib.reports",
+})
+"""The libraries' public modules, besides the package roots."""
 
 
 def _check_module(module: str, names: list[str]) -> list[str]:
@@ -46,7 +60,7 @@ def _check_module(module: str, names: list[str]) -> list[str]:
     """
     root = module.split(".")[0]
     problems = []
-    if module in LIBRARIES:
+    if module in LIBRARIES or module in PUBLIC_MODULES:
         pass
     elif root in LIBRARIES:
         problems.append(f"imports the submodule `{module}`; import public names from `{root}` instead")

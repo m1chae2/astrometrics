@@ -71,8 +71,8 @@ def healthy_summary_metrics() -> SpectroscopyPipelineQualityMetrics:
         gaia_xp_summary=GaiaXpRunSummary(
             compared_star_count=4,
             bands=bands,
-            median_slope_percent_per_1000_angstrom=0.4,
-            median_absolute_slope_percent_per_1000_angstrom=0.9,
+            median_slope_pct_per_1000_angstrom=0.4,
+            median_absolute_slope_pct_per_1000_angstrom=0.9,
         ),
         wavelength_scale_summary=WavelengthScaleSummary(
             spectrum_count=4,

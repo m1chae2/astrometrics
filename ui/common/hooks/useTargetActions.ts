@@ -47,9 +47,9 @@ export function useTargetActions() {
             if (existingObj['main_camera']) objectInfo['main_camera'] = existingObj['main_camera'];
             if (existingObj['main_scope']) objectInfo['main_scope'] = existingObj['main_scope'];
 
-            const expVal = existingObj['exposure_sec'] ?? existingObj['exposure'];
+            const expVal = existingObj['exposureS'] ?? existingObj['exposure_s'];
             if (expVal !== undefined) {
-                objectInfo['exposure_sec'] = expVal;
+                objectInfo['exposure_s'] = expVal;
             }
 
             await updateTargetById(activeTarget, objectInfo);

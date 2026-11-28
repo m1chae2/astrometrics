@@ -1,6 +1,6 @@
 """Purpose: Index the recorded nights so the night list is kept in two parts.
 
-Description: The list of nights (`review.query(kind="nights")`) says, for
+Description: The list of nights (`review.nights.query`) says, for
 each observing night, which targets were imaged, how many light frames the
 active equipment took, and whether the night has guiding, Ekos and sky
 background data. Building it from scratch reads every frame of the library,
@@ -17,7 +17,7 @@ have an Ekos session record or a guiding run. It also works out a digest of
 what the finished nights contain, and a signature of what tonight contains.
 A part is rebuilt only when its own digest or signature changes.
 
-Nights are named as `astrometricslib.reports.observing_night_id` names them,
+Nights are named as `astrometricslib.arguments.observing_night_id` names them,
 from local noon to local noon. A night is finished when it is older than the
 night of the moment asked about.
 
@@ -34,9 +34,9 @@ from functools import cached_property
 from itertools import chain
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib.arguments import observing_night_id
 from astrometricslib.drivers import get_target_document_signs
 from astrometricslib.exceptions import FITS_READ_ERRORS, AstrometricsError
-from astrometricslib.reports import observing_night_id
 from wayfindinglib.analytics import capture_history
 from wayfindinglib.analytics.data_versions import nights_context_signs
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -247,7 +247,7 @@ def read_night_frames(context: Any) -> list[NightFrame]:
     try:
         astrometrics = context.astrometrics
         if document_signs is None:
-            targets = astrometrics.targets.query(detail="objects", limit=None).objects
+            targets = astrometrics.targets.query(include_empty=True).items
         else:
             changed = [
                 target_id
@@ -255,9 +255,9 @@ def read_night_frames(context: Any) -> list[NightFrame]:
                 if target_id not in memo.frames or memo.frames[target_id][0] != signs
             ]
             if len(changed) == len(document_signs):
-                targets = astrometrics.targets.query(detail="objects", limit=None).objects
+                targets = astrometrics.targets.query(include_empty=True).items
             else:
-                targets = [astrometrics.targets.get(target_id, refresh=True) for target_id in changed]
+                targets = [astrometrics.targets.get(target_id) for target_id in changed]
         targets = [target for target in targets if target is not None]
         found: dict[str, list[NightFrame]] = {target.id: [] for target in targets}
         for target, frame in capture_history.equipment_light_frames(

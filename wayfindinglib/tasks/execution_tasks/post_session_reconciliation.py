@@ -57,7 +57,7 @@ def attach_target_session_ids(session: ObservationSession, astrometrics: Any) ->
         target = astrometrics.targets.get(target_id)
         if target is None:
             continue
-        for target_session in astrometrics.targets.sessions(target, night_date=session.night_date):
+        for target_session in astrometrics.targets.frames.get_nights(target, night=session.night_date):
             session_ids.add(target_session.id)
 
     session.target_session_ids = sorted(session_ids)

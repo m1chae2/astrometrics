@@ -88,7 +88,7 @@ def run_sync() -> None:
             print("[Testing Mode] No connection is made to the observatory computer.")
             print(f"[Testing Mode] A real run would list the files in the folder for {target_id}.")
         else:
-            remote_files = wayfinder.control.remote.list("files", folder_name=target_id)
+            remote_files = wayfinder.control.remote.query_files(target_id)
             print(f"Found {len(remote_files)} files in {target_id} remotely.")
         print(f"Downloading telescope frames for Target {target_id}...")
 
@@ -103,8 +103,8 @@ def run_sync() -> None:
             success = True
             print("[Testing Mode] Simulated remote.sync_frames completed successfully.")
         else:
-            result = wayfinder.control.remote.sync_frames(target_id, files=selected_list, log_callback=print)
-            success = result.get("success", False)
+            result = wayfinder.control.remote.sync_frames(target, files=selected_list, force=False)
+            success = bool(result.success)
         elapsed = time.time() - start_time
 
         if success:
@@ -114,9 +114,7 @@ def run_sync() -> None:
                 f"Ingestion successful! Synchronized local frames: "
                 f"{len(target.frames)} in {elapsed:.2f} seconds."
             )
-
-            # Persist target metadata changes back to the library database
-            astrometrics.targets.save()
+            # The sync saved the target as it indexed the new frames.
             print("Target metadata persisted successfully.")
         else:
             print("Failed to download or ingest remote frames.")

@@ -153,7 +153,7 @@ def stored_star_spectrum(star: Any) -> StoredStarSpectrum | None:
         catalog_b_minus_v=optional_float(star.b_minus_v),
         own_rms=optional_float(spectrum.self_determined_spectral_type_rms),
         gaia_residual_rms=optional_float(comparison.residual_rms_fraction) if compared else None,
-        gaia_slope_percent=optional_float(comparison.slope_percent_per_1000_angstrom) if compared else None,
+        gaia_slope_percent=optional_float(comparison.slope_pct_per_1000_angstrom) if compared else None,
     )
 
 

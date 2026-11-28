@@ -155,7 +155,7 @@ def format_report(results: Sequence[tuple[str, GaiaXpComparison]]) -> str:
         ratios = " ".join(_number(band.median_ratio, 9, 3) for band in comparison.bands)
         lines.append(
             f"{star_id[:36]:36s} {comparison.gaia_source_id:>19d} "
-            f"{_number(comparison.slope_percent_per_1000_angstrom, 10, 2, signed=True)} "
+            f"{_number(comparison.slope_pct_per_1000_angstrom, 10, 2, signed=True)} "
             f"{_number(comparison.residual_rms_fraction, 6, 3)} "
             f"{_number(comparison.wavelength_shift_angstrom, 8, 1, signed=True)}  {ratios}"
         )
@@ -177,9 +177,9 @@ def format_report(results: Sequence[tuple[str, GaiaXpComparison]]) -> str:
                 f"{band.star_count:>6d}"
             )
         lines.append(
-            f"Median tilt {_number(summary.median_slope_percent_per_1000_angstrom, 0, 2, signed=True)} "
+            f"Median tilt {_number(summary.median_slope_pct_per_1000_angstrom, 0, 2, signed=True)} "
             f"percent per 1000 A; median absolute tilt "
-            f"{_number(summary.median_absolute_slope_percent_per_1000_angstrom, 0, 2)} "
+            f"{_number(summary.median_absolute_slope_pct_per_1000_angstrom, 0, 2)} "
             f"(designed limit {resolve(GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM).value:g})."
         )
     gate = gaia_xp_gate(rows)
@@ -212,9 +212,9 @@ def compare_target(
     """
     camera_name = camera_name or astrometrics.config.get_primary_camera_name()
     line_spread = load_line_spread_profile(camera_name)
-    answer = astrometrics.stars.query(target_id=target_id, has_spectra=True, detail="objects", limit=None)
+    target = astrometrics.targets.get(target_id, required=True)
     results = []
-    for star in answer.objects or []:
+    for star in astrometrics.stars.query(target=target, has_spectra=True):
         if star.id.endswith("::spectroscopy"):
             continue
         comparison = compare_star(star, driver, line_spread)

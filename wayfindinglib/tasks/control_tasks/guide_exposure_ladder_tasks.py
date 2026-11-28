@@ -99,7 +99,7 @@ def _blob_bytes(blob: Any) -> Any:
 def capture_guide_ladder(
     take_exposure: Callable[[float, float | None], Any],
     read_frame: Callable[[], Any],
-    exposure_seconds: Sequence[float],
+    exposure_s: Sequence[float],
     frames_per_exposure: int,
     gain: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -114,7 +114,7 @@ def capture_guide_ladder(
     read_frame : `Callable`
         Returns the guide camera's latest frame, in any form `frame_from_blob`
         accepts.
-    exposure_seconds : `Sequence` [`float`]
+    exposure_s : `Sequence` [`float`]
         The exposure lengths to try.
     frames_per_exposure : `int`
         Frames to take at each length.
@@ -135,7 +135,7 @@ def capture_guide_ladder(
     """
     ladder: dict[float, list[np.ndarray]] = {}
     previous_digest = _digest(read_frame())
-    for exposure in exposure_seconds:
+    for exposure in exposure_s:
         frames = []
         for _ in range(frames_per_exposure):
             if not take_exposure(exposure, gain):

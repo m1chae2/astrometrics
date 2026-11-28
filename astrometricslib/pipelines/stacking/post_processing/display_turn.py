@@ -16,6 +16,10 @@ No turn is given for a stack without a plate solution, for a frame that has a
 plate solution of its own (it is a stack, or was solved, so its sky map is
 already right), or for a frame already turned to north (``QTURN``).
 
+`frame_rotation` is the owner of ``targets.frames.get_rotation``: it checks
+that the file is one of the target's frames or stacks and reads both
+headers.
+
 Words used here: a picture is drawn with the file's first row at the top when
 the file says ``ROWORDER = TOP-DOWN`` and at the bottom otherwise.
 """
@@ -25,10 +29,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from astrometricslib._internal.drivers.fits_access import header_is_plate_solved
+from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.header_wcs import celestial_wcs, up_angle_degrees
 from astrometricslib.pipelines.stacking.post_processing.quarter_turn import QUARTER_TURN_KEYWORD
 
-__all__ = ["display_turn_degrees", "frame_north_angle_degrees", "nearest_quarter_turn"]
+__all__ = ["display_turn_degrees", "frame_north_angle_degrees", "frame_rotation", "nearest_quarter_turn"]
 
 
 def nearest_quarter_turn(degrees: float) -> int:
@@ -133,3 +138,55 @@ def display_turn_degrees(
     if frame_pier is not None and stack_pier is not None and frame_pier != stack_pier:
         return 180
     return 0
+
+
+def frame_rotation(target: Target, frame: FrameRecord | str) -> int:
+    """Say how far to turn a frame on screen to match the target's stack.
+
+    Frames taken on the two sides of a meridian flip are upside down from
+    each other. A viewer shows each raw frame turned by a quarter turn
+    (clockwise) so it looks the same way round as the target's imaging
+    stack: the stack's rotation from its plate solution minus the frame's
+    capture rotation (``CROTA2``), rounded to a quarter turn, or half a turn
+    for a frame from the other side of the pier (``PIERSIDE``) when it has
+    no ``CROTA2``. A stack with no plate solution, a frame with its own
+    plate solution, a frame already turned to north and a file that cannot
+    be read all give 0.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target.
+    frame : `FrameRecord` or `str`
+        The frame, or the path of one of the target's frames or stacks.
+
+    Returns
+    -------
+    turn_deg : `int`
+        0, 90, 180 or 270 degrees, clockwise.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the file is not one of the target's frames or stacks.
+    """
+    from astrometricslib._internal.drivers.fits_access import FITS_READ_ERRORS, read_header
+    from astrometricslib.foundation.errors import InvalidArgumentError
+
+    path = frame if isinstance(frame, str) else frame.path
+    belongs = any(item.path == path for item in target.frames) or path in (
+        target.stacking.processed_image,
+        target.stacking.stacked_image,
+        target.spectral_stacking.stacked_image,
+    )
+    if not belongs:
+        raise InvalidArgumentError(
+            f"Path {path} does not belong to target {target.id}", details={"path": path}
+        )
+    stack_path = target.stacking.stacked_image
+    if not stack_path:
+        return 0
+    try:
+        return display_turn_degrees(read_header(path), read_header(stack_path))
+    except FITS_READ_ERRORS:
+        return 0

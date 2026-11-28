@@ -1,12 +1,16 @@
-"""Purpose: Read the Ekos session logs without the library's driver code.
+"""Purpose: Read the Ekos session logs and camera status, without driver code.
 
 Description: Ekos writes an analyze log (``ekos-*.analyze``) for each
 session. These two functions read the parts a script usually wants: which
 frames the session saved and when, and how Ekos names its time zones. They
 only read files. The full session record, with its guiding, focus and
 temperature readings, is private to the library; read it through
-`ObservationReview.query` (``kind="ekos_sessions"``) once the log has been
+`review.nights.query_ekos_sessions` once the log has been
 ingested.
+
+`FrameEndDetector` reads the camera status text the telescope status
+reports and says when a frame has ended, so a program can copy the new
+frame at once.
 """
 
 from dataclasses import dataclass
@@ -16,8 +20,10 @@ from wayfindinglib.drivers.ekos.analyze_log_parser import (
     UTC_OFFSET_HOURS_BY_ABBREVIATION,
     parse_ekos_analyze_log,
 )
+from wayfindinglib.tasks.control_tasks.frame_end_detection import FrameEndDetector
 
 __all__ = [
+    "FrameEndDetector",
     "SavedCapture",
     "ekos_utc_offset_hours",
     "read_ekos_captures",
@@ -30,12 +36,12 @@ class SavedCapture:
 
     ``file_path`` is where Ekos saved the frame on the telescope computer,
     ``completed_at`` is when the exposure finished, in seconds since the Unix
-    epoch (UTC), and ``exposure_seconds`` is the exposure length in seconds.
+    epoch (UTC), and ``exposure_s`` is the exposure length in seconds.
     """
 
     file_path: str
     completed_at: float
-    exposure_seconds: float
+    exposure_s: float
 
 
 def read_ekos_captures(file_path: str | Path) -> list[SavedCapture] | None:
@@ -60,7 +66,7 @@ def read_ekos_captures(file_path: str | Path) -> list[SavedCapture] | None:
         SavedCapture(
             file_path=capture.file_path,
             completed_at=capture.completed_at,
-            exposure_seconds=capture.exposure_seconds,
+            exposure_s=capture.exposure_s,
         )
         for capture in parsed[0].captures
     ]

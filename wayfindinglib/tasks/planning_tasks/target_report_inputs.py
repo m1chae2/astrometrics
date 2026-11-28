@@ -42,11 +42,11 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib import Target
+from astrometricslib import CaptureSetting, Target
 from astrometricslib.drivers import VersionedCache, get_stack_quality_data_version
 from astrometricslib.exceptions import AstrometricsError
-from astrometricslib.parameters import resolve_parameter
-from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, CaptureSetting, QualityMeasurement, SubjectLevel
+from astrometricslib.parameters import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C, resolve_parameter
+from astrometricslib.reports import EARLIER_NIGHTS_VARIANT, QualityMeasurement, SubjectLevel
 from wayfindinglib.analytics.result_quality.capture_overheads import EXPOSURE_MATCH_SECONDS
 from wayfindinglib.analytics.result_quality.forecast import (
     NoiseHistory,
@@ -128,11 +128,15 @@ def read_target_rows(astrometrics: Any, target_id: str) -> TargetRows:
         The rows and their capture settings. A library with no measurements
         gives empty lists.
     """
-    rows = list(astrometrics.quality.query(target_id=target_id, library_only=True).rows)
+    rows = list(astrometrics.quality.records.query(target=Target(id=target_id), library_only=True))
     ids = sorted({
         row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
     })
-    settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+    settings = (
+        {stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings(ids)}
+        if ids
+        else {}
+    )
     return TargetRows(rows=rows, settings=settings)
 
 
@@ -158,16 +162,16 @@ def read_earlier_nights_rows(astrometrics: Any, target_id: str) -> list[QualityM
         The rows; empty when the target has no subset stack.
     """
     return [
-        *astrometrics.quality.query(
-            target_id=target_id, level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
-        ).rows,
-        *astrometrics.quality.query(
-            target_id=target_id,
+        *astrometrics.quality.records.query(
+            target=Target(id=target_id), level="stack", variant=EARLIER_NIGHTS_VARIANT, latest_only=False
+        ),
+        *astrometrics.quality.records.query(
+            target=Target(id=target_id),
             level="frame",
             metric=FRAME_WEIGHT_METRIC,
             variant=EARLIER_NIGHTS_VARIANT,
             latest_only=False,
-        ).rows,
+        ),
     ]
 
 
@@ -190,17 +194,16 @@ def read_forecast_runs(
     -------
     runs : `list` [`StackRunRecord`]
         The library runs and the earlier-nights subset runs, oldest first,
-        each with its calibration record where one is stored. A library
-        without ``calibration_identities`` (an old one) gives runs with none,
-        and the forecast check then counts them as confounded.
+        each with its calibration record where one is stored. A run with no
+        stored record gets none, and the forecast check then counts it as
+        confounded.
     """
     from wayfindinglib.analytics.result_quality.forecast import (
         attach_calibration_identities,
         stack_runs_from_measurements,
     )
 
-    reader = getattr(astrometrics.quality, "calibration_identities", None)
-    identities = list(reader(target_id=target_id)) if callable(reader) else []
+    identities = astrometrics.quality.records.get_calibration_identities(Target(id=target_id))
     runs = stack_runs_from_measurements(
         [*library_rows, *read_earlier_nights_rows(astrometrics, target_id)], include_earlier_nights=True
     )
@@ -221,11 +224,15 @@ def _read_library_stack_rows(astrometrics: Any) -> tuple[list[QualityMeasurement
         One library-wide query of stack-level rows (library stacks, every run
         kept) and one read of the capture settings they point at.
     """
-    rows = list(astrometrics.quality.query(level="stack", library_only=True, latest_only=False).rows)
+    rows = list(astrometrics.quality.records.query(level="stack", library_only=True, latest_only=False))
     ids = sorted({
         row.subject.capture_setting_id for row in rows if row.subject.capture_setting_id is not None
     })
-    settings = dict(astrometrics.quality.capture_settings(ids=ids)) if ids else {}
+    settings = (
+        {stored.id: stored.setting for stored in astrometrics.quality.records.get_capture_settings(ids)}
+        if ids
+        else {}
+    )
     return rows, settings
 
 
@@ -272,8 +279,7 @@ def read_noise_history(astrometrics: Any, config: Any | None = None) -> NoiseHis
             The noise history.
         """
         rows, settings = _read_library_stack_rows(astrometrics)
-        reader = getattr(astrometrics.quality, "calibration_identities", None)
-        identities = list(reader()) if callable(reader) else []
+        identities = astrometrics.quality.records.get_calibration_identities()
         return NoiseHistory(
             model_errors=noise_model_errors_by_setting_group(rows, settings),
             fixed_pattern_shares=fixed_pattern_shares_by_setup(rows, identities),
@@ -383,9 +389,9 @@ def frame_altitudes(target: Target) -> dict[str, float]:
         frame with none is left out.
     """
     return {
-        target.frame_subject_id(frame): float(frame.altitude_degrees)
+        target.frame_subject_id(frame): float(frame.altitude_deg)
         for frame in target.frames
-        if frame.altitude_degrees is not None and str(frame.role).upper().endswith("LIGHT")
+        if frame.altitude_deg is not None and str(frame.role).upper().endswith("LIGHT")
     }
 
 
@@ -428,7 +434,7 @@ def _group_exposure(
 
     Returns
     -------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The stored group exposure, else the one written in the id, else
         ``None``.
     """
@@ -479,9 +485,8 @@ def assign_stacks_to_settings(
                 setting_id
                 for setting_id, setting in settings.items()
                 if exposure is not None
-                and setting.exposure_seconds is not None
-                and abs(setting.exposure_seconds - exposure)
-                <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
+                and setting.exposure_s is not None
+                and abs(setting.exposure_s - exposure) <= resolve_parameter(EXPOSURE_MATCH_SECONDS).value
             )
             if len(matches) == 1:
                 assignment[stack_id] = matches[0]
@@ -514,6 +519,32 @@ def assign_stacks_to_settings(
 # -----------------------------------------------------------------------------
 
 
+def _calibration_row(row: Any) -> dict[str, Any]:
+    """Write one library counts row as the calibration rule reads it.
+
+    Parameters
+    ----------
+    row : `CalibrationSetCount`
+        A row of ``calibration.query``.
+
+    Returns
+    -------
+    row : `dict` [`str`, `Any`]
+        ``camera``, ``gain``, ``offset``, ``binning``,
+        ``temperature_c``, ``exposure_s``, ``filter`` and ``count``.
+    """
+    return {
+        "camera": row.camera,
+        "gain": row.gain,
+        "offset": row.offset,
+        "binning": row.binning,
+        "temperature_c": row.temperature_c,
+        "exposure_s": row.exposure_s,
+        "filter": row.filter_name,
+        "count": row.count,
+    }
+
+
 def read_calibration_rows(
     astrometrics: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float | None, str | None]:
@@ -527,16 +558,17 @@ def read_calibration_rows(
     Returns
     -------
     darks, flats, tolerance, problem : `tuple`
-        The rows of ``processing.calibration.query(detail="counts")``, the
-        dark temperature tolerance the same answer reports (degrees Celsius),
-        and a sentence saying why they could not be read (``None`` when they
-        could).
+        The dark and flat rows of ``calibration.query`` (see
+        `_calibration_row`), the dark temperature tolerance the library
+        matches darks with (degrees Celsius), and a sentence saying why they
+        could not be read (``None`` when they could).
     """
     try:
-        answer = astrometrics.processing.calibration.query(detail="counts")
+        darks = [_calibration_row(row) for row in astrometrics.calibration.query("dark")]
+        flats = [_calibration_row(row) for row in astrometrics.calibration.query("flat")]
     except (AstrometricsError, OSError) as error:
         return [], [], None, f"The calibration library could not be read: {error}"
-    return list(answer.darks or []), list(answer.flats or []), answer.dark_temperature_tolerance_c, None
+    return darks, flats, resolve_parameter(DEFAULT_DARK_TEMPERATURE_TOLERANCE_C).value, None
 
 
 def sessions_of_target(butler: Any, target_id: str) -> list[ObservationSession]:

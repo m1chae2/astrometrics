@@ -110,7 +110,7 @@ def test_aborted_captures_are_kept_separately(tmp_path: Path) -> None:
 
     assert len(context.captures) == 2
     (aborted,) = context.aborted_captures
-    assert aborted.exposure_seconds == pytest.approx(30.0)
+    assert aborted.exposure_s == pytest.approx(30.0)
 
 
 def test_a_finished_autofocus_run_separates_the_chosen_position_from_the_curve(tmp_path: Path) -> None:
@@ -140,11 +140,11 @@ def test_mount_positions_keep_the_reliable_fields_and_name_the_pier_side(tmp_pat
     context, _ = _parse(tmp_path)
     parked, tracking = context.mount_positions
 
-    assert parked.altitude_degrees == pytest.approx(45.6817)
+    assert parked.altitude_deg == pytest.approx(45.6817)
     assert parked.pier_side == "West"
-    assert tracking.declination_degrees == pytest.approx(22.8036)
-    assert tracking.azimuth_degrees == pytest.approx(170.2917)
-    assert tracking.altitude_degrees == pytest.approx(66.8779)
+    assert tracking.declination_deg == pytest.approx(22.8036)
+    assert tracking.azimuth_deg == pytest.approx(170.2917)
+    assert tracking.altitude_deg == pytest.approx(66.8779)
     assert tracking.pier_side == "East"
     assert not hasattr(tracking, "right_ascension_hours")
     assert not hasattr(tracking, "hour_angle_degrees")

@@ -30,23 +30,33 @@ def test_shutdown_stops_the_maintenance_thread_and_the_indi_worker() -> None:
     assert container.initialized is False
 
 
-def test_shutdown_stops_the_stacking_programs_through_the_public_name() -> None:
-    """Shutdown stops Siril directly, not through an `atexit` hook."""
+def test_shutdown_stops_the_stacking_programs_through_the_public_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shutdown stops Siril through the public driver, not an `atexit` hook."""
+    import astrometricslib.drivers as drivers
+
+    engine = MagicMock()
+    monkeypatch.setattr(drivers, "get_stacking_driver", lambda: engine)
     container = Container()
     container.astrometrics = MagicMock()
     container.wayfinder = MagicMock()
 
     container.shutdown_resources()
 
-    container.astrometrics.processing.stop_stacking_programs.assert_called_once_with()
+    engine.stop_running_programs.assert_called_once_with()
     container.wayfinder.control.close.assert_called_once_with()
 
 
-def test_a_failure_stopping_siril_does_not_stop_the_rest_of_shutdown() -> None:
+def test_a_failure_stopping_siril_does_not_stop_the_rest_of_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
     """The observatory control is still closed when Siril cannot be stopped."""
+    import astrometricslib.drivers as drivers
+
+    engine = MagicMock()
+    engine.stop_running_programs.side_effect = RuntimeError("boom")
+    monkeypatch.setattr(drivers, "get_stacking_driver", lambda: engine)
     container = Container()
     container.astrometrics = MagicMock()
-    container.astrometrics.processing.stop_stacking_programs.side_effect = RuntimeError("boom")
     container.wayfinder = MagicMock()
 
     container.shutdown_resources()

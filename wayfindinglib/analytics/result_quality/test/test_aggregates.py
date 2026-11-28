@@ -8,7 +8,7 @@ summaries count frames, nights and settings.
 
 import pytest
 
-from astrometricslib.reports import CaptureSetting
+from astrometricslib import CaptureSetting
 from wayfindinglib.analytics.result_quality import aggregates as agg
 from wayfindinglib.analytics.result_quality.efficiency import (
     BaselineNight,
@@ -18,8 +18,8 @@ from wayfindinglib.analytics.result_quality.efficiency import (
 )
 from wayfindinglib.models.quality.efficiency import EfficiencyReference, ScienceGoal
 
-SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_seconds=60.0)
-OTHER = CaptureSetting(camera="CamA", telescope="Scope", filter_name="Ha", exposure_seconds=300.0)
+SETTING = CaptureSetting(camera="CamA", telescope="Scope", filter_name="L", exposure_s=60.0)
+OTHER = CaptureSetting(camera="CamA", telescope="Scope", filter_name="Ha", exposure_s=300.0)
 
 
 def _reference_for(setting: CaptureSetting) -> EfficiencyReference | None:
@@ -75,7 +75,7 @@ def _frame(
         capture_setting=setting,
         night_id=night,
         target_id="T",
-        exposure_seconds=setting.exposure_seconds,
+        exposure_s=setting.exposure_s,
         star_width_effective_arcsec=width,
         sky_rate_e_per_s_per_px=sky,
         read_noise_e=1.5,
@@ -108,14 +108,14 @@ def test_loss_account_adds_up_and_keeps_set_aside_apart() -> None:
     result = agg.loss_account(_frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for)
     assert result is not None
     account = result.account
-    assert account.set_aside_seconds == pytest.approx(60.0)
+    assert account.set_aside_s == pytest.approx(60.0)
     assert [share.cause for share in account.set_aside] == ["clouded"]
     summary = agg.target_summary("T", _frames(), ScienceGoal.FAINT_POINT_SOURCE, _reference_for)
-    kept_captured = summary.captured_seconds - 60.0
+    kept_captured = summary.captured_s - 60.0
     deficit = sum(share.seconds for share in account.kept_frame_deficit)
-    assert deficit == pytest.approx(kept_captured - summary.efficiency_effective_seconds)
+    assert deficit == pytest.approx(kept_captured - summary.efficiency_effective_s)
     assert account.transparency_included is False
-    assert account.cause_unknown_seconds is None
+    assert account.cause_unknown_s is None
     assert "Not measured" in account.cause_unknown_reason
 
 
@@ -130,11 +130,11 @@ def test_cause_unknown_exists_only_with_a_noise_check() -> None:
         _frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for, measured_noise_check=noisy
     )
     assert with_noise is not None
-    assert with_noise.account.cause_unknown_seconds > 0.0
+    assert with_noise.account.cause_unknown_s > 0.0
     with_match = agg.loss_account(
         _frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for, measured_noise_check=agreeing
     )
-    assert with_match.account.cause_unknown_seconds == pytest.approx(0.0)
+    assert with_match.account.cause_unknown_s == pytest.approx(0.0)
 
 
 def test_cause_unknown_allows_for_the_expected_noise_models_own_error() -> None:
@@ -148,14 +148,14 @@ def test_cause_unknown_allows_for_the_expected_noise_models_own_error() -> None:
         _frames(), [], ScienceGoal.FAINT_POINT_SOURCE, _reference_for, measured_noise_check=check
     )
     assert result is not None
-    assert result.account.cause_unknown_seconds == pytest.approx(0.0)
+    assert result.account.cause_unknown_s == pytest.approx(0.0)
 
 
 def test_loss_account_passed_set_aside_frames_are_added() -> None:
     """Frames given as SetAsideInput count the same as marked frames."""
-    extra = agg.SetAsideInput(frame_id="x", exposure_seconds=90.0, reason="trailed", capture_setting=SETTING)
+    extra = agg.SetAsideInput(frame_id="x", exposure_s=90.0, reason="trailed", capture_setting=SETTING)
     result = agg.loss_account([_frame("a")], [extra], ScienceGoal.FAINT_POINT_SOURCE, _reference_for)
-    assert result.account.set_aside_seconds == pytest.approx(90.0)
+    assert result.account.set_aside_s == pytest.approx(90.0)
 
 
 def test_no_reference_gives_no_account_and_a_note() -> None:
@@ -166,7 +166,7 @@ def test_no_reference_gives_no_account_and_a_note() -> None:
     assert agg.loss_account(_frames(), [], ScienceGoal.FAINT_POINT_SOURCE, lambda setting: None) is None
     summary = agg.target_summary("T", _frames(), ScienceGoal.FAINT_POINT_SOURCE, lambda setting: None)
     assert summary.loss_account is None
-    assert summary.efficiency_effective_seconds is None
+    assert summary.efficiency_effective_s is None
     assert any("No reference" in note for note in summary.notes)
 
 
@@ -185,10 +185,10 @@ def test_capture_setting_summaries_count_frames_nights_and_set_aside() -> None:
     assert by_filter["L"].frames_taken == 4
     assert by_filter["L"].frames_set_aside == 1
     assert by_filter["L"].nights == 2
-    assert by_filter["L"].captured_seconds == pytest.approx(240.0)
-    assert by_filter["L"].weight_effective_seconds == pytest.approx(111.0)
-    assert by_filter["Ha"].weight_effective_seconds is None
-    assert by_filter["L"].efficiency_effective_seconds < 180.0
+    assert by_filter["L"].captured_s == pytest.approx(240.0)
+    assert by_filter["L"].weight_effective_s == pytest.approx(111.0)
+    assert by_filter["Ha"].weight_effective_s is None
+    assert by_filter["L"].efficiency_effective_s < 180.0
     assert by_filter["L"].loss_account is not None
 
 

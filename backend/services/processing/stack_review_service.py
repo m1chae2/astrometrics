@@ -14,15 +14,24 @@ job with ``jobs:query`` (``detail="full"``). When the job ends, its result is
 stored in the job's ``output_metrics["result"]``. A call that fails inside the
 short wait raises its error to the caller. A later failure shows up as a
 failed job with a message.
+
+The service also answers three quick reads and one write of the Image
+Processing Display that adapt the app's parameters to the library: the stack
+summary (``processing:stack_summary``), the objects the picture's stretch can
+protect (``processing:list_bright_objects``) and the saved choice of one
+(``processing:set_bright_object``).
 """
 
 import logging
+import re
 import threading
 from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from astrometricslib import EnhancementSettings, PreviewBrightObject
+from astrometricslib.arguments import check_frames
 from astrometricslib.exceptions import InvalidArgumentError, NotFoundError
 from astrometricslib.jobs import (
     RunAbandonedError,
@@ -31,6 +40,8 @@ from astrometricslib.jobs import (
     report_started_jobs,
     run_as_background_job,
 )
+from backend.services.processing.equipment_choice import frames_for_selection, stack_for_equipment
+from backend.services.subject_resolver import SubjectResolver
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +143,155 @@ def _plain(result: Any) -> Any:
     return result.model_dump(mode="json") if hasattr(result, "model_dump") else result
 
 
-class StackReviewService:
+_NAME_PREFIX = "NAME "
+"""SIMBAD's mark of a common name, which a spelling of a name may leave out."""
+
+
+def _spelling_key(name: str) -> str:
+    """Write an object name so case, spaces and SIMBAD's mark do not matter.
+
+    Parameters
+    ----------
+    name : `str`
+        A name, such as ``"ngc7635"`` or ``"NAME Bubble Nebula"``.
+
+    Returns
+    -------
+    key : `str`
+        Upper case, without spaces or underscores, and without a leading
+        ``NAME``.
+    """
+    text = re.sub(r"\s+", " ", name.replace("_", " ")).strip().upper().removeprefix(_NAME_PREFIX)
+    return text.replace(" ", "")
+
+
+class _QuickReads:
+    """The quick stack reads and the bright-object choice of the service."""
+
+    _astrometrics: Any
+    _subjects: SubjectResolver
+
+    def get_stack_summary(self, target: str, kind: Literal["imaging", "spectral"] = "imaging") -> Any:
+        """Summarize a target's current stack (``processing:stack_summary``).
+
+        Parameters
+        ----------
+        target : `str`
+            The target id.
+        kind : `str`, optional
+            ``"imaging"`` (default) or ``"spectral"`` stack.
+
+        Returns
+        -------
+        summary : `StackSummary`
+            The library's summary of the saved stack.
+        """
+        return self._astrometrics.processing.stacking.get_summary(self._subjects.target(target), kind)
+
+    def list_bright_objects(self, target: str, refresh: bool = False) -> Any:
+        """List the objects the picture's stretch can protect.
+
+        Parameters
+        ----------
+        target : `str`
+            The target id.
+        refresh : `bool`, optional
+            Ask SIMBAD again even when an answer is stored.
+
+        Returns
+        -------
+        choices : `BrightObjectChoices`
+            The objects, or none and the reason, with the saved choice.
+        """
+        return self._astrometrics.processing.enhancement.get_bright_objects(
+            self._subjects.target(target), force=refresh
+        )
+
+    def set_bright_object(
+        self,
+        target: str,
+        mode: Literal["auto", "off", "object"] = "auto",
+        simbad_id: str | None = None,
+        ra_deg: float | None = None,
+        dec_deg: float | None = None,
+        major_axis_arcmin: float | None = None,
+        name: str | None = None,
+    ) -> PreviewBrightObject:
+        """Save which object the picture's masked stretch protects.
+
+        The choice is saved on the target and read the next time its picture
+        is made. ``"auto"`` lets the stretch use the target itself, when it
+        is a nebula or a galaxy; ``"off"`` never uses the masked stretch;
+        ``"object"`` protects the object given.
+
+        Parameters
+        ----------
+        target : `str`
+            The target id.
+        mode : `str`, optional
+            ``"auto"`` (default), ``"off"`` or ``"object"``.
+        simbad_id : `str`, optional
+            With ``"object"``, SIMBAD's name of the object.
+        ra_deg, dec_deg : `float`, optional
+            With ``"object"``, its position in degrees.
+        major_axis_arcmin : `float`, optional
+            With ``"object"``, its major axis in arcminutes, if known.
+        name : `str`, optional
+            With ``"object"``, instead of the name and position: any spelling
+            of an object the stack's list holds (``"ngc7635"`` names
+            ``NGC 7635``).
+
+        Returns
+        -------
+        choice : `PreviewBrightObject`
+            The choice as saved.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``mode`` is unknown, ``"object"`` lacks a name or a position
+            inside the sky, or ``name`` is not in the stack's list (the
+            message lists the objects that are).
+        """
+        if mode not in ("auto", "off", "object"):
+            raise InvalidArgumentError(f"Unknown mode {mode!r}. Choose from: auto, off, object.")
+        subject = self._subjects.target(target)
+        if mode == "object" and name and ra_deg is None and dec_deg is None:
+            listing = self._astrometrics.processing.enhancement.get_bright_objects(subject)
+            listed = next(
+                (item for item in listing.objects if _spelling_key(item.simbad_id) == _spelling_key(name)),
+                None,
+            )
+            if listed is None:
+                names = ", ".join(item.simbad_id for item in listing.objects) or "none"
+                raise InvalidArgumentError(
+                    f"{name!r} is not an object in the frame of {listing.target_id!r}. Objects in the frame: "
+                    f"{names}." + (f" {listing.message}" if listing.message else ""),
+                    details={"target": listing.target_id, "name": name},
+                )
+            simbad_id, ra_deg, dec_deg = listed.simbad_id, listed.ra_deg, listed.dec_deg
+            major_axis_arcmin = listed.major_axis_arcmin
+        if mode == "object":
+            if not simbad_id or ra_deg is None or dec_deg is None:
+                raise InvalidArgumentError("Mode 'object' needs simbad_id, ra_deg and dec_deg.")
+            if not (0.0 <= ra_deg < 360.0 and -90.0 <= dec_deg <= 90.0):
+                raise InvalidArgumentError("The position of the object is outside the sky.")
+            if major_axis_arcmin is not None and not major_axis_arcmin > 0.0:
+                raise InvalidArgumentError("major_axis_arcmin must be positive.")
+            choice = PreviewBrightObject(
+                mode="object",
+                simbad_id=simbad_id,
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+                major_axis_arcmin=major_axis_arcmin,
+            )
+        else:
+            choice = PreviewBrightObject(mode=mode)
+        self._astrometrics.targets.update(subject, preview_bright_object=choice)
+        return choice
+
+
+class StackReviewService(_QuickReads):
     """Start the slow stack reviews as background jobs.
 
     Parameters
@@ -145,6 +304,7 @@ class StackReviewService:
 
     def __init__(self, astrometrics: Any, wait_seconds: float = DEFAULT_WAIT_SECONDS) -> None:
         self._astrometrics = astrometrics
+        self._subjects = SubjectResolver(astrometrics)
         self._wait_seconds = wait_seconds
 
     def _start(self, work: Callable[[], Any]) -> StackReviewStart:
@@ -233,9 +393,13 @@ class StackReviewService:
         InvalidArgumentError
             If a camera or optic is given with ``stack_path`` or for a
             spectral stack, or names no stack of the target, or more than one.
+        NotFoundError
+            If a spectral stack is asked for and the target has none.
         """
-        processing = self._astrometrics.processing
+        enhancement = self._astrometrics.processing.enhancement
+        target = self._subjects.target(target_id)
         configuration_key = None
+        stack: Any = stack_path
         if camera_id or focal_length_mm is not None:
             if stack_path or kind == "spectral":
                 raise InvalidArgumentError(
@@ -243,9 +407,22 @@ class StackReviewService:
                     "a spectral stack (spectral stacks are kept only for the main configuration).",
                     details={"target_id": target_id, "kind": kind},
                 )
-            record = processing.find_stack_configuration(target_id, camera_id, focal_length_mm)
-            stack_path = record.stacked_image
-            configuration_key = record.configuration_key
+            stack = stack_for_equipment(self._astrometrics, target, camera_id, focal_length_mm)
+            configuration_key = stack.configuration_key
+        elif kind == "spectral" and not stack_path:
+            stack = target.spectral_stacking.stacked_image
+            if not stack:
+                raise NotFoundError(
+                    f"Target '{target_id}' has no spectral stack.", details={"target": target_id}
+                )
+        settings = EnhancementSettings(
+            denoise=denoise,
+            denoise_strength=denoise_strength,
+            star_toning=star_toning,
+            starnet=bool(starnet),
+            star_strength=star_strength,
+            star_stretch=star_stretch,
+        )
 
         def remake() -> Any:
             """Run the remake so that a cancel can reach it.
@@ -270,18 +447,9 @@ class StackReviewService:
 
             try:
                 with bind_abandonment(abandonment), report_started_jobs(remember_job):
-                    return processing.remake_preview(
-                        target_id,
-                        kind=kind,
-                        denoise=denoise,
-                        denoise_strength=denoise_strength,
-                        star_toning=star_toning,
-                        starnet=starnet,
-                        star_strength=star_strength,
-                        star_stretch=star_stretch,
-                        register_job=True,
-                        stack_path=stack_path,
-                    )
+                    # The button always makes the picture again, even when it
+                    # is up to date.
+                    return enhancement.run(target, settings, stack, force=True)
             finally:
                 with _preview_abandonments_lock:
                     for job_id in recorded_job_ids:
@@ -310,12 +478,33 @@ class StackReviewService:
             target with no previous stack gives a report with no comparison and
             a note that says so.
         """
-        quality = self._astrometrics.quality
-        return self._start(
-            lambda: quality.measure_stack(
-                target_id, kind=kind, include=[], compare_to="previous", register_job=True
-            )
-        )
+        stacks = self._astrometrics.quality.stacks
+
+        def compare() -> Any:
+            """Measure the chosen stack against the previous one.
+
+            Returns
+            -------
+            report : `StackQualityReport`
+                The library's report.
+
+            Raises
+            ------
+            NotFoundError
+                If the target has no spectral stack when one was asked for.
+            """
+            target = self._subjects.target(target_id)
+            stack = None
+            if kind == "spectral":
+                stack = target.spectral_stacking.stacked_image
+                if not stack:
+                    raise NotFoundError(
+                        f"Target '{target.id}' has no spectral stack.",
+                        details={"target": target.id, "kind": kind},
+                    )
+            return stacks.measure(target, stack=stack, include=[], compare_to="previous")
+
+        return self._start(compare)
 
     def start_stack_check(
         self,
@@ -381,25 +570,21 @@ class StackReviewService:
         camera or optic, raise `InvalidArgumentError` before the job starts.
         """
         choices = (kind, filter_name, first_file, last_file, since, until, camera_id, focal_length_mm)
-        frames = None
+        target = self._subjects.target(target_id)
         if image_files is not None:
             if any(value is not None for value in choices):
                 raise InvalidArgumentError(
                     "Pass image_files, or choose the frames with kind, filter_name, first_file, "
                     "last_file, since, until, camera_id and focal_length_mm, not both."
                 )
-            frames = self._frames_from_list(target_id, image_files)
-        processing = self._astrometrics.processing
-        if frames:
-            # The frame choice alone runs the library's frame-list checks
-            # (for example a mix of imaging and spectral frames) and reads no
-            # frame, so a bad list is refused before a job starts.
-            processing.predict_stack(target_id, frames=frames, checks=False)
-        return self._start(
-            lambda: processing.predict_stack(
-                target_id,
-                frames=frames,
-                kind=kind or "imaging",
+            # The frame-list check reads no frame, so a bad list is refused
+            # before a job starts.
+            frames = check_frames(self._frames_from_list(target_id, image_files), target)
+        else:
+            frames = frames_for_selection(
+                self._astrometrics,
+                target,
+                kind=kind,
                 filter_name=filter_name,
                 first_file=first_file,
                 last_file=last_file,
@@ -407,9 +592,9 @@ class StackReviewService:
                 until=until,
                 camera_id=camera_id,
                 focal_length_mm=focal_length_mm,
-                register_job=True,
             )
-        )
+        stacking = self._astrometrics.processing.stacking
+        return self._start(lambda: stacking.predict(target, frames))
 
     def _frames_from_list(self, target_id: str, image_files: list) -> list[Any]:
         """Find the target's frame records for a list of paths or dictionaries.

@@ -114,7 +114,7 @@ def spectral_target_stars(
     """
     wanted_camera = camera_identity(camera_name, configuration)
     found: list[SpectralTargetStars] = []
-    for target in astrometrics.targets.query(detail="objects", limit=None).objects:
+    for target in astrometrics.targets.query(include_empty=True).items:
         stack_path = target.spectral_stacking.stacked_image
         if not stack_path:
             continue
@@ -128,7 +128,7 @@ def spectral_target_stars(
         height, width = header.get("NAXIS2"), header.get("NAXIS1")
         if not height or not width:
             continue
-        stars = astrometrics.stars.query(target_id=target.id, detail="objects", limit=None).objects or []
+        stars = list(astrometrics.stars.query(target=target))
         if stars:
             found.append(SpectralTargetStars(target.id, stack_path, (int(height), int(width)), stars, target))
     return found

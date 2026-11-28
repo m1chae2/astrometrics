@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _PUBLIC_MODULES = {
     "astrometricslib": (
         "astrometricslib",
+        "astrometricslib.arguments",
         "astrometricslib.exceptions",
         "astrometricslib.reports",
         "astrometricslib.jobs",
@@ -56,6 +57,11 @@ _SUB_API_CLASSES = {
         ("wayfindinglib", "ObservationPlanning"),
         ("wayfindinglib", "ObservationExecution"),
         ("wayfindinglib", "ObservationReview"),
+        ("wayfindinglib.api.review", "ReviewNights"),
+        ("wayfindinglib.api.review", "ReviewTargets"),
+        ("wayfindinglib.api.review", "ReviewGuiding"),
+        ("wayfindinglib.api.review", "ReviewPerformance"),
+        ("wayfindinglib.api.review", "ReviewAlignment"),
         ("wayfindinglib.api.control.mount", "MountControl"),
         ("wayfindinglib.api.control.imaging", "ImagingControl"),
         ("wayfindinglib.api.control.guiding", "GuidingControl"),

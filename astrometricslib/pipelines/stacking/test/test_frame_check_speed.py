@@ -77,7 +77,7 @@ def _profile() -> CameraProfile:
         saturation_threshold_adu=ProvenancedValue(value=60000.0, provenance=datasheet),
         sensor_noise=(
             SensorSettingNoise(
-                gain_setting=GAIN_SETTING,
+                gain=GAIN_SETTING,
                 offset="0",
                 binning="1x1",
                 gain_e_per_adu=ProvenancedValue(value=0.5, provenance=provenance),
@@ -143,10 +143,10 @@ def _make_target(tmp_path: Path, count: int) -> Target:
                 path=str(path),
                 camera="Test Camera",
                 telescope="Scope",
-                iso=GAIN_SETTING,
-                offset="0",
+                gain=GAIN_SETTING,
+                offset=0,
                 binning=1,
-                exposure="10.0",
+                exposure_s=10.0,
                 timestamp=1_792_000_000.0 + 60.0 * index,
                 pixelScaleArcsec=2.0,
                 sensorTemperatureC=-10.0,

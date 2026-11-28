@@ -102,7 +102,7 @@ class CaptureSetting:
         The camera gain and offset settings.
     binning : `int`
         The binning factor (``XBINNING``).
-    exposure : `float` or `None`
+    exposure_s : `float` or `None`
         The exposure in seconds.
     """
 
@@ -111,7 +111,7 @@ class CaptureSetting:
     gain: float | None
     offset: float | None
     binning: int
-    exposure: float | None
+    exposure_s: float | None
 
 
 @dataclass(frozen=True)
@@ -235,7 +235,7 @@ def setting_from_header(header: dict[str, object]) -> CaptureSetting:
         gain=_number(header.get("GAIN")),
         offset=_number(header.get("OFFSET")),
         binning=int(binning) if binning else 1,
-        exposure=exposure,
+        exposure_s=exposure,
     )
 
 
@@ -273,7 +273,7 @@ def simulated_capture_setting(
             gain=setting.gain,
             offset=setting.offset if setting.offset is not None else offset,
             binning=setting.binning,
-            exposure=setting.exposure,
+            exposure_s=setting.exposure_s,
         ),
         started,
     )
@@ -490,12 +490,12 @@ class FrameSource:
         matching = [
             frame for frame in self.real_frames(target) if settings_match(wanted, frame.setting, self.camera)
         ]
-        if wanted.exposure is not None:
+        if wanted.exposure_s is not None:
             same_exposure = [
                 frame
                 for frame in matching
-                if frame.setting.exposure is not None
-                and abs(frame.setting.exposure - wanted.exposure) <= EXPOSURE_TOLERANCE_SECONDS
+                if frame.setting.exposure_s is not None
+                and abs(frame.setting.exposure_s - wanted.exposure_s) <= EXPOSURE_TOLERANCE_SECONDS
             ]
             matching = same_exposure or matching
         if not matching:
@@ -615,7 +615,7 @@ class FrameSource:
                 retime_header(
                     hdus[0].header,
                     started or self.clock(),
-                    frame.setting.exposure,
+                    frame.setting.exposure_s,
                 )
                 hdus.flush()
             temporary.replace(destination)

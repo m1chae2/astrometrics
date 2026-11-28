@@ -4,7 +4,7 @@ Two things are checked:
 
 1. The quarantine rows of a moved frame carry the action taken (a processing
    decision is stored as its measurement plus the action taken).
-2. `QualityRecords.set_aside_frames` lists the frames in `_excluded` folders
+2. `TargetFrames.get_set_aside` lists the frames in `_excluded` folders
    with a reason and says whether it came from a stored row, from the
    manifest, or only from the folder.
 """
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib._internal.drivers.quality_store import QualityStore
-from astrometricslib.api.quality import QualityRecords
+from astrometricslib.api._target_frames import TargetFrames
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -49,20 +49,20 @@ REASON = "203 stars against a typical 3348"
 
 
 @pytest.fixture
-def quality(tmp_path: Path) -> QualityRecords:
-    """Make the quality API on a temporary library and frames folder.
+def frames(tmp_path: Path) -> TargetFrames:
+    """Make the frame API on a temporary library and frames folder.
 
     Returns
     -------
-    quality : `QualityRecords`
-        The quality API on a stub configuration.
+    frames : `TargetFrames`
+        The frame API on a stub configuration.
     """
     configuration = SimpleNamespace(
         get_frames_path=lambda: tmp_path / "frames",
         get_library_path=lambda: tmp_path,
         get_stacks_path=lambda: tmp_path / "stacks",
     )
-    return QualityRecords(configuration, None, targets=MagicMock())
+    return TargetFrames(SimpleNamespace(_config=configuration))
 
 
 def _camera_folder(tmp_path: Path) -> Path:
@@ -153,13 +153,11 @@ def test_both_quarantine_rows_of_a_moved_frame_carry_the_action(tmp_path: Path) 
     assert all(row.action_taken is None for row in kept)
 
 
-def test_a_folder_without_stored_rows_is_listed_with_its_source(
-    quality: QualityRecords, tmp_path: Path
-) -> None:
+def test_a_folder_without_stored_rows_is_listed_with_its_source(frames: TargetFrames, tmp_path: Path) -> None:
     """Manifest frames say "manifest", unrecorded frames say "folder_only"."""
     folder = _camera_folder(tmp_path)
     _excluded_folder(folder, ["a.fits", "b.fits", "notes.txt"], ["a.fits"])
-    records = {record.file: record for record in quality.set_aside_frames(Target(id="M 1"))}
+    records = {record.file: record for record in frames.get_set_aside(Target(id="M 1"))}
 
     assert set(records) == {"a.fits", "b.fits"}
     assert records["a.fits"].reason_source == "manifest"
@@ -172,7 +170,7 @@ def test_a_folder_without_stored_rows_is_listed_with_its_source(
 
 
 def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
-    quality: QualityRecords, tmp_path: Path
+    frames: TargetFrames, tmp_path: Path
 ) -> None:
     """Restore moves manifest frames only; the listing flags the rest."""
     from astrometricslib._internal.processing_scripts import restore_excluded_frames
@@ -184,7 +182,7 @@ def test_a_frame_without_a_manifest_entry_is_listed_but_not_restored(
     other = _camera_folder_sibling(folder, "Camera2")
     loose = _excluded_folder(other, ["c.fits"], [])
 
-    records = {record.file: record for record in quality.set_aside_frames(Target(id="M 1"))}
+    records = {record.file: record for record in frames.get_set_aside(Target(id="M 1"))}
     assert records["a.fits"].restorable is True
     assert records["a.fits"].restore_note == ""
     for name in ("b.fits", "c.fits"):
@@ -217,12 +215,12 @@ def _camera_folder_sibling(folder: Path, name: str) -> Path:
     return sibling
 
 
-def test_a_stored_row_gives_the_reason_exposure_and_setting(quality: QualityRecords, tmp_path: Path) -> None:
+def test_a_stored_row_gives_the_reason_exposure_and_setting(frames: TargetFrames, tmp_path: Path) -> None:
     """A stored action wins over the manifest and gives the exposure."""
     folder = _camera_folder(tmp_path)
     _excluded_folder(folder, ["a.fits", "b.fits"], ["a.fits", "b.fits"])
     store = QualityStore(str(tmp_path / "astrometrics.db"))
-    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="Camera", exposure_seconds=120.0))
+    setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="Camera", exposure_s=120.0))
     action = set_aside_action_text("trailed", "stars stretched")
     store.write_measurements([
         QualityMeasurement(
@@ -242,20 +240,20 @@ def test_a_stored_row_gives_the_reason_exposure_and_setting(quality: QualityReco
             measured_at=MEASURED_AT,
         )
     ])
-    records = {record.file: record for record in quality.set_aside_frames(Target(id="M 1"))}
+    records = {record.file: record for record in frames.get_set_aside(Target(id="M 1"))}
 
     assert records["a.fits"].reason_source == "stored_row"
     assert (records["a.fits"].kind, records["a.fits"].reason) == ("trailed", "stars stretched")
     assert records["a.fits"].action_taken == action
-    assert records["a.fits"].exposure_seconds == pytest.approx(120.0)
+    assert records["a.fits"].exposure_s == pytest.approx(120.0)
     assert records["a.fits"].capture_setting_id == setting_id
     assert records["b.fits"].reason_source == "manifest"
 
 
-def test_a_target_with_nothing_set_aside_gives_an_empty_list(quality: QualityRecords, tmp_path: Path) -> None:
+def test_a_target_with_nothing_set_aside_gives_an_empty_list(frames: TargetFrames, tmp_path: Path) -> None:
     """No `_excluded` folder gives an empty list and moves nothing."""
     _camera_folder(tmp_path)
-    assert quality.set_aside_frames(Target(id="M 1")) == []
+    assert len(frames.get_set_aside(Target(id="M 1"))) == 0
 
 
 def test_the_stacking_stage_stores_the_action_for_moved_frames(
@@ -291,15 +289,18 @@ def test_the_stacking_stage_stores_the_action_for_moved_frames(
     assert actions["kept.fits"] is None
 
 
-def test_frame_statuses_list_the_targets_frames_with_the_flags(
-    quality: QualityRecords, monkeypatch: pytest.MonkeyPatch
+def test_get_statuses_list_the_targets_frames_with_the_flags(
+    frames: TargetFrames, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The status call reads stored elongations and flags a stretched frame."""
     target = Target(
         id="M 1",
         frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
     )
-    monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.frame_status.list_set_aside_frames_with_reasons",
+        lambda resolved, config: [],
+    )
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
         lambda target_id: {"M 1/a.fits": 1.6, "M 1/b.fits": 1.7},
@@ -308,7 +309,7 @@ def test_frame_statuses_list_the_targets_frames_with_the_flags(
         "astrometricslib.pipelines.stacking.frame_status.latest_stack_time", lambda resolved, stacks: 200.0
     )
 
-    report = quality.frame_statuses(target)
+    report = frames.get_statuses(target)
 
     assert [(status.name, status.state) for status in report.frames] == [
         ("a.fits", "flagged"),
@@ -318,8 +319,8 @@ def test_frame_statuses_list_the_targets_frames_with_the_flags(
     assert "too small for the quarantine" in report.frames[0].reason
 
 
-def test_frame_statuses_find_the_stack_time_themselves(
-    quality: QualityRecords, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_get_statuses_find_the_stack_time_themselves(
+    frames: TargetFrames, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The newest stack file's time is the stack time."""
     import os
@@ -333,13 +334,16 @@ def test_frame_statuses_find_the_stack_time_themselves(
         frames=[FrameRecord(path="/a.fits", timestamp=100.0), FrameRecord(path="/b.fits", timestamp=300.0)],
     )
     target.stacking.stacked_image = str(stack)
-    monkeypatch.setattr(quality, "set_aside_frames", lambda resolved: [])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.frame_status.list_set_aside_frames_with_reasons",
+        lambda resolved, config: [],
+    )
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.stored_star_elongations",
         lambda target_id: {},
     )
 
-    report = quality.frame_statuses(target)
+    report = frames.get_statuses(target)
 
     assert report.stacked_at == pytest.approx(200.0)
     assert [status.state for status in report.frames] == ["included", "not_stacked"]

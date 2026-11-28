@@ -47,11 +47,11 @@ def test_the_periodic_error_is_recovered_inside_its_uncertainty() -> None:
     fit = result.periodic_error
     assert fit is not None
     assert result.significant_periodic_error
-    assert abs(fit.period_seconds - 480.0) < max(4.0 * fit.period_uncertainty_seconds, 1.0)
+    assert abs(fit.period_s - 480.0) < max(4.0 * fit.period_uncertainty_s, 1.0)
     assert abs(fit.amplitude_arcsec - 4.0) < max(4.0 * fit.amplitude_uncertainty_arcsec, 0.1)
     phase_difference = (fit.phase_radians - 1.1 + math.pi) % (2.0 * math.pi) - math.pi
     assert abs(phase_difference) < max(4.0 * fit.phase_uncertainty_radians, 0.05)
-    assert fit.reference_epoch_seconds == pytest.approx(START)
+    assert fit.reference_epoch_s == pytest.approx(START)
 
 
 @pytest.mark.parametrize("seed", [2, 3, 4])
@@ -62,7 +62,7 @@ def test_the_recovery_holds_for_other_noise_and_periods(seed: int) -> None:
     result = measure_run(synthetic_run(seed=seed, period=period, phase=phase, noise=0.5, duration=3000.0))
     fit = result.periodic_error
     assert fit is not None
-    assert fit.period_seconds == pytest.approx(period, rel=0.02)
+    assert fit.period_s == pytest.approx(period, rel=0.02)
     assert fit.amplitude_arcsec == pytest.approx(4.0, rel=0.1)
 
 
@@ -70,13 +70,13 @@ def test_drift_and_random_terms_are_recovered() -> None:
     """The drift is found in arcseconds per minute, and so is the jitter."""
     result = measure_run(synthetic_run(drift_per_minute=0.8, walk=0.0, noise=0.4))
     assert result.ra is not None
-    assert result.ra.drift_arcsec_per_minute == pytest.approx(
-        0.8, abs=max(4.0 * result.ra.drift_uncertainty_arcsec_per_minute, 0.05)
+    assert result.ra.drift_arcsec_per_min == pytest.approx(
+        0.8, abs=max(4.0 * result.ra.drift_uncertainty_arcsec_per_min, 0.05)
     )
     assert result.ra.random_rms_arcsec == pytest.approx(0.4, rel=0.15)
     assert result.ra.random_step_rms_arcsec == pytest.approx(0.4 * math.sqrt(2.0), rel=0.15)
     assert result.dec is not None
-    assert result.dec.drift_arcsec_per_minute == pytest.approx(0.2, abs=0.05)
+    assert result.dec.drift_arcsec_per_min == pytest.approx(0.2, abs=0.05)
     assert result.dec.random_rms_arcsec == pytest.approx(0.1, rel=0.2)
 
 
@@ -85,9 +85,9 @@ def test_a_dither_does_not_corrupt_the_fit() -> None:
     result = measure_run(synthetic_run(dither_every=60, dither=5.0))
     fit = result.periodic_error
     assert fit is not None
-    assert fit.period_seconds == pytest.approx(480.0, rel=0.02)
+    assert fit.period_s == pytest.approx(480.0, rel=0.02)
     assert fit.amplitude_arcsec == pytest.approx(4.0, rel=0.1)
-    assert result.ra.drift_arcsec_per_minute == pytest.approx(0.5, abs=0.15)
+    assert result.ra.drift_arcsec_per_min == pytest.approx(0.5, abs=0.15)
 
 
 def test_a_run_too_short_for_two_cycles_of_a_worm_period_is_not_claimed() -> None:
@@ -134,12 +134,12 @@ def test_a_pause_inside_a_run_does_not_break_the_reconstruction() -> None:
         dec_error_arcsec=np.concatenate([first.dec_error_arcsec, second.dec_error_arcsec]),
         ra_pulse_ms=np.concatenate([first.ra_pulse_ms, second.ra_pulse_ms]),
         dec_pulse_ms=np.concatenate([first.dec_pulse_ms, second.dec_pulse_ms]),
-        ra_rate_arcsec_per_second=RATE,
-        dec_rate_arcsec_per_second=RATE,
+        ra_rate_arcsec_per_s=RATE,
+        dec_rate_arcsec_per_s=RATE,
     )
     fit = measure_run(joined).periodic_error
     assert fit is not None
-    assert fit.period_seconds == pytest.approx(480.0, rel=0.01)
+    assert fit.period_s == pytest.approx(480.0, rel=0.01)
     assert fit.amplitude_arcsec == pytest.approx(4.0, rel=0.1)
 
 
@@ -156,13 +156,13 @@ def test_pooling_averages_runs_and_reports_their_scatter() -> None:
     assert pooled is not None
     assert pooled.runs_used == 3
     assert pooled.phase_radians is None
-    assert pooled.period_seconds == pytest.approx(484.0, abs=3.0)
+    assert pooled.period_s == pytest.approx(484.0, abs=3.0)
     assert pooled.amplitude_arcsec == pytest.approx(3.4, abs=0.4)
-    assert pooled.period_scatter_seconds is not None
+    assert pooled.period_scatter_s is not None
     assert summary.nights_used == ["2026-01-01", "2026-01-02", "2026-01-03"]
     assert summary.ra.runs_used == 3
     assert summary.dec.runs_used == 3
-    assert summary.ra.drift_median_arcsec_per_minute == pytest.approx(0.5, abs=0.2)
+    assert summary.ra.drift_median_arcsec_per_min == pytest.approx(0.5, abs=0.2)
 
 
 def test_outlier_runs_do_not_move_the_pooled_terms() -> None:
@@ -178,11 +178,9 @@ def test_outlier_runs_do_not_move_the_pooled_terms() -> None:
     clean = summarize_runs(typical).ra
     mixed = summarize_runs(typical + wild).ra
     assert clean is not None and mixed is not None
-    assert mixed.drift_median_arcsec_per_minute == pytest.approx(-5.0, abs=1.0)
-    assert mixed.drift_median_arcsec_per_minute == pytest.approx(
-        clean.drift_median_arcsec_per_minute, abs=0.7
-    )
-    assert mixed.drift_spread_arcsec_per_minute < 3.0
+    assert mixed.drift_median_arcsec_per_min == pytest.approx(-5.0, abs=1.0)
+    assert mixed.drift_median_arcsec_per_min == pytest.approx(clean.drift_median_arcsec_per_min, abs=0.7)
+    assert mixed.drift_spread_arcsec_per_min < 3.0
     assert mixed.random_step_median_arcsec == pytest.approx(clean.random_step_median_arcsec, rel=0.5)
 
 
@@ -195,9 +193,9 @@ def test_an_outlier_period_does_not_move_the_pooled_periodic_error() -> None:
     runs.append(measure_run(synthetic_run(seed=9, period=900.0, amplitude=12.0, night="2026-02-01")))
     pooled = summarize_runs(runs).periodic_error
     assert pooled is not None
-    assert pooled.period_seconds == pytest.approx(480.0, rel=0.02)
+    assert pooled.period_s == pytest.approx(480.0, rel=0.02)
     assert pooled.amplitude_arcsec == pytest.approx(4.0, rel=0.15)
-    assert pooled.period_scatter_seconds is not None and pooled.period_scatter_seconds < 30.0
+    assert pooled.period_scatter_s is not None and pooled.period_scatter_s < 30.0
 
 
 def test_pooling_nothing_gives_an_empty_summary() -> None:
@@ -226,8 +224,8 @@ def test_an_axis_whose_pulses_run_the_other_way_gives_the_same_result() -> None:
         dec_error_arcsec=normal.dec_error_arcsec,
         ra_pulse_ms=-normal.ra_pulse_ms,
         dec_pulse_ms=normal.dec_pulse_ms,
-        ra_rate_arcsec_per_second=RATE,
-        dec_rate_arcsec_per_second=RATE,
+        ra_rate_arcsec_per_s=RATE,
+        dec_rate_arcsec_per_s=RATE,
     )
     # The flipped series is one where a positive pulse lowers the error: the
     # mount motion it implies is the same as the original's.
@@ -248,8 +246,8 @@ def test_pulses_that_do_not_follow_the_error_leave_the_axis_unmeasured() -> None
         dec_error_arcsec=run.dec_error_arcsec,
         ra_pulse_ms=generator.permutation(run.ra_pulse_ms),
         dec_pulse_ms=run.dec_pulse_ms,
-        ra_rate_arcsec_per_second=RATE,
-        dec_rate_arcsec_per_second=RATE,
+        ra_rate_arcsec_per_s=RATE,
+        dec_rate_arcsec_per_s=RATE,
     )
     result = measure_run(shuffled)
     assert result.ra is None

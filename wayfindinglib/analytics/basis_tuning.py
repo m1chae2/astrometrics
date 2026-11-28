@@ -130,7 +130,7 @@ def dominant_periods(analyses: Iterable[Any]) -> list[float]:
     """
     periods = []
     for analysis in analyses:
-        period = getattr(analysis, "dominant_period_seconds", None)
+        period = getattr(analysis, "dominant_period_s", None)
         if period is not None and float(period) > 0.0:
             periods.append(float(period))
     return periods

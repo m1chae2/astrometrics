@@ -7,7 +7,7 @@ with the INDI command line tools, that every property the file says to write
 has that value after start, and that a few short frames drawn by the camera
 simulator measure what the fit aimed at: the sky rate from the prediction and
 the star width from the seeing. The numbers are measured with the library's
-own unstored folder measurement (`quality.measure_folder`), with the
+own unstored frame metric set (`quality.frames.measure`), with the
 simulator's bias level as the pedestal.
 
 Nothing real is touched: the library is a temporary one, the INDI server has
@@ -103,7 +103,7 @@ def _measurements() -> Measurements:
     measurements = Measurements()
     rows = {
         "guide_rate": _candidate("newest real record", {"dec_rate_arcsec_per_s": 6.0}),
-        "periodic_error": _candidate("history fit", {"amplitude_arcsec": 3.0, "period_seconds": 40.0}),
+        "periodic_error": _candidate("history fit", {"amplitude_arcsec": 3.0, "period_s": 40.0}),
         "guiding_disturbance": _candidate(
             "history fit",
             {
@@ -149,7 +149,7 @@ def world(tmp_path: Path) -> Iterator[SimulatedObservatory]:
         SimulationKind.SIMULATED_SKY,
         indi_port,
         phd2_port,
-        exposure_seconds=EXPOSURE_SECONDS,
+        exposure_s=EXPOSURE_SECONDS,
         guider=GuiderKind.MOCK,
         fitted_settings_path=results_path,
     )
@@ -227,13 +227,12 @@ def test_frames_measure_the_sky_and_star_width_the_fit_aimed_at(
     frames = sorted(pictures.glob("*.fits"))
     assert len(frames) >= FRAMES, f"only {len(frames)} frames appeared"
     astrometrics = Astrometrics(config_in_tmp_path)
-    report = astrometrics.quality.measure_folder(
-        str(pictures),
-        limit=FRAMES,
-        camera_id=CAMERA,
-        bias_level_adu=BIAS_LEVEL_ADU,
-        register_job=False,
-    )
+    # The frames name the simulator's camera in their headers; the world's
+    # settings list that name as an alias of CAMERA, so the frame metrics use
+    # CAMERA's profile.
+    report = astrometrics.quality.frames.measure(
+        [str(path) for path in frames[:FRAMES]], include=["metrics"], bias_level_adu=BIAS_LEVEL_ADU
+    ).metrics
     gain_e_per_adu = 0.783
     sky_adu = report.medians["frame.sky_rate_e_per_s_per_px"] / gain_e_per_adu
     scale = 3.76 / 405.0 * 206.3

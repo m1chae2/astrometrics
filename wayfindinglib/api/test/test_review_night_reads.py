@@ -1,7 +1,7 @@
 """Purpose: Tests for the typed night reads of `review`.
 
-Description: Covers `query(kind="nights")`, `query(kind="target_changes")`
-and the size bound of the typed `get_live_session_status`. The nights come
+Description: Covers `review.nights.query`, `review.nights.get_target_changes`
+and the frame choice of `review.targets.get_frame_guiding`. The nights come
 from synthetic frames, guiding nights and Ekos records stored in a
 temporary library. The slews are built from known sky positions, so the
 test knows which right ascension and declination must come back.
@@ -10,6 +10,8 @@ test knows which right ascension and declination must come back.
 import pytest
 from astropy.time import Time
 
+from astrometricslib import Target
+from astrometricslib.arguments import Page
 from astrometricslib.exceptions import InvalidArgumentError
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.review import ObservationReview
@@ -45,7 +47,7 @@ def _position(ra_deg: float, dec_deg: float, timestamp: float) -> EkosMountPosit
         Time(timestamp, format="unix"),
     )
     return EkosMountPosition(
-        timestamp=timestamp, declination_degrees=dec_deg, altitude_degrees=altitude, azimuth_degrees=azimuth
+        timestamp=timestamp, declination_deg=dec_deg, altitude_deg=altitude, azimuth_deg=azimuth
     )
 
 
@@ -89,7 +91,7 @@ def test_nights_lists_each_night_with_the_data_it_has(control: ObservatoryContro
     record_ekos_captures(control, 0, 30)
     second = record_guiding_night(control, 1)
 
-    nights = ObservationReview(control).query(kind="nights", register_job=False).night_list
+    nights = list(ObservationReview(control).nights.query())
 
     assert [night.night_id for night in nights] == [first, second]
     assert all(isinstance(night, NightListEntry) for night in nights)
@@ -105,27 +107,23 @@ def test_nights_without_a_sky_measurement_say_so(control: ObservatoryControl, li
     """A night whose frames have no background value has no sky data."""
     add_frames(library, 0, background_adu=None)
 
-    (night,) = ObservationReview(control).query(kind="nights", register_job=False).night_list
+    (night,) = list(ObservationReview(control).nights.query())
 
     assert night.has_frame_data
     assert not night.has_sky_data
 
 
-def test_nights_keeps_only_the_newest_when_limited(control: ObservatoryControl, library: Library) -> None:
-    """`limit` keeps the most recent nights."""
+def test_nights_are_paged_oldest_first(control: ObservatoryControl, library: Library) -> None:
+    """`limit` and `offset` cut a page; `total` counts every night."""
     for day in range(3):
         add_frames(library, day, count=2)
 
-    nights = ObservationReview(control).query(kind="nights", limit=2, register_job=False).night_list
+    page = ObservationReview(control).nights.query(limit=2, offset=1)
 
-    assert len(nights) == 2
-    assert nights[-1].night_id.endswith("25")
-
-
-def test_nights_refuses_an_argument_it_does_not_use(control: ObservatoryControl) -> None:
-    """A night id means nothing to the list of nights."""
-    with pytest.raises(InvalidArgumentError, match="session_id"):
-        ObservationReview(control).query(kind="nights", session_id="2026-09-23", register_job=False)
+    assert (len(page), page.total, page.next_offset) == (2, 3, None)
+    assert page[-1].night_id.endswith("25")
+    with pytest.raises(InvalidArgumentError, match="limit"):
+        ObservationReview(control).nights.query(limit=0)
 
 
 def test_target_changes_finds_new_targets_and_skips_a_reslew(
@@ -135,7 +133,7 @@ def test_target_changes_finds_new_targets_and_skips_a_reslew(
     monkeypatch.setattr(control._context, "observer_location", lambda: SITE)
     _record_slews(control)
 
-    changes = ObservationReview(control).query(kind="target_changes", register_job=False).target_changes
+    changes = ObservationReview(control).nights.get_target_changes()
 
     assert [change.target_id for change in changes] == ["M 81", "M 13"]
     assert all(isinstance(change, TargetChange) for change in changes)
@@ -156,7 +154,7 @@ def test_target_changes_leaves_the_target_empty_outside_the_match_radius(
     )
     _record_slews(control)
 
-    changes = ObservationReview(control).query(kind="target_changes", register_job=False).target_changes
+    changes = ObservationReview(control).nights.get_target_changes()
 
     assert [change.target_id for change in changes] == [None, None]
     assert all(change.separation_deg is None for change in changes)
@@ -169,41 +167,26 @@ def test_target_changes_says_why_a_position_is_missing(
     monkeypatch.setattr(control._context, "observer_location", lambda: None)
     _record_slews(control)
 
-    changes = ObservationReview(control).query(kind="target_changes", register_job=False).target_changes
+    changes = ObservationReview(control).nights.get_target_changes()
 
     assert len(changes) == 3
     assert all(change.ra_deg is None and "location" in change.note for change in changes)
 
 
-def test_target_changes_filters_by_night_and_limit(
+def test_target_changes_filters_by_night(
     control: ObservatoryControl, monkeypatch: pytest.MonkeyPatch, known_targets: None
 ) -> None:
-    """A night id selects the night; `limit` keeps the newest changes."""
+    """A night with no slews gives no changes."""
     monkeypatch.setattr(control._context, "observer_location", lambda: SITE)
     _record_slews(control)
 
-    assert (
-        ObservationReview(control)
-        .query(kind="target_changes", session_id="2030-01-01", register_job=False)
-        .target_changes
-        == []
-    )
-    newest = (
-        ObservationReview(control).query(kind="target_changes", limit=1, register_job=False).target_changes
-    )
-    assert [change.target_id for change in newest] == ["M 13"]
+    assert ObservationReview(control).nights.get_target_changes("2030-01-01") == []
 
 
-def test_target_changes_refuses_an_argument_it_does_not_use(control: ObservatoryControl) -> None:
-    """`ekos_file_id` is not an argument of this kind."""
-    with pytest.raises(InvalidArgumentError, match="ekos_file_id"):
-        ObservationReview(control).query(kind="target_changes", ekos_file_id="x", register_job=False)
-
-
-@pytest.mark.parametrize("limit", [0, 201, None])
-def test_frame_guiding_refuses_a_limit_outside_its_range(
-    control: ObservatoryControl, limit: int | None
-) -> None:
-    """A frame count below 1 or above 200 raises; it is never clamped."""
-    with pytest.raises(InvalidArgumentError, match="limit"):
-        ObservationReview(control).frame_guiding("M 81", limit=limit)
+def test_frame_guiding_refuses_a_page_cut_short_and_an_unknown_part(control: ObservatoryControl) -> None:
+    """A frame page cut short by `limit`, or an unknown part, raises."""
+    target = Target(id="M 81", name="M 81")
+    with pytest.raises(InvalidArgumentError, match="cut short"):
+        ObservationReview(control).targets.get_frame_guiding(target, Page(items=(), total=3, next_offset=0))
+    with pytest.raises(InvalidArgumentError, match="include"):
+        ObservationReview(control).targets.get_frame_guiding(target, include=["noise"])

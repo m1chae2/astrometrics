@@ -42,7 +42,7 @@ WFWHM_MODE = "wfwhm"
 
 
 def predict_stack_weights(
-    exposure_seconds: Sequence[float | None],
+    exposure_s: Sequence[float | None],
     configured_weight: str | None = None,
     *,
     is_spectral: bool = False,
@@ -55,7 +55,7 @@ def predict_stack_weights(
 
     Parameters
     ----------
-    exposure_seconds : `Sequence` [`float` or `None`]
+    exposure_s : `Sequence` [`float` or `None`]
         The exposure length of each frame, in seconds. `None` marks a frame
         whose length cannot be read.
     configured_weight : `str` or `None`, optional
@@ -85,11 +85,11 @@ def predict_stack_weights(
     """
     if minimum_frames_per_group is None:
         minimum_frames_per_group = resolve(MINIMUM_FRAMES_PER_EXPOSURE_GROUP).value
-    folding = plan_exposure_folding(list(exposure_seconds), minimum_frames_per_group)
+    folding = plan_exposure_folding(list(exposure_s), minimum_frames_per_group)
     if any(reason is not None for reason in folding.left_out_reasons):
         return _predict_without_left_out_frames(
             folding,
-            exposure_seconds,
+            exposure_s,
             configured_weight,
             is_spectral=is_spectral,
             star_width_px=star_width_px,
@@ -102,14 +102,14 @@ def predict_stack_weights(
         mode = GROUP_MODE
     else:
         chosen = choose_stack_weight(
-            [exposure for exposure in exposure_seconds if exposure is not None],
+            [exposure for exposure in exposure_s if exposure is not None],
             configured_weight,
             is_spectral=is_spectral,
         )
         mode = EQUAL_MODE if chosen is None else chosen
     weights, reasons = _weights_for_mode(
         mode,
-        exposure_seconds,
+        exposure_s,
         folded,
         star_width_px=star_width_px,
         rate_variance=rate_variance,
@@ -126,7 +126,7 @@ def predict_stack_weights(
 
 def _predict_without_left_out_frames(
     folding: ExposureFolding,
-    exposure_seconds: Sequence[float | None],
+    exposure_s: Sequence[float | None],
     configured_weight: str | None,
     *,
     is_spectral: bool,
@@ -145,7 +145,7 @@ def _predict_without_left_out_frames(
     ----------
     folding : `ExposureFolding`
         The fold plan of all the frames, with at least one frame left out.
-    exposure_seconds : `Sequence` [`float` or `None`]
+    exposure_s : `Sequence` [`float` or `None`]
         The exposure length of every frame.
     configured_weight : `str` or `None`
         The configured weight (see `predict_stack_weights`).
@@ -181,12 +181,12 @@ def _predict_without_left_out_frames(
             The values of the kept frames. A list of the wrong length is
             passed on as it is, for the prediction to refuse.
         """
-        if values is None or len(values) != len(exposure_seconds):
+        if values is None or len(values) != len(exposure_s):
             return None if values is None else list(values)
         return [values[index] for index in kept]
 
     inner = predict_stack_weights(
-        [exposure_seconds[index] for index in kept],
+        [exposure_s[index] for index in kept],
         configured_weight,
         is_spectral=is_spectral,
         star_width_px=pick(star_width_px),
@@ -195,7 +195,7 @@ def _predict_without_left_out_frames(
         minimum_frames_per_group=minimum_frames_per_group,
     )
     lengths = list(folding.group_lengths)
-    weights = None if inner.weights is None else [0.0] * len(exposure_seconds)
+    weights = None if inner.weights is None else [0.0] * len(exposure_s)
     for position, index in enumerate(kept):
         lengths[index] = inner.folded_exposure_lengths[position]
         if weights is not None and inner.weights is not None:
@@ -211,7 +211,7 @@ def _predict_without_left_out_frames(
 
 def _weights_for_mode(
     mode: str,
-    exposure_seconds: Sequence[float | None],
+    exposure_s: Sequence[float | None],
     folded: Sequence[float | None],
     *,
     star_width_px: Sequence[float | None] | None,
@@ -224,7 +224,7 @@ def _weights_for_mode(
     ----------
     mode : `str`
         The predicted mode.
-    exposure_seconds : `Sequence` [`float` or `None`]
+    exposure_s : `Sequence` [`float` or `None`]
         The exposure length of each frame.
     folded : `Sequence` [`float` or `None`]
         The exposure group length of each frame.
@@ -242,7 +242,7 @@ def _weights_for_mode(
     reasons : `list` [`str`]
         Why the weights are unknown. Empty when they are known.
     """
-    count = len(exposure_seconds)
+    count = len(exposure_s)
     if mode == EQUAL_MODE:
         return [1.0] * count, []
     if mode == WFWHM_MODE:
@@ -257,13 +257,13 @@ def _weights_for_mode(
         return [1.0 / float(variance) for variance in rate_variance if variance is not None], []
     if mode == GROUP_MODE:
         return _group_weights(
-            exposure_seconds, folded, star_width_px=star_width_px, group_frame_noise_adu=group_frame_noise_adu
+            exposure_s, folded, star_width_px=star_width_px, group_frame_noise_adu=group_frame_noise_adu
         )
     return None, [f"The forecast does not know the weights of the {mode!r} mode."]
 
 
 def _group_weights(
-    exposure_seconds: Sequence[float | None],
+    exposure_s: Sequence[float | None],
     folded: Sequence[float | None],
     *,
     star_width_px: Sequence[float | None] | None,
@@ -273,7 +273,7 @@ def _group_weights(
 
     Parameters
     ----------
-    exposure_seconds : `Sequence` [`float` or `None`]
+    exposure_s : `Sequence` [`float` or `None`]
         The exposure length of each frame.
     folded : `Sequence` [`float` or `None`]
         The exposure group length of each frame. No entry is `None`.
@@ -309,12 +309,12 @@ def _group_weights(
         [noises.get(length) for length in lengths],
         holds_folded_frames=[
             any(
-                exposure_seconds[index] is None or exposure_group_key(exposure_seconds[index]) != length
+                exposure_s[index] is None or exposure_group_key(exposure_s[index]) != length
                 for index in indices
             )
             for length, indices in zip(lengths, members, strict=True)
         ],
-        frame_exposures=[[exposure_seconds[index] for index in indices] for indices in members],
+        frame_exposures=[[exposure_s[index] for index in indices] for indices in members],
     )
     if any(group is None for group in result.weights):
         return None, [reason for reason in result.reasons if reason]

@@ -143,7 +143,7 @@ def build_ingest_report(
         The group table after the rescan.
     assessments : `Iterable` [`CalibrationSetHealth`], optional
         The health of each set that gained frames, worked out by the caller
-        (`CalibrationCatalog.reindex_frames`), because it needs the library
+        (`calibration.frames.scan`), because it needs the library
         and the quality store.
 
     Returns
@@ -158,5 +158,6 @@ def build_ingest_report(
         removed_count=removed_count,
         total_count=sum(len(paths) for paths in after.values()),
         changes=changes,
+        added_paths=sorted(set().union(*after.values()) - set().union(*before.values())),
         assessments=list(assessments),
     )

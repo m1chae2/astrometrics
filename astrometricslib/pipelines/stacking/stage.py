@@ -64,6 +64,7 @@ def stack_frames(
     drivers: Drivers | None = None,
     measured_at: datetime | None = None,
     quality_recording: FrameQualityRecording | None = None,
+    make_preview: bool = True,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -118,6 +119,10 @@ def stack_frames(
         for the frame quality rows. The stage stores them only for an imaging
         stack with the quarantine step turned on, and only when both this and
         ``measured_at`` are given. Left out (tests), none are stored.
+    make_preview : `bool`, optional
+        Make the stack's preview picture too (on by default, as the batch
+        does). The public stacking run turns it off, because the
+        enhancement pipeline makes the picture.
 
     Returns
     -------
@@ -154,6 +159,7 @@ def stack_frames(
             drivers,
             measured_at,
             quality_recording,
+            make_preview=make_preview,
         )
 
 
@@ -173,6 +179,8 @@ def _stack_frames_guarded(
     drivers: Drivers | None = None,
     measured_at: datetime | None = None,
     quality_recording: FrameQualityRecording | None = None,
+    *,
+    make_preview: bool = True,
 ) -> str | None:
     """Do the work of `stack_frames` while the target's guard is held.
 
@@ -210,6 +218,7 @@ def _stack_frames_guarded(
         drivers,
         measured_at,
         quality_recording,
+        make_preview=make_preview,
     )
     # Each `begin_stage` writes one "Stage N of M" line to the job's log and
     # moves the job's progress (see `stage_progress.py`).
@@ -233,9 +242,12 @@ def _stack_frames_guarded(
             _save_stack_plate_solution(run, run.stacked_path)
             _record_stack_star_shapes(run, run.stacked_path, only_if_missing=True)
             was_turned = _turn_stack_north_up(run, run.stacked_path)
-            _remake_preview_if_out_of_date(
-                run, "the stack was turned so that north is near the top" if was_turned else None
-            )
+            if run.make_preview:
+                _remake_preview_if_out_of_date(
+                    run, "the stack was turned so that north is near the top" if was_turned else None
+                )
+            else:
+                skip_remaining_stages("the stack is already up to date")
             finish_stages()
             return run.stacked_path
         begin_stage(
@@ -289,8 +301,8 @@ def _choose_frames(run: StackRun) -> None:
     # had more frames. One camera through two optics is refused too: its
     # frames have two image scales, and the exposure grouping would otherwise
     # stack each optic as a group and combine them.
-    from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
-    from astrometricslib.pipelines.stacking.pre_processing.optic_selection import ensure_single_optic
+    from astrometricslib.pipelines.shared.camera_selection import ensure_single_camera
+    from astrometricslib.pipelines.shared.optic_selection import ensure_single_optic
 
     ensure_single_camera(run.target_frames)
     ensure_single_optic(run.target_frames)
@@ -666,8 +678,11 @@ def _finish_made_stack(run: StackRun, stacked_path: str, summary: StackQualitySu
     raise_if_abandoned()
     # The quality rows above are measured on the stack as Siril registered it.
     _turn_stack_north_up(run, stacked_path)
-    begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
-    _make_preview(run, stacked_path)  # run.preview_path
+    if run.make_preview:
+        begin_stage(PREVIEW_STAGE, "making the preview picture (GraXpert, Cosmic Clarity, star toning)")
+        _make_preview(run, stacked_path)  # run.preview_path
+    else:
+        skip_stage(PREVIEW_STAGE, "the enhancement pipeline makes the picture")
     _save_stack_inputs(run, stacked_path)
     _log_finished_stack(run)
 
@@ -1259,7 +1274,8 @@ def _log_finished_stack(run: StackRun) -> None:
         "Stack of '%s' finished: stack %s; preview %s; %d frames submitted, %d set aside.",
         run.target.id,
         run.stacked_path,
-        run.preview_path or "not made (see the warning above)",
+        run.preview_path
+        or ("not made (see the warning above)" if run.make_preview else "left to the enhancement pipeline"),
         run.frames_submitted,
         len(run.excluded_frames),
     )
@@ -1568,8 +1584,12 @@ def _record_configuration_stack(target: Target, target_frames: list[Any], stacke
     camera_matches = bool(primary_camera and camera and _camera_names_match(camera, primary_camera))
     is_preferred = optic_matches and camera_matches
 
+    # The stack points at the observatory configuration its frames share.
+    configuration_ids = {getattr(frame, "configuration_id", None) for frame in target_frames}
+    configuration_id = next(iter(configuration_ids)) if len(configuration_ids) == 1 else None
     target.stacking.stacks_by_configuration[configuration_key] = StackConfigurationResult(
         configuration_key=configuration_key,
+        configuration_id=configuration_id,
         camera=camera,
         focal_length_mm=focal_length,
         frames_stacked=len(target_frames),
@@ -1708,7 +1728,7 @@ def _base_stack_quality_summary(
             flat_noise_fraction=(diagnostics.get("flat_calibration") or {}).get("noise_fraction"),
             flat_smoothing_sigma_px=(diagnostics.get("flat_calibration") or {}).get("smoothing_sigma_pixels"),
             flat_calibration_issues=list((diagnostics.get("flat_calibration") or {}).get("issues", [])),
-            stacking_duration_seconds=diagnostics.get("stacking_duration_seconds"),
+            stacking_duration_s=diagnostics.get("stacking_duration_s"),
             debayer_applied=diagnostics.get("debayer_applied"),
             stacking_engine=diagnostics.get("stacking_engine"),
             stacking_engine_version=diagnostics.get("stacking_engine_version"),

@@ -62,9 +62,7 @@ class CameraController:
         self.client.sendNewNumber(axis)
         return True
 
-    def expose(
-        self, camera_device: PyIndi.BaseDevice, exposure_seconds: float, gain: float | None = None
-    ) -> bool:
+    def expose(self, camera_device: PyIndi.BaseDevice, exposure_s: float, gain: float | None = None) -> bool:
         """Start an exposure on the given camera device.
 
         Optionally sets gain first. Used for both the main imaging camera
@@ -75,7 +73,7 @@ class CameraController:
         ----------
         camera_device
             INDI device handle for the camera.
-        exposure_seconds
+        exposure_s
             Exposure duration in seconds.
         gain
             Optional gain value to set on CCD_GAIN before exposing.
@@ -96,7 +94,7 @@ class CameraController:
 
         ccd_exposure = camera_device.getNumber("CCD_EXPOSURE")
         if ccd_exposure:
-            ccd_exposure[0].value = exposure_seconds
+            ccd_exposure[0].value = exposure_s
             self.client.sendNewNumber(ccd_exposure)
             return True
         return False

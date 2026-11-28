@@ -1,10 +1,13 @@
 """Purpose: Unit tests for plot_target_dashboard and helpers.
 
 Description: Verifies standalone stellar plotting, target plotting,
-error checking, and layout generation.
+error checking, and layout generation. The target charts read their stars
+from the catalog storage through the star query owner; here a stand-in
+storage answers that query with its own ``query`` return value.
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
@@ -23,6 +26,30 @@ from astrometricslib.visualization.helpers import (
     plot_target_dashboard,
     plot_target_spectroscopy,
 )
+
+
+@pytest.fixture(autouse=True)
+def stars_from_the_stand_in_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer the star query owner from the stand-in storage's ``query``.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        Replaces the owner for the test.
+    """
+    from astrometricslib.pipelines.shared import star_catalog_queries
+
+    def query(storage: Any, filters: Any, **_: Any) -> list:
+        """Give the stars the stand-in storage holds.
+
+        Returns
+        -------
+        stars : `list`
+            The stand-in's ``query`` return value.
+        """
+        return list(storage.query())
+
+    monkeypatch.setattr(star_catalog_queries, "query_stars", query)
 
 
 def test_plot_stellar_photometry_renders_light_curve() -> None:
@@ -117,7 +144,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars() -> None:
     mock_star_synthetic.spectroscopy.dispersion_angle = None
 
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.query.return_value.objects = [mock_star_synthetic]
+    mock_astrometrics.stars.query.return_value = [mock_star_synthetic]
 
     with pytest.raises(InvalidArgumentError, match="No catalog-identified stars found"):
         plot_target_dashboard(mock_target, mock_astrometrics.stars)
@@ -161,7 +188,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch: pytest.MonkeyPa
     star_catalog.photometry = mock_light_curve
 
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.query.return_value.objects = [star_catalog]
+    mock_astrometrics.stars.query.return_value = [star_catalog]
 
     # Both photometry + spectroscopy -> 3 axes
     fig_both = plot_target_dashboard(mock_target, mock_astrometrics.stars)
@@ -177,7 +204,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch: pytest.MonkeyPa
     star_catalog_no_spec.star_data = {"xcentroid": 50.0, "ycentroid": 50.0}
     star_catalog_no_spec.photometry = mock_light_curve
 
-    mock_astrometrics.stars.query.return_value.objects = [star_catalog_no_spec]
+    mock_astrometrics.stars.query.return_value = [star_catalog_no_spec]
     fig_photo_only = plot_target_dashboard(mock_target, mock_astrometrics.stars)
     assert len(fig_photo_only.axes) == 2
     plt.close(fig_photo_only)
@@ -191,7 +218,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch: pytest.MonkeyPa
     star_catalog_bare.star_data = {"xcentroid": 20.0, "ycentroid": 20.0}
     star_catalog_bare.photometry = None
 
-    mock_astrometrics.stars.query.return_value.objects = [star_catalog_bare]
+    mock_astrometrics.stars.query.return_value = [star_catalog_bare]
     fig_bare = plot_target_dashboard(mock_target, mock_astrometrics.stars)
     assert len(fig_bare.axes) == 1
     plt.close(fig_bare)
@@ -270,7 +297,7 @@ def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side
     )
 
     stars = MagicMock()
-    stars.query.return_value.objects = [star]
+    stars.query.return_value = [star]
 
     with patch("astrometricslib.visualization.helpers.AstrometricsImage", return_value=mock_img_instance):
         fig = plot_target_spectroscopy(mock_target, stars)
@@ -339,7 +366,7 @@ def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_p
     star_catalog_bare.photometry = None
 
     mock_astrometrics = MagicMock()
-    mock_astrometrics.stars.query.return_value.objects = [star_catalog_bare]
+    mock_astrometrics.stars.query.return_value = [star_catalog_bare]
 
     fig = plot_target_dashboard(mock_target, mock_astrometrics.stars)
 

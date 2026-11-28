@@ -78,7 +78,7 @@ def _calibration_problems(runs: Sequence[GuidingRunSummary], speed_limit: float)
     for run in runs:
         if run.samples_stored == 0:
             continue
-        for axis, rate in (("RA", run.ra_rate_arcsec_per_second), ("Dec", run.dec_rate_arcsec_per_second)):
+        for axis, rate in (("RA", run.ra_rate_arcsec_per_s), ("Dec", run.dec_rate_arcsec_per_s)):
             if rate is None:
                 continue
             if rate <= 0.0:
@@ -166,14 +166,14 @@ def assess_guiding_input_quality(
 
     return GuidingInputQuality(
         runs=len(runs),
-        guided_seconds=sum(run.duration_seconds or 0.0 for run in runs),
+        guided_s=sum(run.duration_s or 0.0 for run in runs),
         frames_total=frames_total,
         frames_lost=frames_lost,
         lost_fraction=lost_fraction,
         lost_fraction_limit=lost_limit,
         has_high_loss=None if lost_fraction is None or lost_limit is None else lost_fraction > lost_limit,
         samples_analyzed=len(samples),
-        cadence_seconds=statistics.median(cadence_gaps) if cadence_gaps else None,
+        cadence_s=statistics.median(cadence_gaps) if cadence_gaps else None,
         excursion_count=excursion_count,
         excursion_fraction=excursion_fraction,
         excursion_fraction_limit=excursion_fraction_limit,
@@ -193,7 +193,7 @@ def assess_guiding_input_quality(
             if median_star_mass is None or star_mass_limit is None
             else median_star_mass < star_mass_limit
         ),
-        typical_cadence_seconds=typical_cadence,
+        typical_cadence_s=typical_cadence,
         calibration_problems=_calibration_problems(runs, speed_limit),
         guide_scale_matches_configuration=guide_scale_matches_configuration,
         has_enough_samples=len(samples) >= resolve_parameter(MINIMUM_SAMPLES_PER_SESSION).value,

@@ -9,7 +9,7 @@ different.
 
 from typing import Any
 
-from astrometricslib.reports import observing_night_id
+from astrometricslib.arguments import observing_night_id
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.test.guiding_night_helpers import FIRST_NIGHT, record_guiding_night
 from wayfindinglib.models.session.capture_frame import CaptureFrame
@@ -41,7 +41,7 @@ def add_frames(library: Library, day: int, count: int = 30, **overrides: Any) ->
             "path": f"/frames/Target_{day}_{index:03d}.fits",
             "target_id": "Target",
             "timestamp": start + 60.0 * index,
-            "exposure_seconds": 30.0,
+            "exposure_s": 30.0,
             "filter_name": "Luminance",
             "is_spectral": False,
             "sensor_temperature_c": -10.0,
@@ -49,7 +49,7 @@ def add_frames(library: Library, day: int, count: int = 30, **overrides: Any) ->
             "background_adu": 100.0,
             "star_width_arcsec": 5.5,
             "roundness": 0.86,
-            "altitude_degrees": 50.0,
+            "altitude_deg": 50.0,
             "pixel_scale_arcsec": 2.0,
         }
         fields.update(overrides)
@@ -73,7 +73,7 @@ def record_ekos_captures(control: ObservatoryControl, day: int, count: int, expo
             captures=[
                 EkosCapture(
                     completed_at=start + 60.0 * index + exposure + 2.0,
-                    exposure_seconds=exposure,
+                    exposure_s=exposure,
                     filter_name="Luminance",
                     file_path=f"/home/pi/Pictures/Target/Light/Target_{index:03d}.fits",
                 )

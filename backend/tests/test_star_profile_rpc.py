@@ -53,13 +53,13 @@ def test_drawing_a_file_follows_the_same_folder_rule(tmp_path: Path) -> None:
     library = tmp_path / "library"
     library.mkdir()
     astrometrics = MagicMock()
-    astrometrics.visualization.render_fits.return_value = None
+    astrometrics.visualization.render.return_value = None
     service = _service(library, astrometrics)
     with pytest.raises(InvalidArgumentError):
         service.convert_fits("/etc/hostname")
-    astrometrics.visualization.render_fits.assert_not_called()
+    astrometrics.visualization.render.assert_not_called()
     assert service.convert_fits(str(library / "frame.fits")) is None
-    drawn = astrometrics.visualization.render_fits.call_args.args[0]
+    drawn = astrometrics.visualization.render.call_args.args[0]
     assert drawn == str((library / "frame.fits").resolve())
 
 
@@ -72,7 +72,7 @@ def test_measures_a_star_in_the_library(tmp_path: Path) -> None:
     path = library / "star.fits"
     fits.PrimaryHDU(image.astype(np.float32)).writeto(path)
     service = _service(library, Astrometrics())
-    result = service.measure_star_profile(str(path), 31.0, 31.0, radius_px=10.0, cut_angle_degrees=45.0)
+    result = service.measure_star_profile(str(path), 31.0, 31.0, radius_px=10.0, cut_angle_deg=45.0)
     assert result["gaussian"]["fwhm_px"] == pytest.approx(2.3548 * 1.8, rel=0.05)
     assert isinstance(result["cut_values"], list)
     assert type(result["center_x"]) is float
@@ -90,6 +90,6 @@ def test_ring_fields_are_sent_as_plain_data(tmp_path: Path) -> None:
     result = _service(library, Astrometrics()).measure_star_profile(str(path), 61.0, 61.0)
     assert 0.0 < result["ring_inner_px"] < result["ring_outer_px"]
     assert [term["order"] for term in result["ring_harmonics"]] == list(range(1, 9))
-    assert len(result["ring_bin_angle_degrees"]) == len(result["ring_bin_values"])
+    assert len(result["ring_bin_angle_deg"]) == len(result["ring_bin_values"])
     assert type(result["ring_masked_fraction"]) is float
     assert isinstance(result["ring_neighbors"], list)

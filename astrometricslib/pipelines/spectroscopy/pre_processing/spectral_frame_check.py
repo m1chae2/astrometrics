@@ -22,6 +22,7 @@ near 16383 ADU, far below a 16-bit camera's 65535 ADU), and the result
 records where the level came from.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -177,7 +178,7 @@ def analyze_spectral_frame(
     positive: bool,
     offset_px: float,
     length_px: float,
-    exposure_seconds: float,
+    exposure_s: float,
     predict_exposure_seconds: float | None = None,
     saturation_threshold_adu: float | None = None,
     saturation_source: str | None = None,
@@ -199,7 +200,7 @@ def analyze_spectral_frame(
         Distance from the zero order at which the spectrum begins.
     length_px : `float`
         Length of the spectrum.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The frame's exposure, used to predict brightness at another one.
     predict_exposure_seconds : `float`, optional
         If given, also predict the peaks at this exposure.
@@ -305,12 +306,12 @@ def analyze_spectral_frame(
         "spectrum_width_px": round(float(np.median(widths)), 2) if widths else None,
         "streak_bands_found": len(bands),
     }
-    if predict_exposure_seconds and exposure_seconds > 0:
-        scale = predict_exposure_seconds / exposure_seconds
+    if predict_exposure_seconds and exposure_s > 0:
+        scale = predict_exposure_seconds / exposure_s
         zero_order_predicted = (zero_order_peak - sky) * scale + sky
         spectrum_predicted = spectrum_peak * scale + sky
         result["predicted"] = {
-            "exposure_seconds": predict_exposure_seconds,
+            "exposure_s": predict_exposure_seconds,
             "zero_order_peak_adu": round(zero_order_predicted),
             "zero_order_peak_is_lower_bound": zero_order_peak >= saturation_threshold_adu,
             "spectrum_peak_adu": round(spectrum_predicted),
@@ -351,7 +352,7 @@ def load_dispersion_geometry(camera_name: str, drivers: Drivers | None = None) -
 def measure_spectral_frame_file(
     path: str,
     camera_name: str,
-    exposure_seconds: float,
+    exposure_s: float,
     geometry: dict[str, Any],
     predict_exposure_seconds: float | None = None,
     zero_order_row_column: tuple[float, float] | None = None,
@@ -373,7 +374,7 @@ def measure_spectral_frame_file(
         The frame's FITS file.
     camera_name : `str`
         The camera, for the instrument geometry.
-    exposure_seconds : `float`
+    exposure_s : `float`
         The frame's exposure length.
     geometry : `dict` [`str`, `Any`]
         From `load_dispersion_geometry`.
@@ -420,7 +421,7 @@ def measure_spectral_frame_file(
     measured = analyze_spectral_frame(
         data,
         position,
-        exposure_seconds=exposure_seconds,
+        exposure_s=exposure_s,
         predict_exposure_seconds=predict_exposure_seconds,
         saturation_threshold_adu=threshold_adu,
         saturation_source=threshold_source,
@@ -442,7 +443,7 @@ def summarize_spectral_frames(rows: list[dict[str, Any]], minimum_contrast: floa
     Parameters
     ----------
     rows : `list` [`dict`]
-        One measured frame each, with ``exposure_seconds``, ``pier_side``,
+        One measured frame each, with ``exposure_s``, ``pier_side``,
         ``tilt_degrees``, ``trail_contrast`` and the saturation fields.
     minimum_contrast : `float`
         A tilt is used only when the streak stood out at least this much.
@@ -468,10 +469,10 @@ def summarize_spectral_frames(rows: list[dict[str, Any]], minimum_contrast: floa
         return round(float(np.median(values)), 3) if values else None
 
     by_exposure: dict[str, Any] = {}
-    for exposure in sorted({row["exposure_seconds"] for row in rows}):
-        group = [row for row in measured if row["exposure_seconds"] == exposure]
+    for exposure in sorted({row["exposure_s"] for row in rows}):
+        group = [row for row in measured if row["exposure_s"] == exposure]
         by_exposure[f"{exposure:g}"] = {
-            "frames": sum(1 for row in rows if row["exposure_seconds"] == exposure),
+            "frames": sum(1 for row in rows if row["exposure_s"] == exposure),
             "measured": len(group),
             "zero_order_saturated": sum(1 for row in group if row["zero_order_saturated"]),
             "spectrum_has_saturated_pixels": sum(1 for row in group if row["spectrum_pixels_saturated"]),
@@ -498,47 +499,24 @@ def summarize_spectral_frames(rows: list[dict[str, Any]], minimum_contrast: floa
     return {"by_exposure": by_exposure, "by_pier_side": by_pier_side}
 
 
-def _exposure_matches(recorded: Any, wanted: float) -> bool:
-    """Say whether a frame's recorded exposure equals a wanted length.
-
-    Returns
-    -------
-    matches : `bool`
-        `True` if the two agree to a thousandth of a second.
-    """
-    try:
-        return abs(float(recorded) - wanted) < 0.001
-    except TypeError, ValueError:
-        return False
-
-
 def check_spectral_frames(
-    target: Any,
-    selection: Any,
-    exposure_seconds: float | None,
+    frames: Sequence[Any],
     predict_exposure_seconds: float | None,
-    limit: int,
     zero_order_row_column: tuple[float, float] | None = None,
     drivers: Drivers | None = None,
 ) -> Any:
-    """Measure a target's raw spectrum frames and summarize where they clip.
+    """Measure raw spectrum frames and summarize where they clip.
 
-    This is the work behind `QualityRecords.check_spectral_frames`. Each
-    frame takes about a second. A frame that cannot be read gets an
-    ``error`` in its row, and the other frames are still measured.
+    This is the spectral part of `quality.frames.measure`. Each frame takes
+    about a second. A frame that cannot be read gets an ``error`` in its
+    row, and the other frames are still measured.
 
     Parameters
     ----------
-    target : `Target`
-        The target whose spectrum frames to measure.
-    selection : `FrameSelection`
-        The file range and time window to keep.
-    exposure_seconds : `float` or `None`
-        Only frames with this exposure length.
+    frames : `Sequence` [`FrameRecord`]
+        The spectrum frames, in the order to measure them.
     predict_exposure_seconds : `float` or `None`
         An exposure to predict the peaks at, in seconds.
-    limit : `int`
-        How many frames to measure.
     zero_order_row_column : `tuple` [`float`, `float`], optional
         The zero order's (row, column), when the caller knows it. It is used
         for every frame, so it suits frames of one target taken without
@@ -556,20 +534,12 @@ def check_spectral_frames(
 
     from astrometricslib.foundation.jobs.runner import get_current_job
     from astrometricslib.models.quality.quality_reports import SpectralFrameCheckReport
-    from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
-    from astrometricslib.pipelines.shared.quality.frame_selection import select_library_frames
     from astrometricslib.pipelines.stacking.processing.group_derotation import MINIMUM_TRAIL_CONTRAST_SIGMA
 
-    lights = [
-        frame for frame in target.frames if str(frame.role).upper() == "LIGHT" and frame_is_spectral(frame)
-    ]
-    chosen = select_library_frames(lights, selection)
-    if exposure_seconds is not None:
-        chosen = [frame for frame in chosen if _exposure_matches(frame.exposure, exposure_seconds)]
+    chosen = list(frames)
     matching = len(chosen)
     if not chosen:
-        return SpectralFrameCheckReport(target_id=target.id)
-    chosen = chosen[:limit] if selection.has_bounds else chosen[-limit:]
+        return SpectralFrameCheckReport()
 
     job = get_current_job()
     geometry_by_camera: dict[str, dict[str, Any]] = {}
@@ -584,7 +554,7 @@ def check_spectral_frames(
             )
         row: dict[str, Any] = {
             "file": os.path.basename(frame.path),
-            "exposure_seconds": float(frame.exposure),
+            "exposure_s": float(frame.exposure_s),
             "pier_side": frame.pier_side,
         }
         try:
@@ -594,7 +564,7 @@ def check_spectral_frames(
                 measure_spectral_frame_file(
                     frame.path,
                     frame.camera,
-                    row["exposure_seconds"],
+                    row["exposure_s"],
                     geometry_by_camera[frame.camera],
                     predict_exposure_seconds,
                     zero_order_row_column,
@@ -605,7 +575,6 @@ def check_spectral_frames(
             row["error"] = str(error)
         rows.append(row)
     return SpectralFrameCheckReport(
-        target_id=target.id,
         frames_matching=matching,
         frames_measured=len(rows),
         summary=summarize_spectral_frames(rows, resolve(MINIMUM_TRAIL_CONTRAST_SIGMA).value),

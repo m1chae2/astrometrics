@@ -15,9 +15,10 @@ them without re-deriving anything.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from astrometricslib.models.quality.gate_result import GateResult
+from astrometricslib.utilities.iso_text import SettingNumber
 
 
 class FlatSetAssessment(BaseModel):
@@ -34,8 +35,8 @@ class FlatSetAssessment(BaseModel):
     telescope: str
     camera: str
     filter: str
-    # The gain (or ISO) setting, as text, and the camera offset.
-    gain: str
+    # The gain (or ISO) setting, and the camera offset.
+    gain: SettingNumber
     offset: float
     # The binning the flats were taken at, such as "2x2" ("1x1" for none).
     # Flats at another binning cannot calibrate these lights.
@@ -115,7 +116,7 @@ class CalibrationSetHealth(BaseModel):
         The set's camera and settings.
     temperature_slot_c : `float` or `None`
         A dark's temperature slot.
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         A dark's exposure.
     telescope, filter : `str` or `None`
         A flat's telescope and filter.
@@ -149,11 +150,15 @@ class CalibrationSetHealth(BaseModel):
     kind: str
     row_key: str = Field(alias="rowKey")
     camera: str
-    gain: str
+    gain: SettingNumber
     offset: float
     binning: str | None = None
     temperature_slot_c: float | None = Field(default=None, alias="temperatureSlotC")
-    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
+    exposure_s: float | None = Field(
+        default=None,
+        alias="exposureS",
+        validation_alias=AliasChoices("exposureS", "exposure_s", "exposureSeconds", "exposure_seconds"),
+    )
     telescope: str | None = None
     filter: str | None = None
     frame_count: int = Field(alias="frameCount")
@@ -203,14 +208,14 @@ class CalibrationMeasurementReport(BaseModel):
 class CalibrationIngestReport(BaseModel):
     """What a rescan of the calibration library changed.
 
-    Returned by `CalibrationCatalog.refresh`, so a caller that has just
+    Returned by `calibration.frames.add` and `scan`, so a caller that has just
     downloaded new frames learns at once whether they were found, where
     they were filed and whether the new sets are good enough. The rescan
     measures no frame of a dark or bias set: those sets are judged from the
-    numbers `CalibrationCatalog.measure_frames` stored, so a new frame
+    numbers `calibration.frames.record` stored, so a new frame
     without numbers gives a set whose checks are ``not_checked`` with the
     reason. A new set of flats is measured, as it always was. The app
-    starts `CalibrationCatalog.measure_frames` after an ingest or a sync
+    starts `calibration.frames.record` after an ingest or a sync
     that added darks or biases; a script must call it itself.
     """
 
@@ -224,6 +229,8 @@ class CalibrationIngestReport(BaseModel):
     total_count: int = Field(alias="totalCount")
     # Only the groups that gained or lost frames.
     changes: list[CalibrationGroupChange] = Field(default_factory=list)
+    # The path of each frame the rescan added, sorted.
+    added_paths: list[str] = Field(default_factory=list, alias="addedPaths")
     # One health record for each set that gained frames, in the same model
     # `CalibrationCatalog.assess` returns.
     assessments: list[CalibrationSetHealth] = Field(default_factory=list)

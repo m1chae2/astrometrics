@@ -29,12 +29,12 @@ class GuideCalibration:
     ----------
     started_at : `float`
         When the calibration began, in seconds since the Unix epoch.
-    ra_rate_arcsec_per_second : `float` or `None`
+    ra_rate_arcsec_per_s : `float` or `None`
         The guide speed the mount reports for RA (how fast a guide pulse
         moves it), in arcseconds per second, as the log states it. It is
         read from the log, not measured from the calibration steps, and it
         has no cos(declination) factor. `None` if the log gave no value.
-    dec_rate_arcsec_per_second : `float` or `None`
+    dec_rate_arcsec_per_s : `float` or `None`
         The guide speed the mount reports for Dec, in arcseconds per second.
     camera_angle_deg : `float` or `None`
         The calibration angle PHD2 writes, in degrees, in PHD2's own
@@ -45,8 +45,8 @@ class GuideCalibration:
     """
 
     started_at: float
-    ra_rate_arcsec_per_second: float | None = None
-    dec_rate_arcsec_per_second: float | None = None
+    ra_rate_arcsec_per_s: float | None = None
+    dec_rate_arcsec_per_s: float | None = None
     camera_angle_deg: float | None = None
 
 
@@ -83,7 +83,7 @@ class GuideControllerSettings:
 
     Attributes
     ----------
-    exposure_seconds : `float` or `None`
+    exposure_s : `float` or `None`
         The guide exposure length, in seconds.
     ra_axis : `GuideAxisSettings` or `None`
         The algorithm on the right ascension (PHD2 "X") axis.
@@ -95,7 +95,7 @@ class GuideControllerSettings:
         The longest declination pulse PHD2 may send, in milliseconds.
     """
 
-    exposure_seconds: float | None = None
+    exposure_s: float | None = None
     ra_axis: GuideAxisSettings | None = None
     dec_axis: GuideAxisSettings | None = None
     maximum_ra_duration_ms: float | None = None
@@ -123,21 +123,21 @@ class GuidingSection:
         Guide scope focal length the guider used, in millimetres.
     right_ascension_hours : `float` or `None`
         Mount right ascension when guiding began, in hours.
-    declination_degrees : `float` or `None`
+    declination_deg : `float` or `None`
         Mount declination when guiding began, in degrees.
     hour_angle_hours : `float` or `None`
         Mount hour angle when guiding began, in hours.
     pier_side : `str` or `None`
         Which side of the pier the telescope was on (``"East"`` or ``"West"``).
-    altitude_degrees : `float` or `None`
+    altitude_deg : `float` or `None`
         Altitude when guiding began, in degrees.
-    azimuth_degrees : `float` or `None`
+    azimuth_deg : `float` or `None`
         Azimuth when guiding began, in degrees.
-    ra_rate_arcsec_per_second : `float` or `None`
+    ra_rate_arcsec_per_s : `float` or `None`
         Calibrated mount speed along RA, in arcseconds per second. This is
         the on-sky rate at the calibration declination, so it includes
         cos(declination).
-    dec_rate_arcsec_per_second : `float` or `None`
+    dec_rate_arcsec_per_s : `float` or `None`
         Calibrated mount speed along Dec, in arcseconds per second.
     controller : `GuideControllerSettings`
         The guide exposure and algorithm settings the header states.
@@ -160,13 +160,13 @@ class GuidingSection:
     binning: int | None = None
     focal_length_mm: float | None = None
     right_ascension_hours: float | None = None
-    declination_degrees: float | None = None
+    declination_deg: float | None = None
     hour_angle_hours: float | None = None
     pier_side: str | None = None
-    altitude_degrees: float | None = None
-    azimuth_degrees: float | None = None
-    ra_rate_arcsec_per_second: float | None = None
-    dec_rate_arcsec_per_second: float | None = None
+    altitude_deg: float | None = None
+    azimuth_deg: float | None = None
+    ra_rate_arcsec_per_s: float | None = None
+    dec_rate_arcsec_per_s: float | None = None
     controller: GuideControllerSettings = field(default_factory=GuideControllerSettings)
     frames_total: int = 0
     frames_with_error_code: int = 0

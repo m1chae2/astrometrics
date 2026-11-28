@@ -296,7 +296,7 @@ def group_peak_fields(frames: list[Any], saturation: list[FrameSaturation]) -> d
 
 
 def build_group_summary(
-    exposure_seconds: float,
+    exposure_s: float,
     frames: list[Any],
     diagnostics: dict[str, Any],
     saturation: list[FrameSaturation],
@@ -311,7 +311,7 @@ def build_group_summary(
 
     Parameters
     ----------
-    exposure_seconds : `float`
+    exposure_s : `float`
         The group's exposure length.
     frames : `list`
         The frames submitted to the group.
@@ -368,7 +368,7 @@ def build_group_summary(
             "gain_not_judged_reason": gain_measurement.not_judged_reason,
         }
     return {
-        "exposure_seconds": float(exposure_seconds),
+        "exposure_s": float(exposure_s),
         "frames_submitted": len(frames),
         # Counts frames in the combined stack, so a group that was left out
         # holds none, even if its own stack was built.
@@ -427,7 +427,7 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
     if nonlinear:
         worst = max(float(group["gain_disagreement"]) for group in nonlinear)
         sentences = [
-            f"the {group['exposure_seconds']:g} s exposure group {group['left_out_reason']}"
+            f"the {group['exposure_s']:g} s exposure group {group['left_out_reason']}"
             for group in nonlinear
             if group.get("left_out_reason")
         ]
@@ -440,7 +440,7 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
         )
     if not compared:
         not_judged = [
-            f"the {group['exposure_seconds']:g} s exposure group {group['gain_not_judged_reason']}"
+            f"the {group['exposure_s']:g} s exposure group {group['gain_not_judged_reason']}"
             for group in groups
             if group.get("gain_not_judged_reason")
         ]
@@ -493,7 +493,7 @@ def exposure_groups_combined_gate(groups: list[dict[str, Any]]) -> GateResult:
         return passed_gate(EXPOSURE_GROUPS_COMBINED_GATE_NAME, 0.0, 0.0, limit_source)
     lost = sum(int(group["frames_submitted"]) for group in dropped)
     names = "; ".join(
-        f"{group['exposure_seconds']:g} s ({group['frames_submitted']} frames: {group['left_out_reason']})"
+        f"{group['exposure_s']:g} s ({group['frames_submitted']} frames: {group['left_out_reason']})"
         for group in dropped
     )
     return failed_gate(
@@ -526,7 +526,7 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
     diagnostics : `dict`
         The stacking run's diagnostics. The measured zero shares are read from
         ``"exposure_group_frame_zero_fractions"``: a list of
-        ``{"exposure_seconds", "frame_zero_fraction"}`` entries, one per
+        ``{"exposure_s", "frame_zero_fraction"}`` entries, one per
         stacked group.
 
     Returns
@@ -554,7 +554,7 @@ def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
     ]
     if not clipped:
         return passed_gate(RAW_FRAME_CLIPPING_GATE_NAME, largest, clipped_frame_zero_fraction, limit_source)
-    exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped)
+    exposures = ", ".join(f"{entry['exposure_s']:g} s" for entry in clipped)
     if len(clipped) == len(measured):
         detail = (
             f"raw frames clipped at zero in the {exposures} exposure group(s), up to {largest:.0%} of "

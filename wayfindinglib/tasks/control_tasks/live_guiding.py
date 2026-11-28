@@ -12,11 +12,13 @@ Two tasks feed the monitor, both through the active guiding driver
 - `poll` reads what another guider (PHD2, or KStars/Ekos through the
   mount's pulses) measured since the last call, adds it to the monitor
   and records it in the log database, labelled with where it came from.
-  `control.guiding.status(include=["live"])` calls it.
+  `control.guiding.get_status(include=["live"])` calls it.
 - `run_loop` runs this app's own guide loop until asked to stop or until
   the mount stops tracking: one `run_cycle` of the driver after another.
-  Every pulse goes through `control.guiding._pulse`, so it needs
-  `AUTOGUIDING` to be `AUTHORITATIVE`. The loop's samples are shown but
+  Every pulse goes through `hardware_operations.pulse`, so it needs
+  `AUTOGUIDING` to be `AUTHORITATIVE`. `start_loop` and `stop_loop`, the
+  work behind `control.guiding.start` and `stop`, run it on a thread the
+  context keeps. The loop's samples are shown but
   not recorded, because only the simulator can run it today.
 """
 
@@ -30,7 +32,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from astrometricslib.exceptions import ConflictError, ExternalServiceError, HardwareError
+from astrometricslib.exceptions import AstrometricsError, ConflictError, ExternalServiceError, HardwareError
 from astrometricslib.parameters import (
     EquipmentKind,
     HardcodedKind,
@@ -44,13 +46,14 @@ from astrometricslib.parameters import (
 )
 from wayfindinglib.analytics.guide_pulses import rms_arcsec
 from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
+from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.session.telemetry import GuidingSample, GuidingStats, LiveGuidingStatus
 from wayfindinglib.tasks.control_tasks import hardware_operations
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["LiveGuidingMonitor", "poll", "run_loop"]
+__all__ = ["LiveGuidingMonitor", "poll", "run_loop", "start_loop", "stop_loop"]
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +127,7 @@ class LiveGuidingMonitor:
         self._history: deque[GuidingSample] = deque(maxlen=HISTORY_LIMIT)
         self._stats = GuidingStats()
         self.running = False
-        self.exposure_seconds = 1.0
+        self.exposure_s = 1.0
         self.gain = 0.0
 
     def add(self, samples: list[GuidingSample]) -> None:
@@ -153,19 +156,19 @@ class LiveGuidingMonitor:
                 if sample.star_mass is not None:
                     self._stats.star_mass = sample.star_mass
 
-    def start(self, exposure_seconds: float | None, gain: float | None) -> None:
+    def start(self, exposure_s: float | None, gain: float | None) -> None:
         """Mark the loop as running, keep its settings and clear the samples.
 
         Parameters
         ----------
-        exposure_seconds : `float` or `None`
+        exposure_s : `float` or `None`
             Guide exposure length. `None` keeps the last one.
         gain : `float` or `None`
             Guide camera gain. `None` keeps the last one.
         """
         with self._lock:
-            if exposure_seconds is not None:
-                self.exposure_seconds = exposure_seconds
+            if exposure_s is not None:
+                self.exposure_s = exposure_s
             if gain is not None:
                 self.gain = gain
             self._history.clear()
@@ -199,7 +202,7 @@ class LiveGuidingMonitor:
             is_guiding=self.running or recent,
             stats=stats,
             history=history,
-            exposure=self.exposure_seconds,
+            exposure_s=self.exposure_s,
             gain=self.gain,
         )
 
@@ -280,9 +283,10 @@ def _wait_for_tracking(context: ControlContext, sleep: Callable[[float], None]) 
 def run_loop(
     context: ControlContext,
     stop: threading.Event,
-    exposure_seconds: float | None = None,
+    exposure_s: float | None = None,
     gain: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    check_tracking: bool = True,
 ) -> None:
     """Run this app's guide loop until `stop` is set or tracking is lost.
 
@@ -292,12 +296,15 @@ def run_loop(
         Supplies the drivers, the policy and the monitor.
     stop : `threading.Event`
         Set it to end the loop after the current cycle.
-    exposure_seconds : `float`, optional
+    exposure_s : `float`, optional
         Guide exposure length. The last one used when omitted.
     gain : `float`, optional
         Guide camera gain. The last one used when omitted.
     sleep : `Callable` [[`float`], `None`], optional
         Waits; tests pass one that returns at once.
+    check_tracking : `bool`, optional
+        Wait for the mount to track first. `start_loop` has already done
+        so and passes `False`.
 
     Notes
     -----
@@ -305,9 +312,10 @@ def run_loop(
     starts or the guiding driver runs its own loop (PHD2), and
     `ConfigurationError` if the guiding driver cannot run this loop.
     """
-    _wait_for_tracking(context, sleep)
+    if check_tracking:
+        _wait_for_tracking(context, sleep)
     monitor = context.live_guiding
-    monitor.start(exposure_seconds, gain)
+    monitor.start(exposure_s, gain)
     commands = GuideCommands(
         expose=lambda seconds, camera_gain: hardware_operations.guide_expose(context, seconds, camera_gain),
         pulse=lambda direction, duration_ms: hardware_operations.pulse(context, direction, duration_ms),
@@ -315,7 +323,7 @@ def run_loop(
     )
     lost_tracking = 0
     lost_tracking_limit = resolve_parameter(LOST_TRACKING_LIMIT).value
-    logger.info("Guide loop started: %s s exposures, gain %s", monitor.exposure_seconds, monitor.gain)
+    logger.info("Guide loop started: %s s exposures, gain %s", monitor.exposure_s, monitor.gain)
     try:
         while not stop.is_set():
             status = _tracking_status(context)
@@ -329,7 +337,7 @@ def run_loop(
             lost_tracking = 0
             try:
                 sample = hardware_operations._run_sync(
-                    context.guiding_driver.run_cycle(monitor.exposure_seconds, monitor.gain, commands)
+                    context.guiding_driver.run_cycle(monitor.exposure_s, monitor.gain, commands)
                 )
             except (HardwareError, ExternalServiceError) as error:
                 logger.warning("Guide cycle failed, retrying: %s", error)
@@ -343,3 +351,89 @@ def run_loop(
     finally:
         monitor.stop()
         logger.info("Guide loop finished")
+
+
+def start_loop(
+    context: ControlContext,
+    exposure_s: float | None = None,
+    gain: float | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Start this app's guide loop on a thread of its own.
+
+    The checks run here, before the thread starts, so a refusal reaches
+    the caller: monitor mode, a loop that already runs, and a mount that
+    does not track. A failure later in the loop is logged by the thread.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the drivers, the policy, the monitor and the loop's thread.
+    exposure_s : `float`, optional
+        Guide exposure length in seconds. The last one used when omitted.
+    gain : `float`, optional
+        Guide camera gain. The last one used when omitted.
+    sleep : `Callable` [[`float`], `None`], optional
+        Waits; tests pass one that returns at once.
+
+    Raises
+    ------
+    ConflictError
+        If this app's guide loop already runs.
+
+    Notes
+    -----
+    Raises `PermissionDeniedError` unless `AUTOGUIDING` is
+    `AUTHORITATIVE`, and `ConflictError` if the mount does not track.
+    """
+    hardware_operations.require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
+    with context.guide_loop_lock:
+        thread = context.guide_loop_thread
+        if thread is not None and thread.is_alive():
+            raise ConflictError("This app's guide loop is already running.")
+        _wait_for_tracking(context, sleep)
+        stop = threading.Event()
+        context.live_guiding.start(exposure_s, gain)
+
+        def guide() -> None:
+            """Run the loop; the top of a background thread."""
+            try:
+                run_loop(context, stop, exposure_s, gain, sleep, check_tracking=False)
+            except AstrometricsError as error:
+                logger.log(logging.getLevelName(error.log_level), "Guiding stopped: %s", error)
+            except Exception:  # the top of a background thread: log it, never lose it
+                logger.exception("Guide loop failed")
+            finally:
+                context.live_guiding.stop()
+
+        context.guide_loop_stop = stop
+        context.guide_loop_thread = threading.Thread(target=guide, name="guiding", daemon=True)
+        context.guide_loop_thread.start()
+
+
+def stop_loop(context: ControlContext, timeout_s: float = 5.0) -> None:
+    """Stop this app's guide loop and wait for its thread to end.
+
+    Monitor mode refuses a stop too (user decision of 2026-10-24, issue
+    #95, decision U4), so the loop is left alone unless the capability is
+    `AUTHORITATIVE`. Stopping when no loop runs does nothing.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the policy and the loop's thread.
+    timeout_s : `float`, optional
+        Longest wait for the thread to end, in seconds.
+
+    Notes
+    -----
+    Raises `PermissionDeniedError` unless `AUTOGUIDING` is
+    `AUTHORITATIVE`.
+    """
+    hardware_operations.require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
+    with context.guide_loop_lock:
+        stop, thread = context.guide_loop_stop, context.guide_loop_thread
+    if stop is not None:
+        stop.set()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout_s)

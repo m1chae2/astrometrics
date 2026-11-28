@@ -357,14 +357,14 @@ def guide_fwhm_to_seeing(fwhm_arcsec: float) -> float:
     return fwhm_arcsec / (_FWHM_PER_SIGMA / math.sqrt(2.0 * _VIGNETTING_EXPONENT))
 
 
-def on_sky_to_ra_coordinate(amount_arcsec: float, declination_degrees: float) -> float:
+def on_sky_to_ra_coordinate(amount_arcsec: float, declination_deg: float) -> float:
     """Convert an on-sky amount to the drivers' right ascension amount.
 
     Parameters
     ----------
     amount_arcsec : `float`
         An error size on the sky, in arcseconds.
-    declination_degrees : `float`
+    declination_deg : `float`
         Where the simulated telescope points.
 
     Returns
@@ -373,4 +373,4 @@ def on_sky_to_ra_coordinate(amount_arcsec: float, declination_degrees: float) ->
         The number to give the driver, which adds it to the right ascension
         without a ``cos(dec)`` factor: `amount_arcsec` / cos(dec).
     """
-    return amount_arcsec / max(math.cos(math.radians(declination_degrees)), 1e-6)
+    return amount_arcsec / max(math.cos(math.radians(declination_deg)), 1e-6)

@@ -1,7 +1,7 @@
 """Purpose: The replies of the `status` reads on the `control` children.
 
 Description: Each child of `ObservatoryControl` that has readable state
-offers one `status(include=[...])` read. `include` names the sections to
+offers one `get_status(include=[...])` read. `include` names the sections to
 fill. A section that was not asked for stays `None`, and `sections`
 lists the ones that were read, so `None` in a section that was read
 means "nothing is recorded or configured".
@@ -11,8 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib import Camera, GuideScope, Telescope
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState
-from wayfindinglib.models.equipment_and_site.equipment import Camera, GuideScope, Telescope
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 from wayfindinglib.models.policy.commissioning import CommissioningRun
@@ -24,19 +24,21 @@ from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis, Live
 class MountControlStatus(BaseModel):
     """The mount's position, tracking and connection, read now.
 
-    Returned by `control.mount.status`. Right ascension and declination are
-    ICRS (J2000), like catalog stars and plate solutions: the mount's own
-    current-epoch (JNow) reading is converted. A position the mount does
-    not know yet (such as ``"Unknown"``) is passed on as it is. The
-    names in quotes are the keys of the reply on the wire.
+    Returned by `control.mount.get_status`. Right ascension and declination
+    are ICRS (J2000), like catalog stars and plate solutions: the mount's
+    own current-epoch (JNow) reading is converted. A position or angle the
+    mount does not know yet is `None`. Text for display is made by the
+    client. The names in quotes are the keys of the reply on the wire.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
 
-    ra: str = Field(description='Right ascension, such as "5h 35m 17.30s".')
-    dec: str = Field(description='Declination, such as "-5° 23′ 28.0″".')
-    altitude: str = Field(description="Altitude above the horizon, as the mount reports it.")
-    azimuth: str = Field(description="Azimuth, as the mount reports it.")
+    ra_deg: float | None = Field(default=None, alias="raDeg", description="Right ascension in degrees.")
+    dec_deg: float | None = Field(default=None, alias="decDeg", description="Declination in degrees.")
+    altitude_deg: float | None = Field(
+        default=None, alias="altitudeDeg", description="Altitude above the horizon in degrees."
+    )
+    azimuth_deg: float | None = Field(default=None, alias="azimuthDeg", description="Azimuth in degrees.")
     temperature: str = Field(default="-", description="Ambient temperature the session reports, or a dash.")
     humidity: str = Field(default="-", description="Ambient humidity the session reports, or a dash.")
     tracking_status: str = Field(
@@ -70,6 +72,9 @@ class ImagingStatus(BaseModel):
     camera_status: str | None = Field(default=None, description='What the camera is doing, such as "Idle".')
     focus_model: FocusModel | None = Field(
         default=None, description="Saved focus model for the active telescope and camera."
+    )
+    capture_running: bool | None = Field(
+        default=None, description="Whether a capture run this app started is going now."
     )
 
 

@@ -9,10 +9,11 @@ computer calls `require_online` (an internet service) or `require_local_host`
 A connection to this computer itself (``localhost``, ``127.x.x.x``, ``::1``)
 stays allowed, because the stand-in programs of a simulator listen there.
 
-The refusal is an `OfflineModeError`. It is a `ConnectionError`, so the code
-that already handles "the service cannot be reached" (the tuple
-``ONLINE_QUERY_ERRORS``, for example) treats it as the service being
-unavailable. That is a status, not an error in the log.
+The refusal is an `OfflineModeError`. It is an `ExternalServiceError` that
+reports as a status, and also a `ConnectionError`, so the code that already
+handles "the service cannot be reached" (the tuple ``ONLINE_QUERY_ERRORS``,
+for example) treats it as the service being unavailable. That is a status,
+not an error in the log.
 """
 
 import ipaddress
@@ -20,6 +21,7 @@ import logging
 import os
 
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.errors import ExternalServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +31,17 @@ logger = logging.getLogger(__name__)
 OFFLINE_VARIABLE = "ASTROMETRICS_OFFLINE"
 
 
-class OfflineModeError(ConnectionError):
-    """A client was refused: this launch sends nothing off the computer."""
+class OfflineModeError(ExternalServiceError, ConnectionError):
+    """A client was refused: this launch sends nothing off the computer.
+
+    It is a status (shown in a status chip, logged at ``INFO``), not an
+    error. It stays a `ConnectionError` so code that handles "the service
+    cannot be reached" handles it too.
+    """
+
+    report = "status"
+    log_level = "INFO"
+    default_retryable = False
 
 
 def network_is_offline() -> bool:

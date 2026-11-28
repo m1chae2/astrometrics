@@ -58,7 +58,7 @@ from astrometricslib.models.tuned_parameter import (
     ParameterSource,
     TunedParameter,
 )
-from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_seconds
+from astrometricslib.pipelines.shared.frame_grouping import frame_exposure_s
 from astrometricslib.pipelines.shared.quality.calibration_frame_measurement import calibration_subject_id
 from astrometricslib.pipelines.shared.quality.metrics import CALIBRATION_FRAME_METRICS, FRAME_METRICS
 from astrometricslib.pipelines.stacking.pre_processing.calibration_assessment import (
@@ -197,7 +197,7 @@ def _frame_batches(target_frames: Sequence[Any]) -> dict[float, list[Any]]:
     """
     batches: dict[float, list[Any]] = defaultdict(list)
     for frame in target_frames:
-        exposure = frame_exposure_seconds(frame)
+        exposure = frame_exposure_s(frame)
         if exposure is not None:
             batches[round(exposure, _BATCH_EXPOSURE_DECIMALS)].append(frame)
     return dict(batches)
@@ -446,9 +446,9 @@ def assess_stack_calibration(
     batches = _frame_batches(target_frames)
     dark_sets = _sets_of_staged_frames(library, "dark", dark_paths)
     dark_exposures = [
-        calibration_set.exposure_seconds
+        calibration_set.exposure_s
         for calibration_set, _ in dark_sets
-        if calibration_set.exposure_seconds is not None
+        if calibration_set.exposure_s is not None
     ]
     health = StackCalibrationHealth()
     judgements: dict[str, list[tuple[str, SetJudgement]]] = {"dark": [], "bias": []}
@@ -483,12 +483,12 @@ def assess_stack_calibration(
                     minimum_frames=minimum_frames,
                     profile=profile,
                     setting=(calibration_set.gain, calibration_set.offset, calibration_set.binning),
-                    exposure_seconds=calibration_set.exposure_seconds,
+                    exposure_s=calibration_set.exposure_s,
                     reference=reference,
                 )
                 label = (
-                    f"{calibration_set.exposure_seconds:g} s darks"
-                    if kind == "dark" and calibration_set.exposure_seconds is not None
+                    f"{calibration_set.exposure_s:g} s darks"
+                    if kind == "dark" and calibration_set.exposure_s is not None
                     else f"{kind} frames"
                 )
                 judgements[kind].append((label, judgement))

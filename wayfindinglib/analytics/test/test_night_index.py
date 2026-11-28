@@ -75,7 +75,7 @@ class _Library:
         self.frames = frames
         self.calls: list[str] = []
         self.targets = SimpleNamespace(
-            query=lambda **_k: SimpleNamespace(objects=self._list()), get=self._get
+            query=lambda **_k: SimpleNamespace(items=tuple(self._list())), get=self._get
         )
 
     def _target(self, target_id: str) -> SimpleNamespace:
@@ -103,15 +103,14 @@ class _Library:
         self.calls.append("list")
         return [self._target(target_id) for target_id in self.frames]
 
-    def _get(self, target_id: str, refresh: bool = False) -> SimpleNamespace:
-        """Read one target.
+    def _get(self, target_id: str) -> SimpleNamespace:
+        """Read one target (the library reads what storage changed).
 
         Returns
         -------
         target : `SimpleNamespace`
             The target.
         """
-        assert refresh
         self.calls.append(target_id)
         return self._target(target_id)
 

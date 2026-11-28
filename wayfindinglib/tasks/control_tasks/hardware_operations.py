@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import threading
 from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -28,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from astropy.time import Time
 from pydantic import ValidationError
 
+from astrometricslib import SkyPosition
 from astrometricslib.exceptions import (
     AstrometricsError,
     ConfigurationError,
@@ -44,10 +44,9 @@ from wayfindinglib.data_access.site_profile_reader import configured_observer_lo
 from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
 from wayfindinglib.models.control_status import MountControlStatus
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
-from wayfindinglib.models.sky_position import SkyPosition
 
 if TYPE_CHECKING:
-    from astrometricslib import Target
+    from astrometricslib import StellarObject, Target
     from wayfindinglib.api.control.context import ControlContext
     from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
     from wayfindinglib.models.policy.safety import SafetyAssessment, SensorReadings
@@ -83,7 +82,7 @@ def _run_sync(coroutine: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coroutine)
 
 
-def _require_authoritative(context: ControlContext, capability: ObservatoryCapability) -> None:
+def require_authoritative(context: ControlContext, capability: ObservatoryCapability) -> None:
     """Refuse a command unless `capability` is `AUTHORITATIVE`.
 
     Parameters
@@ -101,9 +100,28 @@ def _require_authoritative(context: ControlContext, capability: ObservatoryCapab
     if not context.delegation_policy().is_authoritative(capability):
         raise PermissionDeniedError(
             f"Command requires {capability.value} to be AUTHORITATIVE, but it is not. "
-            "Promote this capability (or call control.safety.enter_controller_mode()) before "
+            "Promote this capability (or call control.safety.set_mode('controller')) before "
             "commanding hardware."
         )
+
+
+def _require_accepted(accepted: object, command: str) -> None:
+    """Refuse a device command that the driver did not accept.
+
+    Parameters
+    ----------
+    accepted : `object`
+        What the driver returned; a false value means it refused.
+    command : `str`
+        What was asked for, such as ``"park"``, for the message.
+
+    Raises
+    ------
+    HardwareError
+        If `accepted` is false.
+    """
+    if not accepted:
+        raise HardwareError(f"The device did not accept the {command} command.")
 
 
 def mount_status(context: ControlContext) -> MountControlStatus:
@@ -124,22 +142,20 @@ def mount_status(context: ControlContext) -> MountControlStatus:
 
     Notes
     -----
-    ``ra`` and ``dec`` are ICRS (J2000), the frame of catalog stars,
-    library targets and plate solutions, so they can be compared with
-    them directly. The mount itself reports the current-epoch frame
-    (JNow); `mount_position_to_icrs` converts it. ``ra`` reads like
-    ``"5h 35m 17.30s"`` and ``dec`` like ``"-5° 23′ 28.0″"``. A position
-    the mount does not know yet (such as ``"Unknown"``) is passed on as
-    it is.
+    ``ra_deg`` and ``dec_deg`` are ICRS (J2000), the frame of catalog
+    stars, library targets and plate solutions, so they can be compared
+    with them directly. The mount itself reports the current-epoch frame
+    (JNow); `mount_position_to_icrs` converts it. A position or angle the
+    mount does not know yet (such as ``"Unknown"``) is `None`.
     """
     mount = _run_sync(context.mount_driver.get_status())
     raw_status = getattr(context.driver, "status", {})
-    ra_text, dec_text = mount_position_to_icrs(mount.ra, mount.dec, Time.now())
+    ra_deg, dec_deg = mount_position_to_icrs(mount.ra, mount.dec, Time.now())
     return MountControlStatus(
-        ra=ra_text,
-        dec=dec_text,
-        altitude=mount.altitude,
-        azimuth=mount.azimuth,
+        ra_deg=ra_deg,
+        dec_deg=dec_deg,
+        altitude_deg=_parse_mount_coordinate(mount.altitude),
+        azimuth_deg=_parse_mount_coordinate(mount.azimuth),
         temperature=raw_status.get("TEMPERATURE", "-"),
         humidity=raw_status.get("HUMIDITY", "-"),
         tracking_status=mount.tracking_status,
@@ -188,8 +204,8 @@ def camera_reading(context: ControlContext) -> tuple[str, str]:
     return temperature, raw_status.get("CAMERA_STATUS", "Idle")
 
 
-def mount_position_to_icrs(ra_text: str, dec_text: str, obstime: Time) -> tuple[str, str]:
-    """Convert the position a mount reports from JNow to ICRS (J2000) text.
+def mount_position_to_icrs(ra_text: str, dec_text: str, obstime: Time) -> tuple[float | None, float | None]:
+    """Convert the position a mount reports from JNow to ICRS (J2000) degrees.
 
     Mount drivers report the current-epoch frame (JNow: the true equator
     and equinox of the date). Catalog stars, library targets and plate
@@ -209,17 +225,16 @@ def mount_position_to_icrs(ra_text: str, dec_text: str, obstime: Time) -> tuple[
 
     Returns
     -------
-    ra_text, dec_text : `tuple` [`str`, `str`]
-        The ICRS position as ``"5h 35m 17.30s"`` and ``"-5° 23′ 28.0″"``.
-        If either input cannot be read (for example ``"Unknown"``), both
-        are returned unchanged.
+    ra_deg, dec_deg : `tuple` [`float` or `None`, `float` or `None`]
+        The ICRS position in degrees. If either input cannot be read (for
+        example ``"Unknown"``), both are `None`.
     """
     ra_hours = _parse_mount_coordinate(ra_text)
     dec_deg = _parse_mount_coordinate(dec_text)
     if ra_hours is None or dec_deg is None:
-        return ra_text, dec_text
+        return None, None
     icrs_ra_deg, icrs_dec_deg = current_epoch_to_icrs((ra_hours * 15.0) % 360.0, dec_deg, obstime)
-    return _format_ra_hours(icrs_ra_deg / 15.0), _format_dec_degrees(icrs_dec_deg)
+    return float(icrs_ra_deg) % 360.0, float(icrs_dec_deg)
 
 
 def _mount_frame_position(position: SkyPosition) -> tuple[float, float]:
@@ -258,66 +273,6 @@ def _parse_mount_coordinate(text: str | None) -> float | None:
     if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", stripped):
         return float(stripped)
     return _parse_dms_degrees(stripped)
-
-
-def _split_sexagesimal(value: float, decimals: int) -> tuple[int, int, float]:
-    """Split a positive value into whole units, minutes and rounded seconds.
-
-    Rounding is done on the total seconds first, so a value such as
-    59.999 seconds carries into the next minute instead of printing
-    ``60``.
-
-    Parameters
-    ----------
-    value : `float`
-        A positive value in hours or degrees.
-    decimals : `int`
-        Decimal places kept on the seconds.
-
-    Returns
-    -------
-    units, minutes, seconds : `tuple` [`int`, `int`, `float`]
-        The value split into its three parts.
-    """
-    total_seconds = round(value * 3600.0, decimals)
-    units, remainder = divmod(total_seconds, 3600.0)
-    minutes, seconds = divmod(remainder, 60.0)
-    return int(units), int(minutes), round(seconds, decimals)
-
-
-def _format_ra_hours(ra_hours: float) -> str:
-    """Write a Right Ascension in hours as ``"5h 35m 17.30s"``.
-
-    Parameters
-    ----------
-    ra_hours : `float`
-        Right Ascension in hours.
-
-    Returns
-    -------
-    text : `str`
-        The formatted value, with hours from 0 to 23.
-    """
-    hours, minutes, seconds = _split_sexagesimal(ra_hours % 24.0, 2)
-    return f"{hours % 24}h {minutes:02d}m {seconds:05.2f}s"
-
-
-def _format_dec_degrees(dec_deg: float) -> str:
-    """Write a Declination in degrees as ``"-5° 23′ 28.0″"``.
-
-    Parameters
-    ----------
-    dec_deg : `float`
-        Declination in degrees.
-
-    Returns
-    -------
-    text : `str`
-        The formatted value, always with a sign.
-    """
-    sign = "-" if dec_deg < 0 else "+"
-    degrees, minutes, seconds = _split_sexagesimal(abs(dec_deg), 1)
-    return f"{sign}{degrees}° {minutes:02d}′ {seconds:04.1f}″"
 
 
 def check_sections(include: list[str] | None, known: tuple[str, ...]) -> list[str]:
@@ -376,15 +331,18 @@ def sky_position_from(value: SkyPosition | dict[str, Any]) -> SkyPosition:
         ) from error
 
 
-def resolve_destination(context: ControlContext, destination: str | Target | SkyPosition) -> SkyPosition:
+def resolve_destination(
+    context: ControlContext, destination: str | Target | StellarObject | SkyPosition | dict[str, Any]
+) -> SkyPosition:
     """Turn a slew destination into a sky position.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the target catalog.
-    destination : `str`, `Target` or `SkyPosition`
-        A library target, its id, or a position.
+    destination : `Target`, `StellarObject`, `SkyPosition`, `str` or `dict`
+        A library target, a star, a position, a target id (library code
+        only) or ``{"ra_deg": ..., "dec_deg": ...}``.
 
     Returns
     -------
@@ -396,15 +354,24 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
     NotFoundError
         If a target id names no library target.
     InvalidArgumentError
-        If the target has no coordinates yet, or they cannot be read.
+        If the target or star has no coordinates yet, or they cannot be
+        read.
     """
+    from astrometricslib import StellarObject
+
     if isinstance(destination, SkyPosition):
         return destination
     if isinstance(destination, dict):
         return sky_position_from(destination)
+    if isinstance(destination, StellarObject):
+        if destination.right_ascension is None or destination.declination is None:
+            raise InvalidArgumentError(f"Star '{destination.id}' has no sky position yet.")
+        return SkyPosition(
+            ra_deg=float(destination.right_ascension) % 360.0, dec_deg=float(destination.declination)
+        )
     target = destination
     if isinstance(destination, str):
-        target = context.astrometrics.targets.get(destination, refresh=True)
+        target = context.astrometrics.targets.get(destination)
         if target is None:
             raise NotFoundError(f"Target '{destination}' not found in library")
 
@@ -425,7 +392,7 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
     return SkyPosition(ra_deg=ra_deg % 360.0, dec_deg=dec_deg)
 
 
-def slew(context: ControlContext, position: SkyPosition) -> bool:
+def slew(context: ControlContext, position: SkyPosition) -> None:
     """Slew the mount to a sky position.
 
     Requires `MOUNT_CONTROL` to be `AUTHORITATIVE`. If this app has a
@@ -440,17 +407,16 @@ def slew(context: ControlContext, position: SkyPosition) -> bool:
         Where to point, in ICRS (J2000). It is converted to the mount's
         current-epoch frame (JNow) before it is sent.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the slew command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the slew.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
     stop_own_capture(context)
-    return _run_sync(context.mount_driver.slew(*_mount_frame_position(position)))
+    _require_accepted(_run_sync(context.mount_driver.slew(*_mount_frame_position(position))), "slew")
 
 
-def sync_mount(context: ControlContext, position: SkyPosition) -> bool:
+def sync_mount(context: ControlContext, position: SkyPosition) -> None:
     """Tell the mount it is pointing at a plate-solved position.
 
     Gated on `PLATE_SOLVE_ALIGNMENT`, not `MOUNT_CONTROL`: a sync corrects
@@ -465,16 +431,15 @@ def sync_mount(context: ControlContext, position: SkyPosition) -> bool:
         The solved position, in ICRS (J2000). It is converted to the
         mount's current-epoch frame (JNow) before it is sent.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the sync command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the sync.
     """
-    _require_authoritative(context, ObservatoryCapability.PLATE_SOLVE_ALIGNMENT)
-    return _run_sync(context.mount_driver.sync(*_mount_frame_position(position)))
+    require_authoritative(context, ObservatoryCapability.PLATE_SOLVE_ALIGNMENT)
+    _require_accepted(_run_sync(context.mount_driver.sync(*_mount_frame_position(position))), "sync")
 
 
-def park(context: ControlContext) -> bool:
+def park(context: ControlContext) -> None:
     """Park the mount. Requires `MOUNT_CONTROL` to be `AUTHORITATIVE`.
 
     If this app has a capture run going, it is stopped and its exposure
@@ -485,17 +450,16 @@ def park(context: ControlContext) -> bool:
     context : `ControlContext`
         Supplies the mount driver and the policy.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the park command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the park command.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
     stop_own_capture(context)
-    return _run_sync(context.mount_driver.park())
+    _require_accepted(_run_sync(context.mount_driver.park()), "park")
 
 
-def unpark(context: ControlContext) -> bool:
+def unpark(context: ControlContext) -> None:
     """Unpark the mount. Requires `MOUNT_CONTROL` to be `AUTHORITATIVE`.
 
     Parameters
@@ -503,35 +467,34 @@ def unpark(context: ControlContext) -> bool:
     context : `ControlContext`
         Supplies the mount driver and the policy.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the unpark command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the unpark command.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
-    return _run_sync(context.mount_driver.unpark())
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    _require_accepted(_run_sync(context.mount_driver.unpark()), "unpark")
 
 
-def set_tracking(context: ControlContext, enabled: bool) -> bool:
+def set_tracking(context: ControlContext, on: bool) -> None:
     """Turn mount tracking on or off. Requires `MOUNT_CONTROL`.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the mount driver and the policy.
-    enabled : `bool`
+    on : `bool`
         `True` to track.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the tracking command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the tracking
+    command.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
-    return _run_sync(context.mount_driver.set_tracking(enabled))
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    _require_accepted(_run_sync(context.mount_driver.set_tracking(on)), "tracking")
 
 
-def manual_move(context: ControlContext, direction: str, start: bool = True) -> bool:
+def manual_move(context: ControlContext, direction: str, start: bool = True) -> None:
     """Start or stop a manual mount move. Requires `MOUNT_CONTROL`.
 
     Parameters
@@ -543,108 +506,57 @@ def manual_move(context: ControlContext, direction: str, start: bool = True) -> 
     start : `bool`, optional
         `True` to start moving, `False` to stop.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the move command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the move command.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
-    return _run_sync(context.mount_driver.move(direction, start))
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    _require_accepted(_run_sync(context.mount_driver.move(direction, start)), "move")
 
 
-def abort_motion(context: ControlContext) -> bool:
-    """Stop all mount motion now. Requires `MOUNT_CONTROL`.
+def stop_mount(context: ControlContext) -> None:
+    """Stop all mount motion and any centering run. Needs `MOUNT_CONTROL`.
 
-    Also stops a centering loop (``control.mount.slew(center=True)``)
-    before its next step.
+    The centering loop (``control.mount.slew(center=True)``) stops before
+    its next step. Monitor mode refuses a stop too (user decision of
+    2026-10-24, issue #95, decision U4), so the check comes before anything
+    else, and a refused stop changes nothing.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the mount driver and the policy.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the abort command was accepted.
+    Notes
+    -----
+    Raises `PermissionDeniedError` unless `MOUNT_CONTROL` is
+    `AUTHORITATIVE`. Raises `HardwareError` if the mount does not accept
+    the abort command.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
     context.motion_stop.set()
-    return _run_sync(context.mount_driver.abort_motion())
+    _require_accepted(_run_sync(context.mount_driver.abort_motion()), "stop")
 
 
-def cancel_centering(context: ControlContext, run_is_active: bool) -> bool:
-    """Stop a centering run. Requires `MOUNT_CONTROL`, even if none runs.
-
-    Monitor mode refuses a stop too (user decision of 2026-10-24, issue
-    #95, decision U4), so the check comes before anything else, and a
-    refused stop changes nothing.
-
-    Parameters
-    ----------
-    context : `ControlContext`
-        Supplies the mount driver and the policy.
-    run_is_active : `bool`
-        Whether the caller has a centering run going. When `False`, no
-        command is sent.
-
-    Returns
-    -------
-    cancelled : `bool`
-        `True` if the run was stopped, `False` if none was running.
-
-    Notes
-    -----
-    Raises `PermissionDeniedError` unless `MOUNT_CONTROL` is `AUTHORITATIVE`.
-    """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
-    if not run_is_active:
-        return False
-    return abort_motion(context)
-
-
-def stop_guide_loop(context: ControlContext, stop: threading.Event) -> None:
-    """End this app's guide loop. Requires `AUTOGUIDING`.
-
-    Monitor mode refuses a stop too (user decision of 2026-10-24, issue
-    #95, decision U4), so the loop is left alone unless the capability is
-    `AUTHORITATIVE`.
-
-    Parameters
-    ----------
-    context : `ControlContext`
-        Supplies the policy.
-    stop : `threading.Event`
-        The event the running loop watches. It is set only when allowed.
-
-    Notes
-    -----
-    Raises `PermissionDeniedError` unless `AUTOGUIDING` is `AUTHORITATIVE`.
-    """
-    _require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
-    stop.set()
-
-
-def set_slew_rate(context: ControlContext, rate_index: int) -> bool:
+def set_slew_rate(context: ControlContext, rate: int) -> None:
     """Choose the mount's slew rate. Requires `MOUNT_CONTROL`.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the mount driver and the policy.
-    rate_index : `int`
+    rate : `int`
         Index into the mount's list of slew rates.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the rate command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the mount does not accept the rate.
     """
-    _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
-    return _run_sync(context.mount_driver.set_slew_rate(rate_index))
+    require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
+    _require_accepted(_run_sync(context.mount_driver.set_slew_rate(rate)), "slew rate")
 
 
-def set_filter(context: ControlContext, filter_name: str) -> bool:
+def set_filter(context: ControlContext, filter_name: str) -> None:
     """Turn the filter wheel to a filter.
 
     Requires `CAPTURE_ORCHESTRATION`: changing filters is part of setting
@@ -657,11 +569,6 @@ def set_filter(context: ControlContext, filter_name: str) -> bool:
     filter_name : `str`
         The filter name, or a name the wheel can match to one.
 
-    Returns
-    -------
-    success : `bool`
-        `True` once the wheel reports the new filter.
-
     Raises
     ------
     NotFoundError
@@ -669,7 +576,7 @@ def set_filter(context: ControlContext, filter_name: str) -> bool:
     HardwareError
         If the wheel fails to turn.
     """
-    _require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
+    require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
 
     known_filters = _run_sync(context.filter_wheel_driver.get_names())
     resolved_name = _run_sync(context.filter_wheel_driver.resolve_name(filter_name))
@@ -683,7 +590,6 @@ def set_filter(context: ControlContext, filter_name: str) -> bool:
     success = _run_sync(context.filter_wheel_driver.set_position(final_name))
     if not success:
         raise HardwareError(f"Filter change to '{final_name}' failed at hardware level")
-    return True
 
 
 def _equivalent_filter_name(filter_name: str, known_filters: list[str]) -> str | None:
@@ -712,7 +618,7 @@ def _equivalent_filter_name(filter_name: str, known_filters: list[str]) -> str |
     return None
 
 
-def focus_move(context: ControlContext, steps: int) -> bool:
+def move_focuser(context: ControlContext, steps: int) -> None:
     """Move the focuser by a number of steps. Requires `AUTOFOCUS`.
 
     Parameters
@@ -722,13 +628,12 @@ def focus_move(context: ControlContext, steps: int) -> bool:
     steps : `int`
         Steps to move; the sign gives the direction.
 
-    Returns
-    -------
-    success : `bool`
-        `True` if the move command was accepted.
+    Notes
+    -----
+    Raises `HardwareError` if the focuser does not accept the move.
     """
-    _require_authoritative(context, ObservatoryCapability.AUTOFOCUS)
-    return _run_sync(context.focuser_driver.move_relative(steps))
+    require_authoritative(context, ObservatoryCapability.AUTOFOCUS)
+    _require_accepted(_run_sync(context.focuser_driver.move_relative(steps)), "focuser move")
 
 
 def filter_names(context: ControlContext) -> list[str]:
@@ -790,7 +695,7 @@ def pulse(context: ControlContext, direction: str, duration_ms: float) -> bool:
     InvalidArgumentError
         If `direction` is not one of the four directions.
     """
-    _require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
+    require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
     axis = PULSE_DIRECTIONS.get(direction.strip().lower())
     if axis is None:
         raise InvalidArgumentError(
@@ -800,7 +705,7 @@ def pulse(context: ControlContext, direction: str, duration_ms: float) -> bool:
     return _run_sync(context.mount_driver.pulse_guide(axis, duration_ms))
 
 
-def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
+def capture_image(context: ControlContext, exposure_s: float) -> Any:
     """Take one exposure with the main camera.
 
     Requires `CAPTURE_ORCHESTRATION`.
@@ -809,7 +714,7 @@ def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
     ----------
     context : `ControlContext`
         Supplies the camera driver and the policy.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length in seconds.
 
     Returns
@@ -817,8 +722,8 @@ def capture_image(context: ControlContext, exposure_seconds: float) -> Any:
     result : `Any`
         The camera driver's exposure result.
     """
-    _require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
-    return _run_sync(context.camera_driver.expose(exposure_seconds))
+    require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
+    return _run_sync(context.camera_driver.expose(exposure_s))
 
 
 def abort_exposure(context: ControlContext) -> bool:
@@ -870,34 +775,29 @@ def stop_own_capture(context: ControlContext) -> bool:
     return True
 
 
-def stop_capture(context: ControlContext) -> bool:
+def stop_capture(context: ControlContext) -> None:
     """Stop the capture run this app started. Requires `CAPTURE_ORCHESTRATION`.
 
     Monitor mode refuses a stop too, whether or not a run is going (the
-    same rule as `cancel_centering`, decision of 2026-10-24, issue #95), so the
-    check comes before anything else.
+    same rule as `stop_mount`, decision of 2026-10-24, issue #95), so the
+    check comes before anything else. When no run is going nothing is sent
+    to the camera.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the list of runs, the camera driver and the policy.
 
-    Returns
-    -------
-    stopped : `bool`
-        `True` if a run was stopped, `False` if none was going (then
-        nothing is sent to the camera).
-
     Notes
     -----
     Raises `PermissionDeniedError` unless `CAPTURE_ORCHESTRATION` is
     `AUTHORITATIVE`.
     """
-    _require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
-    return stop_own_capture(context)
+    require_authoritative(context, ObservatoryCapability.CAPTURE_ORCHESTRATION)
+    stop_own_capture(context)
 
 
-def guide_expose(context: ControlContext, exposure_seconds: float, gain: float | None = None) -> Any:
+def guide_expose(context: ControlContext, exposure_s: float, gain: float | None = None) -> Any:
     """Take one exposure with the guide camera.
 
     Requires `AUTOGUIDING`, like a guide pulse, because a guide exposure
@@ -907,7 +807,7 @@ def guide_expose(context: ControlContext, exposure_seconds: float, gain: float |
     ----------
     context : `ControlContext`
         Supplies the guide camera driver and the policy.
-    exposure_seconds : `float`
+    exposure_s : `float`
         Exposure length in seconds.
     gain : `float`, optional
         Camera gain to set first. `None` leaves it alone.
@@ -917,8 +817,27 @@ def guide_expose(context: ControlContext, exposure_seconds: float, gain: float |
     result : `Any`
         The guide camera driver's exposure result.
     """
-    _require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
-    return _run_sync(context.guide_camera_driver.expose(exposure_seconds, gain=gain))
+    require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
+    return _run_sync(context.guide_camera_driver.expose(exposure_s, gain=gain))
+
+
+def capture_guide_frame(context: ControlContext, exposure_s: float, gain: float | None = None) -> None:
+    """Take one guide camera exposure as a device action (`AUTOGUIDING`).
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the guide camera driver and the policy.
+    exposure_s : `float`
+        Exposure length in seconds.
+    gain : `float`, optional
+        Camera gain to set first. `None` leaves it alone.
+
+    Notes
+    -----
+    Raises `HardwareError` if the guide camera does not start the exposure.
+    """
+    _require_accepted(guide_expose(context, exposure_s, gain=gain), "guide exposure")
 
 
 def guide_image(context: ControlContext) -> Any:
@@ -954,21 +873,17 @@ def drain_external_pulses(context: ControlContext) -> list[dict[str, Any]]:
     return context.driver.drain_external_pulses()
 
 
-def connect(context: ControlContext) -> bool:
+def connect(context: ControlContext) -> None:
     """Connect every device driver.
 
     The mount driver's `connect` opens the shared INDI session; the other
-    drivers share that session, so their own `connect` only reports.
+    drivers share that session, so their own `connect` only reports. Each
+    driver connects on a best-effort basis.
 
     Parameters
     ----------
     context : `ControlContext`
         Supplies the drivers.
-
-    Returns
-    -------
-    success : `bool`
-        Always `True`.
     """
     _run_sync(context.mount_driver.connect())
     _run_sync(context.focuser_driver.connect())
@@ -976,32 +891,6 @@ def connect(context: ControlContext) -> bool:
     _run_sync(context.camera_driver.connect())
     _run_sync(context.guide_camera_driver.connect())
     _run_sync(context.enclosure_driver.connect())
-    return True
-
-
-def disconnect(context: ControlContext) -> bool:
-    """Disconnect every device driver.
-
-    The safe alternative to unplugging powered hardware. Only the mount
-    driver closes the shared session; the others do nothing.
-
-    Parameters
-    ----------
-    context : `ControlContext`
-        Supplies the drivers.
-
-    Returns
-    -------
-    success : `bool`
-        Always `True`.
-    """
-    _run_sync(context.mount_driver.disconnect())
-    _run_sync(context.focuser_driver.disconnect())
-    _run_sync(context.filter_wheel_driver.disconnect())
-    _run_sync(context.camera_driver.disconnect())
-    _run_sync(context.guide_camera_driver.disconnect())
-    _run_sync(context.enclosure_driver.disconnect())
-    return True
 
 
 def enclosure_state(context: ControlContext) -> EnclosureState:
@@ -1037,7 +926,7 @@ def open_enclosure(context: ControlContext) -> bool:
     success : `bool`
         Whether the open command was issued and confirmed.
     """
-    _require_authoritative(context, ObservatoryCapability.OBSERVATORY_SAFETY)
+    require_authoritative(context, ObservatoryCapability.OBSERVATORY_SAFETY)
     return _run_sync(context.enclosure_driver.open())
 
 
@@ -1069,7 +958,7 @@ def close_enclosure(context: ControlContext) -> bool:
     """
     from wayfindinglib.tasks.control_tasks.enclosure_control import can_close_enclosure
 
-    _require_authoritative(context, ObservatoryCapability.OBSERVATORY_SAFETY)
+    require_authoritative(context, ObservatoryCapability.OBSERVATORY_SAFETY)
 
     enclosure = context.active_enclosure()
     if enclosure is None:
@@ -1175,3 +1064,42 @@ def refresh_safety_assessment(context: ControlContext) -> SafetyAssessment:
     """
     readings = _run_sync(context.weather_driver.get_readings())
     return assess_safety(context, readings)
+
+
+def set_device_property(
+    context: ControlContext,
+    device_name: str,
+    property_name: str,
+    value: Any = "On",
+    element: str | None = None,
+) -> None:
+    """Set one raw INDI property element on a device, for diagnosis.
+
+    Parameters
+    ----------
+    context : `ControlContext`
+        Supplies the INDI session.
+    device_name : `str`
+        The INDI device.
+    property_name : `str`
+        The property to change.
+    value : `Any`, optional
+        The new value. ``"On"`` turns a switch element on.
+    element : `str`, optional
+        The element of the property to change.
+
+    Raises
+    ------
+    ConfigurationError
+        If the active mount does not use INDI. Its ``report`` is
+        ``"status"``.
+    NotFoundError
+        If the device, the property or the element was not found.
+    """
+    diagnostics = context.indi_diagnostics
+    if diagnostics is None:
+        raise ConfigurationError(
+            "The active mount does not use INDI, so it has no INDI properties.", report="status"
+        )
+    if not diagnostics.set_property(device_name, property_name, value, element):
+        raise NotFoundError(f"No element {element!r} of {property_name!r} on INDI device {device_name!r}.")

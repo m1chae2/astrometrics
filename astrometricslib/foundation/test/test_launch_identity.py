@@ -17,13 +17,13 @@ from astrometricslib.drivers import (
     launch_identity_from_settings,
     library_folders,
     network_is_offline,
-    read_launch_identity,
     require_local_host,
     require_online,
 )
 from astrometricslib.exceptions import OfflineModeError
 from astrometricslib.foundation import offline
 from astrometricslib.foundation.config import _TomlSectionedConfig
+from astrometricslib.foundation.launch_identity import read_launch_identity
 
 FULL_SECTION = """
 [Launch]

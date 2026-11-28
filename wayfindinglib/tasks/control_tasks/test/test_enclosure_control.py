@@ -28,7 +28,7 @@ def _enclosure(**overrides: Any) -> Enclosure:
         "park_azimuth_deg": 180.0,
         "park_altitude_deg": 0.0,
         "clearance_tolerance_deg": 2.0,
-        "motion_timeout_sec": 120,
+        "motion_timeout_s": 120,
     }
     defaults.update(overrides)
     return Enclosure(**defaults)
@@ -76,8 +76,8 @@ def test_mount_motion_permitted_when_open() -> None:
 
 
 def test_motion_timeout_yields_fault() -> None:
-    """Verify motion held past motion_timeout_sec resolves to FAULT."""
-    enclosure = _enclosure(motion_timeout_sec=60)
+    """Verify motion held past motion_timeout_s resolves to FAULT."""
+    enclosure = _enclosure(motion_timeout_s=60)
     started_at = _NOW
     now = started_at + timedelta(seconds=61)
     result = check_motion_timeout(started_at, EnclosureState.OPENING, now, enclosure)
@@ -85,8 +85,8 @@ def test_motion_timeout_yields_fault() -> None:
 
 
 def test_motion_within_timeout_stays_in_progress() -> None:
-    """Verify motion still within motion_timeout_sec is unchanged."""
-    enclosure = _enclosure(motion_timeout_sec=60)
+    """Verify motion still within motion_timeout_s is unchanged."""
+    enclosure = _enclosure(motion_timeout_s=60)
     started_at = _NOW
     now = started_at + timedelta(seconds=30)
     result = check_motion_timeout(started_at, EnclosureState.CLOSING, now, enclosure)
@@ -95,7 +95,7 @@ def test_motion_within_timeout_stays_in_progress() -> None:
 
 def test_timeout_check_does_not_affect_settled_states() -> None:
     """Verify a non-transitional state is returned unchanged over time."""
-    enclosure = _enclosure(motion_timeout_sec=60)
+    enclosure = _enclosure(motion_timeout_s=60)
     started_at = _NOW
     now = started_at + timedelta(hours=1)
     result = check_motion_timeout(started_at, EnclosureState.OPEN, now, enclosure)

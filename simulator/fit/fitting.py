@@ -388,9 +388,9 @@ def _periodic_error(measurements: Measurements, setup: WorldSetup, result: FitRe
             )
             continue
         amplitude = driver_model.on_sky_to_ra_coordinate(
-            candidate.values["amplitude_arcsec"], setup.declination_degrees
+            candidate.values["amplitude_arcsec"], setup.declination_deg
         )
-        period = candidate.values["period_seconds"]
+        period = candidate.values["period_s"]
         maximum_period = range_of(device, property_name, period_element).maximum
         conversion = "amplitude (zero to peak, on the sky) divided by cos(dec); period as measured"
         if period > maximum_period:
@@ -469,7 +469,7 @@ def _guiding_disturbance(measurements: Measurements, setup: WorldSetup, result: 
     for element, key, factor, is_right_ascension, conversion in plan:
         amount = values[key] * factor
         if is_right_ascension:
-            amount = driver_model.on_sky_to_ra_coordinate(amount, setup.declination_degrees)
+            amount = driver_model.on_sky_to_ra_coordinate(amount, setup.declination_deg)
         result.values.append(
             _make(
                 "guiding_disturbance",
@@ -673,7 +673,7 @@ def _controller(measurements: Measurements, result: FitResult) -> None:
                 device="PHD2 profile",
                 property_name="GuideAlgorithm",
                 element=key,
-                unit="px" if key == "minimum_move" else ("s" if key == "exposure_seconds" else "fraction"),
+                unit="px" if key == "minimum_move" else ("s" if key == "exposure_s" else "fraction"),
                 value=clamped,
                 applied=True,
                 source_kind=candidate.kind,

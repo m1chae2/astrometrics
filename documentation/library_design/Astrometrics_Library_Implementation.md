@@ -96,7 +96,7 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 
 - **Interfaces (§4.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection and centroids (§4.2).** `processing/star_identifier.py`, `star_detection.py`, `pre_processing/source_detection.py`, `fwhm.py`.
-- **Plate solving, Gaia and the refit (§4.2).** `processing/plate_solution_steps.py`, `wcs_refinement.py`; `astrometricslib/_internal/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
+- **Plate solving, Gaia and the refit (§4.2).** `processing/plate_solution_steps.py`, `wcs_refinement.py`; `siril/astrometry/plate_solve.py`, `solve_driver.py`, `astrometry_net_client.py`, `gaia_cone_driver.py`, `catalog_store.py`, `sky_tiles.py`; `utilities/catalog_seeding.py`.
 - **Gaia tiles (§4.2).** `processing/gaia_depth.py` sets depth; `gaia_tile_queries.py`, `gaia_field_stars.py` fetch and read tiles. Missing tiles raise `astrometry.notice_gaia_tiles_missing`.
 - **WCS header (§4.3).** `pipelines/shared/session_identification.write_wcs_to_fits_header`. The refit is around the center (`proj_point="center"`); `save_refit_stack_plate_solution` adds the `WCSREFIT` card; detections file version 3.
 - **Extended-source hint (§4.2).** `check_extended_source` falls back to the saved target record; type rule `target_object_category`. <!-- impl: astrometricslib.utilities.target_object_category.target_object_category -->
@@ -157,7 +157,7 @@ Paths are relative to the pipeline's folder unless they start `astrometricslib/`
 
 - **Interfaces.** `interfaces/` holds `StackingDriver`, `PlateSolveDriver`, `SimbadDriver`, `GaiaXpDriver`, `ReddeningDriver` and their types; `driver_set.py` (`Drivers`) fills empty slots with built-ins.
 - **Siril.** `siril/`.
-- **Catalogs and services.** `_internal/drivers/outside_services` is the request gateway (AST-D26, AST-D27). `astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`. `catalog_cache.answer_through_cache` stores each answer with its fetch time (`SIMBAD_ANSWER_LIFETIME_DAYS` 180, `VSX_ANSWER_LIFETIME_DAYS` 90; AST-D24); see `catalog_answer_store.py`, `cached_simbad_driver.py`. <!-- impl: astrometricslib._internal.drivers.catalog_cache.SIMBAD_ANSWER_LIFETIME_DAYS --> <!-- impl: astrometricslib._internal.drivers.catalog_cache.VSX_ANSWER_LIFETIME_DAYS -->
+- **Catalogs and services.** `_internal/drivers/outside_services` is the request gateway (AST-D26, AST-D27). `astrometry_net_client.py`, `gaia_cone_driver.py`, `catalog_store.py`, `gaia_xp_driver.py`, `astroquery_simbad_driver.py`. `catalog_cache.answer_through_cache` stores each answer with its fetch time (`SIMBAD_ANSWER_LIFETIME_DAYS` 180, `VSX_ANSWER_LIFETIME_DAYS` 90; AST-D24); see `catalog_answer_store.py`, `cached_simbad_driver.py`. <!-- impl: astrometricslib._internal.drivers.catalog_cache.SIMBAD_ANSWER_LIFETIME_DAYS --> <!-- impl: astrometricslib._internal.drivers.catalog_cache.VSX_ANSWER_LIFETIME_DAYS -->
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `catalog_access.py`.
 - **Images.** `fits_access.py`, `image.py`. <!-- impl: astrometricslib._internal.drivers.fits_access.header_is_plate_solved -->
 
@@ -366,9 +366,9 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 | --- | --- | --- | --- |
 | Detection threshold; sharpness; roundness | 5σ; 0.2 to 1.0; ±0.6 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 1) |
 | Fewest stars for a solve | 4 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
-| Fewest stars for a local solve | 10 | Partly measured ([AST-13](validation/astrometry.md#ast-13)) | §4.4.1 |
-| Pixel-scale window; solver widening | ±5%; 20% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
-| Stars sent to the online solver | 100 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 2) |
+| Siril retry factors; run limit | 0.8, 1.25, 0.64, 1.5625; 60 s | Partly measured ([AST-23](validation/astrometry.md#ast-23)) | §4.2 (step 2) |
+| Pixel-scale window | ±5% | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.4.1 |
+| Stars sent online | 100 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 2) |
 | Gaia refit: fewest matched stars | 40 | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 (step 6) |
 | Gaia refit: largest shift | 30″ | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
 | Gaia refit: match radii; clip; passes; SIP order | 4 and 1.5 px; 3σ; 5; 2 | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
@@ -389,7 +389,8 @@ Tables 3 to 7 list tuned values. Status labels ([register](validation/index.md#3
 | Margin around the solved frame for a catalog position | 15′ | Design estimate ([table](validation/astrometry.md#design-estimates)) | §4.2 |
 
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
-<!-- impl: astrometricslib._internal.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
+<!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.FOCAL_LENGTH_RETRY_FACTORS -->
+<!-- impl: astrometricslib._internal.drivers.siril.astrometry.plate_solve.SOLVE_TIMEOUT_SECONDS -->
 <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->

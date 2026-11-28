@@ -352,3 +352,29 @@ def test_skipping_unchanged_stacks_can_be_turned_off(config_in_tmp_path: AppConf
     config = config_in_tmp_path
     config.app_config.set("Processing.Siril", "skip_unchanged_stacks_enabled", "false")
     assert config.get_skip_unchanged_stacks_enabled() is False
+
+
+def test_a_settings_file_with_the_old_local_solver_keys_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Settings with the old local solver keys load, and the keys are ignored.
+
+    The local solver section (``index_path``, ``autoindex``, ``cpulimit``)
+    stays in the file, and so does the older ``Astrometry.Solver`` section;
+    nothing reads either, and no setting that is read changes.
+    """
+    settings_path = tmp_path / "astrometrics.config.toml"
+    settings_path.write_text(
+        '["Processing.Astrometry.Local Solver"]\n'
+        'index_path = "/usr/share/astrometry"\nautoindex = "true"\ncpulimit = "300"\n\n'
+        '["Astrometry.Solver"]\nindex_path = "/old/place"\n\n'
+        '["Processing.Astrometry.Online Solver"]\napi_key = "abc"\n\n'
+        '["Processing.Astrometry"]\nmaximum_identified_stars = "123"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: settings_path)
+
+    config = AppConfiguration()
+
+    assert config.get_maximum_identified_stars() == 123
+    assert config.get_value("Processing.Astrometry.Online Solver", "api_key") == "abc"

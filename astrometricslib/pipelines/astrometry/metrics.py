@@ -564,18 +564,18 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "The solve requests made during the run.",
         "A solve that needed retries is told apart from one that worked the first time.",
         better=Direction.LOWER,
-        computed_by="_internal.drivers.astrometry_net_driver._call_with_transient_retry",
+        computed_by="_internal.drivers.astrometry_net_client._call_with_transient_retry",
         levels=_RUN_ONLY,
     ),
     _count_metric(
         ASTROMETRY_PLATE_SOLVE_MATCHED_STAR_COUNT,
         "How many stars the plate solver matched to its own reference stars.",
-        "The number of usable rows in the solver's match table.",
-        "The stars in the solver's match table. Missing when the solver gave no table, as the online "
+        "The number of matched stars Siril prints after a solve (`nmatched`).",
+        "The stars Siril matched to its Gaia catalog. Missing when the solver gave no fit, as the online "
         "solver does.",
         "The fit residual is an RMS over these stars, so the count says how far to trust it.",
         better=Direction.HIGHER,
-        computed_by="_internal.drivers.astrometry_net_driver.read_corr_fit_statistics",
+        computed_by="_internal.drivers.siril.astrometry.plate_solve.parse_fit",
     ),
     _count_metric(
         ASTROMETRY_GAIA_FIT_STAR_COUNT,
@@ -628,13 +628,14 @@ ASTROMETRY_METRICS: tuple[MetricSpec, ...] = (
         "How far the plate solver's fitted star positions sit from its own reference stars, as a root "
         "mean square.",
         "Root mean square of the distance between each matched field star's position under the solved "
-        "coordinates and its reference star's position, read from the solver's match table. The "
-        "reference stars carry their own position errors, so this is a pessimistic check of the "
-        "solution.",
-        "The stars in the solver's match table. Missing when the solver gave no table.",
+        "coordinates and its reference star's position. Siril prints the spread of that distance on each "
+        "axis, and the two are combined. The reference stars carry their own position errors, so this "
+        "is a pessimistic check of the solution.",
+        "The stars Siril matched to its Gaia catalog. Missing when the solver gave no fit, as the online "
+        "solver does.",
         "The `astrometric_residual` self-check uses it when the Gaia refit gave no residual.",
         better=Direction.LOWER,
-        computed_by="_internal.drivers.astrometry_net_driver.read_corr_fit_statistics",
+        computed_by="_internal.drivers.siril.astrometry.plate_solve.parse_fit",
         register_entry="AST-01",
     ),
     _value_metric(

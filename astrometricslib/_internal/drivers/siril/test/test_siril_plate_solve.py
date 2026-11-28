@@ -297,7 +297,7 @@ def test_siril_solves_a_real_m13_frame(tmp_path: Path, monkeypatch: pytest.Monke
     Skipped without Siril, its Gaia catalog or the sample frame. The solve
     uses the temporary settings home, so the user's own Siril settings are not
     read or changed. The scratch and data folders move into the test's own
-    folder, which a Flatpak Siril can reach (it cannot see ``/tmp``).
+    folder, which a Flatpak Siril can reach (not ``/tmp``).
     """
     if shutil.which("siril-cli"):
         siril_executable = "siril-cli"
@@ -312,8 +312,8 @@ def test_siril_solves_a_real_m13_frame(tmp_path: Path, monkeypatch: pytest.Monke
         pytest.skip("Siril's Gaia astrometry catalog is not installed")
     if not SAMPLE_FRAME.is_file() or SAMPLE_FRAME.stat().st_size < 1_000_000:
         pytest.skip("the Git LFS sample frame is not checked out")
-    if str(tmp_path).startswith("/tmp"):
-        pytest.skip("a Flatpak Siril cannot reach /tmp; run with a pytest base folder in the home folder")
+    if not tmp_path.resolve().is_relative_to(Path.home()):
+        pytest.skip("a Flatpak Siril reaches the home folder only; use a pytest base folder there")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     frame = tmp_path / "frame.fits"

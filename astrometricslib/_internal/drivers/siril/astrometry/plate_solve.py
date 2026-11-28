@@ -75,8 +75,9 @@ SOLVE_TIMEOUT_SECONDS = 60
 # long failed, while 20% too short solved (AST-23), so Siril tolerates a
 # little over 10% on the long side. A step of 0.8 therefore leaves no gap:
 # the attempts at 1.0, 0.8 and 0.64 of the header's value cover true focal
-# lengths from the header's own down to about 0.58 of it. Two retries cost
-# about 3 s on a frame that never solves.
+# lengths from the header's own down to about 0.58 of it. A failed attempt
+# took about 5 s on the M 13 frame, so a frame that never solves costs about
+# 15 s. A header focal length that is too short is not retried.
 FOCAL_LENGTH_RETRY_FACTORS = TunedParameter(
     name="internal.siril_solve_focal_length_retry_factors",
     default=(0.8, 0.64),

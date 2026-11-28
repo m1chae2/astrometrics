@@ -76,21 +76,13 @@ class Drivers:
         Returns
         -------
         solver : `PlateSolveDriver`
-            The chosen solver, or a new `SirilPlateSolveDriver` when Siril
-            and its Gaia catalog are installed, or else a new
-            `AstrometryNetPlateSolveDriver` (``solve-field``).
+            The chosen solver, or a new `SirilPlateSolveDriver`.
         """
         if self.plate_solve is not None:
             return self.plate_solve
-        from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
-        from astrometricslib._internal.drivers.siril.astrometry.solve_driver import (
-            SirilPlateSolveDriver,
-            siril_is_ready,
-        )
+        from astrometricslib._internal.drivers.siril.astrometry.solve_driver import SirilPlateSolveDriver
 
-        if siril_is_ready():
-            return SirilPlateSolveDriver(api_key=api_key)
-        return AstrometryNetPlateSolveDriver(api_key=api_key)
+        return SirilPlateSolveDriver(api_key=api_key)
 
     def stacking_or_default(self) -> StackingDriver:
         """Give the chosen stacking program, or build the built-in one.

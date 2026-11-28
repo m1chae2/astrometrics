@@ -21,6 +21,7 @@ the plate solve and the colour calibration read.
 import os
 import shlex
 
+from astrometricslib.foundation.paths import data_directory
 from astrometricslib.foundation.system import split_program_command
 
 # The Flatpak name of Siril, as Flathub publishes it.
@@ -207,9 +208,22 @@ def gui_arguments(siril_executable: str, file_path: str) -> list[str]:
 _LOCAL_GAIA_CATALOG_NAME = "siril_cat_healpix8_astro.dat"
 
 
+def setup_catalog_folder() -> str:
+    """Give the folder the app's setup puts Siril's Gaia catalog in.
+
+    Returns
+    -------
+    folder : `str`
+        ``siril`` in the app's data folder, the folder of the private
+        settings file. It is not created here.
+    """
+    return os.path.join(data_directory(), "siril")
+
+
 def find_local_gaia_catalog(search_folders: list[str] | None = None) -> str | None:
     """Find the Gaia star catalog that Siril can read from the disk.
 
+    The app's setup (`catalog_setup`) puts it in `setup_catalog_folder`.
     Siril's own Catalog_Installer script puts it in Siril's data folder. A
     Flatpak Siril keeps that folder under ``~/.var/app``, a normal install
     under ``~/.local/share``. Reading the catalog from the disk takes about
@@ -218,7 +232,7 @@ def find_local_gaia_catalog(search_folders: list[str] | None = None) -> str | No
     Parameters
     ----------
     search_folders : `list` [`str`], optional
-        Folders to look in, in order. By default, the two places above.
+        Folders to look in, in order. By default, the three places above.
 
     Returns
     -------
@@ -227,6 +241,7 @@ def find_local_gaia_catalog(search_folders: list[str] | None = None) -> str | No
     """
     if search_folders is None:
         search_folders = [
+            setup_catalog_folder(),
             os.path.expanduser("~/.local/share/siril"),
             os.path.expanduser(f"~/.var/app/{FLATPAK_SIRIL_APP_ID}/data/siril"),
         ]

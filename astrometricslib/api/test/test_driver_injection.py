@@ -211,7 +211,7 @@ def real_drivers_are_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("A real driver was used instead of the one that was injected.")
 
     for path in (
-        "astrometricslib._internal.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
+        "astrometricslib._internal.drivers.siril.astrometry.solve_driver.SirilPlateSolveDriver.solve",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_region",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_object",
         "astrometricslib._internal.drivers.astroquery_simbad_driver.AstroquerySimbadDriver.query_tap",
@@ -481,28 +481,21 @@ def test_group_derotation_passes_the_drivers_to_the_trail_measurement(
     assert seen == [drivers]
 
 
-def test_defaults_build_the_real_drivers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no drivers given, the built-in drivers are the ones built.
-
-    Siril is reported as not installed, so the plate solver is the
-    solve-field one on every computer.
-    """
-    from astrometricslib._internal.drivers.siril.astrometry import solve_driver
-
-    monkeypatch.setattr(solve_driver, "siril_is_ready", lambda config=None: False)
-    from astrometricslib._internal.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+def test_defaults_build_the_real_drivers() -> None:
+    """With no drivers given, the built-in drivers are the ones built."""
     from astrometricslib._internal.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib._internal.drivers.siril.astrometry.solve_driver import SirilPlateSolveDriver
     from astrometricslib._internal.drivers.siril.stacking.stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
     drivers = Drivers()
-    assert isinstance(drivers.plate_solve_or_default(), AstrometryNetPlateSolveDriver)
+    assert isinstance(drivers.plate_solve_or_default(), SirilPlateSolveDriver)
     assert isinstance(drivers.stacking_or_default(), SirilStackingDriver)
     assert isinstance(drivers.simbad_or_default(), AstroquerySimbadDriver)
 
     astrometrics = astrometrics_with_drivers(AppConfiguration(), MagicMock())
     identifier = StarIdentifier(AppConfiguration(), drivers=astrometrics.processing._drivers)
-    assert isinstance(identifier.solver, AstrometryNetPlateSolveDriver)
+    assert isinstance(identifier.solver, SirilPlateSolveDriver)
     assert isinstance(identifier.simbad, AstroquerySimbadDriver)
     assert not astrometrics.processing._drivers.any_chosen
 

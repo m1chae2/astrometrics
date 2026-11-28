@@ -324,7 +324,7 @@ The pipeline tracks each star's brightness across unstacked frames, builds light
 
 ### 5.2 Major concepts and governing equations
 
-1. **Tracking a star frame to frame.** Stars are found once, on the first frame of a session (one target, night, gain and offset). On each later frame, the pipeline measures the frame's offset from the first using a few bright stars, moves each star by it, and re-centers it on its brightness-weighted centroid in a small box unless the box looks unreliable. Brightness is the pixel sum in a circle on the star, less the sky from a ring around it. The circle sits at the star's exact fractional position, since one a pixel fraction off loses light that changes as the field drifts. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
+1. **Placing a star in each frame.** Stars are found once, on the first frame of a session (one target, night, gain and offset). A plate solver solves each frame. The first frame's solution gives a star's sky position; each later frame's solution gives its pixel position. The pipeline re-centers it on its brightness-weighted centroid in a small box unless the box looks unreliable. Brightness is the pixel sum in a circle on the star, less the sky from a ring around it. The circle sits at the star's exact fractional position, since one a pixel fraction off loses light that changes as the field drifts. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_mapping.FrameMapping --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
 2. **Uncertainty of each measurement.** Every brightness carries a $1\sigma$ uncertainty. It follows the CCD equation [33] in the form of Merline and Howell [34], in electrons, where independent noise variances add:
 
    $$
@@ -380,7 +380,7 @@ Table 6 lists the steps.
 
 | Step | Stage | Description |
 | --- | --- | --- |
-| 1 | Star tracking | Shift each star by the frame's drift and re-center it. |
+| 1 | Star placement | Place each star by the frame's plate solution; re-center it. |
 | 2 | Aperture photometry | Sum the light, subtract the sky, and compute the uncertainty (Equation (11)). |
 | 3 | Ensemble selection | Exclude saturated and variable stars, then vet the rest. |
 | 4 | Differential normalization | Divide by the ensemble signal (Equation (12)). |
@@ -394,7 +394,7 @@ Run-level checks are recorded as in Section 4.4. <!-- impl: astrometricslib.pipe
 
 #### 5.4.1 Before measuring: screening the input
 
-A star saturated in any frame is never a comparison star. A star whose brightness steps when the field moves, that saturated in over a tenth of its frames, or that lies near the frame edge is not judged; it keeps its light curve and the reason is recorded. A frame's drift is measured only with enough alignment stars.
+A star saturated in any frame is never a comparison star. A star whose brightness steps when the field moves, that saturated in over a tenth of its frames, or that lies near the frame edge is not judged; it keeps its light curve and the reason is recorded. A frame with no plate solution is left out.
 
 #### 5.4.2 After measuring: checking the light curve
 

@@ -79,16 +79,6 @@ models.pixel_scale_significant_figures,STK-D29,measurement,Design estimate
 models.unreliable_match_rms,SPE-17,judgment,Partly measured
 photometry.agreeing_share,PHO-D19,judgment,Design estimate
 photometry.agreement_p_value,PHO-D34,judgment,Design estimate
-photometry.alignment_anchor_count,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_anchor_fallback_band,PHO-D03,exclusion criteria,Design estimate
-photometry.alignment_anchor_minimum_peak_snr,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_anchor_minimum_qualifying,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_anchor_reach_px,PHO-04,measurement,Partly measured
-photometry.alignment_anchor_saturation_box_half_width_px,PHO-D03,exclusion criteria,Design estimate
-photometry.alignment_anchor_skipped_brightest_fraction,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_clip_passes,PHO-D04,measurement,Design estimate
-photometry.alignment_clip_sigmas,PHO-D04,measurement,Design estimate
-photometry.alignment_refinement_passes,PHO-04,measurement,Partly measured
 photometry.aperture_radius_px,PHO-D01,measurement,Design estimate
 photometry.block_length_in_correlation_lengths,PHO-11,judgment,Partly measured
 photometry.brightest_skipped_fraction,PHO-01,exclusion criteria,Partly measured
@@ -126,9 +116,6 @@ photometry.maximum_noise_bins,PHO-06,judgment,Partly measured
 photometry.maximum_period_ratio,PHO-D31,exclusion criteria,Design estimate
 photometry.maximum_vetting_candidates,PHO-D05,exclusion criteria,Design estimate
 photometry.maximum_window_points,PHO-D23,measurement,Design estimate
-photometry.minimum_anchor_spread_fraction,PHO-D04,measurement,Design estimate
-photometry.minimum_anchors_for_shift,PHO-D04,measurement,Design estimate
-photometry.minimum_anchors_for_similarity,PHO-D04,measurement,Design estimate
 photometry.minimum_comparison_stars,PHO-01,exclusion criteria,Partly measured
 photometry.minimum_cycles_in_span,PHO-D31,exclusion criteria,Design estimate
 photometry.minimum_discrimination_auc,PHO-08,judgment,Partly measured

@@ -320,8 +320,10 @@ def test_the_photometry_stage_uses_the_injected_solver_and_simbad(
     result = astrometrics.processing.photometry.run(target, frames=frames)
 
     assert "photometry" in result.results
-    assert len(solver.calls) == 1
+    # The reference frame is solved to name the stars, and every frame is
+    # solved to place them (the default `solve_frames` calls `solve` for each).
     assert solver.calls[0]["image_path"] == frame_paths[0]
+    assert [call["image_path"] for call in solver.calls[1:]] == frame_paths
     assert simbad.region_calls
 
 

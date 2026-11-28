@@ -195,11 +195,12 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error."
     ),
     "registration_drift": (
-        "Fails when the field shifts by more than `UNSTABLE_TRACKING_DRIFT_PX`, when rotation and "
-        "scale change move a corner by more than `MAXIMUM_CORNER_DISPLACEMENT_PX` (95th "
-        "percentile), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
-        "(brightness-weighted star centers) were untrustworthy and fell back to the aligned "
-        "position."
+        "Fails when the field sits more than `UNSTABLE_TRACKING_DRIFT_PX` from its place in the "
+        "reference frame, when a corner of the frame moves by more than "
+        "`MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or "
+        "rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
+        "(brightness-weighted star centers) were untrustworthy and fell back to the position "
+        "the frame's plate solution gives."
     ),
     "scatter_population": (
         "Not checked when too few stars have a measured scatter, or too few to fit the noise "
@@ -591,7 +592,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "plate_solve_attempts": "Number of plate-solve tries.",
     "stars_processed": "Number of stars tracked through the light curves (brightness over time).",
     "stars_found": (
-        "Number of stars detected on the reference frame (the frame every other frame is aligned to)."
+        "Number of stars detected on the reference frame (the frame every other frame is mapped to)."
     ),
     "frames_processed": "Number of calibrated frames measured.",
     "rejected_frames": "Frames rejected because their comparison-star level was out of line with the rest.",
@@ -1957,23 +1958,23 @@ def build_photometry_doc() -> str:
             "`UNSTABLE_TRACKING_DRIFT_PX`",
             f"`{values['drift']:g}` px",
             design_estimate_cell("PHO"),
-            "Largest shift of the field between frames before `registration_drift` fails. Half "
-            "of the ±40 px box in which a star's center is searched, so stars are caught "
-            "before they leave the box.",
+            "Largest shift of the field from its place in the reference frame before "
+            "`registration_drift` fails. It flags a mount that lost tracking; the plate "
+            "solutions place the stars wherever the field went.",
         ],
         [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",
             f"`{values['corner']}` px",
             design_estimate_cell("PHO"),
-            "Largest shift of an image corner caused by rotation and scale change between frames "
-            "(95th percentile)." + see_also("PHO-04"),
+            "Largest shift of an image corner beyond the shift of the field's middle, from a "
+            "turn or a change of scale between frames (95th percentile)." + see_also("PHO-04"),
         ],
         [
             "`MAXIMUM_CENTROID_FALLBACK_FRACTION`",
             f"`{values['fallback']:g}`",
             design_estimate_cell("PHO"),
-            "Largest share of star measurements that may keep the aligned position because the "
-            "star's own centroid was refused." + see_also("PHO-04"),
+            "Largest share of star measurements that may keep the plate solution's position "
+            "because the star's own centroid was refused." + see_also("PHO-04"),
         ],
         [
             "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED`",
@@ -2020,7 +2021,7 @@ by an ensemble (a combined set) of constant comparison stars in the same frames.
 
 A session here is the frames of one night (noon to noon) taken with the same gain setting and
 offset; the run uses only the frames of the requested filter. Each session has a reference
-frame: the frame every other frame is aligned to, and on which the stars to measure are found.
+frame: the frame every other frame is mapped to, and on which the stars to measure are found.
 
 The diagram shows one run, top to bottom.
 
@@ -2028,7 +2029,7 @@ The diagram shows one run, top to bottom.
 flowchart TD
     A["Frames in the requested filter (spectral frames left out)"] --> B["Group into observing sessions"]
     B --> C["Per session: find the stars to measure on the reference frame, optionally named from a catalog"]
-    C --> D["Per frame: read capture time, align to the reference frame, find star centers"]
+    C --> D["Per frame: read capture time, place stars by the frame's solution, find centers"]
     D --> E["Sum each star's light in a circle, subtract sky, estimate the error"]
     E --> F["Convert times to a common solar-system clock"]
     F --> G["Divide by a fixed set of steady comparison stars"]
@@ -2079,10 +2080,12 @@ mid-exposure). The `capture_timestamps` gate quotes which time basis was used.
 
 ### 3.2 Centroid and aperture photometry
 
-**Placing each star.** Each star is placed at its position on the reference frame, moved by the
-frame's fitted shift, rotation and scale change. It is then re-centered on its centroid (the
+**Placing each star.** Siril plate-solves every frame of a session on its own. A star's sky
+position comes from the reference frame's solution, and the frame's own solution turns it into a
+pixel position in that frame. The star is then re-centered on its centroid (the
 brightness-weighted center of its light, photutils `centroid_com`). When the centroid is not
-trustworthy, the aligned position is kept and the reason is recorded. Apertures are never
+trustworthy, the solution's position is kept and the reason is recorded. A frame Siril cannot
+solve is left out, with the reason, and no other way places the stars. Apertures are never
 rounded to whole pixels.
 
 **Measuring its light.** Aperture photometry sums the light inside a circle (the aperture) and

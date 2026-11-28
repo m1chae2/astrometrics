@@ -20,7 +20,7 @@ The result is a light curve for every star, a list of candidate variable stars, 
 
 **Statement of need.** Time-domain photometry (brightness measurement repeated over time) measures how a star's brightness changes. It finds pulsating, eclipsing and rotating variables and planet transits (the small dip when a planet crosses its star). From the ground, cloud, haze and airmass (how much atmosphere the light passed through; 1 straight overhead) change every star's flux together. Differential photometry removes that shared change by dividing each star by an ensemble (a combined set) of constant comparison stars in the same frames.
 
-A session here is the frames of one night (noon to noon) taken with the same gain setting and offset; the run uses only the frames of the requested filter. Each session has a reference frame: the frame every other frame is aligned to, and on which the stars to measure are found.
+A session here is the frames of one night (noon to noon) taken with the same gain setting and offset; the run uses only the frames of the requested filter. Each session has a reference frame: the frame every other frame is mapped to, and on which the stars to measure are found.
 
 The diagram shows one run, top to bottom.
 
@@ -28,7 +28,7 @@ The diagram shows one run, top to bottom.
 flowchart TD
     A["Frames in the requested filter (spectral frames left out)"] --> B["Group into observing sessions"]
     B --> C["Per session: find the stars to measure on the reference frame, optionally named from a catalog"]
-    C --> D["Per frame: read capture time, align to the reference frame, find star centers"]
+    C --> D["Per frame: read capture time, place stars by the frame's solution, find centers"]
     D --> E["Sum each star's light in a circle, subtract sky, estimate the error"]
     E --> F["Convert times to a common solar-system clock"]
     F --> G["Divide by a fixed set of steady comparison stars"]
@@ -71,7 +71,7 @@ With no site configured, the observer is placed at Earth's center. With no targe
 
 ### 3.2 Centroid and aperture photometry
 
-**Placing each star.** Each star is placed at its position on the reference frame, moved by the frame's fitted shift, rotation and scale change. It is then re-centered on its centroid (the brightness-weighted center of its light, photutils `centroid_com`). When the centroid is not trustworthy, the aligned position is kept and the reason is recorded. Apertures are never rounded to whole pixels.
+**Placing each star.** Siril plate-solves every frame of a session on its own. A star's sky position comes from the reference frame's solution, and the frame's own solution turns it into a pixel position in that frame. The star is then re-centered on its centroid (the brightness-weighted center of its light, photutils `centroid_com`). When the centroid is not trustworthy, the solution's position is kept and the reason is recorded. A frame Siril cannot solve is left out, with the reason, and no other way places the stars. Apertures are never rounded to whole pixels.
 
 **Measuring its light.** Aperture photometry sums the light inside a circle (the aperture) and subtracts the sky that falls in the same circle. The radius is a fixed 4 pixels for every star, not scaled to the star's width. The net flux is
 
@@ -226,7 +226,7 @@ Run gates are recorded on the quality summary. Period checks are recorded on eac
 | `session_plate_solve` | run gate | `post_processing/record_quality.py` | Fails when a session could not be plate-solved (given a pixel-to-sky map) for matching stars across sessions. Not checked for a single session. |
 | `photometry_work` | run gate | `post_processing/record_quality.py` | Fails when stage 1 found nothing to measure (no frame in the filter, or no frame with a capture time). |
 | `comparison_ensemble` | run gate | `post_processing/record_quality.py` | Fails when a session has fewer than `MINIMUM_COMPARISON_STARS` comparison stars, a set that changes between frames, or comparison stars that scatter more than `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error. |
-| `registration_drift` | run gate | `post_processing/record_quality.py` | Fails when the field shifts by more than `UNSTABLE_TRACKING_DRIFT_PX`, when rotation and scale change move a corner by more than `MAXIMUM_CORNER_DISPLACEMENT_PX` (95th percentile), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids (brightness-weighted star centers) were untrustworthy and fell back to the aligned position. |
+| `registration_drift` | run gate | `post_processing/record_quality.py` | Fails when the field sits more than `UNSTABLE_TRACKING_DRIFT_PX` from its place in the reference frame, when a corner of the frame moves by more than `MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids (brightness-weighted star centers) were untrustworthy and fell back to the position the frame's plate solution gives. |
 | `scatter_population` | run gate | `post_processing/record_quality.py` | Not checked when too few stars have a measured scatter, or too few to fit the noise model (expected scatter against brightness), so the variable-candidate cutoff is not reliable. |
 | `variability_discrimination` | run gate | `post_processing/record_quality.py` | Fails when the variability score does not rank cataloged variables above unlisted stars (AUC against catalog labels: the chance that a random cataloged variable scores above a random unlisted star). Not checked with too few of either. |
 | `detectable_amplitude` | run gate | `post_processing/record_quality.py` | Fails when a sinusoidal variable would need more than `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` peak to peak to clear the run's noise, so the run is blind to smaller variables. |
@@ -259,9 +259,9 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 | `CALIBRATION_SIGMAS` | `2.326` | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Robust standard deviations above the field median for the chi-square and J thresholds: the one-sided 99% point of a normal distribution. Related entry: [PHO-06](../validation/photometry.md#pho-06). |
 | `DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | `7.4` | Measured ([PHO-10](../validation/photometry.md#pho-10)) | Multiplier of the unscaled MAD in the CV cutoff (Eq. 9), about 5.0 robust standard deviations. Chosen to flag about the top 3% of stars. |
 | `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | `0.3` mag | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic brightness scale) is larger, the run is called blind to most variables. Most pulsating and rotating variables change by less than this. Related entry: [PHO-09](../validation/photometry.md#pho-09). |
-| `UNSTABLE_TRACKING_DRIFT_PX` | `20` px | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Largest shift of the field between frames before `registration_drift` fails. Half of the ±40 px box in which a star's center is searched, so stars are caught before they leave the box. |
-| `MAXIMUM_CORNER_DISPLACEMENT_PX` | `1.0` px | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Largest shift of an image corner caused by rotation and scale change between frames (95th percentile). Related entry: [PHO-04](../validation/photometry.md#pho-04). |
-| `MAXIMUM_CENTROID_FALLBACK_FRACTION` | `0.2` | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Largest share of star measurements that may keep the aligned position because the star's own centroid was refused. Related entry: [PHO-04](../validation/photometry.md#pho-04). |
+| `UNSTABLE_TRACKING_DRIFT_PX` | `20` px | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Largest shift of the field from its place in the reference frame before `registration_drift` fails. It flags a mount that lost tracking; the plate solutions place the stars wherever the field went. |
+| `MAXIMUM_CORNER_DISPLACEMENT_PX` | `1.0` px | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Largest shift of an image corner beyond the shift of the field's middle, from a turn or a change of scale between frames (95th percentile). Related entry: [PHO-04](../validation/photometry.md#pho-04). |
+| `MAXIMUM_CENTROID_FALLBACK_FRACTION` | `0.2` | Design estimate ([photometry design estimates](../validation/photometry.md#design-estimates)) | Largest share of star measurements that may keep the plate solution's position because the star's own centroid was refused. Related entry: [PHO-04](../validation/photometry.md#pho-04). |
 | `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` | `5.0` | Partly measured ([PHO-02](../validation/photometry.md#pho-02)) | Largest ratio of the comparison stars' measured scatter to the scatter their error bars predict. Set between clear nights and a cloudy one. |
 
 ## 6. Degraded states and fallback pathways
@@ -304,7 +304,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `position_only_star_count` | `int` | Stars named only by their sky position. |
 | `unresolved_star_count` | `int` | Stars with no catalog match whose sky position could not be worked out (as when the image has no pixel-to-sky map); not saved. |
 | `stars_processed` | `int` | Number of stars tracked through the light curves (brightness over time). |
-| `stars_found` | `int` | Number of stars detected on the reference frame (the frame every other frame is aligned to). |
+| `stars_found` | `int` | Number of stars detected on the reference frame (the frame every other frame is mapped to). |
 | `frames_processed` | `int` | Number of calibrated frames measured. |
 | `rejected_frames` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames rejected because their comparison-star level was out of line with the rest. |
 | `frame_ensemble_composition` | `list[astrometricslib.models.quality.quality_summary.FrameEnsembleComposition]` | For each frame, which comparison stars were used. |

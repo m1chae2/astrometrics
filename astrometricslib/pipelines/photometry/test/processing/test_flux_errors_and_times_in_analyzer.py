@@ -29,11 +29,9 @@ from astrometricslib.pipelines.photometry.processing.variability_analyzer import
     VariabilityAnalyzer,
     median_flux_error_mag,
 )
-from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
+from astrometricslib.test.synthetic import SyntheticStar, drifted_frame_solves, make_photometry_fits
 
-# The frame alignment step takes its anchor stars from detections number 50 to
-# 100 in brightness order, so the field needs more than 100 real stars.
-# Otherwise it would anchor on noise and measure the wrong places.
+# The field has 121 stars, enough for the comparison ensemble.
 GRID_SIZE = 11
 GRID_SPACING_PX = 90.0
 FRAME_SHAPE = (1100, 1100)
@@ -113,7 +111,8 @@ def _analyze(paths: list[str], **process_options: object) -> VariabilityAnalyzer
         The analyzer after processing, normalizing and detrending.
     """
     analyzer = VariabilityAnalyzer()
-    analyzer.process(paths, max_workers=1, **process_options)
+    solves = drifted_frame_solves(paths, FRAME_SHAPE, (0.0, 0.0))
+    analyzer.process(paths, solves, max_workers=1, **process_options)
     analyzer.normalize_light_curves()
     analyzer.detrend_light_curves_airmass()
     return analyzer

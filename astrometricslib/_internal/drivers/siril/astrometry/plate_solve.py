@@ -161,6 +161,47 @@ def platesolve_command(
     return " ".join(words)
 
 
+def seqplatesolve_command(
+    sequence_name: str,
+    catalog: str,
+    *,
+    ra_deg: float,
+    dec_deg: float,
+    focal_length_mm: float,
+    pixel_size_um: float,
+) -> str:
+    """Write Siril's command that plate-solves every image of a sequence.
+
+    The command solves each image on its own and writes the solution into that
+    image's file. An image Siril cannot solve is left as it was, and the
+    others are still solved.
+
+    Parameters
+    ----------
+    sequence_name : `str`
+        The name of the sequence the ``link`` command made.
+    catalog : `str`
+        The star catalog Siril matches the stars to: `LOCAL_GAIA_CATALOG` or
+        `ONLINE_GAIA_CATALOG`.
+    ra_deg, dec_deg : `float`
+        The position to start every search from, in degrees.
+    focal_length_mm : `float`
+        The focal length in millimeters.
+    pixel_size_um : `float`
+        The pixel size in micrometers.
+
+    Returns
+    -------
+    command : `str`
+        The ``seqplatesolve`` command, always with ``-force`` and
+        ``-noflip``.
+    """
+    return (
+        f"seqplatesolve {sequence_name} {ra_deg:.6f},{dec_deg:.6f} -catalog={catalog} "
+        f"-focal={focal_length_mm:.3f} -pixelsize={pixel_size_um:.4f} -force -noflip"
+    )
+
+
 @dataclass(frozen=True)
 class SolveInputs:
     """What Siril needs to solve one image.

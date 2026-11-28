@@ -21,7 +21,7 @@ from pytest_mock import MockerFixture
 
 from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 from astrometricslib.pipelines.stacking.pre_processing import set_aside_listing
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import MANIFEST_FILE_NAME
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import MANIFEST_FILE_NAME
 from astrometricslib.pipelines.stacking.pre_processing.set_aside_listing import (
     build_set_aside_records,
     clear_set_aside_cache,
@@ -140,7 +140,7 @@ def test_an_unchanged_folder_is_not_read_again(tmp_path: Path, mocker: MockerFix
         _write_frame(folder / name, INSTRUME="Camera", EXPTIME=10.0)
     (folder / MANIFEST_FILE_NAME).write_text(json.dumps([]))
     fits_opens = mocker.spy(fits, "open")
-    manifest_reads = mocker.spy(set_aside_listing, "read_quarantine_manifest")
+    manifest_reads = mocker.spy(set_aside_listing, "read_set_aside_manifest")
 
     first = build_set_aside_records("M 1", [str(folder)], [], {})
     assert fits_opens.call_count == 2

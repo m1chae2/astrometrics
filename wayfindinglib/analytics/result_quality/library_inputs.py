@@ -250,14 +250,14 @@ def set_aside_reasons(
 ) -> dict[str, str]:
     """Find the frames the stacker set aside, and why.
 
-    The stacker's quarantine step moves a frame to an ``_excluded`` folder.
+    The stacker's set-aside step moves a frame to an ``_excluded`` folder.
     Three places can say so, and this reads them in order of trust. The first
     is the library's own listing of the ``_excluded`` folders
     (``Astrometrics.targets.frames.get_set_aside``), which already prefers the
     stored rows, then the folder's manifest, then the folder alone. The
     second is a stored row whose ``action_taken`` says the frame was moved.
-    The quarantine measurements (roundness, sky median) are stored for kept
-    frames too, so only that wording marks a frame as set aside.
+    The set-aside check measurements (roundness, sky median) are stored for
+    kept frames too, so only that wording marks a frame as set aside.
 
     Parameters
     ----------

@@ -10,7 +10,7 @@ module stacks a list of frames with the target's normal settings and does
 nothing else:
 
 - The frames are copied, so the caller's records are never changed.
-- No frame is moved or measured on the target. The frame quarantine step is
+- No frame is moved or measured on the target. The set-aside check step is
   left out, because the frames of a subset are frames the library stack already
   kept.
 - The stack goes to a path the caller names, in a subset folder

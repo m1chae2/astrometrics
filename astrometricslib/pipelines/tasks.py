@@ -1378,7 +1378,7 @@ def run_full_pipeline(
         target, camera_name, standard_frames, spectral_frames, measured_at, quality_recording
     )
     # The stacking stage moves frames with clouds or trailed stars out of the
-    # target (see `stacking/pre_processing/frame_quarantine.py`) and no longer
+    # target (see `stacking/pre_processing/frame_set_aside.py`) and no longer
     # lists them in `target.frames`. The frame lists above were made before
     # that, so drop the moved frames here: the later stages would otherwise
     # try to open files that are no longer where the list says.

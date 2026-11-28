@@ -28,13 +28,22 @@ from astrometricslib.pipelines.photometry.pre_processing.detector_noise import (
     DetectorNoise,
     resolve_detector_noise,
 )
+from astrometricslib.pipelines.photometry.pre_processing.frame_mapping import (
+    FrameMapping,
+    wcs_from_solved_header,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     _process_single_frame_worker,
     aperture_flux_error_adu,
     measure_aperture_photometry,
 )
 from astrometricslib.pipelines.shared.quality.clipped_frames import frame_is_clipped_at_zero
-from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits, make_photometry_frame
+from astrometricslib.test.synthetic import (
+    SyntheticStar,
+    drifted_frame_solves,
+    make_photometry_fits,
+    make_photometry_frame,
+)
 
 SATURATION_ADU = 65535.0
 FRAME_SHAPE = (80, 80)
@@ -207,6 +216,19 @@ def _write_frame(path: Path, exposure_s: float) -> None:
     )
 
 
+def _identity_mapping() -> FrameMapping:
+    """Give the mapping of a frame whose stars sit where the reference's do.
+
+    Returns
+    -------
+    mapping : `FrameMapping`
+        The mapping from the reference frame to a frame of the same field.
+    """
+    solves = drifted_frame_solves(["a"], FRAME_SHAPE)
+    wcs = wcs_from_solved_header(solves["a"].header)
+    return FrameMapping.from_solutions(wcs, wcs, FRAME_SHAPE)
+
+
 def test_the_worker_reports_flux_and_error_in_adu_per_second(tmp_path: Path) -> None:
     """The worker divides both the flux and its error by the exposure time.
 
@@ -222,7 +244,7 @@ def test_the_worker_reports_flux_and_error_in_adu_per_second(tmp_path: Path) -> 
     _, result = _process_single_frame_worker((
         str(path),
         [("star0", 40.0, 40.0)],
-        [],
+        _identity_mapping(),
         SATURATION_ADU,
         DetectorNoise(),
     ))

@@ -5,7 +5,7 @@ Description: The reader `read_star_shape_rows` and the stack baseline
 with the science library's own store. The database holds the cases the
 reader must handle: rows at another definition version, a color-channel row,
 a row with no value, a newer row that replaces an older one, a subset stack,
-a frame the quarantine set aside, and rows of other targets. The expected
+a frame the set-aside check set aside, and rows of other targets. The expected
 numbers were taken from the reader as it was before it read the stored rows
 once per level instead of once per metric, so these tests show the faster
 reader gives the same answer. A further test checks that the kept rows are

@@ -67,7 +67,7 @@ def measure_star_profile(
         SKY_ANNULUS_INNER_RADIUS_PX,
         SKY_ANNULUS_OUTER_RADIUS_PX,
     )
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import TRAILED_ELONGATION_LIMIT
+    from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import TRAILED_ELONGATION_LIMIT
 
     if len(position) != 2:
         raise InvalidArgumentError("position must be the star's (x, y) in 1-based pixels.")

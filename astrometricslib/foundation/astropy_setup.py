@@ -8,11 +8,13 @@ it needs it. That download stalled the first altitude conversion of a program
 for 6 to 14 seconds, and it quietly needed the internet.
 
 This module keeps the setting in one place. `configure_offline_iers` tells
-astropy to use the copy that ships with it and to accept it at any age. Both
-libraries call it when they are imported, so every program that uses them
-works offline. `warm_earth_orientation_data` loads the table ahead of time,
-so a program can pay the half-second load cost during startup instead of on
-the user's first click.
+astropy to use the copy that ships with it and to accept it at any age.
+`astrometricslib` calls it when it is imported, so every program that uses
+either library works offline. `warm_earth_orientation_data` loads the table
+ahead of time. `start_earth_orientation_warmup` runs it once per process in a
+background thread; `Astrometrics(...)` starts that thread, so a program pays
+the half-second load cost while it starts instead of on the user's first
+click. None of these names is public.
 
 Measured with astropy 8.0.1 for a star at RA 315.7 deg, Dec 68.7 deg seen from
 the observatory site: the first conversion took 5.8 to 13.8 s with the
@@ -21,9 +23,16 @@ arcseconds for dates from two years ago to ten years ahead. That is far below
 what a sky map or a telescope slew can resolve, and no date raised an error.
 """
 
+import logging
+import threading
 import time
 
 from astropy.utils import iers
+
+logger = logging.getLogger(__name__)
+
+_warmup_lock = threading.Lock()
+_warmup_started = False
 
 
 def configure_offline_iers() -> None:
@@ -60,3 +69,46 @@ def warm_earth_orientation_data() -> float:
         AltAz(obstime=Time.now(), location=EarthLocation(lat=0.0 * u.deg, lon=0.0 * u.deg))
     )
     return time.monotonic() - started_at
+
+
+def _run_earth_orientation_warmup() -> None:
+    """Load the table in the warm-up thread and log how long it took.
+
+    A failure is logged at DEBUG and never raised. It only means the first
+    altitude conversion pays the load cost itself.
+    """
+    try:
+        elapsed = warm_earth_orientation_data()
+        logger.debug("Earth-orientation data loaded in %.1fs", elapsed)
+    except Exception:
+        logger.debug(
+            "Earth-orientation warm-up failed; the first conversion will load the table", exc_info=True
+        )
+
+
+def start_earth_orientation_warmup() -> bool:
+    """Start loading the Earth-rotation table in a background thread, once.
+
+    The first call in a process starts a daemon thread that runs
+    `warm_earth_orientation_data`. Later calls do nothing. The call returns
+    at once and never raises, so it is safe inside a constructor.
+
+    Returns
+    -------
+    bool
+        `True` if this call started the thread, `False` if one had already
+        been started (or the thread could not start).
+    """
+    global _warmup_started
+    with _warmup_lock:
+        if _warmup_started:
+            return False
+        _warmup_started = True
+    try:
+        threading.Thread(
+            target=_run_earth_orientation_warmup, name="earth-orientation-warmup", daemon=True
+        ).start()
+    except Exception:
+        logger.debug("Earth-orientation warm-up thread did not start", exc_info=True)
+        return False
+    return True

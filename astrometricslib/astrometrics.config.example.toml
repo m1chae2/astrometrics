@@ -427,7 +427,7 @@ exposure_group_gain_tolerance = "0.05"
 # excluded_frames.json (why each was moved), and
 # astrometricslib/scripts/restore_excluded_frames.py moves them back. Set
 # "false" to leave every frame where it is.
-quarantine_bad_frames_enabled = "true"
+set_aside_bad_frames_enabled = "true"
 # "true" (the default): the stack preview picture dims stars in proportion to
 # their brightness and softens the brightest values, so stars no longer look
 # like equally bright white dots. The stack file itself is never changed. Set

@@ -1,8 +1,8 @@
-"""Purpose: Test that photometry skips frames the quarantine sets aside.
+"""Purpose: Test that photometry skips frames the set-aside check sets aside.
 
 Description: On 2026-09-24 most M 27 frames were clouded, so no star was in
 every frame and the night had no comparison stars. Photometry now asks the
-frame quarantine's own judging function which frames it would set aside, and
+set-aside check's own judging function which frames it would set aside, and
 measures the rest. These tests use stand-in frame records and a stand-in
 measuring function, so no FITS data is read. They check that:
 
@@ -28,7 +28,7 @@ from astrometricslib.pipelines.photometry.pre_processing.skip_set_aside_frames i
     skip_set_aside_frames,
 )
 from astrometricslib.pipelines.pipeline_base import PipelineRequest
-from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
+from astrometricslib.pipelines.stacking.pre_processing import frame_set_aside
 
 NIGHT_START = datetime(2026, 9, 24, 3, 0, tzinfo=UTC).timestamp()
 FRAME_COUNT = 12
@@ -54,7 +54,7 @@ def stand_in_measurer(cloudy_indexes: set[int]) -> Any:
     Returns
     -------
     measure : `Callable`
-        Takes a path and returns a quarantine measurement.
+        Takes a path and returns a set-aside measurement.
     """
 
     def measure(path: str) -> dict[str, Any]:
@@ -80,14 +80,14 @@ def stand_in_measurer(cloudy_indexes: set[int]) -> Any:
 @pytest.fixture
 def no_frames_set_aside(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the library hold no `_excluded` frames."""
-    monkeypatch.setattr(frame_quarantine, "list_set_aside_frames", lambda *_arguments: [])
+    monkeypatch.setattr(frame_set_aside, "list_set_aside_frames", lambda *_arguments: [])
 
 
 def use_measurer(monkeypatch: pytest.MonkeyPatch, cloudy_indexes: set[int]) -> None:
-    """Give the quarantine the stand-in measuring function."""
+    """Give the set-aside check the stand-in measuring function."""
     monkeypatch.setattr(
-        frame_quarantine,
-        "make_quarantine_measurer",
+        frame_set_aside,
+        "make_set_aside_measurer",
         lambda _target_id: stand_in_measurer(cloudy_indexes),
     )
 
@@ -95,7 +95,7 @@ def use_measurer(monkeypatch: pytest.MonkeyPatch, cloudy_indexes: set[int]) -> N
 def test_clouded_frames_are_skipped_and_clear_frames_kept(
     monkeypatch: pytest.MonkeyPatch, no_frames_set_aside: None
 ) -> None:
-    """The quarantine's judgement splits the night into clear and clouded."""
+    """The set-aside check splits the night into clear and clouded frames."""
     use_measurer(monkeypatch, {2, 3, 4})
     frames = make_frames()
 
@@ -113,7 +113,7 @@ def test_a_frame_in_an_excluded_folder_is_skipped(monkeypatch: pytest.MonkeyPatc
     use_measurer(monkeypatch, set())
     frames = make_frames()
     monkeypatch.setattr(
-        frame_quarantine,
+        frame_set_aside,
         "list_set_aside_frames",
         lambda *_arguments: [SimpleNamespace(original_path=frames[5].path)],
     )
@@ -158,7 +158,7 @@ def test_process_input_builds_the_session_from_the_clear_frames_only(
     assert [
         path for session in result.payload["photometry_sessions"] for path in session.frame_paths
     ] == clear_paths
-    assert len(result.payload["quarantine_skipped_frames"]) == 3
+    assert len(result.payload["set_aside_skipped_frames"]) == 3
     (warning,) = result.payload["input_logged_warnings"]
     assert "frame_002.fits" in warning.message
 
@@ -170,7 +170,7 @@ def test_a_night_where_every_frame_fails_is_left_out_with_a_warning(
     use_measurer(monkeypatch, set())
     frames = make_frames()
     monkeypatch.setattr(
-        frame_quarantine,
+        frame_set_aside,
         "list_set_aside_frames",
         lambda *_arguments: [SimpleNamespace(original_path=frame.path) for frame in frames],
     )
@@ -179,6 +179,6 @@ def test_a_night_where_every_frame_fails_is_left_out_with_a_warning(
     result = runner.PhotometryPipelineAdapter().process_input(request)
 
     assert not result.has_work
-    assert "set aside by the frame quarantine" in result.payload["no_work_reason"]
-    assert len(result.payload["quarantine_skipped_frames"]) == FRAME_COUNT
+    assert "set aside by the cloud and target alignment check" in result.payload["no_work_reason"]
+    assert len(result.payload["set_aside_skipped_frames"]) == FRAME_COUNT
     assert len(result.payload["input_logged_warnings"]) == 1

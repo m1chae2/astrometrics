@@ -195,11 +195,12 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times their predicted error."
     ),
     "registration_drift": (
-        "Fails when the field shifts by more than `UNSTABLE_TRACKING_DRIFT_PX`, when rotation and "
-        "scale change move a corner by more than `MAXIMUM_CORNER_DISPLACEMENT_PX` (95th "
-        "percentile), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
-        "(brightness-weighted star centers) were untrustworthy and fell back to the aligned "
-        "position."
+        "Fails when the field sits more than `UNSTABLE_TRACKING_DRIFT_PX` from its place in the "
+        "reference frame, when a corner of the frame moves by more than "
+        "`MAXIMUM_CORNER_DISPLACEMENT_PX` beyond that shift (95th percentile; a turned or "
+        "rescaled field), or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of centroids "
+        "(brightness-weighted star centers) were untrustworthy and fell back to the position "
+        "the frame's plate solution gives."
     ),
     "scatter_population": (
         "Not checked when too few stars have a measured scatter, or too few to fit the noise "
@@ -302,9 +303,10 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "Frames taken at a less common gain setting (the camera's amplifier setting) are set "
         "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
-    "frame_quarantine": (
-        "Fails (as a warning) when more than `WARN_QUARANTINED_FRACTION` of a batch was set "
-        "aside. The frames are moved all the same; the detail says how many and why."
+    "frame_set_aside": (
+        "Fails (as a warning) when the cloud and target alignment check set aside more than "
+        "`WARN_SET_ASIDE_FRACTION` of a batch. The frames are moved all the same; "
+        "the detail says how many and why."
     ),
     "background_homogeneity": (
         "Fails when the sky-background levels of the frames of one exposure length split into "
@@ -591,7 +593,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "plate_solve_attempts": "Number of plate-solve tries.",
     "stars_processed": "Number of stars tracked through the light curves (brightness over time).",
     "stars_found": (
-        "Number of stars detected on the reference frame (the frame every other frame is aligned to)."
+        "Number of stars detected on the reference frame (the frame every other frame is mapped to)."
     ),
     "frames_processed": "Number of calibrated frames measured.",
     "rejected_frames": "Frames rejected because their comparison-star level was out of line with the rest.",
@@ -731,7 +733,7 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "frames_excluded_for_background": (
         "Number of frames set aside because their sky background differed from the rest."
     ),
-    "frames_quarantined": "Number of frames with clouds or trailed stars moved to the excluded folder.",
+    "frames_set_aside": "Number of frames with clouds or trailed stars moved to the excluded folder.",
     "dark_unique_frame_count": "Number of different frames (copies counted once) in the master dark.",
     "bias_unique_frame_count": "Number of different frames (copies counted once) in the master bias.",
 }
@@ -1957,23 +1959,23 @@ def build_photometry_doc() -> str:
             "`UNSTABLE_TRACKING_DRIFT_PX`",
             f"`{values['drift']:g}` px",
             design_estimate_cell("PHO"),
-            "Largest shift of the field between frames before `registration_drift` fails. Half "
-            "of the ±40 px box in which a star's center is searched, so stars are caught "
-            "before they leave the box.",
+            "Largest shift of the field from its place in the reference frame before "
+            "`registration_drift` fails. It flags a mount that lost tracking; the plate "
+            "solutions place the stars wherever the field went.",
         ],
         [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",
             f"`{values['corner']}` px",
             design_estimate_cell("PHO"),
-            "Largest shift of an image corner caused by rotation and scale change between frames "
-            "(95th percentile)." + see_also("PHO-04"),
+            "Largest shift of an image corner beyond the shift of the field's middle, from a "
+            "turn or a change of scale between frames (95th percentile)." + see_also("PHO-04"),
         ],
         [
             "`MAXIMUM_CENTROID_FALLBACK_FRACTION`",
             f"`{values['fallback']:g}`",
             design_estimate_cell("PHO"),
-            "Largest share of star measurements that may keep the aligned position because the "
-            "star's own centroid was refused." + see_also("PHO-04"),
+            "Largest share of star measurements that may keep the plate solution's position "
+            "because the star's own centroid was refused." + see_also("PHO-04"),
         ],
         [
             "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED`",
@@ -2020,7 +2022,7 @@ by an ensemble (a combined set) of constant comparison stars in the same frames.
 
 A session here is the frames of one night (noon to noon) taken with the same gain setting and
 offset; the run uses only the frames of the requested filter. Each session has a reference
-frame: the frame every other frame is aligned to, and on which the stars to measure are found.
+frame: the frame every other frame is mapped to, and on which the stars to measure are found.
 
 The diagram shows one run, top to bottom.
 
@@ -2028,7 +2030,7 @@ The diagram shows one run, top to bottom.
 flowchart TD
     A["Frames in the requested filter (spectral frames left out)"] --> B["Group into observing sessions"]
     B --> C["Per session: find the stars to measure on the reference frame, optionally named from a catalog"]
-    C --> D["Per frame: read capture time, align to the reference frame, find star centers"]
+    C --> D["Per frame: read capture time, place stars by the frame's solution, find centers"]
     D --> E["Sum each star's light in a circle, subtract sky, estimate the error"]
     E --> F["Convert times to a common solar-system clock"]
     F --> G["Divide by a fixed set of steady comparison stars"]
@@ -2079,10 +2081,12 @@ mid-exposure). The `capture_timestamps` gate quotes which time basis was used.
 
 ### 3.2 Centroid and aperture photometry
 
-**Placing each star.** Each star is placed at its position on the reference frame, moved by the
-frame's fitted shift, rotation and scale change. It is then re-centered on its centroid (the
+**Placing each star.** Siril plate-solves every frame of a session on its own. A star's sky
+position comes from the reference frame's solution, and the frame's own solution turns it into a
+pixel position in that frame. The star is then re-centered on its centroid (the
 brightness-weighted center of its light, photutils `centroid_com`). When the centroid is not
-trustworthy, the aligned position is kept and the reason is recorded. Apertures are never
+trustworthy, the solution's position is kept and the reason is recorded. A frame Siril cannot
+solve is left out, with the reason, and no other way places the stars. Apertures are never
 rounded to whole pixels.
 
 **Measuring its light.** Aperture photometry sums the light inside a circle (the aperture) and
@@ -3176,9 +3180,9 @@ def build_stacking_doc() -> str:
         "min_surviving": require_symbol(
             "astrometricslib.utilities.stack_filter_floor", "DEFAULT_MINIMUM_SURVIVING_FRAMES"
         ),
-        "quarantine": require_symbol(
-            "astrometricslib.pipelines.stacking.pre_processing.frame_quarantine",
-            "WARN_QUARANTINED_FRACTION",
+        "set_aside": require_symbol(
+            "astrometricslib.pipelines.stacking.pre_processing.frame_set_aside",
+            "WARN_SET_ASIDE_FRACTION",
         ),
         "penalty": require_symbol(
             "astrometricslib.pipelines.stacking.pre_processing.exposure_weighting",
@@ -3305,8 +3309,8 @@ def build_stacking_doc() -> str:
             "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
-            "`WARN_QUARANTINED_FRACTION`",
-            f"`{values['quarantine']}`",
+            "`WARN_SET_ASIDE_FRACTION`",
+            f"`{values['set_aside']}`",
             status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
             "Share of a batch above which setting frames aside draws a warning. It blocks nothing: "
             "every frame that fails a check is moved. About twice the share the step picks from a "
@@ -3480,8 +3484,8 @@ flowchart TD
 Siril is an open-source astronomy image processor that does the pixel work. In code terms the
 run starts at `stage.stack_frames(target)`, splits frames in `stack_runner.run_stack`, and
 stacks through a `StackingDriver` (the interface for a stacking program), whose Siril version
-runs `ImageProcessing` (Section 4). Setting bad frames aside is the frame quarantine, and the
-quality summary is a `StackQualitySummary` (Section 7).
+runs `ImageProcessing` (Section 4). Setting frames aside is the set-aside check, a cloud and
+target alignment check, and the quality summary is a `StackQualitySummary` (Section 7).
 
 <<heading_2>>
 
@@ -3614,7 +3618,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Frame selection and tests.** One camera only, no mix of spectral and imaging frames, frames
    at a less common gain setting set aside, frames set aside by an earlier run dropped, the
-   quarantine (imaging only), and the background test.
+   the set-aside check (imaging only; the cloud and target alignment check), and the background test.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames, calibration frames,
    settings and stacking code: a short code that changes whenever any of them changes. A match
    with the last run keeps the stack on disk, unless `force=True`. A kept stack still gets a new
@@ -3669,8 +3673,10 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 
 1. **Temperature gap above <<dark_tol>> °C.** The nearest dark is applied with a soft flag;
    `calibration_metadata` fails. A missing `CCD-TEMP` means the dark is not judged.
-2. **Bad frames.** Frames with too few stars or non-round stars move to `_excluded`. A batch
-   whose share of bad frames is above <<quarantine>> moves nothing and `frame_quarantine` fails.
+2. **Bad frames.** The cloud and target alignment check moves frames with too few stars,
+   non-round stars or a pointing off the target to `_excluded`. It moves every failing frame.
+   A batch whose share of bad frames is above <<set_aside>> only draws a warning, and
+   `frame_set_aside` fails as a warning.
 3. **Registration failure.** Spectral stacks are retried. On an imaging stack, blur shows as $R
    > <<degrade>>$ in `stack_sharpness`.
 4. **Over-subtraction.** `zero_pixel_fraction` and `negative_pixels` catch darks or biases that

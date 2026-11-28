@@ -435,7 +435,7 @@ class TargetFrames(MovedNames):
 
         Each frame is ``included``, ``flagged`` (in the stack, but its stars
         are stretched: at least the warning level and kept by the
-        quarantine, with a reason giving the numbers), ``not_stacked``
+        the set-aside check, with a reason giving the numbers), ``not_stacked``
         (taken after the newest stack file was written, or there is no
         stack) or ``set_aside`` (moved into an `_excluded` folder, with the
         stacker's kind and reason). Nothing is written.

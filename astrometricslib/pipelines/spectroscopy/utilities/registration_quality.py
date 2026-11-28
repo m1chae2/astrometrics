@@ -8,7 +8,8 @@ fades out, which means the software might be confused and ruining the stack.
 
 Siril's per-frame "rmse" column is really the frame's sky background level,
 not a registration error, so this check no longer tests it. Sky changes are
-caught by the quarantine's cloud check and the background-homogeneity check.
+caught by the set-aside check's cloud check and the background-homogeneity
+check.
 """
 
 import itertools

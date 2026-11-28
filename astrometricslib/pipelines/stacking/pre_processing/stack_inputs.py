@@ -104,7 +104,7 @@ SETTINGS_THAT_CHANGE_A_STACK = (
     "get_stack_filter_wfwhm_percentile",
     "get_stack_filter_round_percentile",
     "get_trim_noisy_stack_edges_enabled",
-    "get_quarantine_bad_frames_enabled",
+    "get_set_aside_bad_frames_enabled",
     "get_background_homogeneity_check_enabled",
 )
 

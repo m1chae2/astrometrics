@@ -2,7 +2,7 @@
 
 They use stand-in frame records and a stand-in measuring function, so no
 FITS data is read. The limits themselves were checked on real frames (see the
-numbers in `frame_quarantine.py`).
+numbers in `frame_set_aside.py`).
 """
 
 import json
@@ -17,20 +17,20 @@ import pytest
 
 from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
-from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME, is_quarantined_path
+from astrometricslib.pipelines.shared.set_aside_path import SET_ASIDE_FOLDER_NAME, is_set_aside_path
 from astrometricslib.pipelines.stacking.post_processing.record_quality import stacking_notice_measurements
-from astrometricslib.pipelines.stacking.pre_processing import frame_quarantine
+from astrometricslib.pipelines.stacking.pre_processing import frame_set_aside
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
-    QUARANTINE_EXCLUSION_REASON_PREFIX,
+    SET_ASIDE_EXCLUSION_REASON_PREFIX,
     record_input_counts,
 )
-from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+from astrometricslib.pipelines.stacking.pre_processing.frame_set_aside import (
     MANIFEST_FILE_NAME,
     drop_frames_already_set_aside,
-    find_frames_to_quarantine,
+    find_frames_to_set_aside,
     judge_batch,
-    quarantine_bad_frames,
-    restore_quarantined_frames,
+    restore_set_aside_frames,
+    set_aside_bad_frames,
     split_into_batches,
 )
 
@@ -101,7 +101,7 @@ def test_split_into_batches_separates_setups_and_sessions() -> None:
         make_frame("b1", 0.0, exposure=30.0),
         make_frame("c1", 0.0, filter_name="Red"),
         make_frame("d1", 0.0, camera="Camera B"),
-        make_frame("a3", 120.0 + frame_quarantine.SESSION_GAP_SECONDS.default + 1),
+        make_frame("a3", 120.0 + frame_set_aside.SESSION_GAP_SECONDS.default + 1),
         other_gain,
         same_gain_written_otherwise,
         other_optic,
@@ -175,8 +175,8 @@ def colour_session(elongation_values: list[float], colour_camera: bool) -> list[
 
 def test_judge_batch_reads_the_colour_cameras_own_elongation_rise(monkeypatch: pytest.MonkeyPatch) -> None:
     """A colour camera is judged with its own rise, mono with the mono one."""
-    wider = frame_quarantine.COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN.model_copy(update={"default": 0.40})
-    monkeypatch.setattr(frame_quarantine, "COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN", wider)
+    wider = frame_set_aside.COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN.model_copy(update={"default": 0.40})
+    monkeypatch.setattr(frame_set_aside, "COLOUR_CAMERA_ELONGATION_RISE_ABOVE_MEDIAN", wider)
 
     mono = judge_batch(colour_session([1.36], colour_camera=False))
     colour = judge_batch(colour_session([1.36], colour_camera=True))
@@ -222,7 +222,7 @@ def test_find_frames_moves_every_bad_frame_and_warns_when_many_look_bad(tmp_path
         for index, frame in enumerate(frames)
     }
 
-    report = find_frames_to_quarantine(frames, measure=lambda path: dict(measurements[path]))
+    report = find_frames_to_set_aside(frames, measure=lambda path: dict(measurements[path]))
 
     assert len(report.moved) == 3
     assert report.batches_with_many_set_aside == 1
@@ -238,7 +238,7 @@ def test_find_frames_does_not_warn_at_a_quarter_or_less(tmp_path: Path) -> None:
         for index, frame in enumerate(frames)
     }
 
-    report = find_frames_to_quarantine(frames, measure=lambda path: dict(measurements[path]))
+    report = find_frames_to_set_aside(frames, measure=lambda path: dict(measurements[path]))
 
     assert len(report.moved) == 2
     assert report.warnings == []
@@ -254,14 +254,14 @@ def test_find_frames_notes_small_batches_and_reports_unreadable_frames(tmp_path:
             raise OSError("truncated file")
         return make_measurement(path)
 
-    report = find_frames_to_quarantine([*small, *big], measure=measure)
+    report = find_frames_to_set_aside([*small, *big], measure=measure)
 
     assert report.moved == []
     assert report.unreadable == [str(tmp_path / "b4.fits")]
     assert any("too few to judge" in note for note in report.notes)
 
 
-def test_quarantine_moves_files_records_them_and_updates_the_target(tmp_path: Path) -> None:
+def test_set_aside_moves_files_records_them_and_updates_the_target(tmp_path: Path) -> None:
     """A bad frame moves to _excluded, is recorded, and leaves the target."""
     directory = tmp_path / "lights" / "M 1" / "Scope" / "Camera"
     directory.mkdir(parents=True)
@@ -280,18 +280,18 @@ def test_quarantine_moves_files_records_them_and_updates_the_target(tmp_path: Pa
     def measure(path: str) -> dict[str, Any]:
         return make_measurement(path, elongation=2.5 if path == bad_path else 1.05)
 
-    kept, report = quarantine_bad_frames(target, frames, measure=measure)
+    kept, report = set_aside_bad_frames(target, frames, measure=measure)
 
     assert [frame.path for frame in kept] == [f.path for f in frames if f.path != bad_path]
     assert not os.path.exists(bad_path)
-    assert os.path.exists(directory / QUARANTINE_FOLDER_NAME / "M1_004.fits")
+    assert os.path.exists(directory / SET_ASIDE_FOLDER_NAME / "M1_004.fits")
     assert bad_path not in [frame.path for frame in target.frames]
     assert flat in target.frames
     assert recalculations == [1]
-    manifest = json.loads((directory / QUARANTINE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
+    manifest = json.loads((directory / SET_ASIDE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
     assert manifest[0]["original_path"] == bad_path
     assert manifest[0]["kind"] == "trailed"
-    assert report.reasons_by_path()[bad_path].startswith(QUARANTINE_EXCLUSION_REASON_PREFIX)
+    assert report.reasons_by_path()[bad_path].startswith(SET_ASIDE_EXCLUSION_REASON_PREFIX)
 
 
 def test_frames_set_aside_earlier_are_dropped_even_if_the_target_still_lists_them(
@@ -307,7 +307,7 @@ def test_frames_set_aside_earlier_are_dropped_even_if_the_target_still_lists_the
         frames.append(make_frame(path, float(index) * 120.0))
     bad_path = frames[4].path
     first_run_target = SimpleNamespace(id="M 1", frames=list(frames), recalculate_total_exposure=lambda: None)
-    quarantine_bad_frames(
+    set_aside_bad_frames(
         first_run_target,
         frames,
         measure=lambda path: make_measurement(path, elongation=2.5 if path == bad_path else 1.05),
@@ -338,7 +338,7 @@ def test_a_restored_frame_is_not_dropped(tmp_path: Path) -> None:
         frames.append(make_frame(path, float(index) * 120.0))
     bad_path = frames[4].path
     target = SimpleNamespace(id="M 1", frames=list(frames), recalculate_total_exposure=lambda: None)
-    quarantine_bad_frames(
+    set_aside_bad_frames(
         target,
         frames,
         measure=lambda path: make_measurement(path, elongation=2.5 if path == bad_path else 1.05),
@@ -352,7 +352,7 @@ def test_a_restored_frame_is_not_dropped(tmp_path: Path) -> None:
     assert len(kept) == 10
 
 
-def test_quarantine_ignores_calibration_frames(tmp_path: Path) -> None:
+def test_set_aside_ignores_calibration_frames(tmp_path: Path) -> None:
     """Only light frames are measured; a flat is never judged or moved."""
     flats = []
     for index in range(10):
@@ -364,7 +364,7 @@ def test_quarantine_ignores_calibration_frames(tmp_path: Path) -> None:
     def measure(path: str) -> dict[str, Any]:
         raise AssertionError("a flat frame was measured")
 
-    kept, report = quarantine_bad_frames(target, flats, measure=measure)
+    kept, report = set_aside_bad_frames(target, flats, measure=measure)
 
     assert len(kept) == 10
     assert report.moved == []
@@ -384,30 +384,30 @@ def test_restore_moves_frames_back_and_cleans_up(tmp_path: Path) -> None:
     def measure(path: str) -> dict[str, Any]:
         return make_measurement(path, elongation=2.5 if path.endswith("f2.fits") else 1.05)
 
-    quarantine_bad_frames(target, frames, measure=measure)
+    set_aside_bad_frames(target, frames, measure=measure)
     assert not (directory / "f2.fits").exists()
 
-    restored = restore_quarantined_frames(str(directory))
+    restored = restore_set_aside_frames(str(directory))
 
     assert restored == [str(directory / "f2.fits")]
     assert (directory / "f2.fits").exists()
-    assert not (directory / QUARANTINE_FOLDER_NAME).exists()
+    assert not (directory / SET_ASIDE_FOLDER_NAME).exists()
 
 
 def test_restore_leaves_a_frame_whose_original_place_is_taken(tmp_path: Path) -> None:
     """A frame is never restored over a file that now holds its old name."""
-    quarantine = tmp_path / "Camera" / QUARANTINE_FOLDER_NAME
-    quarantine.mkdir(parents=True)
-    (quarantine / "f.fits").write_bytes(b"old")
+    set_aside_folder = tmp_path / "Camera" / SET_ASIDE_FOLDER_NAME
+    set_aside_folder.mkdir(parents=True)
+    (set_aside_folder / "f.fits").write_bytes(b"old")
     (tmp_path / "Camera" / "f.fits").write_bytes(b"new")
     manifest = [{"file": "f.fits", "original_path": str(tmp_path / "Camera" / "f.fits")}]
-    (quarantine / MANIFEST_FILE_NAME).write_text(json.dumps(manifest))
+    (set_aside_folder / MANIFEST_FILE_NAME).write_text(json.dumps(manifest))
 
-    restored = restore_quarantined_frames(str(quarantine))
+    restored = restore_set_aside_frames(str(set_aside_folder))
 
     assert restored == []
     assert (tmp_path / "Camera" / "f.fits").read_bytes() == b"new"
-    assert (quarantine / "f.fits").read_bytes() == b"old"
+    assert (set_aside_folder / "f.fits").read_bytes() == b"old"
 
 
 def test_a_second_move_with_the_same_name_does_not_overwrite(tmp_path: Path) -> None:
@@ -417,24 +417,24 @@ def test_a_second_move_with_the_same_name_does_not_overwrite(tmp_path: Path) -> 
     for content in (b"first", b"second"):
         path = directory / "f.fits"
         path.write_bytes(content)
-        decision = frame_quarantine.QuarantineDecision(str(path), "trailed", "test", 100, 3000.0, 2.5, 1400.0)
-        frame_quarantine._move_to_quarantine(decision)
+        decision = frame_set_aside.SetAsideDecision(str(path), "trailed", "test", 100, 3000.0, 2.5, 1400.0)
+        frame_set_aside._move_to_set_aside(decision)
 
-    names = sorted(os.listdir(directory / QUARANTINE_FOLDER_NAME))
+    names = sorted(os.listdir(directory / SET_ASIDE_FOLDER_NAME))
     assert names == ["excluded_frames.json", "f.fits", "f_1.fits"]
 
 
-def test_is_quarantined_path_checks_whole_folder_names() -> None:
+def test_is_set_aside_path_checks_whole_folder_names() -> None:
     """Only a folder named _excluded counts, not a name that contains it."""
-    assert is_quarantined_path(os.path.join("lights", "M 1", QUARANTINE_FOLDER_NAME, "f.fits"))
-    assert not is_quarantined_path(os.path.join("lights", "M 1", "not_excluded_frames", "f.fits"))
+    assert is_set_aside_path(os.path.join("lights", "M 1", SET_ASIDE_FOLDER_NAME, "f.fits"))
+    assert not is_set_aside_path(os.path.join("lights", "M 1", "not_excluded_frames", "f.fits"))
 
 
-def test_input_counts_include_quarantined_frames_and_a_notice_says_so() -> None:
+def test_input_counts_include_set_aside_frames_and_a_notice_says_so() -> None:
     """The metrics count moved frames and the stack gets a notice row."""
     excluded = [
-        SimpleNamespace(path="a.fits", reason=f"{QUARANTINE_EXCLUSION_REASON_PREFIX}: clouded (203 stars)"),
-        SimpleNamespace(path="b.fits", reason=f"{QUARANTINE_EXCLUSION_REASON_PREFIX}: trailed (round 0.44)"),
+        SimpleNamespace(path="a.fits", reason=f"{SET_ASIDE_EXCLUSION_REASON_PREFIX}: clouded (203 stars)"),
+        SimpleNamespace(path="b.fits", reason=f"{SET_ASIDE_EXCLUSION_REASON_PREFIX}: trailed (round 0.44)"),
         SimpleNamespace(path="c.fits", reason="minority gain setting"),
     ]
 
@@ -451,7 +451,7 @@ def test_input_counts_include_quarantined_frames_and_a_notice_says_so() -> None:
 
     rows = stacking_notice_measurements(summary, context, "M1_Stacked.fits")
 
-    assert summary.stacking_metrics.frames_quarantined == 2
+    assert summary.stacking_metrics.frames_set_aside == 2
     assert summary.stacking_metrics.frames_excluded_for_gain == 1
     assert [row.reason for row in rows] == [
         "2 frame(s) with clouds or trailed stars moved to the _excluded folder"
@@ -468,7 +468,7 @@ def test_the_report_keeps_the_measurements_of_kept_frames_as_well_as_moved_ones(
             raise OSError("truncated file")
         return make_measurement(path, elongation=2.5 if path == bad_path else 1.05)
 
-    report = find_frames_to_quarantine(frames, measure=measure)
+    report = find_frames_to_set_aside(frames, measure=measure)
 
     assert [decision.path for decision in report.moved] == [bad_path]
     assert len(report.measurements) == 11
@@ -520,7 +520,7 @@ def uneven_batch() -> list[dict[str, Any]]:
 
 def test_judge_batch_keeps_and_flags_an_uneven_frame_whose_stars_are_normal() -> None:
     """A gradient or a tree with normal stars is flagged, not set aside."""
-    decisions, flagged, _ = frame_quarantine.judge_batch_in_full(uneven_batch())
+    decisions, flagged, _ = frame_set_aside.judge_batch_in_full(uneven_batch())
 
     assert decisions == []
     assert [frame.path for frame in flagged] == ["frame_004.fits"]
@@ -533,7 +533,7 @@ def test_judge_batch_sets_aside_a_frame_with_an_uneven_sky_and_says_why() -> Non
     measurements = uneven_batch()
     measurements[4]["bright_star_flux_adu"] = 600.0
 
-    decisions, notes = frame_quarantine.judge_batch_with_notes(measurements)
+    decisions, notes = frame_set_aside.judge_batch_with_notes(measurements)
 
     assert [decision.path for decision in decisions] == ["frame_004.fits"]
     assert decisions[0].kind == "clouded"
@@ -571,7 +571,7 @@ def test_judge_batch_sets_aside_a_frame_pointing_off_the_main_field() -> None:
     # Turned half a revolution, as after a meridian flip, same field.
     measurements[6] = frame_with([(shape[0] - 1 - y, shape[1] - 1 - x) for y, x in sky_rows], "flipped.fits")
 
-    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+    decisions, _ = frame_set_aside.judge_batch_with_notes(measurements)
 
     assert [decision.path for decision in decisions] == ["off.fits"]
     assert decisions[0].kind == "off_field"
@@ -601,7 +601,7 @@ def test_the_warning_counts_each_rule_in_words() -> None:
     measurements[8] = make_measurement("cloud.fits", stars=900, sky=3500.0)
     decisions = judge_batch(measurements)
 
-    warning = frame_quarantine.describe_many_set_aside(decisions, len(measurements))
+    warning = frame_set_aside.describe_many_set_aside(decisions, len(measurements))
 
     assert len(decisions) == 6
     assert warning == "6 of 12 frames set aside: 5 trailed, 1 few stars"
@@ -612,7 +612,7 @@ def test_frames_with_no_elongation_are_noted_not_judged_for_trailing() -> None:
     measurements = clean_batch()
     measurements[1]["star_elongation"] = None
 
-    decisions, notes = frame_quarantine.judge_batch_with_notes(measurements)
+    decisions, notes = frame_set_aside.judge_batch_with_notes(measurements)
 
     assert decisions == []
     assert any("1 of 12 frames have no star elongation" in note for note in notes)
@@ -629,13 +629,13 @@ def test_the_manifest_records_the_rule_value_and_limit(tmp_path: Path) -> None:
         frames.append(make_frame(path, float(index)))
     target = SimpleNamespace(id="T", frames=list(frames), recalculate_total_exposure=lambda: None)
 
-    quarantine_bad_frames(
+    set_aside_bad_frames(
         target,
         frames,
         measure=lambda path: make_measurement(path, elongation=1.64 if path.endswith("f2.fits") else 1.05),
     )
 
-    manifest = json.loads((directory / QUARANTINE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
+    manifest = json.loads((directory / SET_ASIDE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
     assert manifest[0]["reason"] == "Stars trailed: elongation 1.64, limit 1.32"
     assert manifest[0]["star_elongation"] == pytest.approx(1.64)
     assert manifest[0]["rules"] == ["trailed"]
@@ -652,7 +652,7 @@ def test_the_manifest_carries_the_warning_when_many_frames_are_set_aside(tmp_pat
         frames.append(make_frame(path, float(index)))
     target = SimpleNamespace(id="T", frames=list(frames), recalculate_total_exposure=lambda: None)
 
-    kept, report = quarantine_bad_frames(
+    kept, report = set_aside_bad_frames(
         target,
         frames,
         measure=lambda path: make_measurement(
@@ -660,7 +660,7 @@ def test_the_manifest_carries_the_warning_when_many_frames_are_set_aside(tmp_pat
         ),
     )
 
-    manifest = json.loads((directory / QUARANTINE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
+    manifest = json.loads((directory / SET_ASIDE_FOLDER_NAME / MANIFEST_FILE_NAME).read_text())
     assert len(manifest) == 3
     assert len(kept) == 7
     assert {entry["warning"] for entry in manifest} == {"3 of 10 frames set aside: 3 trailed"}
@@ -703,7 +703,7 @@ def test_a_second_field_is_set_aside_as_another_field() -> None:
     """A second pointing held by enough frames is an "Other field"."""
     measurements = frames_on_fields([14, 4])
 
-    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+    decisions, _ = frame_set_aside.judge_batch_with_notes(measurements)
 
     assert [decision.path for decision in decisions] == [f"field1_{index:02d}.fits" for index in range(4)]
     assert all(decision.kind == "off_field" for decision in decisions)
@@ -714,12 +714,12 @@ def test_a_short_run_at_another_pointing_is_a_stray_not_a_field() -> None:
     """A small run or a lone frame at another pointing is a stray."""
     measurements = frames_on_fields([20, 2])
 
-    decisions, _ = frame_quarantine.judge_batch_with_notes(measurements)
+    decisions, _ = frame_set_aside.judge_batch_with_notes(measurements)
 
     assert [decision.path for decision in decisions] == ["field1_00.fits", "field1_01.fits"]
     assert all(decision.reason.startswith("Pointing off the main field: ") for decision in decisions)
 
     lone = frames_on_fields([11, 1])
-    lone_decisions, _ = frame_quarantine.judge_batch_with_notes(lone)
+    lone_decisions, _ = frame_set_aside.judge_batch_with_notes(lone)
     assert [decision.path for decision in lone_decisions] == ["field1_00.fits"]
     assert lone_decisions[0].reason.startswith("Pointing off the main field: ")

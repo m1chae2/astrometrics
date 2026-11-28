@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padd
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from astrometricslib import configure_logging, configure_offline_iers, get_configuration
+from astrometricslib import configure_logging, get_configuration
 from astrometricslib.drivers import require_mounted_storage
 from astrometricslib.exceptions import AstrometricsError, ErrorInfo, StorageNotMountedError, to_error_info
 from astrometricslib.jobs import DbLogHandler, SkipJobStoredRecords, close_interrupted_jobs, new_request_id
@@ -60,11 +60,6 @@ configure_logging(
 )
 
 logger = logging.getLogger(__name__)
-
-# Astropy must use its bundled Earth-rotation (IERS) table and never download
-# one. Importing astrometricslib already does this; the call states it here
-# because the backend depends on it.
-configure_offline_iers()
 
 #: The handlers made by `attach_log_handlers`, kept so `detach_log_handlers`
 #: can remove them.

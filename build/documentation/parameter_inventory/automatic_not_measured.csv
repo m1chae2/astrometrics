@@ -79,16 +79,6 @@ models.pixel_scale_significant_figures,STK-D29,measurement,Design estimate
 models.unreliable_match_rms,SPE-17,judgment,Partly measured
 photometry.agreeing_share,PHO-D19,judgment,Design estimate
 photometry.agreement_p_value,PHO-D34,judgment,Design estimate
-photometry.alignment_anchor_count,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_anchor_fallback_band,PHO-D03,exclusion criteria,Design estimate
-photometry.alignment_anchor_minimum_peak_snr,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_anchor_minimum_qualifying,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_anchor_reach_px,PHO-04,measurement,Partly measured
-photometry.alignment_anchor_saturation_box_half_width_px,PHO-D03,exclusion criteria,Design estimate
-photometry.alignment_anchor_skipped_brightest_fraction,PHO-05,exclusion criteria,Partly measured
-photometry.alignment_clip_passes,PHO-D04,measurement,Design estimate
-photometry.alignment_clip_sigmas,PHO-D04,measurement,Design estimate
-photometry.alignment_refinement_passes,PHO-04,measurement,Partly measured
 photometry.aperture_radius_px,PHO-D01,measurement,Design estimate
 photometry.block_length_in_correlation_lengths,PHO-11,judgment,Partly measured
 photometry.brightest_skipped_fraction,PHO-01,exclusion criteria,Partly measured
@@ -126,9 +116,6 @@ photometry.maximum_noise_bins,PHO-06,judgment,Partly measured
 photometry.maximum_period_ratio,PHO-D31,exclusion criteria,Design estimate
 photometry.maximum_vetting_candidates,PHO-D05,exclusion criteria,Design estimate
 photometry.maximum_window_points,PHO-D23,measurement,Design estimate
-photometry.minimum_anchor_spread_fraction,PHO-D04,measurement,Design estimate
-photometry.minimum_anchors_for_shift,PHO-D04,measurement,Design estimate
-photometry.minimum_anchors_for_similarity,PHO-D04,measurement,Design estimate
 photometry.minimum_comparison_stars,PHO-01,exclusion criteria,Partly measured
 photometry.minimum_cycles_in_span,PHO-D31,exclusion criteria,Design estimate
 photometry.minimum_discrimination_auc,PHO-08,judgment,Partly measured
@@ -489,7 +476,6 @@ stacking.color_preview_chroma_blur_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_color_fade,STK-62,measurement,Partly measured
 stacking.color_preview_color_index_error_limit,STK-62,exclusion criteria,Partly measured
 stacking.color_preview_crowded_aperture_pixels,STK-62,measurement,Partly measured
-stacking.color_preview_detection_sigmas,STK-62,measurement,Partly measured
 stacking.color_preview_footprint_noise_multiples,STK-62,measurement,Partly measured
 stacking.color_preview_gaia_match_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_halo_widths,STK-62,measurement,Partly measured
@@ -497,18 +483,15 @@ stacking.color_preview_lightness_ratio_limits,STK-62,measurement,Partly measured
 stacking.color_preview_maximum_alignment_rms_pixels,STK-62,judgment,Partly measured
 stacking.color_preview_minimum_coverage,STK-62,judgment,Partly measured
 stacking.color_preview_nebula_chroma_gain,STK-62,measurement,Partly measured
-stacking.color_preview_pairing_radii_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_red_wide_tolerance,STK-62,exclusion criteria,Partly measured
 stacking.color_preview_resampling_noise_factor,STK-62,measurement,Partly measured
 stacking.color_preview_saturated_halo_radii,STK-62,measurement,Partly measured
 stacking.color_preview_saturation_shares,STK-62,exclusion criteria,Partly measured
-stacking.color_preview_shift_search_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_sky_noise_multiple,STK-62,measurement,Partly measured
 stacking.color_preview_sky_ring_gaps_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_sky_tint_limits,STK-62,measurement,Partly measured
 stacking.color_preview_sky_tint_smoothing,STK-62,measurement,Partly measured
 stacking.color_preview_star_core_taper,STK-62,measurement,Partly measured
-stacking.color_preview_star_widths_pixels,STK-62,measurement,Partly measured
 stacking.color_preview_wing_calibration,STK-62,measurement,Partly measured
 stacking.color_preview_wing_radii_pixels,STK-62,measurement,Partly measured
 stacking.contamination_magnitude_margin,STK-D34,judgment,Design estimate

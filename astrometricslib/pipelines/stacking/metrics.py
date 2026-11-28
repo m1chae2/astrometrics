@@ -10,11 +10,11 @@ stack (level ``stack``). A value about one exposure group is about that group's
 own stack file (see `exposure_group_subject` in `record_quality.py`). The
 per-frame weights are about one frame each.
 
-Three of them are frame metrics (`frame.quarantine_sky_median_adu`,
+Three of them are frame metrics (`frame.set_aside_sky_median_adu`,
 `frame.sky_unevenness` and `frame.pointing_offset_fraction`). The frame
-quarantine step measures them for every light frame it checks, so the stacking
+set-aside step measures them for every light frame it checks, so the stacking
 stage records them for kept frames as well as for the frames it moves aside.
-A fourth, `frame.quarantine_roundness`, is retired: the step no longer
+A fourth, `frame.set_aside_roundness`, is retired: the step no longer
 measures it (trailing is judged on the stored `frame.star_elongation`), and
 its old rows stay readable.
 """
@@ -47,8 +47,8 @@ STACKING_STAR_ELONGATION = "stacking.star_elongation"
 STACKING_STAR_ELONGATION_ANGLE_DEG = "stacking.star_elongation_angle_deg"
 STACKING_STAR_ELONGATION_COHERENCE = "stacking.star_elongation_coherence"
 STACKING_STAR_WIDTH_CENTER_PX = "stacking.star_width_center_px"
-FRAME_QUARANTINE_ROUNDNESS = "frame.quarantine_roundness"
-FRAME_QUARANTINE_SKY_MEDIAN = "frame.quarantine_sky_median_adu"
+FRAME_SET_ASIDE_ROUNDNESS = "frame.set_aside_roundness"
+FRAME_SET_ASIDE_SKY_MEDIAN = "frame.set_aside_sky_median_adu"
 FRAME_SKY_UNEVENNESS = "frame.sky_unevenness"
 FRAME_POINTING_OFFSET_FRACTION = "frame.pointing_offset_fraction"
 
@@ -83,14 +83,14 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
         ),
     ),
     MetricSpec(
-        name=FRAME_QUARANTINE_ROUNDNESS,
+        name=FRAME_SET_ASIDE_ROUNDNESS,
         definition_version=1,
         unit="",
         checkpoint=Checkpoint.FRAME,
         levels=(SubjectLevel.FRAME,),
         better=Direction.HIGHER,
         meaning=(
-            "RETIRED. How round the brightest stars of one raw frame were, as the frame quarantine "
+            "RETIRED. How round the brightest stars of one raw frame were, as the set-aside check "
             "step once measured it (1 is round, smaller is more stretched). The step no longer "
             "measures it and judges trailing on `frame.star_elongation`. Rows written before the "
             "change stay in the store."
@@ -121,17 +121,17 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
         ),
     ),
     MetricSpec(
-        name=FRAME_QUARANTINE_SKY_MEDIAN,
+        name=FRAME_SET_ASIDE_SKY_MEDIAN,
         definition_version=1,
         unit="adu",
         checkpoint=Checkpoint.FRAME,
         levels=(SubjectLevel.FRAME,),
         better=Direction.NONE,
         meaning=(
-            "The median pixel value of one raw frame, as the frame quarantine step measures it. "
+            "The median pixel value of one raw frame, as the set-aside check step measures it. "
             "It includes the bias level and every star, so it is not the sky brightness."
         ),
-        decisions=("frame quarantine",),
+        decisions=("set-aside check",),
         # `frame.background_level_adu` is the sigma-clipped median, a different
         # estimator. The two must never share a name.
         estimator="The plain median of every pixel of the frame, `numpy.median`, with no clipping.",
@@ -144,7 +144,7 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "A frame much brighter than its session, together with few stars, is clouded, and the "
-            "quarantine step moves it out of the stack."
+            "set-aside step moves it out of the stack."
         ),
     ),
     MetricSpec(
@@ -158,7 +158,7 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
             "How much the sky pattern across one raw frame differs from the typical pattern of its "
             "session (0 is the same). Thin cloud lights part of the frame and raises it."
         ),
-        decisions=("frame quarantine",),
+        decisions=("set-aside check",),
         estimator=(
             "The sky is measured in a 4 x 4 grid of boxes (the median of the 32-pixel block medians "
             "of each box, after dropping blocks more than 3 robust standard deviations above the "
@@ -173,14 +173,14 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
             "it is not comparable between sessions. The sky level includes the bias."
         ),
         band="The frame's own filter; a color image is read as stored, with its color pixels mixed.",
-        computed_by="pipelines.stacking.pre_processing.frame_quarantine.measure_sky_unevenness",
+        computed_by="pipelines.stacking.pre_processing.frame_set_aside.measure_sky_unevenness",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         register_entry="STK-01",
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "A frame whose sky differs from its session's pattern by far more than the clear frames "
-            "do was shot through cloud, and the quarantine step moves it out of the stack."
+            "do was shot through cloud, and the set-aside step moves it out of the stack."
         ),
     ),
     MetricSpec(
@@ -195,7 +195,7 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
             "share of the frame width. A frame turned half a revolution by a meridian flip that "
             "points at the same field is not offset."
         ),
-        decisions=("frame quarantine",),
+        decisions=("set-aside check",),
         estimator=(
             "The brightest stars (at most 150) of the frame are matched with those of the batch's "
             "middle frame by voting on the offsets of all star pairs, as the frame is and with the "
@@ -208,14 +208,14 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
             "with fewer than 15 agreeing pairs gets no value."
         ),
         band="The frame's own filter; a color image is read as stored, with its color pixels mixed.",
-        computed_by="pipelines.stacking.pre_processing.frame_quarantine.measure_pointing_offsets",
+        computed_by="pipelines.stacking.pre_processing.frame_set_aside.measure_pointing_offsets",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         register_entry="STK-01",
         purpose=MetricPurpose.DECISION,
         purpose_reason=(
             "A frame centred far from the rest of the session forces the stack to be cut down to "
-            "the area every frame shares, so the quarantine step moves it out of the stack."
+            "the area every frame shares, so the set-aside step moves it out of the stack."
         ),
     ),
 )
@@ -231,7 +231,7 @@ STACKING_FRAMES_STACKED = "stacking.frames_stacked_count"
 STACKING_FRAMES_ACCEPTED = "stacking.frames_accepted_count"
 STACKING_FRAMES_EXCLUDED_FOR_GAIN = "stacking.frames_excluded_for_gain_count"
 STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND = "stacking.frames_excluded_for_background_count"
-STACKING_FRAMES_QUARANTINED = "stacking.frames_quarantined_count"
+STACKING_FRAMES_SET_ASIDE = "stacking.frames_set_aside_count"
 STACKING_FLAT_FRAME_COUNT = "stacking.flat_frame_count"
 STACKING_DARK_UNIQUE_FRAME_COUNT = "stacking.dark_unique_frame_count"
 STACKING_BIAS_UNIQUE_FRAME_COUNT = "stacking.bias_unique_frame_count"
@@ -395,7 +395,7 @@ STACKING_WALKING_NOISE_CORRELATION_EXCESS = "stacking.walking_noise_correlation_
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
 STACKING_GATE_GAIN_HOMOGENEITY = "stacking.gate_gain_homogeneity"
-STACKING_GATE_FRAME_QUARANTINE = "stacking.gate_frame_quarantine"
+STACKING_GATE_FRAME_SET_ASIDE = "stacking.gate_frame_set_aside"
 STACKING_GATE_BACKGROUND_HOMOGENEITY = "stacking.gate_background_homogeneity"
 STACKING_GATE_FLAT_LEVEL = "stacking.gate_flat_level"
 STACKING_GATE_FLAT_NOISE = "stacking.gate_flat_noise"
@@ -621,7 +621,7 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
     _context_metric(
         STACKING_FRAMES_ACCEPTED,
         "count",
-        "How many frames were left after the gain, quarantine and background checks.",
+        "How many frames were left after the gain, set-aside check and background checks.",
         "A count of the frames given to the stacking program.",
         "The frames that passed the stage's pre-checks.",
         "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
@@ -644,11 +644,11 @@ _VALUE_METRICS: tuple[MetricSpec, ...] = (
         "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
     ),
     _context_metric(
-        STACKING_FRAMES_QUARANTINED,
+        STACKING_FRAMES_SET_ASIDE,
         "count",
-        "How many frames the quarantine step moved out of the stack.",
+        "How many frames the set-aside step moved out of the stack.",
         "A count of the frames moved to the excluded folder for clouds or trailed stars.",
-        "The frames the quarantine step moved.",
+        "The frames the set-aside step moved.",
         "pipelines.stacking.pre_processing.assess_input_quality.record_input_counts",
         register_entry="STK-01",
     ),
@@ -1221,7 +1221,7 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
             "`stacking.empty_aperture_noise_normalized`; `stacking.noise_difference_without_night` gives "
             "the difference with an error that accounts for the two stacks sharing frames and apertures. "
             "The leave-out stack uses the target's normal stacking settings but skips the frame "
-            "quarantine step, which the library stack's own members have already passed."
+            "set-aside step, which the library stack's own members have already passed."
         ),
         _NIGHT_SAMPLE + " Up to 100 empty apertures, as for the stack noise.",
         "pipelines.stacking.subset_noise_run.run_night_contributions",
@@ -1314,7 +1314,7 @@ _ODD_EVEN_DIFFERENCE_SAMPLE = (
     "stacker as the frame to line up with, so a half cannot choose its own and the pixels of the two "
     "halves coincide; the job still refuses when either half reports another reference frame. Each "
     "half is stacked with the target's normal settings except "
-    "that the edges are not trimmed and no frame is quarantined. At least 8 frames per half, counting the "
+    "that the edges are not trimmed and no frame is set aside. At least 8 frames per half, counting the "
     "shared one, are needed (a design choice, not a measurement); with fewer the rows are not measured. "
     "A Siril failure or a missing registration reference is stored as not measured, with the reason, and "
     "no other number is put in its place."
@@ -1547,11 +1547,11 @@ _GATE_METRICS: tuple[MetricSpec, ...] = (
         "Frames of different gains have different noise, so the minority is set aside and the count shown.",
     ),
     _gate_metric(
-        STACKING_GATE_FRAME_QUARANTINE,
+        STACKING_GATE_FRAME_SET_ASIDE,
         "fraction",
-        "Whether the quarantine step judged each session, and whether it set aside over a quarter of one.",
+        "Whether the set-aside step judged each session, and whether it set aside over a quarter of one.",
         "No number: the check reports its outcome and the share of a session above which it warns.",
-        "pipelines.stacking.pre_processing.frame_quarantine.quarantine_gate",
+        "pipelines.stacking.pre_processing.frame_set_aside.set_aside_gate",
         (
             "A session with many apparent bad frames is probably a bad night, or a limit that does not "
             "suit the equipment. The frames are moved all the same and the stack is flagged."
@@ -3110,7 +3110,7 @@ _NOTICE_METRICS: tuple[MetricSpec, ...] = (
         Checkpoint.STACKING,
         SubjectLevel.STACK,
         "count",
-        "Whether the quarantine step moved frames with clouds or trailed stars out of the stack.",
+        "Whether the set-aside step moved frames with clouds or trailed stars out of the stack.",
         "The number of frames moved to the excluded folder.",
         _NOTICE_COMPUTED_BY,
         "Moved frames are no longer in the target's frame list, so a person should know they were moved.",
@@ -3412,7 +3412,7 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
 # The gate name (as in the stack summary) mapped to the metric that stores it.
 GATE_METRIC_BY_NAME: dict[str, str] = {
     "gain_homogeneity": STACKING_GATE_GAIN_HOMOGENEITY,
-    "frame_quarantine": STACKING_GATE_FRAME_QUARANTINE,
+    "frame_set_aside": STACKING_GATE_FRAME_SET_ASIDE,
     "background_homogeneity": STACKING_GATE_BACKGROUND_HOMOGENEITY,
     "flat_level": STACKING_GATE_FLAT_LEVEL,
     "flat_noise": STACKING_GATE_FLAT_NOISE,

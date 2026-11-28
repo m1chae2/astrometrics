@@ -38,7 +38,7 @@ ALL_THREE = frozenset({PASSED, FAILED, NOT_CHECKED})
 # decision on record. Add a new gate here when you add it to the code.
 GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
     "stacking": {
-        "frame_quarantine": ALL_THREE,
+        "frame_set_aside": ALL_THREE,
         # Setting aside a minority gain corrects the stack, so it never fails.
         "gain_homogeneity": frozenset({PASSED, NOT_CHECKED}),
         "background_homogeneity": ALL_THREE,

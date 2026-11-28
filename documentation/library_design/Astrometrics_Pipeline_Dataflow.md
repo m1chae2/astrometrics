@@ -80,7 +80,7 @@ flowchart LR
    * *Underlying math & equations:* [Stacking equations](Astrometrics_Library_Architecture.md#3-image-stacking-pipeline)
 2. **Astrometry.** Looks at the stars in an image, extracts their center positions, and plate-solves the field against the Gaia catalog. It writes a World Coordinate System (WCS) into the FITS header, which converts any pixel $(x, y)$ into sky coordinates $(\alpha, \delta)$.
    * *Detailed guide:* [Astrometry review guide](pipelines/astrometry.md)
-   * *Underlying math & equations:* [Plate solving & WCS refit](Astrometrics_Library_Architecture.md#4-astrometry-pipeline)
+   * *Underlying math & equations:* [Plate solving & WCS check against Gaia](Astrometrics_Library_Architecture.md#4-astrometry-pipeline)
 3. **Photometry.** Measures star brightness by summing the pixel counts inside a small circular aperture around each star and subtracting the surrounding sky background. It tracks brightness across every frame in an observing run, picks non-variable comparison stars to cancel out changing atmospheric transparency, and plots light curves to reveal variable stars and eclipsing binaries.
    * *Detailed guide:* [Photometry review guide](pipelines/photometry.md)
    * *Underlying math & equations:* [Differential ensemble & period search](Astrometrics_Library_Architecture.md#5-stellar-photometry-pipeline)

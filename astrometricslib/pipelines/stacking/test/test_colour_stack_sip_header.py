@@ -1,8 +1,8 @@
 """Tests that a colour stack's header with a SIP plate solution can be read.
 
 A colour stack has three axes (channel, row, column), and its plate solution
-refit to Gaia carries SIP distortion terms. Astropy refuses to build a WCS
-from such a header unless it is told to use only two axes. These tests build
+carries SIP distortion terms. Astropy refuses to build a WCS from such a
+header unless it is told to use only two axes. These tests build
 that header and check that the stacking code which reads it gets a sky
 solution back instead of an error.
 """
@@ -26,7 +26,7 @@ def _colour_sip_header() -> fits.Header:
     Returns
     -------
     header : `astropy.io.fits.Header`
-        A header like the one the Gaia refit writes into a colour stack.
+        A header like the one the plate solver writes into a colour stack.
     """
     header = fits.Header()
     header["NAXIS"] = 3

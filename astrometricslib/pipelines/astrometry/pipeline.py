@@ -53,11 +53,6 @@ class AstrometryPipeline:
         self.config = app_config
         self.drivers = drivers or Drivers()
         self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
-        # Whether the last `solve_wcs` refit its solution to cached Gaia stars.
-        self.last_solve_was_refit = False
-        # One sentence saying what happened to that refit (see
-        # `StarIdentifier.wcs_refit_note`).
-        self.last_solve_refit_note = ""
 
     def prepare_image(
         self,
@@ -162,9 +157,9 @@ class AstrometryPipeline:
             ),
             plate_solve_fit_residual_rms_arcsec=self.star_identifier.plate_solve_fit_residual_rms_arcsec,
             plate_solve_matched_star_count=self.star_identifier.plate_solve_matched_star_count,
-            wcs_refinement=self.star_identifier.wcs_refinement,
-            gaia_fit_peak_over_noise=self.star_identifier.gaia_fit_peak_over_noise,
-            gaia_fit_signal_reason=self.star_identifier.gaia_fit_signal_reason,
+            gaia_match=self.star_identifier.gaia_match,
+            gaia_match_peak_over_noise=self.star_identifier.gaia_match_peak_over_noise,
+            gaia_match_signal_reason=self.star_identifier.gaia_match_signal_reason,
             astrometry_flags=list(self.star_identifier.astrometry_flags),
             gaia_tiles_count=0 if field is None else len(field.tiles),
             gaia_tiles_missing_count=0 if field is None else len(field.missing_tiles),
@@ -175,19 +170,14 @@ class AstrometryPipeline:
         image_or_path: AstrometricsImage | str,
         target_ra: float | None = None,
         target_dec: float | None = None,
-        refit_from_cache: bool = False,
     ) -> Any | None:
         """Find only the image's sky coordinates (its WCS), and nothing else.
 
         This detects the stars and runs the plate solver, as `process` does,
-        then stops. It skips the refit to Gaia, the naming of stars from
+        then stops. It skips the Gaia match, the naming of stars from
         SIMBAD and Gaia and the extended-source hint, so it asks no online
         catalog. It is for callers that need only a
-        place to put apertures. By default the solution is returned unrefined
-        (see `process` for the refined one). With `refit_from_cache`, it is
-        refit to the Gaia stars of the cache tiles that are already complete,
-        using the cache alone; `last_solve_was_refit` then says whether that
-        happened, and `last_solve_refit_note` says why not.
+        place to put apertures.
         A field the solver cannot solve raises `PlateSolveFailedError`, as in
         `process`.
 
@@ -198,14 +188,11 @@ class AstrometryPipeline:
         target_ra, target_dec : `float`, optional
             A hint for where the telescope was pointing, in degrees. Left
             out, the image's FITS header supplies one.
-        refit_from_cache : `bool`, optional
-            If True, refit the solution to the Gaia stars of the cache tiles
-            that are already complete. Never sends a query.
 
         Returns
         -------
         wcs : `astropy.wcs.WCS` or `None`
-            The solver's solution (refit if asked and possible), or `None`
+            The solver's solution, or `None`
             when too few stars were found to try a solve.
 
         """
@@ -218,12 +205,6 @@ class AstrometryPipeline:
             center_ra=ra_hint,
             center_dec=dec_hint,
             solve_only=True,
-            refit_from_cache=refit_from_cache,
-        )
-        refinement = self.star_identifier.wcs_refinement
-        self.last_solve_was_refit = bool(refinement is not None and refinement.applied)
-        self.last_solve_refit_note = (
-            self.star_identifier.wcs_refit_note if refit_from_cache else "not refit: it was not asked for"
         )
         return wcs
 

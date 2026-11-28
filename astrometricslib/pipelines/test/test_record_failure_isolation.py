@@ -97,7 +97,7 @@ def _record_astrometry(damage: str, _unused: bool) -> int:
     """
     metrics, gates, context = astrometry_fixture_run()
     if damage == "nan":
-        metrics = metrics.model_copy(update={"gaia_fit_rms_arcsec": math.nan})
+        metrics = metrics.model_copy(update={"gaia_match_rms_arcsec": math.nan})
         gates = [
             gate.model_copy(update={"measured_value": math.nan, "limit": math.inf})
             if gate.measured_value
@@ -190,7 +190,7 @@ def _record_asteroid(damage: str, _unused: bool) -> int:
 
 
 SCENARIOS = [
-    Scenario("astrometry", _record_astrometry, "astrometry.gaia_fit_rms_arcsec"),
+    Scenario("astrometry", _record_astrometry, "astrometry.gaia_match_rms_arcsec"),
     Scenario("photometry", _record_photometry, "photometry.light_curve_scatter_rms_median_mag"),
     Scenario("spectroscopy", _record_spectroscopy, "spectroscopy.trail_width_median_px"),
     Scenario("asteroid_detection", _record_asteroid, "asteroid_detection.candidates_detected_count"),

@@ -200,8 +200,8 @@ def check_frame(frame: Any, shifts: Sequence[float]) -> list[str]:
     from astrometricslib._internal.drivers.image import AstrometricsImage
     from astrometricslib.foundation.parameters import resolve
     from astrometricslib.parameters import frames_parameter_context
+    from astrometricslib.pipelines.astrometry.processing.gaia_match import record_plate_scale
     from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-    from astrometricslib.pipelines.astrometry.processing.wcs_refinement import record_plate_scale
     from astrometricslib.pipelines.shared.catalog_star_identity import CATALOG_MATCH_RADIUS_ARCSEC
     from astrometricslib.pipelines.shared.session_identification import (
         SOLUTION_CHECK_RADIUS_FACTOR,

@@ -41,9 +41,7 @@ from astrometricslib.pipelines.astrometry.processing.gaia_field_matching import 
     GaiaFieldMatching,
     read_catalog_magnitude,
 )
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
-    record_plate_scale,
-)
+from astrometricslib.pipelines.astrometry.processing.gaia_match import record_plate_scale
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     CATALOG_MATCH_RADIUS_ARCSEC,
     name_simbad_star,

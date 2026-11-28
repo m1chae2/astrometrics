@@ -2139,10 +2139,8 @@ export interface AstrometryPipelineQualityMetrics {
   catalogMatchSeparationRmsArcsec?: number | null;
   plateSolveFitResidualRmsArcsec?: number | null;
   plateSolveMatchedStarCount?: number | null;
-  gaiaFitRmsArcsec?: number | null;
-  gaiaFitRmsBeforeArcsec?: number | null;
-  gaiaFitStarCount?: number | null;
-  wcsRefinementShiftArcsec?: number | null;
+  gaiaMatchRmsArcsec?: number | null;
+  gaiaMatchStarCount?: number | null;
   astrometryFlags?: string[];
   gaiaTilesCount?: number;
   gaiaTilesMissingCount?: number;

@@ -348,7 +348,11 @@ def judge_solution(
     from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
         MAXIMUM_RESIDUAL_FRACTION_OF_FWHM,
     )
-    from astrometricslib.pipelines.astrometry.processing.wcs_refinement import refine_wcs_with_gaia
+
+    # The app lost this module; see the README (commit 62906cee).
+    from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (  # pyrefly: ignore[missing-import]
+        refine_wcs_with_gaia,
+    )
 
     height, width = shape
     center, scale, rotation, parity = geometry(wcs, width, height)

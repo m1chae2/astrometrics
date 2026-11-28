@@ -1,10 +1,11 @@
-"""Gives the plate solver its scale hints and refits its solution to Gaia.
+"""Gives the plate solver its scale hints and checks its solution on Gaia.
 
 This layer of `StarIdentifier` (see `star_identifier`) works out the image
 scale from the header (focal length and pixel size, with the binning
-checked), so the solver searches a narrow range, and after a solve refits
-the solution to the field's Gaia stars (see `wcs_refinement`). It also keeps
-the peak over the noise of the stars that fit used.
+checked), so the solver gets a start focal length (or a narrow range, online),
+and after a solve measures the solution against the field's Gaia stars (see
+`gaia_match`). It never changes the solution. It also keeps the peak over the
+noise of the stars the measurement used.
 """
 
 import logging
@@ -17,16 +18,10 @@ from astropy.wcs import WCS
 
 from astrometricslib._internal.drivers.image import AstrometricsImage
 from astrometricslib.foundation.parameters import resolve
-from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import (
-    load_field_gaia_stars,
-    tiles_under_image,
-)
+from astrometricslib.pipelines.astrometry.processing.gaia_field_stars import load_field_gaia_stars
+from astrometricslib.pipelines.astrometry.processing.gaia_match import GaiaMatch, measure_gaia_match
 from astrometricslib.pipelines.astrometry.processing.gaia_tile_queries import GAIA_DEFAULT_MAGNITUDE_LIMIT
 from astrometricslib.pipelines.astrometry.processing.simbad_matching import SimbadMatching
-from astrometricslib.pipelines.astrometry.processing.wcs_refinement import (
-    WcsRefinement,
-    refine_wcs_with_gaia,
-)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -35,10 +30,7 @@ logger = logging.getLogger(__name__)
 FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
 
 
-FLAG_WCS_REFINED = "wcs_refined_against_gaia"
-
-
-FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
+FLAG_GAIA_MATCH_SKIPPED = "gaia_match_skipped"
 
 
 class PlateSolutionSteps(SimbadMatching):
@@ -171,20 +163,16 @@ class PlateSolutionSteps(SimbadMatching):
         logger.info("Equipment metadata missing; proceeding with blind scale search.")
         return None, None
 
-    def _refine_wcs_against_gaia(
-        self, wcs: WCS, sources: list[dict], height: int, width: int, *, cache_only: bool = False
-    ) -> WCS:
-        """Refit the plate solution to the field's Gaia stars.
+    def _measure_wcs_against_gaia(self, wcs: WCS, sources: list[dict], height: int, width: int) -> None:
+        """Measure the plate solution against the field's Gaia stars.
 
-        The solver fits only the few stars of its own index files, and can sit
-        more than a pixel from the truth with no check noticing (see
-        `wcs_refinement`). This fills the Gaia tiles under the image (see
-        `_prepare_field_gaia_stars`), reads the stars of the complete tiles
-        to `GAIA_DEFAULT_MAGNITUDE_LIMIT` (or the query depth, if shallower),
-        moves them to the date of the image, and refits. Stars of a tile that
-        is not complete are not used. The outcome is kept in
-        `wcs_refinement`, and one flag says whether the new solution was used.
-        A failed download leaves the solver's solution as it was.
+        This fills the Gaia tiles under the image (see
+        `_prepare_field_gaia_stars`), reads the stars of the complete tiles to
+        `GAIA_DEFAULT_MAGNITUDE_LIMIT` (or the query depth, if shallower),
+        moves them to the date of the image, and measures the RMS distance of
+        the matched stars (see `gaia_match`). The solution is not changed. The
+        outcome is kept in `gaia_match`, and one flag says when no RMS could
+        be measured. A failed download leaves `gaia_match` empty.
 
         Parameters
         ----------
@@ -194,14 +182,6 @@ class PlateSolutionSteps(SimbadMatching):
             The detected stars, each with a centroid in pixels.
         height, width : `int`
             The image's size in pixels.
-        cache_only : `bool`, optional
-            If True, use only tiles already complete in the cache and never
-            ask a remote service. With none, the solver's solution is kept.
-
-        Returns
-        -------
-        wcs : `astropy.wcs.WCS`
-            The refined solution, or `wcs` unchanged.
         """
         centroids = []
         centroid_source_indices = []
@@ -212,93 +192,81 @@ class PlateSolutionSteps(SimbadMatching):
                 centroids.append((float(x), float(y)))
                 centroid_source_indices.append(source_index)
         try:
-            if cache_only:
-                tiles = tiles_under_image(wcs, width, height)
-            else:
-                tiles = self._prepare_field_gaia_stars(wcs, width, height).tiles
+            tiles = self._prepare_field_gaia_stars(wcs, width, height).tiles
         except DATA_ERRORS:
-            logger.exception("Could not place the solved image on the sky; the Gaia refit is skipped.")
-            self.wcs_refit_note = "not refit: the solved image could not be placed on the sky"
-            self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
-            return wcs
-        # The refit keeps its own depth: bright stars place the field well,
+            logger.exception("Could not place the solved image on the sky; the Gaia match is skipped.")
+            self.gaia_match_note = "not measured: the solved image could not be placed on the sky"
+            self._add_flag(FLAG_GAIA_MATCH_SKIPPED)
+            return
+        # The match keeps its own depth: bright stars place the field well,
         # and the faintest stars of a crowded field add wrong pairs.
-        refit_depth = min(float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value), self._gaia_query_depth())
+        match_depth = min(float(resolve(GAIA_DEFAULT_MAGNITUDE_LIMIT).value), self._gaia_query_depth())
         try:
-            refit_stars = load_field_gaia_stars(self.config, tiles, refit_depth, None)
+            match_stars = load_field_gaia_stars(self.config, tiles, match_depth, None)
         except sqlite3.Error, OSError:
-            logger.exception("The Gaia cache could not be read for the refit.")
-            refit_stars = None
-        gaia_table = None if refit_stars is None else refit_stars.table
-        gaia_coords = None if refit_stars is None else refit_stars.coords
+            logger.exception("The Gaia cache could not be read for the Gaia match.")
+            match_stars = None
+        gaia_table = None if match_stars is None else match_stars.table
+        gaia_coords = None if match_stars is None else match_stars.coords
         if gaia_table is None or gaia_coords is None:
-            # In cache-only mode (stacking) a new field has no cached stars
-            # yet: the analysis downloads them later, so this is expected.
-            logger.log(
-                logging.INFO if cache_only else logging.WARNING,
-                "No Gaia stars for the refit of the solution; the solver's solution is kept.",
+            logger.warning("No Gaia stars for the Gaia match; no RMS distance to Gaia is measured.")
+            self.gaia_match_note = (
+                f"not measured: no Gaia stars cached for this field to depth G {match_depth:g}"
             )
-            self.wcs_refit_note = f"not refit: no Gaia stars cached for this field to depth G {refit_depth:g}"
-            self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
-            return wcs
+            self._add_flag(FLAG_GAIA_MATCH_SKIPPED)
+            return
         gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
-        refinement = refine_wcs_with_gaia(wcs, np.array(centroids), gaia_coords, (height, width))
-        self.wcs_refinement = refinement
-        self._record_fit_star_signal(refinement, sources, centroid_source_indices)
-        if refinement.applied:
-            logger.info(
-                "Refit the solution to %s Gaia stars: RMS %.2f -> %.2f arcsec, moved up to %.2f arcsec.",
-                refinement.star_count,
-                refinement.rms_before_arcsec,
-                refinement.rms_after_arcsec,
-                refinement.shift_arcsec,
-            )
-            self.wcs_refit_note = "refit to Gaia stars"
-            self._add_flag(FLAG_WCS_REFINED)
-            return refinement.wcs
-        logger.warning("The solver's solution was kept: %s.", refinement.reason)
-        self.wcs_refit_note = f"refit rejected: {refinement.reason}"
-        self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
-        return wcs
+        match = measure_gaia_match(wcs, np.array(centroids), gaia_coords)
+        self.gaia_match = match
+        self._record_match_star_signal(match, sources, centroid_source_indices)
+        if match.rms_arcsec is None:
+            logger.warning("No RMS distance to Gaia: %s.", match.reason)
+            self.gaia_match_note = f"not measured: {match.reason}"
+            self._add_flag(FLAG_GAIA_MATCH_SKIPPED)
+            return
+        logger.info(
+            "The solution sits %.2f arcsec (RMS) from %s Gaia stars.", match.rms_arcsec, match.star_count
+        )
+        self.gaia_match_note = "measured"
 
-    def _record_fit_star_signal(
-        self, refinement: WcsRefinement, sources: list[dict], centroid_source_indices: list[int]
+    def _record_match_star_signal(
+        self, match: GaiaMatch, sources: list[dict], centroid_source_indices: list[int]
     ) -> None:
-        """Keep the peak over the noise of the stars the Gaia fit used.
+        """Keep the peak over the noise of the stars the Gaia match used.
 
         The expected position error of a star follows from how far its peak
-        stands above the background noise. The fit's stars are the ones the
+        stands above the background noise. The matched stars are the ones the
         measured residual is taken over, so the expectation is found over the
         same stars. A one-shot-color frame is searched on a binned copy whose
         peaks and noise are in other units, so it gets no value.
 
         Parameters
         ----------
-        refinement : `WcsRefinement`
-            What the Gaia fit found.
+        match : `GaiaMatch`
+            What the Gaia match found.
         sources : `list` [`dict`]
-            The detected stars the fit was given, each with a ``peak``.
+            The detected stars the match was given, each with a ``peak``.
         centroid_source_indices : `list` [`int`]
-            For each centroid given to the fit, the index of its source in
+            For each centroid given to the match, the index of its source in
             `sources`.
         """
         noise = self.detector.last_background_noise
-        if not refinement.fit_star_indices:
-            self.gaia_fit_signal_reason = "the Gaia fit used no stars"
+        if not match.star_indices:
+            self.gaia_match_signal_reason = "the Gaia match used no stars"
         elif self._detected_on_binned_copy:
-            self.gaia_fit_signal_reason = (
+            self.gaia_match_signal_reason = (
                 "the stars were found on a binned copy of a one-shot-color frame, whose peaks and noise "
                 "are not in full-pixel units"
             )
         elif noise is None or not math.isfinite(noise) or noise <= 0:
-            self.gaia_fit_signal_reason = "the detector measured no background noise"
+            self.gaia_match_signal_reason = "the detector measured no background noise"
         else:
             peaks = [
                 float(sources[centroid_source_indices[index]].get("peak", math.nan))
-                for index in refinement.fit_star_indices
+                for index in match.star_indices
             ]
             if all(math.isfinite(peak) and peak > 0 for peak in peaks):
-                self.gaia_fit_peak_over_noise = tuple(peak / noise for peak in peaks)
-                self.gaia_fit_signal_reason = ""
+                self.gaia_match_peak_over_noise = tuple(peak / noise for peak in peaks)
+                self.gaia_match_signal_reason = ""
             else:
-                self.gaia_fit_signal_reason = "a fitted star had no positive peak from the star finder"
+                self.gaia_match_signal_reason = "a matched star had no positive peak from the star finder"

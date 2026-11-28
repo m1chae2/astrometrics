@@ -232,16 +232,10 @@ def test_the_identifier_warns_once_and_flags_missing_tiles(
     assert identifier.astrometry_flags == [gaia_field_matching.FLAG_GAIA_TILES_MISSING]
 
 
-@pytest.mark.parametrize(("cache_only", "expected_level"), [(True, logging.INFO), (False, logging.WARNING)])
-def test_an_empty_refit_cache_is_a_warning_only_after_a_real_fetch(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, cache_only: bool, expected_level: int
+def test_an_empty_gaia_cache_is_a_warning_and_keeps_the_note_and_flag(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An empty refit cache is INFO in cache-only mode, WARNING otherwise.
-
-    The stacking solve reads the cache only, and a new field has nothing
-    cached until the analysis downloads it. After a real fetch, an empty
-    answer is still a warning. Both keep the note and the flag.
-    """
+    """With no Gaia stars for the match, one warning, the note and the flag."""
     monkeypatch.setattr(gaia_field_matching, "load_field_gaia_stars", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(plate_solution_steps, "load_field_gaia_stars", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
@@ -257,13 +251,14 @@ def test_an_empty_refit_cache_is_a_warning_only_after_a_real_fetch(
     wcs = _wcs(size=300)
 
     with caplog.at_level(logging.INFO):
-        kept = identifier._refine_wcs_against_gaia(wcs, [], 300, 300, cache_only=cache_only)
+        identifier._measure_wcs_against_gaia(wcs, [], 300, 300)
 
-    records = [record for record in caplog.records if "No Gaia stars for the refit" in record.getMessage()]
-    assert [record.levelno for record in records] == [expected_level]
-    assert kept is wcs
-    assert identifier.wcs_refit_note.startswith("not refit: no Gaia stars cached")
-    assert identifier.astrometry_flags == [plate_solution_steps.FLAG_WCS_REFINEMENT_SKIPPED]
+    records = [
+        record for record in caplog.records if "No Gaia stars for the Gaia match" in record.getMessage()
+    ]
+    assert [record.levelno for record in records] == [logging.WARNING]
+    assert identifier.gaia_match_note.startswith("not measured: no Gaia stars cached")
+    assert identifier.astrometry_flags == [plate_solution_steps.FLAG_GAIA_MATCH_SKIPPED]
 
 
 def test_the_catalog_density_counts_the_stars_on_the_image_per_square_degree() -> None:

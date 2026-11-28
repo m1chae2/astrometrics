@@ -48,8 +48,6 @@ from astrometricslib.pipelines.stacking.post_processing.difference_noise import 
 )
 from astrometricslib.pipelines.stacking.post_processing.empty_apertures import (
     APERTURE_FILE_VERSION,
-    PLATE_SOLVE_REFIT_WCS_SOURCE,
-    PLATE_SOLVE_UNREFINED_WCS_SOURCE,
     PLATE_SOLVE_WCS_SOURCE,
     REPLACEMENT_DEPTH_FACTOR,
     ApertureSetMismatchError,
@@ -889,7 +887,7 @@ def test_a_much_deeper_library_stack_replaces_the_set_and_a_close_one_does_not(
         solution : `tuple` [`astropy.wcs.WCS`, `str`, `str`]
             The header's solution, an empty reason and the source.
         """
-        return WCS(fits.getheader(stack_path)).celestial, "", PLATE_SOLVE_UNREFINED_WCS_SOURCE
+        return WCS(fits.getheader(stack_path)).celestial, "", PLATE_SOLVE_WCS_SOURCE
 
     monkeypatch.setattr(
         "astrometricslib.pipelines.stacking.post_processing.stack_noise._plate_solve_stack_wcs",
@@ -1321,7 +1319,7 @@ def _fake_stack_solver(
     monkeypatch: pytest.MonkeyPatch,
     solution: WCS | None,
     reason: str = "",
-    source: str = PLATE_SOLVE_UNREFINED_WCS_SOURCE,
+    source: str = PLATE_SOLVE_WCS_SOURCE,
 ) -> list[str]:
     """Replace the stack plate solve with a fake and record what it was asked.
 
@@ -1376,7 +1374,7 @@ def test_a_stack_nobody_solved_is_plate_solved_as_the_last_source(
     before = fits.getheader(stack)
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is not None
-    assert outcome.result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     assert outcome.result.aperture_identity
     assert calls == [stack]
     # The stack's header is read only, never written.
@@ -1394,7 +1392,7 @@ def test_the_solve_of_the_stack_gives_the_reference_frame_flux_ratio(
     _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial)
     result = measure_stack_noise(bare_stack, bare_frame, str(tmp_path / APERTURE_FILE_NAME)).result
     assert result is not None
-    assert result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     assert result.reference_frame_flux_ratio is not None
     assert result.reference_frame_flux_ratio.ratio == pytest.approx(1.4, abs=0.02)
 
@@ -1410,7 +1408,7 @@ def test_the_solve_is_tried_after_the_member_frames_fail(
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME), member_frame_paths=[bare])
     assert calls == [stack]
     assert outcome.result is not None
-    assert outcome.result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
 
 
 def test_a_failed_solve_of_the_stack_gives_a_reason_and_no_apertures(
@@ -1439,7 +1437,7 @@ def test_the_real_stack_solve_turns_an_exception_into_a_reason(
         def __init__(self, drivers: object = None) -> None:
             """Accept the drivers the caller passes."""
 
-        def solve_wcs(self, image: str, *, refit_from_cache: bool = False) -> None:
+        def solve_wcs(self, image: str) -> None:
             """Fail as the star identifier does for an unsolvable field.
 
             Raises
@@ -1456,7 +1454,7 @@ def test_the_real_stack_solve_turns_an_exception_into_a_reason(
     assert wcs is None
     assert "tried and failed" in reason
     assert "PlateSolveFailedError" in reason
-    assert wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert wcs_source == PLATE_SOLVE_WCS_SOURCE
 
 
 def test_the_real_stack_solve_uses_the_solve_only_path_and_logs_it(
@@ -1473,7 +1471,7 @@ def test_the_real_stack_solve_uses_the_solve_only_path_and_logs_it(
         def __init__(self, drivers: object = None) -> None:
             """Accept the drivers the caller passes."""
 
-        def solve_wcs(self, image: str, *, refit_from_cache: bool = False) -> WCS:
+        def solve_wcs(self, image: str) -> WCS:
             """Record the call and give a solution.
 
             Returns
@@ -1503,7 +1501,7 @@ def test_the_real_stack_solve_uses_the_solve_only_path_and_logs_it(
     assert calls == [str(tmp_path / "stack.fits")]
     messages = [record.getMessage() for record in caplog.records]
     assert "Solving the stack for its sky coordinates..." in messages
-    assert any(message.startswith("Solved in ") and "not refit" in message for message in messages)
+    assert any(message.startswith("Solved in ") for message in messages)
 
 
 def test_the_real_stack_solve_logs_when_it_finds_no_solution(
@@ -1518,7 +1516,7 @@ def test_the_real_stack_solve_logs_when_it_finds_no_solution(
         def __init__(self, drivers: object = None) -> None:
             """Accept the drivers the caller passes."""
 
-        def solve_wcs(self, image: str, *, refit_from_cache: bool = False) -> None:
+        def solve_wcs(self, image: str) -> None:
             """Give no solution."""
             return
 
@@ -1547,7 +1545,7 @@ def test_the_noise_is_the_same_whether_the_solution_comes_from_the_header_or_the
     solved_outcome = measure_stack_noise(bare_stack, None, str(tmp_path / "solved_apertures.json"))
     assert header_outcome.result is not None
     assert solved_outcome.result is not None
-    assert solved_outcome.result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert solved_outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     assert solved_outcome.result.noise_adu == pytest.approx(header_outcome.result.noise_adu)
     assert solved_outcome.result.aperture_count == header_outcome.result.aperture_count
 
@@ -1560,14 +1558,14 @@ def test_a_stack_with_a_header_solution_is_solved_only_to_choose_a_set(
     stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
     outcome = measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME))
     assert outcome.result is not None
-    assert outcome.result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     reference = _write(tmp_path / "reference.fits", _sky_image(2.0, seed=5), _sky_header())
     trimmed = _write(tmp_path / "trimmed.fits", _sky_image(2.0, seed=6)[20:, 10:], None)
     reference_outcome = measure_stack_noise(
         trimmed, reference, str(tmp_path / "other_apertures.json"), crop_offset=(10, 20)
     )
     assert reference_outcome.result is not None
-    assert reference_outcome.result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert reference_outcome.result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     # Each new set is plate-solved once; a stack that only reads a set is not.
     assert calls == [stack, trimmed]
     assert measure_stack_noise(stack, None, str(tmp_path / APERTURE_FILE_NAME)).result is not None
@@ -1591,7 +1589,7 @@ def test_a_header_solution_that_misses_the_stored_stars_falls_back_to_the_stack_
     result = measure_stack_noise(stack, None, apertures).result
     assert calls == [stack]
     assert result is not None
-    assert result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
 
 
 def test_a_missed_header_solution_with_a_failed_stack_solve_gives_both_reasons(
@@ -1751,11 +1749,11 @@ def test_a_set_is_chosen_with_the_plate_solve_when_the_header_solution_is_off(
     result = measure_stack_noise(stack, None, apertures).result
     assert result is not None
     assert calls == [stack]
-    assert result.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert result.wcs_source == PLATE_SOLVE_WCS_SOURCE
     assert result.sky_positions_from_plate_solve
     stored = load_apertures(apertures, next(iter(json.loads(Path(apertures).read_text())["sets"])))
     assert stored is not None and stored.sky_positions_from_plate_solve
-    assert stored.wcs_source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert stored.wcs_source == PLATE_SOLVE_WCS_SOURCE
     columns_rows = sky_to_pixels(true_wcs, stored.reference_sky)
     stars = np.array(scattered)
     for column_row in columns_rows:
@@ -1897,75 +1895,25 @@ def test_a_stored_set_without_the_field_is_trusted_only_when_it_was_plate_solved
     ).to_json()
     del base["sky_positions_from_plate_solve"]
     assert not ApertureSet.from_json(base).sky_positions_from_plate_solve
-    for source in (PLATE_SOLVE_WCS_SOURCE, PLATE_SOLVE_REFIT_WCS_SOURCE, PLATE_SOLVE_UNREFINED_WCS_SOURCE):
+    for source in (
+        PLATE_SOLVE_WCS_SOURCE,
+        f"{PLATE_SOLVE_WCS_SOURCE}, refit to cached Gaia",
+        f"{PLATE_SOLVE_WCS_SOURCE}, not refit",
+    ):
         base["wcs_source"] = source
         assert ApertureSet.from_json(base).sky_positions_from_plate_solve
     assert not is_plate_solve_wcs_source("stack header")
 
 
-def test_a_stack_solve_refit_to_cached_gaia_is_recorded_as_refit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The stored source tells a refit solution from one that was not refit."""
-    _fake_stack_solver(monkeypatch, WCS(_sky_header()).celestial, source=PLATE_SOLVE_REFIT_WCS_SOURCE)
-    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), None)
-    apertures = str(tmp_path / APERTURE_FILE_NAME)
-    outcome = measure_stack_noise(stack, None, apertures)
-    assert outcome.result is not None
-    assert outcome.result.wcs_source == PLATE_SOLVE_REFIT_WCS_SOURCE
-    stored = load_apertures(apertures)
-    assert stored is not None and stored.wcs_source == PLATE_SOLVE_REFIT_WCS_SOURCE
-    assert stored.sky_positions_from_plate_solve
-
-
-def test_the_real_stack_solve_asks_for_a_refit_from_the_cache_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The stack solve passes `refit_from_cache` and records what happened."""
-    from astrometricslib.pipelines.stacking.post_processing import stack_noise
-
-    asked: list[bool] = []
-
-    class RefitPipeline:
-        """A stand-in pipeline that says its solution was refit."""
-
-        last_solve_was_refit = False
-
-        def __init__(self, drivers: object = None) -> None:
-            """Accept the drivers the caller passes."""
-
-        def solve_wcs(self, image: str, *, refit_from_cache: bool = False) -> WCS:
-            """Record the request and mark the solution as refit.
-
-            Returns
-            -------
-            wcs : `astropy.wcs.WCS`
-                The test solution.
-            """
-            asked.append(refit_from_cache)
-            self.last_solve_was_refit = True
-            return WCS(_sky_header())
-
-    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", RefitPipeline)
-    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
-    wcs, reason, wcs_source = real(str(tmp_path / "stack.fits"))
-    assert wcs is not None and reason == ""
-    assert asked == [True]
-    assert wcs_source == PLATE_SOLVE_REFIT_WCS_SOURCE
-
-
 class _CountingPipeline:
-    """A stand-in pipeline that counts its solves and gives a refit note."""
+    """A stand-in pipeline that counts its solves."""
 
     solves = 0
-    note = ""
 
     def __init__(self, drivers: object = None) -> None:
         """Accept the drivers the caller passes."""
-        self.last_solve_was_refit = False
-        self.last_solve_refit_note = type(self).note
 
-    def solve_wcs(self, image: str, *, refit_from_cache: bool = False) -> WCS:
+    def solve_wcs(self, image: str) -> WCS:
         """Count the solve.
 
         Returns
@@ -2003,43 +1951,6 @@ def test_the_same_unchanged_stack_is_solved_only_once(
     stack_noise._RECENT_STACK_SOLVES.clear()
 
 
-@pytest.mark.parametrize(
-    ("note", "expected"),
-    [
-        (
-            "not refit: no Gaia stars cached for this field to depth G 14",
-            "not refit: no Gaia stars cached for this field to depth G 14",
-        ),
-        (
-            "refit rejected: the fit moved the field by 99.0 arcsec",
-            "refit rejected: the fit moved the field by 99.0 arcsec",
-        ),
-    ],
-)
-def test_the_solve_log_says_why_the_solution_was_not_refit(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    note: str,
-    expected: str,
-) -> None:
-    """Each reason for no refit has its own log text, at the status level."""
-    from astrometricslib.pipelines.stacking.post_processing import stack_noise
-
-    _CountingPipeline.note = note
-    monkeypatch.setattr("astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline", _CountingPipeline)
-    real = stack_noise._plate_solve_stack_wcs.real_function  # type: ignore[attr-defined]
-
-    with caplog.at_level("INFO"):
-        real(str(tmp_path / "missing.fits"))
-
-    messages = [record for record in caplog.records if record.getMessage().startswith("Solved in")]
-    assert len(messages) == 1
-    assert expected in messages[0].getMessage()
-    assert messages[0].levelname == "INFO"
-    _CountingPipeline.note = ""
-
-
 class _FakePlateSolve:
     """A stand-in for the stack's one plate solve that counts its calls."""
 
@@ -2055,7 +1966,7 @@ class _FakePlateSolve:
         """
         self.solution = solution
         self.reason = reason
-        self.source = PLATE_SOLVE_UNREFINED_WCS_SOURCE
+        self.source = PLATE_SOLVE_WCS_SOURCE
         self.calls = 0
 
     def solve(self) -> tuple[WCS | None, str]:
@@ -2163,7 +2074,7 @@ def test_a_poor_fit_on_a_plate_solved_set_uses_the_plate_solve(monkeypatch: pyte
     assert failure is None
     assert solve.calls == 1
     assert wcs is second
-    assert source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert source == PLATE_SOLVE_WCS_SOURCE
     assert "0.02 px rms" in note
 
 
@@ -2237,5 +2148,5 @@ def test_a_fit_that_stays_poor_with_the_plate_solve_is_used_and_noted(
     )
     assert failure is None
     assert wcs is second
-    assert source == PLATE_SOLVE_UNREFINED_WCS_SOURCE
+    assert source == PLATE_SOLVE_WCS_SOURCE
     assert "stayed poor" in note and "0.90 px rms" in note and "even with the plate solve" in note

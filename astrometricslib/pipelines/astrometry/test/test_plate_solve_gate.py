@@ -49,7 +49,7 @@ def validate_with_options(
         catalog_match_separation_rms_arcsec=None,
         plate_solve_fit_residual_rms_arcsec=None,
         plate_solve_matched_star_count=None,
-        wcs_refinement=None,
+        gaia_match=None,
         astrometry_flags=[],
         gaia_tiles_count=0,
         gaia_tiles_missing_count=0,

@@ -64,10 +64,8 @@ def astrometry_fixture_run() -> tuple[AstrometryPipelineQualityMetrics, list[Gat
         catalog_match_separation_rms_arcsec=1.2,
         plate_solve_fit_residual_rms_arcsec=0.8,
         plate_solve_matched_star_count=70,
-        gaia_fit_rms_arcsec=0.4,
-        gaia_fit_rms_before_arcsec=0.9,
-        gaia_fit_star_count=55,
-        wcs_refinement_shift_arcsec=1.5,
+        gaia_match_rms_arcsec=0.4,
+        gaia_match_star_count=55,
         plate_scale_arcsec_per_pixel=1.9,
         star_fwhm_px=3.0,
         remote_catalog_queries_attempted=10,
@@ -135,7 +133,7 @@ def astrometry_emitted_measurements() -> list[QualityMeasurement]:
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        What the record step emits for a solved run with a Gaia refit and
+        What the record step emits for a solved run with a Gaia match and
         a match table.
     """
     metrics, gates, context = astrometry_fixture_run()
